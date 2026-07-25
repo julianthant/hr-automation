@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { IconActionButton } from "@/components/shared/IconActionButton";
-import { StatusBadge, type ProposedStatus } from "../proposals/proposal-rows";
+import { StatusBadge, type ProposedStatus } from "./demo-status";
 import { panelKindOf, panelKindSpec, rowVariantSpec } from "./demo-catalog";
 import {
   DEMO_ROWS,

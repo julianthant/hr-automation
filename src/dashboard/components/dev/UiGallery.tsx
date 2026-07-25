@@ -1,1174 +1,935 @@
 import { useState, type ReactNode } from "react";
-import { Inbox } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  ArrowUpRight,
+  Ban,
+  Camera,
+  Check,
+  CheckCircle2,
+  ChevronsUp,
+  CircleHelp,
+  ClipboardList,
+  Clock,
+  CornerDownRight,
+  Eye,
+  Hourglass,
+  KeyRound,
+  LayoutGrid,
+  Loader2,
+  Pause,
+  Plus,
+  RotateCcw,
+  RotateCw,
+  SearchX,
+  Trash2,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { OperationQueueParentRunIdProvider } from "@/components/hooks/useOperationQueueContext";
-import { TerminalDrawerProvider } from "@/components/hooks/useTerminalDrawer";
-import { WorkflowsProvider } from "@/lib/workflows-context";
-import type { TrackerEntry, WorkflowInstanceState } from "@/components/shared/types";
-import { EntryItem } from "@/components/queue-panel/EntryItem";
-import { OperationRowUnified } from "@/components/queue-panel/operation-row-variants";
-import { StatPills } from "@/components/queue-panel/StatPills";
-import { QueueSortDropdown } from "@/components/queue-panel/QueueSortDropdown";
-import { RetryAllButton } from "@/components/queue-panel/RetryAllButton";
-import { StopAllButton } from "@/components/queue-panel/StopAllButton";
-import { DeleteAllButton } from "@/components/queue-panel/DeleteAllButton";
-import {
-  buildQueueProjectionRows,
-  type OperationSurface,
-  type QueueGroupProjectionRow,
-} from "@/components/queue-panel/queue-surface-classifier";
-import { DEFAULT_QUEUE_SORT_MODE, type QueueSortMode } from "@/components/queue-panel/queue-sort";
-import { WorkflowBox } from "@/components/terminal-drawer/WorkflowBox";
-import { LiveIndicator } from "@/components/terminal-drawer/LiveIndicator";
-import { BrowserChip } from "@/components/terminal-drawer/BrowserChip";
-import { RunSettingsMenu } from "@/components/navigation/RunSettingsMenu";
-import { MODAL_FOOTER_CONTROL_HEIGHT, WorkerStepper } from "@/components/shared/WorkerStepper";
-import { AUTO_WORKERS, type StepPreset, type WorkerChoice } from "@/lib/run-settings";
-import { EmptyState } from "@/components/shared/EmptyState";
-import type { AuthState } from "@/components/shared/types";
-import { buildWorkflowRunProjection } from "../../../domain/workflow-runtime/projection.js";
-import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
-import { ProposalsTab } from "./proposals/ProposalsTab";
+import { IconActionButton } from "@/components/shared/IconActionButton";
+import { StatusCounts } from "@/components/queue-panel/StatusCounts";
+import { DemoRowCard, type DemoQueueHandlers, type DemoQueueState } from "./rebuild-demo/DemoQueue";
+import { DemoLogPanel } from "./rebuild-demo/DemoLogPanel";
+import { PANEL_KINDS, ROW_VARIANTS } from "./rebuild-demo/demo-catalog";
+import { PROPOSED_STATUS, StatusBadge, type ProposedStatus } from "./rebuild-demo/demo-status";
+import { DEMO_ROWS, groupCounts } from "./rebuild-demo/demo-data";
 
 /**
- * TEMPORARY DEV ROUTE — `?view=ui-gallery`.
+ * DEV-ONLY — `?view=ui-gallery`.
  *
- * A catalog of the dashboard's reusable surfaces, rendered with the REAL
- * components fed synthetic data. Organized into tabs:
+ * The dashboard's **specimen catalog**: every named surface of the rebuild,
+ * one at a time, with its name, what it is, and where it is used. This is the
+ * reference you point at when you say "make it look like X" — the demo
+ * (`?view=rebuild-demo`) shows the surfaces WORKING TOGETHER, this shows them
+ * INDIVIDUALLY and names them.
  *
- *   - Queue Rows   → row archetypes (single / batch / approval+preview).
- *                    Workflow-agnostic; variations come from kind + status/
- *                    derived tags. Approval and preview rows share the `preview`
- *                    archetype (approval gates fan-out; preview is read-only).
- *   - Session Cards → the terminal-drawer `WorkflowBox` daemon session card,
- *                     across its lifecycle states (in-flight, authing, duo,
- *                     idle, keepalive, complete, failed, crashed).
- *   - Controls     → toolbar buttons, stat/filter pills, sort, and the small
- *                    indicators (Live pill, browser chips, empty state).
- *   - Proposals    → the queue-row / log-panel data-enrichment proposals
- *                    (dev/proposals/) rendered in the real skin with per-
- *                    proposal toggles — a decision surface, not production UI.
- *
- * Reusing the real components means design regressions show up here. Remove
- * this file + its `?view=ui-gallery` gate in App.tsx when done.
+ * Specimens render the demo's own components against the demo's world model,
+ * so the catalog cannot drift from the thing it documents. The old "Proposals"
+ * tab is retired — its 26 toggle mocks were a decision surface for choices that
+ * are now built and visible here.
  */
 
-const DATE = "2026-06-01";
 const NOOP = () => {};
-const EMPTY_DISPLAY_NAMES = new Map<string, string>();
 
-/** Relative ISO start so session-card elapsed timers read as live. */
-function agoIso(secondsAgo: number): string {
-  return new Date(Date.now() - secondsAgo * 1000).toISOString();
-}
+const STATIC_STATE: DemoQueueState = {
+  view: { kind: "queue" },
+  filter: "all",
+  selectedId: "",
+  checkedIds: new Set(),
+  expandedGroups: new Set(["oath-summer", "oath-batch"]),
+  tick: 0,
+};
+
+const STATIC_HANDLERS: DemoQueueHandlers = {
+  onSelect: NOOP,
+  onFilter: NOOP,
+  onDrillIn: NOOP,
+  onBack: NOOP,
+  onToggleGroup: NOOP,
+};
 
 // ===========================================================================
-// Shared layout chrome (tabs + labeled variant cells).
+// Catalog chrome
 // ===========================================================================
 
-interface VariantProps {
-  label: string;
-  axes: string;
-  note?: string;
-  /** Variant cell width; session cards need their native 290px. */
+function Specimen({
+  name,
+  kind,
+  what,
+  where,
+  width,
+  children,
+}: {
+  name: string;
+  kind: string;
+  what: string;
+  where?: string;
   width?: number;
   children: ReactNode;
-}
-
-function Variant({ label, axes, note, width = 380, children }: VariantProps) {
+}) {
   return (
-    <div className="rounded-lg border border-border/60 bg-card/30 overflow-hidden">
-      <div className="px-3 py-2 border-b border-border/60 bg-secondary/20">
-        <div className="text-[13px] font-semibold text-foreground">{label}</div>
-        <div className="mt-0.5 font-mono text-[10.5px] text-muted-foreground">{axes}</div>
-        {note && <div className="mt-0.5 text-[10.5px] text-muted-foreground/80">{note}</div>}
-      </div>
-      {/* Mimic the owning column width so wrapping/truncation matches reality. */}
-      <div className="pb-2" style={{ width: `min(100%, ${width}px)` }}>
+    <section className="overflow-hidden rounded-lg border border-border bg-card/30">
+      <header className="border-b border-border/60 bg-secondary/20 px-3 py-2">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <h3 className="text-[13.5px] font-semibold text-foreground">{name}</h3>
+          <span className="rounded border border-border px-1.5 py-px text-[9.5px] uppercase tracking-wider text-muted-foreground">{kind}</span>
+        </div>
+        <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">{what}</p>
+        {where && <p className="mt-0.5 font-mono text-[10.5px] text-muted-foreground/80">{where}</p>}
+      </header>
+      <div className="p-3" style={width ? { width: `min(100%, ${width}px)` } : undefined}>
         {children}
       </div>
-    </div>
+    </section>
   );
 }
 
-function Section({ title, sub }: { title: ReactNode; sub: string }) {
+function Section({ title, sub }: { title: string; sub: string }) {
   return (
-    <div className="col-span-full mt-7 first:mt-0">
+    <div className="col-span-full mt-8 first:mt-0">
       <h2 className="text-[16px] font-bold text-foreground">{title}</h2>
-      <p className="text-[12px] text-muted-foreground mt-0.5">{sub}</p>
+      <p className="mt-0.5 text-[12px] text-muted-foreground">{sub}</p>
+    </div>
+  );
+}
+
+/** a labelled swatch for the small named pieces */
+function Chip({ name, note, children }: { name: string; note?: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border border-border/60 bg-card/40 px-2.5 py-2">
+      <div className="flex min-h-[26px] items-center">{children}</div>
+      <div>
+        <div className="text-[11.5px] font-medium text-foreground">{name}</div>
+        {note && <div className="text-[10.5px] leading-snug text-muted-foreground">{note}</div>}
+      </div>
     </div>
   );
 }
 
 // ===========================================================================
-// QUEUE ROWS — synthetic tracker rows + the real EntryItem / operation rows.
+// TAB 1 — Queue Rows
 // ===========================================================================
-
-/** Build a synthetic tracker row. `_hash` is required for EntryItem's memo. */
-function row(partial: Partial<TrackerEntry> & { id: string }): TrackerEntry {
-  return {
-    workflow: "onboarding",
-    timestamp: "2026-06-01T09:56:00.000Z",
-    status: "pending",
-    _hash: partial.id,
-    ...partial,
-  };
-}
-
-/**
- * Minimal projection carrying a batch card's title + (trace-id) subtitle.
- * `projection.title` (operationGroupTitle) is the primary title path in production,
- * so passing it here is faithful. An empty title renders a no-title anchor.
- */
-function operationProjection(runId: string, title: string, subtitle: string): WorkflowRunProjection {
-  // Enabled retry+delete descriptors with empty targets → OperationFooterActions
-  // acts on every member, so the bulk retry/delete icons render in the footer.
-  const bulk = (kind: "retry" | "delete") => ({
-    kind,
-    scope: "group" as const,
-    source: "queue-panel" as const,
-    label: kind === "retry" ? "Retry all" : "Delete all",
-    enabled: true,
-    targets: [],
-  });
-  return {
-    runId,
-    workflowId: "",
-    itemId: runId,
-    title,
-    subtitle,
-    status: "running",
-    surfaceType: "operation",
-    rowTypeLabel: "Operation",
-    actions: [bulk("retry"), bulk("delete")],
-    operationMembers: [],
-  } as unknown as WorkflowRunProjection;
-}
-
-/**
- * A flat EntryItem in its own selectable shell. Feeds the row a REAL projection
- * (default policy, status-gated row actions) so the footer's button cluster
- * matches production exactly: running → ×, queued → ▲ × 🗑, done/failed → ↻ 🗑.
- */
-function Flat({ entry, selected = false }: { entry: TrackerEntry; selected?: boolean }) {
-  return (
-    <EntryItem
-      entry={entry}
-      projection={buildWorkflowRunProjection(entry, {})}
-      displayNames={EMPTY_DISPLAY_NAMES}
-      selected={selected}
-      onSelect={NOOP}
-      date={DATE}
-      onDelete={NOOP}
-    />
-  );
-}
-
-/**
- * A neutral batch group card — same component for every workflow.
- * `title=""` renders a no-title person anchor (count + member names identify it).
- */
-function Batch({
-  parentRunId,
-  members,
-  title,
-  subtitle,
-  anchorEntry,
-}: {
-  parentRunId: string;
-  members: TrackerEntry[];
-  workflowLabel: string;
-  title: string;
-  subtitle: string;
-  /** Footer fallback when the coordinator has no members (pre-fan-out anchor). */
-  anchorEntry?: TrackerEntry;
-}) {
-  const parent =
-    anchorEntry ??
-    row({
-      id: `op-${parentRunId.slice(0, 8)}`,
-      runId: parentRunId,
-      status: members[0]?.status ?? "running",
-      data: { archetype: "operation", __traceId: subtitle },
-    });
-  return (
-    <OperationRowUnified
-      date={DATE}
-      parentRunId={parentRunId}
-      projection={operationProjection(parentRunId, title, subtitle)}
-      displayNames={EMPTY_DISPLAY_NAMES}
-      parent={parent}
-      members={members}
-      selected={false}
-      selectedId={null}
-      onSelect={NOOP}
-      onDelete={NOOP}
-    />
-  );
-}
-
-type OperationGalleryRow = QueueGroupProjectionRow & { surface: OperationSurface };
-
-function buildOperationGalleryRow(
-  parent: TrackerEntry,
-  members: TrackerEntry[],
-  workflowLabel: string,
-): OperationGalleryRow {
-  const projected = buildQueueProjectionRows({
-    entries: [parent],
-    delegationSourceEntries: [parent, ...members],
-    workflow: parent.workflow,
-    workflowLabel,
-    displayNames: EMPTY_DISPLAY_NAMES,
-  });
-  const operation = projected.groupRows.find(
-    (group): group is OperationGalleryRow =>
-      group.surface.kind === "operation" &&
-      group.surface.parentRunId === (parent.runId ?? parent.id),
-  );
-  if (!operation) {
-    throw new Error(`UI gallery operation fixture did not produce an operation surface for ${parent.id}`);
-  }
-  return operation;
-}
-
-/** Redesign harness — the new single-card coordinator (work zone above footer). */
-function OpUnifiedFixture({
-  fixture,
-  defaultExpanded = false,
-  expandedExtra,
-}: {
-  fixture: OperationGalleryRow;
-  defaultExpanded?: boolean;
-  expandedExtra?: ReactNode;
-}) {
-  return (
-    <OperationRowUnified
-      date={DATE}
-      parentRunId={fixture.surface.parentRunId}
-      projection={fixture.projection}
-      displayNames={EMPTY_DISPLAY_NAMES}
-      parent={fixture.surface.parent}
-      members={fixture.surface.members}
-      ocr={fixture.surface.ocr}
-      selected={false}
-      selectedId={null}
-      onSelect={NOOP}
-      onDelete={NOOP}
-      defaultExpanded={defaultExpanded}
-      onOpenOcrReview={NOOP}
-      expandedExtra={expandedExtra}
-    />
-  );
-}
-
-// --- SINGLE: kind variations (title/subtitle only) ---
-const singlePerson = row({
-  id: "s-person",
-  status: "running",
-  firstLogTs: "2026-06-01T09:24:00.000Z",
-  lastLogMessage: "Filling award row…",
-  runOrdinal: 1,
-  data: {
-    archetype: "single",
-    queueRowKind: "person",
-    name: "Maria Gonzalez",
-    emplId: "10012345",
-    __traceId: "ws-092400-7c2a",
-  },
-});
-
-const singleFile = row({
-  id: "s-file",
-  status: "running",
-  firstLogTs: "2026-06-01T09:40:00.000Z",
-  lastLogMessage: "Downloading document…",
-  runOrdinal: 1,
-  data: {
-    archetype: "single",
-    queueRowKind: "file",
-    pdfOriginalName: "I9_Form_Scan.pdf",
-    __traceId: "cd-094000-d4c1",
-  },
-});
-
-const singleCatalog = row({
-  id: "s-catalog",
-  status: "running",
-  firstLogTs: "2026-06-01T09:41:00.000Z",
-  lastLogMessage: "Fetching report…",
-  runOrdinal: 1,
-  data: {
-    archetype: "single",
-    queueRowKind: "catalog",
-    __queueTitle: "UKG Roster — Q3 FY26",
-    __traceId: "ur-094100-aa90",
-  },
-});
-
-// --- SINGLE: status tags (person kind) ---
-const statusDone = row({
-  id: "s-done",
-  status: "done",
-  firstLogTs: "2026-06-01T08:10:00.000Z",
-  lastLogTs: "2026-06-01T08:12:30.000Z",
-  runOrdinal: 2,
-  data: { archetype: "single", queueRowKind: "person", name: "Darnell Pierce", emplId: "10067890", __traceId: "ws-081000-1b4e" },
-});
-
-const statusFailed = row({
-  id: "s-failed",
-  status: "failed",
-  firstLogTs: "2026-06-01T08:40:00.000Z",
-  lastLogTs: "2026-06-01T08:41:10.000Z",
-  error: "Selector timeout: award amount field never appeared",
-  runOrdinal: 1,
-  data: { archetype: "single", queueRowKind: "person", name: "Aisha Khan", emplId: "10055512", __traceId: "ws-084000-9d10" },
-});
-
-const statusQueued = row({
-  id: "s-queued",
-  status: "pending",
-  runOrdinal: 1,
-  data: { archetype: "single", queueRowKind: "person", name: "Tomás Rivera", emplId: "10043321", __traceId: "ws-095500-4f88" },
-});
-
-const statusCancelled = row({
-  id: "s-cancelled",
-  status: "failed",
-  step: "cancelled",
-  firstLogTs: "2026-06-01T09:00:00.000Z",
-  lastLogTs: "2026-06-01T09:00:40.000Z",
-  runOrdinal: 1,
-  data: { archetype: "single", queueRowKind: "person", name: "Priya Nair", emplId: "10078900", __traceId: "ws-090000-2a55" },
-});
-
-// --- SINGLE: derived tags (resolved from data; workflow-keyed in current code) ---
-const derivedNotFound = row({
-  id: "s-notfound",
-  workflow: "person-lookup",
-  status: "done",
-  firstLogTs: "2026-06-01T09:30:00.000Z",
-  lastLogTs: "2026-06-01T09:30:20.000Z",
-  runOrdinal: 1,
-  data: { archetype: "single", queueRowKind: "person", searchName: "Jordan Vale", activeStatus: "not-found", __traceId: "pl-093000-aa01" },
-});
-
-const tagActive = row({
-  id: "s-active",
-  workflow: "person-lookup",
-  status: "done",
-  firstLogTs: "2026-06-01T09:31:00.000Z",
-  lastLogTs: "2026-06-01T09:31:18.000Z",
-  runOrdinal: 1,
-  data: { archetype: "single", queueRowKind: "person", name: "Wei Chen", emplId: "10090011", activeStatus: "active", __traceId: "pl-093100-bb02" },
-});
-
-const tagInactive = row({
-  id: "s-inactive",
-  workflow: "person-lookup",
-  status: "done",
-  firstLogTs: "2026-06-01T09:32:00.000Z",
-  lastLogTs: "2026-06-01T09:32:14.000Z",
-  runOrdinal: 1,
-  data: { archetype: "single", queueRowKind: "person", name: "Helen Park", emplId: "10090022", activeStatus: "inactive", __traceId: "pl-093200-cc03" },
-});
-
-// A "batch member" is just a single scoped under a batch (parentRunId set).
-const memberAsSingle = row({
-  id: "s-member",
-  workflow: "oath-signature",
-  status: "done",
-  parentRunId: "batch-parent-2",
-  firstLogTs: "2026-06-01T09:12:00.000Z",
-  lastLogTs: "2026-06-01T09:13:40.000Z",
-  runOrdinal: 1,
-  data: { archetype: "operation-member", queueRowKind: "person", name: "Carlos Mendez", emplId: "10031200", __traceId: "os-091200-3c0f" },
-});
-
-// --- BATCH: neutral group cards, identical for every workflow. ---
-function member(
-  id: string,
-  status: TrackerEntry["status"],
-  name: string,
-  emplId: string,
-  parentRunId: string,
-  error?: string,
-): TrackerEntry {
-  return row({
-    id,
-    workflow: "oath-signature",
-    status,
-    parentRunId,
-    ...(error ? { error } : {}),
-    firstLogTs: agoIso(status === "running" ? 120 : status === "pending" ? 60 : 420),
-    lastLogTs:
-      status === "running" || status === "pending" ? undefined : agoIso(30),
-    data: {
-      archetype: "operation-member",
-      queueRowKind: "person",
-      name,
-      emplId,
-      __traceId: `os-090500-${id}`,
-    },
-  });
-}
-
-const FILE_BATCH_RUN = "batch-file-1";
-const fileOperationMembers = [
-  member("fb-1", "done", "Lena Ortiz", "10010001", FILE_BATCH_RUN),
-  member("fb-2", "running", "Marcus Bell", "10010002", FILE_BATCH_RUN),
-  member("fb-3", "pending", "Sofia Ruiz", "10010003", FILE_BATCH_RUN),
-  member("fb-4", "failed", "Dev Patel", "10010004", FILE_BATCH_RUN),
-];
-
-const PERSON_BATCH_RUN = "batch-person-1";
-const personOperationMembers = [
-  member("pb-1", "done", "Grace Liu", "10020001", PERSON_BATCH_RUN),
-  member("pb-2", "done", "Ian Wong", "10020002", PERSON_BATCH_RUN),
-  member("pb-3", "running", "Nadia Haddad", "10020003", PERSON_BATCH_RUN),
-  member("pb-4", "pending", "Owen Fischer", "10020004", PERSON_BATCH_RUN),
-  member("pb-5", "pending", "Rosa Delgado", "10020005", PERSON_BATCH_RUN),
-  member("pb-6", "failed", "Dev Patel", "10020006", PERSON_BATCH_RUN),
-];
-
-// A real transient state: a `batch` anchor that has not fanned out yet, so it
-// has ZERO members. The oath-signature PDF row sits here during the whole OCR
-// approval window — it's stamped `archetype: batch` at pre-emit but its
-// `batch-member` signer children don't exist until the `fan-out` step.
-const EMPTY_BATCH_RUN = "batch-prefanout-1";
-const emptyOperationMembers: TrackerEntry[] = [];
-const emptyOperationAnchor = row({
-  id: EMPTY_BATCH_RUN,
-  runId: EMPTY_BATCH_RUN,
-  workflow: "oath-signature",
-  status: "running",
-  step: "ocr",
-  firstLogTs: agoIso(300),
-  lastLogMessage: "Awaiting OCR approval…",
-  runOrdinal: 1,
-  data: {
-    archetype: "operation",
-    queueRowKind: "file",
-    pdfOriginalName: "Oath_Packet_Batch.pdf",
-    sessionId: "sess-oath-prefanout",
-    __traceId: "os-095000-7711",
-  },
-});
-
-// --- APPROVAL / PREVIEW: OCR review surfaces (archetype: preview). ---
-// Two named row types share the `preview` archetype. An APPROVAL ROW gates
-// downstream fan-out on operator approval (oath / emergency-contact — the form
-// declares approveTo / approveDocumentTo, so the review pane shows an Approve
-// button). A PREVIEW ROW is read-only — no approval gate (verify: the form
-// declares neither target, so there is no Approve button; the operator inspects
-// the completeness report then discards). Same queue-row shape for both; the
-// only difference is the Approve button in the review pane.
-const approvalReady = row({
-  id: "pv-ready",
-  workflow: "ocr",
-  status: "done",
-  firstLogTs: "2026-06-01T09:56:00.000Z",
-  lastLogTs: "2026-06-01T10:28:06.000Z",
-  runOrdinal: 1,
-  data: {
-    archetype: "preview",
-    queueRowKind: "file",
-    mode: "prepare",
-    pdfOriginalName: "Xerox Scan_04282026111307.pdf",
-    __traceId: "oc-095600-5603",
-  },
-});
-
-const approvalNeedsReview = row({
-  id: "pv-needs-review",
-  workflow: "ocr",
-  status: "running",
-  step: "awaiting-approval",
-  parentRunId: "ou-parent-1",
-  firstLogTs: "2026-06-01T09:50:00.000Z",
-  lastLogTs: "2026-06-01T09:52:00.000Z",
-  lastLogMessage: "Review extracted rows in the Preview tab…",
-  runOrdinal: 1,
-  data: {
-    archetype: "preview",
-    queueRowKind: "file",
-    pdfOriginalName: "Oath_Packet_Batch.pdf",
-    __traceId: "oc-095000-7711",
-  },
-});
-
-// Read-only review surface — no approval gate (verify completeness report).
-const previewReadOnly = row({
-  id: "pv-verify",
-  workflow: "ocr",
-  status: "running",
-  step: "awaiting-approval",
-  firstLogTs: "2026-06-01T09:50:00.000Z",
-  lastLogTs: "2026-06-01T09:52:00.000Z",
-  lastLogMessage: "Inspect completeness report…",
-  runOrdinal: 1,
-  data: {
-    archetype: "preview",
-    queueRowKind: "file",
-    formType: "verify",
-    pdfOriginalName: "Mixed_Oath_EC_Packet.pdf",
-    __traceId: "vf-095000-9a2c",
-  },
-});
-
-// --- OPERATION: target-workflow coordinator rows for OCR-backed PDF runs. ---
-const OPERATION_PRE_RUN = "op-oath-pre-1";
-const operationPreApprovalParent = row({
-  id: "ocr-prep-sess-op-pre",
-  runId: OPERATION_PRE_RUN,
-  workflow: "oath-signature",
-  status: "running",
-  step: "ocr-prep",
-  firstLogTs: "2026-06-01T09:58:00.000Z",
-  lastLogMessage: "OCR prep running in the OCR panel…",
-  runOrdinal: 1,
-  data: {
-    archetype: "operation",
-    mode: "prepare",
-    formType: "oath",
-    queueRowKind: "file",
-    pdfOriginalName: "Oath_Packet_Batch.pdf",
-    ocrRunId: "ocr-run-op-pre",
-    ocrSessionId: "sess-op-pre",
-    ocrStatus: "awaiting-review",
-    ocrStep: "awaiting-approval",
-    operationWorkflow: "oath-signature",
-    operationKind: "oath",
-    operationRunId: OPERATION_PRE_RUN,
-    __traceId: "os-095800-opre",
-  },
-});
-
-const OPERATION_POST_RUN = "op-oath-post-1";
-const operationPostApprovalParent = row({
-  id: "ocr-prep-sess-op-post",
-  runId: OPERATION_POST_RUN,
-  workflow: "oath-signature",
-  status: "running",
-  step: "approved",
-  firstLogTs: "2026-06-01T10:02:00.000Z",
-  lastLogMessage: "Waiting on signer rows…",
-  runOrdinal: 1,
-  data: {
-    archetype: "operation",
-    mode: "prepare",
-    formType: "oath",
-    queueRowKind: "file",
-    pdfOriginalName: "Oath_Packet_Approved.pdf",
-    ocrRunId: "ocr-run-op-post",
-    ocrSessionId: "sess-op-post",
-    ocrStatus: "approved",
-    ocrStep: "approved",
-    operationWorkflow: "oath-signature",
-    operationKind: "oath",
-    operationRunId: OPERATION_POST_RUN,
-    __traceId: "os-100200-opst",
-  },
-});
-
-const operationMembers = [
-  member("opm-1", "done", "Amara Brooks", "10041001", OPERATION_POST_RUN),
-  member("opm-2", "running", "Noah Kim", "10041002", OPERATION_POST_RUN),
-  member("opm-3", "pending", "Elena Vega", "10041003", OPERATION_POST_RUN),
-  member(
-    "opm-4",
-    "failed",
-    "Diego Santos",
-    "10041004",
-    OPERATION_POST_RUN,
-    "Signature field never rendered after 3 attempts",
-  ),
-  // Extra members (>4) so the scroll cap on the expanded list is demonstrable.
-  member("opm-5", "done", "Priya Shah", "10041005", OPERATION_POST_RUN),
-  member("opm-6", "pending", "Marcus Bell", "10041006", OPERATION_POST_RUN),
-  member("opm-7", "done", "Lena Ortiz", "10041007", OPERATION_POST_RUN),
-];
-
-const operationPreApproval = buildOperationGalleryRow(
-  operationPreApprovalParent,
-  [],
-  "Oath Signature",
-);
-const operationPostApproval = buildOperationGalleryRow(
-  operationPostApprovalParent,
-  operationMembers,
-  "Oath Signature",
-);
-
-// A TITLELESS operation coordinator: the parent is person-kind (no PDF/file
-// title), so `operationGroupTitle` returns "" and the header shows ONLY the status
-// icon + badge — no member-name summary. The count badge + expandable member
-// rows identify it. Mirrors the production row the operator flagged.
-const TITLELESS_OP_RUN = "op-oath-titleless-1";
-const titlelessOperationParent = row({
-  id: "ocr-prep-sess-op-titleless",
-  runId: TITLELESS_OP_RUN,
-  workflow: "oath-signature",
-  status: "done",
-  step: "approved",
-  firstLogTs: "2026-06-01T15:12:00.000Z",
-  lastLogTs: "2026-06-01T15:14:00.000Z",
-  lastLogMessage: "All signer rows complete",
-  runOrdinal: 1,
-  data: {
-    archetype: "operation",
-    mode: "prepare",
-    formType: "oath",
-    // person-kind anchor → no synthetic title (titleless variant).
-    queueRowKind: "person",
-    ocrRunId: "ocr-run-op-titleless",
-    ocrSessionId: "sess-op-titleless",
-    ocrStatus: "approved",
-    ocrStep: "approved",
-    operationWorkflow: "oath-signature",
-    operationKind: "oath",
-    operationRunId: TITLELESS_OP_RUN,
-    __traceId: "se-151218-55d5",
-  },
-});
-
-const titlelessOperationMembers = [
-  member("tlm-1", "done", "Figueroa", "10734655", TITLELESS_OP_RUN),
-  member("tlm-2", "done", "Figueroa, Mehkai", "10734655", TITLELESS_OP_RUN),
-];
-
-const titlelessOperation = buildOperationGalleryRow(
-  titlelessOperationParent,
-  titlelessOperationMembers,
-  "Oath Signature",
-);
 
 function QueueRowsTab() {
   return (
-    <div className="grid grid-cols-1 min-[820px]:grid-cols-2 gap-4 items-start">
-      {/* ---- SINGLE ---- */}
+    <div className="grid grid-cols-1 gap-3 min-[1500px]:grid-cols-2">
       <Section
-        title="single"
-        sub="One flat EntryItem. Kind sets title/subtitle; tags set the status badge / chip. A batch member is just a single with a parentRunId — not a separate type."
+        title="Queue Rows — 8 named variants over 3 types"
+        sub="The row TYPE is structural (Run / Group / Member). The VARIANT is what the row is about, and it decides the title rule, what the body carries, and which Log Panel you land in."
       />
-      <Variant label="kind = person" axes="single · kind=person · running" note="title = name, subtitle = EID">
-        <Flat entry={singlePerson} />
-      </Variant>
-      <Variant label="kind = file" axes="single · kind=file · running" note="title = PDF filename, subtitle = trace id">
-        <Flat entry={singleFile} />
-      </Variant>
-      <Variant label="kind = catalog" axes="single · kind=catalog · running" note="title = spec label, subtitle = trace id">
-        <Flat entry={singleCatalog} />
-      </Variant>
-      <Variant label="tag = done" axes="single · tag=done">
-        <Flat entry={statusDone} selected />
-      </Variant>
-      <Variant label="tag = failed" axes="single · tag=failed" note="error surfaced inline">
-        <Flat entry={statusFailed} />
-      </Variant>
-      <Variant label="tag = queued" axes="single · tag=pending">
-        <Flat entry={statusQueued} />
-      </Variant>
-      <Variant label="tag = cancelled" axes="single · tag=failed+step=cancelled" note="operator-stopped (amber, not red)">
-        <Flat entry={statusCancelled} />
-      </Variant>
-      <Variant label="tag = not found" axes="single · derived=notFound" note="from data.activeStatus=not-found (status still done)">
-        <Flat entry={derivedNotFound} />
-      </Variant>
-      <Variant label="tag = active (A)" axes="single · secondaryTag=A" note="from data.activeStatus=active">
-        <Flat entry={tagActive} />
-      </Variant>
-      <Variant label="tag = inactive (IA)" axes="single · secondaryTag=IA" note="from data.activeStatus=inactive">
-        <Flat entry={tagInactive} />
-      </Variant>
-      <Variant label="member = single (scoped)" axes="single · parentRunId set · done" note="a 'batch member' is just a single under a batch">
-        <Flat entry={memberAsSingle} />
-      </Variant>
+      {ROW_VARIANTS.map((v) => {
+        const row = v.exampleId ? DEMO_ROWS[v.exampleId] : undefined;
+        if (!row) return null;
+        return (
+          <Specimen
+            key={v.key}
+            name={v.name}
+            kind={v.rowType}
+            what={v.subject}
+            where={v.workflows.map((w) => `${w.code} ${w.label}`).join(" · ")}
+            width={480}
+          >
+            <DemoRowCard row={row} state={STATIC_STATE} handlers={STATIC_HANDLERS} />
+            <p className="mt-2 rounded-md border border-warning/30 bg-warning/6 px-2.5 py-1.5 text-[11px] leading-relaxed text-warning">{v.gotcha}</p>
+          </Specimen>
+        );
+      })}
 
-      {/* ---- BATCH ---- */}
-      <Section
-        title="operation"
-        sub="Dedicated queue-ledger row for batches. It is not a tracker/coordinator parent: title is optional, subtitle = trace id, member preview is compact, and clicking opens the dedicated batch queue view for large fan-outs."
-      />
-      <Variant label="with title (file)" axes="batch · 4 members · titled" note="title from the batch's file/spec; footer uses bulk retry/delete">
-        <Batch
-          parentRunId={FILE_BATCH_RUN}
-          members={fileOperationMembers}
-          workflowLabel="Oath Signature"
-          title="Approved_Oath_Batch.pdf"
-          subtitle="oc-090500-aprv"
-        />
-      </Variant>
-      <Variant label="no title (person anchor)" axes="batch · 6 members · no title · incl. failed" note="member-name preview + initials identify the batch without inventing a parent title">
-        <Batch
-          parentRunId={PERSON_BATCH_RUN}
-          members={personOperationMembers}
-          workflowLabel="Onboarding"
-          title=""
-          subtitle="ob-090500-7f31"
-        />
-      </Variant>
-      <Variant label="0 members (pre-fan-out)" axes="batch · 0 members · file · running" note="oath-signature PDF anchor during OCR approval — empty strip, but footer falls back to the anchor so time/elapsed/retry+delete stay">
-        <Batch
-          parentRunId={EMPTY_BATCH_RUN}
-          members={emptyOperationMembers}
-          workflowLabel="Oath Signature"
-          title="Oath_Packet_Batch.pdf"
-          subtitle="os-095000-7711"
-          anchorEntry={emptyOperationAnchor}
-        />
-      </Variant>
+      <Section title="Row states" sub="The same row across all eight statuses — the whole status vocabulary of the rebuild, replacing six near-identical status maps and three resolvers that decoded status out of step strings." />
+      <div className="col-span-full grid grid-cols-2 gap-2 min-[1100px]:grid-cols-4">
+        {(Object.keys(PROPOSED_STATUS) as ProposedStatus[]).map((s) => {
+          const spec = PROPOSED_STATUS[s];
+          const Icon = spec.icon;
+          return (
+            <Chip key={s} name={spec.label} note={spec.meaning}>
+              <span className="flex items-center gap-2">
+                <Icon aria-hidden className={cn("size-3.5", spec.iconClass)} />
+                <StatusBadge status={s} />
+              </span>
+            </Chip>
+          );
+        })}
+      </div>
 
-      {/* ---- APPROVAL / PREVIEW ---- */}
-      <Section
-        title="approval / preview"
-        sub="OCR review surfaces (archetype: preview). An approval row gates downstream fan-out on operator approval (oath / emergency-contact — Approve button in the review pane). A preview row is read-only — no approval gate (verify completeness report); operator inspects then discards. Same queue-row shape; the Approve button is the only difference. 'Needs review' is a derived tag, not a separate row."
-      />
-      <Variant label="approval row · ready / done" axes="preview · kind=file · done" note="approval already resolved (done)">
-        <Flat entry={approvalReady} />
-      </Variant>
-      <Variant label="approval row · needs review" axes="preview · derived=needsReview" note="delegated awaiting-approval (parentRunId set); review pane shows Approve">
-        <Flat entry={approvalNeedsReview} />
-      </Variant>
-      <Variant label="preview row · read-only (verify)" axes="preview · kind=file · awaiting-approval" note="no approveTo → no Approve button; operator inspects then discards">
-        <Flat entry={previewReadOnly} />
-      </Variant>
-
-      {/* ---- OPERATION ---- */}
-      <Section
-        title="operation"
-        sub="Target-workflow coordinator for OCR-backed Oath Signature / Emergency Contact PDF runs. One card: header → work zone → footer. The OCR-status / member section sits INSIDE the card above the footer; members are EntryItem single rows, capped to scroll after ~4. A titleless (person-anchor) coordinator has NO header strip — the card starts at the count badge. Collapsed, it shows a batch-style member-name preview below the count (it reads like a batch row); expanding swaps that for the full member rows."
-      />
-      <Variant label="before approval" axes="awaiting review · header jump" note="no middle strip — badge + blue OCR jump in header; footer is the true bottom edge">
-        <OpUnifiedFixture fixture={operationPreApproval} />
-      </Variant>
-      <Variant label="after approval (expanded)" axes="member single rows · counts · scroll-capped" note="status tally beside chevron; list scrolls past ~4 rows">
-        <OpUnifiedFixture fixture={operationPostApproval} defaultExpanded />
-      </Variant>
-      <Variant
-        label="after approval (expanded) · nested batch"
-        axes="batch row inside expand · then singles"
-        note="batch ledger nested above fanned-out EntryItems — same components as the batch section"
+      <Section title="Group density ladder" sub="Member count is a continuous property, so scale is presentation — never a fourth row type." />
+      <Specimen
+        name="Member list"
+        kind="≤ 20 members"
+        what="Compact person lines inline under the group, attention-first, first four then Show all. Each line is the one fact that distinguishes that person's outcome."
+        where="Packet Group Row · small Roster Group Row"
+        width={480}
       >
-        <OpUnifiedFixture
-          fixture={operationPostApproval}
-          defaultExpanded
-          expandedExtra={
-            <Batch
-              parentRunId={`${OPERATION_POST_RUN}-nested-batch`}
-              members={fileOperationMembers}
-              workflowLabel="Oath Signature"
-              title="Approved_Oath_Batch.pdf"
-              subtitle="oc-090500-aprv"
-            />
-          }
-        />
-      </Variant>
-      <Variant label="after approval (collapsed)" axes="status counts only" note="collapsed: per-status tally beside chevron, members hidden">
-        <OpUnifiedFixture fixture={operationPostApproval} />
-      </Variant>
-      <Variant
-        label="titleless person anchor (expanded)"
-        axes="operation · person-kind · no title · done"
-        note="NO header strip — card starts at the count badge; expanded shows full member rows"
+        <DemoRowCard row={DEMO_ROWS["oath-batch"]} state={STATIC_STATE} handlers={STATIC_HANDLERS} />
+      </Specimen>
+      <Specimen
+        name="Status matrix + attention band"
+        kind="20+ members"
+        what="One cell per person as the general lookup, plus a band naming exactly who needs you and a Start review that walks them one at a time. The matrix is never the review."
+        where="Roster Group Row — I-9 Check quarterly retention"
+        width={480}
       >
-        <OpUnifiedFixture fixture={titlelessOperation} defaultExpanded />
-      </Variant>
-      <Variant
-        label="titleless person anchor (collapsed)"
-        axes="operation · person-kind · no title · done"
-        note="collapsed: count strip + hairline-divided member-name preview (reads like a batch row); click a name to expand + jump to that member"
-      >
-        <OpUnifiedFixture fixture={titlelessOperation} />
-      </Variant>
+        <DemoRowCard row={DEMO_ROWS["i9-batch"]} state={STATIC_STATE} handlers={STATIC_HANDLERS} />
+      </Specimen>
     </div>
   );
 }
 
 // ===========================================================================
-// SESSION CARDS — the terminal-drawer WorkflowBox across lifecycle states.
-// Real workflow names so icon + step pipeline resolve from the live registry.
+// TAB 2 — Log Panels
 // ===========================================================================
 
-function browser(system: string, authState: AuthState): { browserId: string; system: string; authState: AuthState } {
-  return { browserId: `${system}-1`, system, authState };
-}
-
-function session(
-  partial: Partial<WorkflowInstanceState> & { instance: string; workflow: string },
-): WorkflowInstanceState {
-  return {
-    active: true,
-    pidAlive: true,
-    currentItemId: null,
-    currentTraceId: null,
-    itemInFlight: false,
-    currentStep: null,
-    finalStatus: null,
-    sessions: [],
-    ...partial,
-  };
-}
-
-const sessInFlight = session({
-  instance: "Onboarding 1",
-  workflow: "onboarding",
-  startedAt: agoIso(95),
-  currentItemId: "Maria Gonzalez",
-  currentTraceId: "on-022400-9f1a",
-  itemInFlight: true,
-  currentStep: "fill-award",
-  sessions: [{ sessionId: "s1", browsers: [browser("ucpath", "authed"), browser("crm", "authed")] }],
-});
-
-const sessAuthing = session({
-  instance: "Separation 1",
-  workflow: "separations",
-  startedAt: agoIso(18),
-  currentStep: "auth",
-  sessions: [{ sessionId: "s2", browsers: [browser("ucpath", "authenticating"), browser("kuali", "idle")] }],
-});
-
-const sessDuo = session({
-  instance: "Oath Upload 1",
-  workflow: "oath-upload",
-  startedAt: agoIso(135),
-  currentStep: "auth",
-  sessions: [{ sessionId: "s3", browsers: [browser("ucpath", "duo_waiting"), browser("crm", "authed")] }],
-});
-
-const sessIdleUcpath = session({
-  instance: "Work Study 1",
-  workflow: "work-study",
-  startedAt: agoIso(240),
-  daemonPhase: "idle",
-  sessions: [{ sessionId: "s4", browsers: [browser("ucpath", "authed")] }],
-  idleBySystem: { ucpath: { lastTouchAt: agoIso(120), refreshing: false } },
-});
-
-const sessIdleLogs = session({
-  instance: "Person Lookup 1",
-  workflow: "person-lookup",
-  startedAt: agoIso(300),
-  // Idle daemon that already processed an item. currentTraceId is still set
-  // (the last run's id) but the subtitle now HIDES it once the item is no
-  // longer in flight — it falls back to the phase subline ("idle — waiting for
-  // work"). Exercises that the trace id shows only while itemInFlight.
-  currentTraceId: "pl-093100-bb02",
-  daemonPhase: "idle",
-  sessions: [{ sessionId: "s5", browsers: [browser("crm", "authed")] }],
-});
-
-const sessKeepalive = session({
-  instance: "Onboarding 2",
-  workflow: "onboarding",
-  startedAt: agoIso(420),
-  daemonPhase: "keepalive",
-  sessions: [{ sessionId: "s6", browsers: [browser("ucpath", "authed"), browser("crm", "authed")] }],
-});
-
-const sessComplete = session({
-  instance: "Work Study 2",
-  workflow: "work-study",
-  startedAt: agoIso(180),
-  currentTraceId: "ws-090000-2a55",
-  active: false,
-  pidAlive: false,
-  finalStatus: "done",
-  sessions: [{ sessionId: "s7", browsers: [browser("ucpath", "authed")] }],
-});
-
-const sessFailed = session({
-  instance: "Separation 2",
-  workflow: "separations",
-  startedAt: agoIso(90),
-  currentTraceId: "se-014000-9d10",
-  active: false,
-  pidAlive: false,
-  finalStatus: "failed",
-  sessions: [{ sessionId: "s8", browsers: [browser("ucpath", "failed")] }],
-});
-
-const sessCrashed = session({
-  instance: "Kronos Reports 1",
-  workflow: "kronos-reports",
-  startedAt: agoIso(12),
-  active: false,
-  pidAlive: false,
-  crashedOnLaunch: true,
-  sessions: [],
-});
-
-function SessionCardsTab() {
+function LogPanelsTab() {
   return (
-    <WorkflowsProvider>
-      <TerminalDrawerProvider>
-        <p className="mb-4 text-[12px] text-muted-foreground">
-          The real <span className="font-mono">WorkflowBox</span> card from the terminal drawer.
-          Icon + step pipeline resolve from the live registry; the{" "}
-          <span className="font-mono">queued</span> chip and idle-refresh ring are driven by{" "}
-          <span className="font-mono">/api/queue-depth</span> + <span className="font-mono">/api/daemons</span>{" "}
-          polling, so they reflect whatever the backend reports (typically 0 here). Clicking a card sets
-          its focus ring; the <span className="font-mono">× stop</span> pill fires a real{" "}
-          <span className="font-mono">/api/daemon/stop</span> — don&apos;t click it against a live daemon.
-        </p>
-        <div className="grid grid-cols-1 min-[680px]:grid-cols-2 min-[1040px]:grid-cols-3 gap-4 items-start">
-          <Variant width={290} label="in-flight" axes="active · itemInFlight · 2 browsers authed" note="cyan border tint; subtitle = trace id, footer = current step">
-            <div className="px-2"><WorkflowBox workflow={sessInFlight} queued={0} /></div>
-          </Variant>
-          <Variant width={290} label="authenticating" axes="active · auth · 1/2 authed" note="blue step; one tile still spinning">
-            <div className="px-2"><WorkflowBox workflow={sessAuthing} queued={0} /></div>
-          </Variant>
-          <Variant width={290} label="duo waiting" axes="active · auth · duo_waiting tile" note="amber pulse tile + amber elapsed pill (≥1m)">
-            <div className="px-2"><WorkflowBox workflow={sessDuo} queued={0} /></div>
-          </Variant>
-          <Variant width={290} label="idle + UCPath ring" axes="active · daemonPhase=idle · idleBySystem set" note="idle-refresh countdown ring on the UCPath tile">
-            <div className="px-2"><WorkflowBox workflow={sessIdleUcpath} queued={0} /></div>
-          </Variant>
-          <Variant width={290} label="idle (had a run)" axes="active · daemonPhase=idle · currentTraceId set" note="trace id hidden once idle; subtitle falls back to phase">
-            <div className="px-2"><WorkflowBox workflow={sessIdleLogs} queued={0} /></div>
-          </Variant>
-          <Variant width={290} label="keepalive" axes="active · daemonPhase=keepalive" note="'keepalive — checking browsers'">
-            <div className="px-2"><WorkflowBox workflow={sessKeepalive} queued={0} /></div>
-          </Variant>
-          <Variant width={290} label="complete" axes="!active · finalStatus=done" note="dimmed (opacity 55); no stop pill">
-            <div className="px-2"><WorkflowBox workflow={sessComplete} queued={0} /></div>
-          </Variant>
-          <Variant width={290} label="failed" axes="!active · finalStatus=failed" note="dimmed; failed auth tile">
-            <div className="px-2"><WorkflowBox workflow={sessFailed} queued={0} /></div>
-          </Variant>
-          <Variant width={290} label="crashed on launch" axes="crashedOnLaunch" note="compact destructive card; points to the queue row">
-            <div className="px-2"><WorkflowBox workflow={sessCrashed} queued={0} /></div>
-          </Variant>
-        </div>
-      </TerminalDrawerProvider>
-    </WorkflowsProvider>
+    <div className="grid grid-cols-1 gap-3">
+      <Section
+        title="Log Panels — 4 kinds, tabs derived not fixed"
+        sub="One Log Panel surface; the tab set comes from the row you selected. Screenshots is not a tab — evidence is a bar above the tabs. Review exists only where records exist."
+      />
+      {PANEL_KINDS.map((p) => {
+        const row = p.exampleId ? DEMO_ROWS[p.exampleId] : undefined;
+        if (!row) return null;
+        return (
+          <Specimen key={p.key} name={p.name} kind={`tabs: ${p.tabs.join(" · ")}`} what={p.forRows} where={`Opens on: ${p.defaultTab}`}>
+            <div className="h-[580px] overflow-hidden rounded-lg border border-border">
+              <DemoLogPanel row={row} tab={null} onTab={NOOP} onSelect={NOOP} checkedIds={new Set()} onToggleChecked={NOOP} tick={0} liveCount={0} />
+            </div>
+            <ul className="mt-2 flex flex-col gap-0.5">
+              {p.specifics.map((s) => (
+                <li key={s} className="flex gap-1.5 text-[11px] text-muted-foreground">
+                  <span aria-hidden className="mt-[6px] size-1 shrink-0 rounded-full bg-muted-foreground/60" />
+                  <span>{s}</span>
+                </li>
+              ))}
+            </ul>
+          </Specimen>
+        );
+      })}
+    </div>
   );
 }
 
 // ===========================================================================
-// CONTROLS — toolbar buttons, filter/sort, and the small indicators.
+// TAB 3 — Session Cards
 // ===========================================================================
 
-const AUTH_STATES: AuthState[] = ["idle", "authenticating", "authed", "duo_waiting", "failed"];
+const TILE_STATES = {
+  ready: { label: "Ready", cls: "border-success/30 bg-success/10 text-success", icon: Check },
+  authing: { label: "Authing", cls: "border-info/30 bg-info/10 text-info", icon: Loader2 },
+  duo: { label: "Duo", cls: "border-warning/40 bg-warning/10 text-warning", icon: KeyRound },
+  pending: { label: "Pending", cls: "border-border/60 bg-muted/20 text-muted-foreground", icon: Hourglass },
+  refreshing: { label: "Refreshing", cls: "border-info/40 bg-info/10 text-info", icon: RotateCw },
+  unhealthy: { label: "Unhealthy", cls: "border-warning/40 bg-warning/10 text-warning", icon: AlertTriangle },
+  failed: { label: "Failed", cls: "border-destructive/50 bg-destructive/10 text-destructive", icon: AlertTriangle },
+  paused: { label: "Paused", cls: "border-log-violet/45 bg-log-violet/10 text-log-violet", icon: Pause },
+  unknown: { label: "Not checked", cls: "border-border bg-secondary/20 text-muted-foreground", icon: CircleHelp },
+} as const;
 
-const controlEntries: TrackerEntry[] = [
-  statusDone,
-  statusDone,
-  singlePerson,
-  statusFailed,
-  statusQueued,
-];
+type TileState = keyof typeof TILE_STATES;
 
-const SAMPLE_PRESETS: StepPreset[] = [
+interface CardSpec {
+  name: string;
+  what: string;
+  phase: "Running" | "Authenticating" | "Idle" | "Keep-alive" | "Complete" | "Failed" | "Launch failed";
+  tone: string;
+  workflow: string;
+  subline: string;
+  mono?: boolean;
+  elapsed: string;
+  step?: string;
+  queued?: number;
+  tiles: { label: string; state: TileState }[];
+  steps?: ("done" | "current" | "pending")[];
+  crashed?: boolean;
+}
+
+const CARD_SPECS: CardSpec[] = [
   {
-    id: "lookup-only",
-    label: "Lookup only",
-    skipSteps: ["save"],
-    description: "Resolve EID + active status; skip the UCPath write.",
+    name: "Running · item in flight",
+    what: "The only state where the subtitle is a trace id — the id of the run this daemon is executing right now, identical to that run's queue-row subtitle. That is how you correlate a card to a row.",
+    phase: "Running",
+    tone: "text-success",
+    workflow: "Separations",
+    subline: "se-140211-9f3a",
+    mono: true,
+    elapsed: "18m 44s",
+    step: "UCPath transaction",
+    queued: 2,
+    steps: ["done", "done", "done", "done", "current", "pending"],
+    tiles: [
+      { label: "kuali", state: "ready" },
+      { label: "ucpath", state: "ready" },
+      { label: "kronos", state: "refreshing" },
+    ],
+  },
+  {
+    name: "Authenticating",
+    what: "Alive but has not reported a phase yet — still in serial Duo prompts, browser launch, login retries. Bucketing this as idle is what makes you think capacity is free when it isn't.",
+    phase: "Authenticating",
+    tone: "text-warning",
+    workflow: "Oath Signature",
+    subline: "Authenticating 1/2",
+    elapsed: "53s",
+    tiles: [
+      { label: "crm", state: "duo" },
+      { label: "ucpath", state: "authing" },
+    ],
+  },
+  {
+    name: "Idle",
+    what: "Authenticated, browsers warm, nothing to do. The retained trace id is deliberately NOT shown — a stale id on an idle card reads as a leftover bug.",
+    phase: "Idle",
+    tone: "text-muted-foreground",
+    workflow: "OCR",
+    subline: "idle — waiting for work",
+    elapsed: "6m 36s",
+    tiles: [{ label: "i9", state: "ready" }],
+  },
+  {
+    name: "Idle · work waiting",
+    what: "Same daemon, but the shared queue has items. The queued chip is the cue to add a worker rather than wait — a new worker joins the same queue and absorbs what is already there.",
+    phase: "Idle",
+    tone: "text-muted-foreground",
+    workflow: "I-9 Check",
+    subline: "6 queued — ready",
+    elapsed: "40m 22s",
+    queued: 6,
+    tiles: [{ label: "ucpath", state: "unknown" }],
+  },
+  {
+    name: "Keep-alive",
+    what: "Between items, touching each browser so the session does not time out. Distinct from idle because it is doing something.",
+    phase: "Keep-alive",
+    tone: "text-info",
+    workflow: "Emergency Contact",
+    subline: "keepalive — checking browsers",
+    elapsed: "1h 12m",
+    tiles: [
+      { label: "ucpath", state: "ready" },
+      { label: "crm", state: "paused" },
+    ],
+  },
+  {
+    name: "Complete",
+    what: "The daemon finished its run and exited cleanly. Dimmed, kept on screen so the outcome stays legible.",
+    phase: "Complete",
+    tone: "text-muted-foreground",
+    workflow: "Kronos Pay Rule",
+    subline: "Run complete",
+    elapsed: "4m 02s",
+    tiles: [{ label: "kronos", state: "ready" }],
+  },
+  {
+    name: "Failed",
+    what: "The daemon ended on an error. A clean idle shutdown must never render like this — a phantom failed-end event used to inflate the notification bell.",
+    phase: "Failed",
+    tone: "text-destructive",
+    workflow: "OnBase",
+    subline: "Run failed",
+    elapsed: "2m 55s",
+    tiles: [{ label: "onbase", state: "failed" }],
+  },
+  {
+    name: "Crashed on launch",
+    what: "A different object: no tiles, no timer, nothing to stop, because the browser never opened. Stays visible after the process is gone so the failure is actually learned.",
+    phase: "Launch failed",
+    tone: "text-destructive",
+    workflow: "CRM Doc Download",
+    subline: "Check the queue row for details",
+    elapsed: "—",
+    tiles: [],
+    crashed: true,
   },
 ];
 
-function ControlsTab() {
-  const [filter, setFilter] = useState<string | null>(null);
-  const [sort, setSort] = useState<QueueSortMode>(DEFAULT_QUEUE_SORT_MODE);
-  // Parallel-workers run setting demos — the input-run gear (RunSettingsMenu,
-  // which embeds the WorkerStepper) and the standalone WorkerStepper used in the
-  // upload-modal footer. Stateful so the stepper + gear accent update live.
-  const [gearWorkers, setGearWorkers] = useState<WorkerChoice>(AUTO_WORKERS);
-  const [activeGearWorkers, setActiveGearWorkers] = useState<WorkerChoice>("4");
-  const [activeGearPreset, setActiveGearPreset] = useState<string>("full");
-  const [fieldWorkers, setFieldWorkers] = useState<WorkerChoice>(AUTO_WORKERS);
+function GalleryTile({ label, state }: { label: string; state: TileState }) {
+  const spec = TILE_STATES[state];
+  const Icon = spec.icon;
+  const spins = state === "refreshing" || state === "authing";
   return (
-    <div className="grid grid-cols-1 min-[820px]:grid-cols-2 gap-4 items-start">
-      <Section title="filter + sort" sub="The queue header's stat/filter pills and the sort dropdown. Stateful here." />
-      <Variant label="StatPills" axes="status filter strip" note="click a pill to filter; click active to clear">
-        <div className="px-3 py-2">
-          <StatPills entries={controlEntries} activeFilter={filter} onFilter={setFilter} />
-        </div>
-      </Variant>
-      <Variant label="QueueSortDropdown" axes="sort mode menu">
-        <div className="px-3 py-2">
-          <QueueSortDropdown value={sort} onChange={setSort} />
-        </div>
-      </Variant>
+    <div className={cn("flex w-[112px] flex-col gap-0.5 rounded-md border px-2 py-1", spec.cls)}>
+      <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider">
+        <Icon aria-hidden className={cn("size-3 shrink-0", spins && "animate-spin motion-reduce:animate-none")} />
+        {label}
+      </span>
+      <span className="truncate text-[10px] opacity-80">{spec.label}</span>
+    </div>
+  );
+}
 
-      <Section title="bulk actions" sub="Toolbar icon buttons. These POST to the real API on click — present for layout only." />
-      <Variant label="RetryAllButton" axes="bulk retry" note="POSTs /api/.../retry-all">
-        <div className="px-3 py-2 flex">
-          <RetryAllButton workflow="onboarding" ids={["s-failed"]} items={[{ id: "s-failed" }]} date={DATE} />
-        </div>
-      </Variant>
-      <Variant label="StopAllButton" axes="bulk stop" note="POSTs /api/.../stop-all">
-        <div className="px-3 py-2 flex">
-          <StopAllButton workflow="onboarding" items={[{ id: "s-person", status: "running" }]} />
-        </div>
-      </Variant>
-      <Variant label="DeleteAllButton" axes="bulk delete" note="POSTs /api/.../delete-all">
-        <div className="px-3 py-2 flex">
-          <DeleteAllButton workflow="onboarding" date={DATE} entries={[{ id: "s-done" }]} onDeleted={NOOP} />
-        </div>
-      </Variant>
+const PHASE_DOT: Record<CardSpec["phase"], string> = {
+  Running: "bg-success",
+  Authenticating: "bg-warning animate-pulse motion-reduce:animate-none",
+  Idle: "bg-muted-foreground/60",
+  "Keep-alive": "bg-info",
+  Complete: "bg-success/60",
+  Failed: "bg-destructive",
+  "Launch failed": "bg-destructive",
+};
 
-      <Section
-        title="run settings"
-        sub="The parallel-workers run option surfaces: the input-run settings gear (RunSettingsMenu, which embeds the stepper) and the standalone WorkerStepper used in the upload-modal footer. Both feed src/lib/run-settings.ts."
-      />
-      <Variant
-        label="RunSettingsMenu — Auto (default)"
-        axes="workers only · no presets"
-        note="click the gear to open; Auto + Full → no accent"
-      >
-        <div className="px-3 py-3 flex items-center gap-4">
-          <RunSettingsMenu
-            workerChoice={gearWorkers}
-            onSelectWorker={setGearWorkers}
-            presets={[]}
-            presetId="full"
-            onSelectPreset={NOOP}
-            workflowLabel="Person Lookup"
-          />
-          <span className="font-mono text-[11px] text-muted-foreground">workers={gearWorkers}</span>
+function GalleryCard({ s }: { s: CardSpec }) {
+  if (s.crashed) {
+    return (
+      <article className="flex w-[268px] flex-col gap-1 rounded-lg border border-destructive/40 bg-destructive/5 p-2.5">
+        <div className="flex items-center gap-2">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-destructive" />
+          <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-foreground">{s.workflow}</span>
+          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-destructive">Launch failed</span>
         </div>
-      </Variant>
-      <Variant
-        label="RunSettingsMenu — active"
-        axes="workers + run-mode presets"
-        note="any non-default choice → primary accent + dot"
-      >
-        <div className="px-3 py-3 flex items-center gap-4">
-          <RunSettingsMenu
-            workerChoice={activeGearWorkers}
-            onSelectWorker={setActiveGearWorkers}
-            presets={SAMPLE_PRESETS}
-            presetId={activeGearPreset}
-            onSelectPreset={setActiveGearPreset}
-            workflowLabel="Separations"
-          />
-          <span className="font-mono text-[11px] text-muted-foreground">
-            workers={activeGearWorkers} · preset={activeGearPreset}
-          </span>
-        </div>
-      </Variant>
-      <Variant
-        label="WorkerStepper — modal footer"
-        axes="− value + · Auto…8 · matches Run/Cancel"
-        note="footer variant beside Run-modal buttons at h-[38px]; compact variant stays h-8 in the gear"
-      >
-        <div className="px-3 py-3 flex items-center gap-2.5">
-          <WorkerStepper value={fieldWorkers} onChange={setFieldWorkers} variant="footer" />
-          <button
-            type="button"
-            className={cn(
-              MODAL_FOOTER_CONTROL_HEIGHT,
-              "flex-1 min-w-[6rem] rounded-[7px] border border-border px-3.5 text-[12.5px] font-medium text-foreground",
-            )}
-          >
-            Run
-          </button>
-          <button
-            type="button"
-            className={cn(
-              MODAL_FOOTER_CONTROL_HEIGHT,
-              "shrink-0 rounded-[7px] border border-border px-5 text-[12.5px] font-medium text-muted-foreground",
-            )}
-          >
-            Cancel
-          </button>
-        </div>
-      </Variant>
-      <Variant label="WorkerStepper — compact (gear)" axes="h-8 · input-run settings">
-        <div className="px-3 py-3 flex items-center gap-4">
-          <WorkerStepper value={fieldWorkers} onChange={setFieldWorkers} />
-          <span className="font-mono text-[11px] text-muted-foreground">value={fieldWorkers}</span>
-        </div>
-      </Variant>
-      <Variant label="WorkerStepper — disabled" axes="disabled state">
-        <div className="px-3 py-3">
-          <WorkerStepper value="4" onChange={NOOP} disabled />
-        </div>
-      </Variant>
+        <p className="text-[10.5px] leading-tight text-destructive/80">{s.subline}</p>
+      </article>
+    );
+  }
+  const dim = s.phase === "Complete" || s.phase === "Failed";
+  return (
+    <article
+      className={cn(
+        "flex w-[268px] flex-col rounded-lg border bg-card p-2.5",
+        s.phase === "Failed" ? "border-destructive/40" : "border-border",
+        dim && "opacity-70",
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", PHASE_DOT[s.phase])} />
+        <span className="min-w-0 truncate text-[12.5px] font-semibold text-foreground">{s.workflow}</span>
+        <span className={cn("ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-wider", s.tone)}>{s.phase}</span>
+      </div>
+      <span className={cn("mt-0.5 truncate text-[10.5px] text-muted-foreground", s.mono && "font-mono")}>{s.subline}</span>
 
-      <Section title="indicators" sub="Small status atoms used across the drawer and panels." />
-      <Variant label="LiveIndicator" axes="connected: true / false">
-        <div className="px-3 py-2 flex items-center gap-4">
-          <LiveIndicator connected={true} />
-          <LiveIndicator connected={false} />
-        </div>
-      </Variant>
-      <Variant label="BrowserChip" axes="every AuthState">
-        <div className="px-3 py-2 flex flex-wrap gap-2">
-          {AUTH_STATES.map((s) => (
-            <BrowserChip key={s} system="ucpath" authState={s} />
+      {s.tiles.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {s.tiles.map((t) => (
+            <GalleryTile key={t.label} {...t} />
           ))}
         </div>
-      </Variant>
-      <Variant label="EmptyState" axes="icon + title + description">
-        <div className="px-3 py-2">
-          <EmptyState icon={Inbox} title="No runs yet" description="Start a workflow to see it here." />
+      )}
+
+      {s.steps && (
+        <div aria-hidden className="mt-1.5 flex items-center gap-0">
+          {s.steps.map((st, i) => (
+            <span key={i} className="flex flex-1 items-center last:flex-none">
+              <span
+                className={cn(
+                  "size-1.5 shrink-0 rounded-full",
+                  st === "done" && "bg-success/85",
+                  st === "current" && "bg-primary shadow-[0_0_0_2px_color-mix(in_srgb,var(--primary)_18%,transparent)]",
+                  st === "pending" && "border border-border bg-muted",
+                )}
+              />
+              {i < (s.steps?.length ?? 0) - 1 && <span className={cn("h-px min-w-[3px] flex-1", st === "done" ? "bg-success/30" : "bg-border")} />}
+            </span>
+          ))}
         </div>
-      </Variant>
+      )}
+
+      <div className="mt-1.5 flex items-center gap-2 border-t border-border/60 pt-1.5 text-[10px] text-muted-foreground">
+        <span className="font-mono tabular-nums">{s.elapsed}</span>
+        {s.queued ? (
+          <span className="inline-flex shrink-0 items-center gap-1 rounded bg-primary/10 px-1.5 py-px leading-none text-primary">
+            <span className="font-medium">{s.queued}</span> queued
+          </span>
+        ) : null}
+        <span className="min-w-0 flex-1 truncate">{s.step ?? ""}</span>
+        <button
+          type="button"
+          onClick={NOOP}
+          className="shrink-0 rounded border border-destructive/30 px-1.5 py-px text-[10px] text-destructive/85 outline-none hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          × stop
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function SessionCardsTab() {
+  return (
+    <div className="grid grid-cols-1 gap-3 min-[1400px]:grid-cols-2">
+      <Section
+        title="Session Cards — one per daemon, 8 states"
+        sub="A Session Card is a WORKER, not a run. It answers: is this thing alive, is it stuck on Duo, which browser broke, and what is it doing right now."
+      />
+      {CARD_SPECS.map((s) => (
+        <Specimen key={s.name} name={s.name} kind="Session Card" what={s.what}>
+          <GalleryCard s={s} />
+        </Specimen>
+      ))}
+
+      <Section
+        title="Browser tiles — 9 states"
+        sub="One tile per browser the daemon owns, bound by browser id and never by position. Zero chrome at rest: the state word owns the full tile width, and every action lives behind a right-click menu."
+      />
+      <div className="col-span-full grid grid-cols-2 gap-2 min-[900px]:grid-cols-3 min-[1400px]:grid-cols-5">
+        {(Object.keys(TILE_STATES) as TileState[]).map((k) => (
+          <Chip
+            key={k}
+            name={TILE_STATES[k].label}
+            note={
+              k === "unknown"
+                ? "Never probed. Must NOT read as healthy — a stalled monitor would look forever fine."
+                : k === "paused"
+                  ? "You turned auto-recovery off so you could inspect it."
+                  : k === "duo"
+                    ? "Blocking on the MFA prompt."
+                    : k === "refreshing"
+                      ? "Recovery rung 1 — reloading the page."
+                      : undefined
+            }
+          >
+            <GalleryTile label="ucpath" state={k} />
+          </Chip>
+        ))}
+      </div>
+
+      <Section title="Session Panel bar" sub="Collapsed, this is the whole daemon fleet in one line — plus a browser-health rollup that only appears when something is wrong." />
+      <div className="col-span-full">
+        <Specimen
+          name="Session Panel bar"
+          kind="collapsed"
+          what="Three-way daemon split — never two-way. Alive-but-no-phase means authenticating, not idle; calling it idle is what makes free capacity look available when there is none."
+        >
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card px-3 py-2">
+            <span className="text-[11.5px] font-medium text-foreground">Sessions</span>
+            <span className="flex items-center gap-2.5 text-[11px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1">
+                <span aria-hidden className="size-1.5 rounded-full bg-success" />2 running
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span aria-hidden className="size-1.5 rounded-full bg-warning animate-pulse motion-reduce:animate-none" />1 authenticating
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground/60" />1 idle
+              </span>
+              <span className="inline-flex items-center gap-1 text-destructive">
+                <span aria-hidden className="size-1.5 rounded-full bg-destructive" />1 failed
+              </span>
+            </span>
+            <span className="inline-flex items-center gap-1 rounded border border-warning/40 bg-warning/10 px-1.5 py-px text-[10px] text-warning">
+              <AlertTriangle aria-hidden className="size-3" />5 browsers need attention
+            </span>
+            <span className="ml-auto flex items-center gap-1.5">
+              <Plus aria-hidden className="size-3.5 text-muted-foreground" />
+              <span className="inline-flex items-center gap-1 text-[10.5px] text-success">
+                <span aria-hidden className="size-1.5 rounded-full bg-success animate-pulse motion-reduce:animate-none" />
+                Live
+              </span>
+            </span>
+          </div>
+        </Specimen>
+      </div>
     </div>
   );
 }
 
 // ===========================================================================
-// Gallery shell — tabbed.
+// TAB 4 — Controls
 // ===========================================================================
 
-type TabKey = "rows" | "sessions" | "controls" | "proposals";
+const PILLS: { key: string; label: string; n: number; icon: typeof Eye; tone: string; on?: boolean }[] = [
+  { key: "all", label: "All", n: 15, icon: LayoutGrid, tone: "text-muted-foreground", on: true },
+  { key: "attention", label: "Needs you", n: 7, icon: Eye, tone: "text-warning" },
+  { key: "running", label: "Running", n: 3, icon: Loader2, tone: "text-primary" },
+  { key: "queued", label: "Queued", n: 1, icon: Clock, tone: "text-muted-foreground" },
+  { key: "done", label: "Done", n: 5, icon: CheckCircle2, tone: "text-success" },
+  { key: "failed", label: "Failed", n: 1, icon: AlertTriangle, tone: "text-destructive" },
+  { key: "cancelled", label: "Cancelled", n: 0, icon: Ban, tone: "text-warning" },
+];
+
+const RAIL_ROWS = [
+  { label: "Separations", total: 2, queued: 0, on: true, note: "Active — 3px primary accent, bold label, primary count." },
+  { label: "I-9 Check", total: 1, queued: 6, on: false, note: "Queued work waiting behind the running item." },
+  { label: "Person Match", total: 0, queued: 0, on: false, note: "Nothing today — the count dims rather than vanishing, so the set of entries is stable." },
+];
+
+const MATRIX_CELL: Record<ProposedStatus, string> = {
+  verifiedDone: "bg-success/75",
+  doneWarnings: "bg-warning/80",
+  running: "bg-primary/80",
+  queued: "bg-secondary",
+  failed: "bg-destructive",
+  waiting: "bg-warning",
+  parked: "bg-log-violet",
+  cancelled: "bg-warning/60",
+};
+
+function ControlsTab() {
+  const i9 = groupCounts("i9-batch");
+  return (
+    <div className="grid grid-cols-1 gap-3 min-[1500px]:grid-cols-2">
+      <Section
+        title="Status Bar"
+        sub="The count pills. Every number here comes from the same server projection as the Workflow Panel badges and the queue itself — so two surfaces can never disagree."
+      />
+      <div className="col-span-full">
+        <Specimen name="Status Bar" kind="filter + summary" what="Clicking a pill filters; clicking the active pill clears it. A zero count dims rather than disappearing, so the buckets stay in the same place.">
+          <div className="flex flex-wrap items-center gap-1">
+            {PILLS.map((p) => {
+              const Icon = p.icon;
+              return (
+                <button
+                  key={p.key}
+                  type="button"
+                  aria-pressed={p.on}
+                  onClick={NOOP}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    p.on ? "border-primary/45 bg-primary/12 font-semibold text-foreground" : "border-border bg-card text-muted-foreground",
+                    p.n === 0 && !p.on && "opacity-45",
+                  )}
+                >
+                  <Icon aria-hidden className={cn("size-3", p.tone)} />
+                  {p.label}
+                  <span className="font-mono tabular-nums">{p.n}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Specimen>
+      </div>
+
+      <Section title="Row footer actions" sub="Which buttons exist is decided by status, in the projection — never by a client-side branch. That is why the queue can never offer an action that fails." />
+      <Specimen name="Running" kind="footer cluster" what="Only cancel. You cannot bump something already in flight, and retry or delete would race the worker.">
+        <div className="flex items-center gap-1">
+          <IconActionButton tone="muted" icon={<X aria-hidden className="size-3.5" />} label="Cancel" onClick={NOOP} />
+        </div>
+      </Specimen>
+      <Specimen name="Queued" kind="footer cluster" what="Bump to the front, or cancel. No delete — cancel it first, which makes it terminal, and then delete appears.">
+        <div className="flex items-center gap-1">
+          <IconActionButton tone="primary" icon={<ChevronsUp aria-hidden className="size-3.5" />} label="Bump" onClick={NOOP} />
+          <IconActionButton tone="muted" icon={<X aria-hidden className="size-3.5" />} label="Cancel" onClick={NOOP} />
+        </div>
+      </Specimen>
+      <Specimen name="Terminal" kind="footer cluster" what="Retry replays the same input as a new attempt; delete removes the history. Both are safe only once nothing is running.">
+        <div className="flex items-center gap-1">
+          <IconActionButton tone="primary" icon={<RotateCcw aria-hidden className="size-3.5" />} label="Retry" onClick={NOOP} />
+          <IconActionButton tone="destructive" icon={<Trash2 aria-hidden className="size-3.5" />} label="Delete" onClick={NOOP} />
+        </div>
+      </Specimen>
+      <Specimen name="Rejected member" kind="footer cluster" what="Delete only — and structurally absent rather than disabled, because there is no task behind this row to replay.">
+        <div className="flex items-center gap-1">
+          <IconActionButton tone="destructive" icon={<Trash2 aria-hidden className="size-3.5" />} label="Delete" onClick={NOOP} />
+        </div>
+      </Specimen>
+      <Specimen name="Cancel remaining" kind="group footer" what="Tree-scoped: cancels the coordinator, its OCR review and every non-terminal member in one act. Row-scoped group cancel is what used to leave orphaned OCR reviews behind.">
+        <span className="flex items-center gap-1">
+          <span className="mr-1 text-[10px] text-muted-foreground">Cancel remaining</span>
+          <IconActionButton tone="muted" icon={<X aria-hidden className="size-3.5" />} label="Cancel remaining" onClick={NOOP} />
+        </span>
+      </Specimen>
+
+      <Section title="Group indicators" sub="How a group reports its members without you opening anything." />
+      <Specimen name="Status counts" kind="group header" what="Per-status member tallies. Icon shape carries the meaning, not colour alone; a retried member counts once even though both attempts stay in the list.">
+        {/* StatusCounts renders a FRAGMENT on purpose — the caller owns the
+            flex row, which is why one tally fits both a group header and a
+            count strip. Forget the wrapper and the numbers collide. */}
+        <span className="flex items-center gap-2.5 whitespace-nowrap font-mono text-[10.5px]">
+          <StatusCounts counts={{ done: i9.done + i9.warnings, running: i9.running, queued: i9.queued, failed: i9.failed }} />
+        </span>
+      </Specimen>
+      <Specimen name="Attention band" kind="group body" what="Named, derived counts under a matrix — the difference between 'something is wrong' and knowing exactly what.">
+        <div className="flex items-center gap-2 rounded-md border border-warning/35 bg-warning/6 px-2.5 py-1.5">
+          <AlertTriangle aria-hidden className="size-3.5 shrink-0 text-warning" />
+          <span className="min-w-0 flex-1 truncate text-[11.5px] text-warning">4 need attention — 2 failed · 1 waiting on you · 1 with warnings</span>
+          <button
+            type="button"
+            onClick={NOOP}
+            className="shrink-0 rounded-md border border-warning/45 bg-warning/12 px-2.5 py-0.5 text-[10.5px] font-semibold text-warning outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Start review
+          </button>
+        </div>
+      </Specimen>
+      <Specimen name="Rejected count" kind="group header" what="Pages or rows that can never become work are counted separately and excluded from the rollup, so a packet with rejections never reads as clean.">
+        <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+          <SearchX aria-hidden className="size-3" />1 rejected
+        </span>
+      </Specimen>
+      <Specimen name="Checked by you" kind="group header" what="Your own review progress. Nobody else is tracking that you looked at each person — this is the only thing that does.">
+        <span className="inline-flex items-center gap-1 text-[11px] text-success">
+          <CheckCircle2 aria-hidden className="size-3" />
+          10/50 checked
+        </span>
+      </Specimen>
+
+      <Section title="Delegation" sub="A linked child keeps its own row in its own panel; the two point at each other with one chip each, never a duplicated run." />
+      <Specimen name="Forward link" kind="on the parent" what="From the packet to the OCR review that owns the records, carrying the child's live status so you know whether it needs you.">
+        <button type="button" onClick={NOOP} className="inline-flex items-center gap-1.5 rounded-md border border-info/35 bg-info/8 px-2 py-0.5 text-[10.5px] text-info">
+          <ClipboardList aria-hidden className="size-3 shrink-0" />
+          OCR review · waiting on you
+          <ArrowUpRight aria-hidden className="size-3 shrink-0" />
+        </button>
+      </Specimen>
+      <Specimen name="Back link" kind="on the child" what="From the delegated run home to its parent. One level of back — there is only ever one parent worth returning to, so there is no breadcrumb trail.">
+        <button type="button" onClick={NOOP} className="inline-flex items-center gap-1.5 rounded-md border border-info/35 bg-info/8 px-2 py-0.5 text-[10.5px] text-info">
+          <CornerDownRight aria-hidden className="size-3 shrink-0" />
+          Delegated by Oath_Packet_Summer.pdf
+        </button>
+      </Specimen>
+
+      <Section title="Log Panel bars" sub="The pinned surfaces above the tabs — visible whichever tab you are on." />
+      <div className="col-span-full">
+        <Specimen name="Gate banner" kind="pinned, all tabs" what="The decision itself, with its age and its actions. Not a tab, because a pending decision must be visible from wherever you happen to be looking.">
+          <div className="rounded-lg border border-warning/30 bg-warning/8 px-3 py-2">
+            <div className="flex items-center gap-2">
+              <ClipboardList aria-hidden className="size-3.5 shrink-0 text-warning" />
+              <span className="min-w-0 truncate text-[12px] font-semibold text-warning">Waiting on you — approve the people to sign</span>
+              <span className="ml-auto shrink-0 font-mono text-[10px] text-warning/80">open 10m · since 2:22 PM</span>
+            </div>
+            <p className="mt-1 pl-5 text-[11px] leading-relaxed text-muted-foreground">
+              Review each person against their page, then approve. Diego Diaz is blocked (inactive) and is excluded from the count.
+            </p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5 pl-5">
+              <button type="button" onClick={NOOP} className="rounded-md border border-warning/55 bg-warning/15 px-2.5 py-0.5 text-[11px] font-semibold text-warning">
+                Open review
+              </button>
+              <button type="button" onClick={NOOP} className="rounded-md border border-border bg-card px-2.5 py-0.5 text-[11px] font-semibold text-secondary-foreground">
+                Approve 5 of 6
+              </button>
+              <button type="button" onClick={NOOP} className="rounded-md border border-border bg-card px-2.5 py-0.5 text-[11px] font-semibold text-secondary-foreground">
+                Discard packet
+              </button>
+            </div>
+          </div>
+        </Specimen>
+      </div>
+      <div className="col-span-full">
+        <Specimen
+          name="Evidence bar"
+          kind="pinned, all tabs"
+          what="Every capture the run took, always one glance away. This replaces the Screenshots tab; failure captures are counted separately so you can see there is proof of the break."
+        >
+          <div className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5">
+            <span className="flex shrink-0 items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+              <Camera aria-hidden className="size-3" />
+              Evidence
+              <span className="font-mono normal-case tracking-normal">6</span>
+              <span className="rounded border border-destructive/40 px-1 font-mono text-[9px] normal-case tracking-normal text-destructive">1 at failure</span>
+            </span>
+            <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
+              {["Kuali doc", "Identity check", "Job summary", "Kronos timeout", "Kronos search", "Paused at gate"].map((l, i) => (
+                <button
+                  key={l}
+                  type="button"
+                  onClick={NOOP}
+                  className={cn(
+                    "flex h-10 w-[4.75rem] shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border bg-secondary/40",
+                    i === 3 ? "border-destructive/45" : "border-border",
+                  )}
+                >
+                  <Camera aria-hidden className={cn("size-3", i === 3 ? "text-destructive" : "text-muted-foreground")} />
+                  <span className="max-w-full truncate px-1 text-[8.5px] text-muted-foreground">{l}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </Specimen>
+      </div>
+      <div className="col-span-full">
+        <Specimen name="Approve bar" kind="Review Panel" what="The gate on the whole set. Approve stays disabled until every person has been looked at — you cannot approve what you have not seen.">
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-secondary/20 px-3 py-1.5">
+            <span className="font-mono text-[11px] tabular-nums text-foreground">2/6 reviewed</span>
+            <span aria-hidden className="flex h-1 w-24 overflow-hidden rounded-full bg-secondary">
+              <span className="bg-success/70" style={{ flexGrow: 2 }} />
+              <span className="bg-border" style={{ flexGrow: 4 }} />
+            </span>
+            <span className="text-[11px] text-muted-foreground">1 approved · 1 blocked</span>
+            <button
+              type="button"
+              disabled
+              onClick={NOOP}
+              className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-success/50 bg-success/15 px-2.5 py-1 text-[11px] font-semibold text-success opacity-40"
+            >
+              <CheckCircle2 aria-hidden className="size-3" />
+              Approve 5 of 6
+            </button>
+          </div>
+        </Specimen>
+      </div>
+      <div className="col-span-full">
+        <Specimen name="Conveyor header" kind="Member + Review Panel" what="How you walk a set without losing your place: position, prev/next, and a jump straight to the next person who needs something.">
+          <div className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5">
+            <IconActionButton tone="muted" icon={<ArrowRight aria-hidden className="size-3.5 rotate-180" />} label="Previous person" onClick={NOOP} />
+            <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">3/6</span>
+            <IconActionButton tone="muted" icon={<ArrowRight aria-hidden className="size-3.5" />} label="Next person" onClick={NOOP} />
+            <span className="ml-1 text-[13px] font-semibold text-foreground">Carla Chen</span>
+            <span className="font-mono text-[10.5px] text-muted-foreground">10552018</span>
+            <span className="rounded-md border border-success/40 bg-success/12 px-1.5 py-px text-[10px] font-semibold text-success">Ready</span>
+            <button type="button" onClick={NOOP} className="ml-auto inline-flex items-center gap-1 rounded-md border border-warning/45 bg-warning/10 px-2 py-0.5 text-[10.5px] font-semibold text-warning">
+              Next flagged
+              <ArrowRight aria-hidden className="size-3" />
+            </button>
+          </div>
+        </Specimen>
+      </div>
+
+      <Section title="Provenance" sub="Where a value came from, on the card you approve from. Colour alone never carries this — the chip is a word." />
+      <div className="col-span-full grid grid-cols-2 gap-2 min-[900px]:grid-cols-4">
+        <Chip name="Paper" note="Read off the scanned form by the vision model.">
+          <span className="rounded border border-log-violet/35 px-1 text-[9px] font-semibold uppercase text-log-violet">paper</span>
+        </Chip>
+        <Chip name="Roster" note="Matched from the roster spreadsheet.">
+          <span className="rounded border border-log-teal/35 px-1 text-[9px] font-semibold uppercase text-log-teal">roster</span>
+        </Chip>
+        <Chip name="UCPath" note="Looked up live in the system of record.">
+          <span className="rounded border border-log-cyan/35 px-1 text-[9px] font-semibold uppercase text-log-cyan">UCPath</span>
+        </Chip>
+        <Chip name="Low confidence" note="Below the review threshold — the number is shown, not hidden, so you check it against the image.">
+          <span className="font-mono text-[10px] tabular-nums text-warning">0.44</span>
+        </Chip>
+      </div>
+
+      <Section title="Record verdicts" sub="Per-person state inside a review, and whether it can be approved at all." />
+      <div className="col-span-full grid grid-cols-2 gap-2 min-[900px]:grid-cols-3">
+        <Chip name="Ready" note="Everything checks out. Included in Approve.">
+          <span className="rounded-md border border-success/40 bg-success/12 px-1.5 py-px text-[10px] font-semibold text-success">Ready</span>
+        </Chip>
+        <Chip name="Flagged" note="Approvable, but something wants your eyes first — a weak read, a missing signature.">
+          <span className="rounded-md border border-warning/45 bg-warning/12 px-1.5 py-px text-[10px] font-semibold text-warning">Flagged</span>
+        </Chip>
+        <Chip name="Blocked" note="Cannot be approved, and says why in plain language. Excluded from the count rather than silently approved.">
+          <span className="rounded-md border border-destructive/45 bg-destructive/12 px-1.5 py-px text-[10px] font-semibold text-destructive">Blocked</span>
+        </Chip>
+      </div>
+
+      <Section title="Workflow Panel rows" sub="The left rail. The amber sub-badge is queued work — the cue to add a worker." />
+      <div className="col-span-full grid grid-cols-1 gap-2 min-[900px]:grid-cols-3">
+        {RAIL_ROWS.map((e) => (
+          <Chip key={e.label} name={e.label} note={e.note}>
+            <span className={cn("flex h-10 w-full items-stretch gap-2 rounded-md py-0 pl-1 pr-2.5", e.on && "bg-accent/40")}>
+              <span aria-hidden className={cn("my-1.5 w-[3px] rounded-r-full", e.on ? "bg-primary" : "bg-transparent")} />
+              <span className="flex min-w-0 flex-1 items-center">
+                <span className={cn("truncate text-[13px]", e.on ? "font-semibold text-foreground" : "font-medium text-foreground/90")}>{e.label}</span>
+              </span>
+              <span className="flex shrink-0 items-center gap-1.5">
+                {e.queued > 0 && (
+                  <span className="rounded-sm bg-warning/15 px-1 py-0.5 font-mono text-[9px] font-semibold leading-none tabular-nums text-warning">{e.queued}</span>
+                )}
+                <span
+                  className={cn(
+                    "font-mono text-[11px] leading-none tabular-nums",
+                    e.total === 0 ? "text-muted-foreground/50" : e.on ? "font-semibold text-primary" : "text-foreground",
+                  )}
+                >
+                  {e.total}
+                </span>
+              </span>
+            </span>
+          </Chip>
+        ))}
+      </div>
+
+      <Section title="Matrix cells" sub="One cell per person at 20+ members. Hover names the person and their outcome; click opens them." />
+      <div className="col-span-full grid grid-cols-3 gap-2 min-[900px]:grid-cols-5 min-[1400px]:grid-cols-9">
+        {(Object.keys(PROPOSED_STATUS) as ProposedStatus[]).map((s) => (
+          <Chip key={s} name={PROPOSED_STATUS[s].label}>
+            <span className={cn("size-3.5 rounded-[3px]", MATRIX_CELL[s])} />
+          </Chip>
+        ))}
+        <Chip name="Rejected" note="Not a person — a page that named nobody searchable.">
+          <span className="size-3.5 rounded-[3px] bg-muted-foreground/40" />
+        </Chip>
+      </div>
+
+      <Section title="Row qualifier chips" sub="Small facts that ride the row header without changing its status." />
+      <div className="col-span-full grid grid-cols-2 gap-2 min-[900px]:grid-cols-4">
+        <Chip name="Dry run" note="A rehearsal — the irreversible submit is skipped. The only visual separator from a real transaction.">
+          <span className="rounded-md border border-warning/40 bg-warning/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning">Dry run</span>
+        </Chip>
+        <Chip name="Attempt" note="This is a retry. Hover names when the prior attempt failed and why.">
+          <span className="inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/12 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+            <RotateCcw aria-hidden className="size-3" />
+            attempt 2
+          </span>
+        </Chip>
+        <Chip name="Warning count" note="How many warnings, with the first one in the hover.">
+          <span className="inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/12 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+            <AlertTriangle aria-hidden className="size-3" />1
+          </span>
+        </Chip>
+        <Chip name="Gate age" note="How long a decision has been waiting — the most actionable fact in the queue.">
+          <span className="inline-flex items-center gap-1 rounded-md bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+            <Clock aria-hidden className="size-3" />
+            waiting 18m
+          </span>
+        </Chip>
+      </div>
+    </div>
+  );
+}
+
+// ===========================================================================
+// Shell
+// ===========================================================================
+
+type TabKey = "rows" | "panels" | "sessions" | "controls";
+
 const TABS: { key: TabKey; label: string }[] = [
   { key: "rows", label: "Queue Rows" },
+  { key: "panels", label: "Log Panels" },
   { key: "sessions", label: "Session Cards" },
   { key: "controls", label: "Controls" },
-  { key: "proposals", label: "Proposals" },
 ];
 
 export function UiGallery() {
   const [tab, setTab] = useState<TabKey>("rows");
   return (
-    <OperationQueueParentRunIdProvider parentRunId={null}>
-      <TooltipProvider delayDuration={150}>
-        <div className="h-screen overflow-y-auto bg-background text-foreground">
-          <div className="mx-auto max-w-[1200px] px-6 py-8">
-            <header className="mb-5">
-              <h1 className="text-[20px] font-bold">UI Gallery</h1>
-              <p className="text-[13px] text-muted-foreground mt-1">
-                Temporary dev route (<code className="font-mono">?view=ui-gallery</code>). Catalogs the
-                dashboard&apos;s reusable surfaces rendered with the <span className="font-mono">real</span>{" "}
-                components fed synthetic data, so design regressions surface here.
-              </p>
-            </header>
-
-            <div role="tablist" className="mb-6 flex items-center gap-1 border-b border-border/60">
-              {TABS.map((t) => (
-                <button
-                  key={t.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === t.key}
-                  onClick={() => setTab(t.key)}
-                  className={cn(
-                    "relative px-3.5 py-2 text-[13px] font-medium transition-colors -mb-px border-b-2",
-                    tab === t.key
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            {tab === "rows" && <QueueRowsTab />}
-            {tab === "sessions" && <SessionCardsTab />}
-            {tab === "controls" && <ControlsTab />}
-            {tab === "proposals" && <ProposalsTab />}
+    <TooltipProvider delayDuration={200}>
+      <div className="flex h-screen flex-col overflow-y-auto bg-background text-foreground">
+        <header className="sticky top-0 z-20 border-b border-border bg-background/95 px-5 py-3 backdrop-blur">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h1 className="text-[17px] font-bold">UI catalog</h1>
+            <span className="rounded-full border border-info/40 bg-info/10 px-2 py-px text-[9.5px] font-semibold uppercase tracking-wider text-info">
+              rebuild design · synthetic data
+            </span>
+            <p className="text-[12px] text-muted-foreground">
+              Every named surface, one at a time. Open <span className="font-mono">?view=rebuild-demo</span> to see them working together.
+            </p>
           </div>
-        </div>
-      </TooltipProvider>
-    </OperationQueueParentRunIdProvider>
+          <div role="tablist" className="mt-2.5 flex gap-1">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.key}
+                onClick={() => setTab(t.key)}
+                className={cn(
+                  "rounded-md px-3 py-1 text-[12.5px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  tab === t.key ? "bg-accent font-semibold text-foreground" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </header>
+        <main className="px-5 py-4">
+          {tab === "rows" && <QueueRowsTab />}
+          {tab === "panels" && <LogPanelsTab />}
+          {tab === "sessions" && <SessionCardsTab />}
+          {tab === "controls" && <ControlsTab />}
+        </main>
+      </div>
+    </TooltipProvider>
   );
 }
