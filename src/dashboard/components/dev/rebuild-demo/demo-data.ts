@@ -78,7 +78,7 @@ export interface DemoDataPoint {
 }
 
 export interface DemoGate {
-  kind: "identity" | "parked";
+  kind: "identity" | "parked" | "approval";
   title: string;
   openedAt: string;
   waiting: string;
@@ -114,9 +114,46 @@ export interface DemoOutcome {
   action?: string;
 }
 
+/** One extracted person on an OCR packet — the unit of "review each person before approving". */
+export interface DemoRecordField {
+  label: string;
+  value: string;
+  /** where the value came from — drives the provenance chip */
+  source: "paper" | "roster" | "ucpath";
+  /** LLM confidence for a paper-read value (0–1); omitted for looked-up values */
+  confidence?: number;
+  editable?: boolean;
+  warn?: string;
+}
+
+export interface DemoRecordCheck {
+  label: string;
+  state: "ok" | "warn" | "fail";
+  value: string;
+}
+
+export interface DemoRecord {
+  id: string;
+  name: string;
+  eid?: string;
+  /** page of the source PDF this person was read from */
+  page: number;
+  pageNote: string;
+  /** ready = approvable · warn = approvable but flagged · blocked = cannot be approved */
+  state: "ready" | "warn" | "blocked";
+  fields: DemoRecordField[];
+  checks: DemoRecordCheck[];
+  /** why this record is blocked / what the warning means */
+  note?: string;
+  /** the member row this record fans out to once approved */
+  memberId?: string;
+}
+
 export interface DemoRow {
   id: string;
   rowType: "run" | "group" | "member";
+  /** what the row is ABOUT — drives title/subtitle and the Run Row variant name */
+  subjectKind?: "person" | "file" | "catalog";
   wfLabel: string;
   title: string;
   eid?: string;
@@ -147,9 +184,16 @@ export interface DemoRow {
   /** group only */
   memberIds?: string[];
   ocrPhase?: string;
+  /** group only — the delegated OCR Review Row that owns this packet's records */
+  reviewRunId?: string;
+  /** review run only — the records the operator works through, and the group they belong to */
+  records?: DemoRecord[];
+  reviewOf?: string;
   /** member only */
   parentId?: string;
   memberFact?: string;
+  /** member only — the OCR record this member was fanned out from */
+  recordId?: string;
   displayOnly?: boolean;
   checkedByDefault?: boolean;
 }
@@ -926,6 +970,324 @@ function oathMember(i: number): DemoRow {
 }
 
 // ===========================================================================
+// Packet at approval — the "review each person before approving" flow.
+// A Packet Group Row (oath-summer) whose members are all still queued behind
+// the operator's decision, plus the delegated OCR Review Row (ocr-summer) that
+// OWNS the per-person records. This is the D4 shape: the OCR run keeps its own
+// row and the group links to it.
+// ===========================================================================
+
+const summerMemberIds = Array.from({ length: 6 }, (_, i) => `os2-m-${i}`);
+
+const SUMMER_PEOPLE: { name: string; eid: string; page: number; state: DemoRecord["state"] }[] = [
+  { name: "Ana Alvarez", eid: "10510221", page: 2, state: "ready" },
+  { name: "Ben Brooks", eid: "10538744", page: 3, state: "warn" },
+  { name: "Carla Chen", eid: "10552018", page: 4, state: "ready" },
+  { name: "Diego Diaz", eid: "10499310", page: 5, state: "blocked" },
+  { name: "Emma Egan", eid: "10571663", page: 6, state: "warn" },
+  { name: "Felix Flores", eid: "10583127", page: 7, state: "ready" },
+];
+
+function summerRecord(i: number): DemoRecord {
+  const p = SUMMER_PEOPLE[i];
+  const base: DemoRecord = {
+    id: `rec-${i}`,
+    memberId: `os2-m-${i}`,
+    name: p.name,
+    eid: p.eid,
+    page: p.page,
+    pageNote: `page ${p.page} of 8 · oath form`,
+    state: p.state,
+    fields: [
+      { label: "Printed name", value: p.name, source: "paper", confidence: 0.97, editable: true },
+      { label: "Employee ID", value: p.eid, source: "paper", confidence: 0.93, editable: true },
+      { label: "Signature date", value: "07/21/2026", source: "paper", confidence: 0.95, editable: true },
+      { label: "Department", value: "000371 · Student Health", source: "ucpath" },
+      { label: "Payroll title", value: "Blank Assistant 3", source: "ucpath" },
+    ],
+    checks: [
+      { label: "Roster match", state: "ok", value: "matched row 14" },
+      { label: "UCPath person", state: "ok", value: `1 active match · ${p.eid}` },
+      { label: "Employment status", state: "ok", value: "Active" },
+      { label: "Employee signed", state: "ok", value: "yes — on paper" },
+      { label: "Officer signed", state: "ok", value: "yes — on paper" },
+    ],
+  };
+  if (p.state === "warn" && i === 1) {
+    return {
+      ...base,
+      fields: base.fields.map((f) =>
+        f.label === "Employee ID" ? { ...f, confidence: 0.44, warn: "low confidence — handwriting unclear, confirm before approving" } : f,
+      ),
+      checks: base.checks.map((c) => (c.label === "UCPath person" ? { ...c, state: "warn", value: "matched by name — EID read is low confidence" } : c)),
+      note: "The EID on paper was read at 0.44 confidence. UCPath found this person by NAME, so the write is safe — but confirm the digits against the form image before approving.",
+    };
+  }
+  if (p.state === "warn" && i === 4) {
+    return {
+      ...base,
+      checks: base.checks.map((c) => (c.label === "Employee signed" ? { ...c, state: "warn", value: "NO — signature box is blank" } : c)),
+      note: "The employee signature box on page 6 is blank. Approving files an unsigned oath — send it back for signature unless you have a countersigned copy.",
+    };
+  }
+  if (p.state === "blocked") {
+    return {
+      ...base,
+      fields: base.fields.map((f) =>
+        f.label === "Department" ? { ...f, value: "000512 · Facilities (separated)" } : f,
+      ),
+      checks: base.checks.map((c) =>
+        c.label === "Employment status" ? { ...c, state: "fail", value: "Inactive — separated 06/30/2026" } : c,
+      ),
+      note: "UCPath shows this person separated on 06/30/2026. An inactive employee cannot be signed — this record is blocked and is excluded from Approve.",
+    };
+  }
+  return base;
+}
+
+const SUMMER_RECORDS: DemoRecord[] = SUMMER_PEOPLE.map((_, i) => summerRecord(i));
+
+const oathSummer: DemoRow = {
+  id: "oath-summer",
+  rowType: "group",
+  subjectKind: "file",
+  wfLabel: "Oath Signature",
+  title: "Oath_Packet_Summer.pdf",
+  trace: "os-142012-b410",
+  status: "waiting",
+  time: "2:20 PM",
+  run: 5,
+  elapsedSec: 640,
+  waitingLabel: "waiting 10m",
+  ocrPhase: "6 people extracted — waiting on your review",
+  memberIds: summerMemberIds,
+  reviewRunId: "ocr-summer",
+  outcome: {
+    tone: "warning",
+    text: "Waiting on you — review 6 people, then approve. Nothing is written until you do.",
+    action: "Review people",
+  },
+  steps: [
+    { label: "OCR extraction", state: "done", system: "i9", durationSec: 128, keyLines: ["6 people on 8 pages", "2 pages had no form"] },
+    { label: "Roster match", state: "done", system: "i9", durationSec: 31, keyLines: ["6/6 matched to the July roster"] },
+    { label: "Your review", state: "waiting", keyLines: ["0 of 6 reviewed"] },
+    { label: "Signer fan-out", state: "pending", system: "ucpath" },
+    { label: "Rollup", state: "pending" },
+  ],
+  lines: [
+    { ts: "2:20:12", kind: "event", text: "Upload started — Oath_Packet_Summer.pdf · 8 pages", step: "OCR extraction" },
+    { ts: "2:22:20", kind: "ok", text: "6 records extracted · 2 pages had no readable form", duration: "2m 8s", step: "OCR extraction" },
+    { ts: "2:22:51", kind: "ok", system: "i9", text: "Roster re-match — 6/6 matched to July_Roster.xlsx", duration: "31s", step: "Roster match" },
+    { ts: "2:22:54", kind: "warn", text: "Diego Diaz — UCPath status Inactive (separated 06/30/2026), record blocked", step: "Roster match" },
+    { ts: "2:22:55", kind: "warn", text: "Ben Brooks — EID read at 0.44 confidence, flagged for your eyes", step: "Roster match" },
+    { ts: "2:22:56", kind: "pause", text: "Waiting on you — approve people to fan out signer tasks. Open the OCR review row to work through them.", card: "gate", step: "Your review" },
+  ],
+  data: [
+    { step: "OCR extraction", dir: "read", field: "People found", value: "6 (8 pages)", system: "i9", ts: "2:22:20" },
+    { step: "Roster match", dir: "read", field: "Roster rows matched", value: "6 / 6", system: "i9", ts: "2:22:51" },
+    { step: "Signer fan-out", dir: "write", field: "Oath signatures", value: "5 approvable of 6", system: "ucpath", ts: "—", staged: true },
+  ],
+  gate: {
+    kind: "approval",
+    title: "Waiting on you — approve the people to sign",
+    openedAt: "2:22 PM",
+    waiting: "10m",
+    note: "Review each person against their page, then approve. Approving fans out one signer task per approved person; Diego Diaz is blocked (inactive) and is excluded from the count.",
+    actions: ["Open review", "Approve 5 of 6", "Discard packet"],
+  },
+  receipt: {
+    tone: "muted",
+    headline: "Receipt — pending",
+    note: "The packet receipt rolls up once every approved signer reaches a terminal state: who signed, when, and the CRM verification per person.",
+  },
+  shots: [
+    { label: "Packet page 1", kind: "step" },
+    { label: "Roster match report", kind: "step" },
+  ],
+};
+
+const ocrSummer: DemoRow = {
+  id: "ocr-summer",
+  rowType: "run",
+  subjectKind: "file",
+  wfLabel: "OCR",
+  title: "Oath_Packet_Summer.pdf",
+  trace: "oc-142012-d771",
+  status: "waiting",
+  time: "2:20 PM",
+  run: 5,
+  elapsedSec: 640,
+  waitingLabel: "waiting 10m",
+  reviewOf: "oath-summer",
+  records: SUMMER_RECORDS,
+  outcome: {
+    tone: "warning",
+    text: "6 people extracted — 0 reviewed · 1 blocked · 2 flagged. Approve to release the signers.",
+    action: "Start review",
+  },
+  steps: [
+    { label: "Split pages", state: "done", system: "i9", durationSec: 9, keyLines: ["8 pages · 6 with a readable form"] },
+    { label: "Read forms", state: "done", system: "i9", durationSec: 119, keyLines: ["tier-1 model · 6/6 read", "no fabricated SSNs detected"] },
+    { label: "Roster match", state: "done", system: "i9", durationSec: 31 },
+    { label: "Person lookup", state: "done", system: "ucpath", durationSec: 44, keyLines: ["6 lookups · 1 inactive"] },
+    { label: "Your review", state: "waiting" },
+  ],
+  lines: [
+    { ts: "2:20:21", kind: "event", system: "i9", text: "Split 8 pages · 6 carry a readable oath form", step: "Split pages" },
+    { ts: "2:22:20", kind: "ok", system: "i9", text: "6 records read — tier-1 vision model, no fabrication flags", duration: "1m 59s", step: "Read forms" },
+    { ts: "2:22:51", kind: "ok", system: "i9", text: "Roster re-match — 6/6", step: "Roster match" },
+    { ts: "2:23:35", kind: "warn", system: "ucpath", text: "Diego Diaz — person found but Inactive (separated 06/30/2026)", step: "Person lookup" },
+    { ts: "2:23:40", kind: "pause", text: "Awaiting your review — 6 records, 5 approvable", card: "gate", step: "Your review" },
+  ],
+  data: [
+    { step: "Read forms", dir: "read", field: "Records read", value: "6", system: "i9", ts: "2:22:20" },
+    { step: "Person lookup", dir: "read", field: "Active people", value: "5 of 6", system: "ucpath", ts: "2:23:35" },
+  ],
+  gate: {
+    kind: "approval",
+    title: "Waiting on you — 6 people to review",
+    openedAt: "2:23 PM",
+    waiting: "10m",
+    note: "Each person is shown beside the page they were read from. Approve per person; the packet fans out only what you approved.",
+    actions: ["Approve 5 of 6", "Reupload packet", "Discard"],
+  },
+  receipt: { tone: "muted", headline: "Receipt — pending", note: "An OCR run's receipt records what was read and what you approved — the signing receipts belong to the member rows." },
+  shots: [
+    { label: "Page 2 · Alvarez", kind: "form" },
+    { label: "Page 3 · Brooks", kind: "form" },
+    { label: "Page 5 · Diaz", kind: "form" },
+  ],
+};
+
+function summerMember(i: number): DemoRow {
+  const p = SUMMER_PEOPLE[i];
+  const blocked = p.state === "blocked";
+  return {
+    id: `os2-m-${i}`,
+    rowType: "member",
+    parentId: "oath-summer",
+    wfLabel: "Oath Signature",
+    title: p.name,
+    eid: p.eid,
+    trace: `os-142012-n${pad(i, 2)}`,
+    status: "queued",
+    time: "2:22 PM",
+    run: 1,
+    memberFact: blocked ? "blocked — inactive in UCPath" : p.state === "warn" ? "flagged in review" : "awaiting approval",
+    queueNote: blocked ? "blocked — cannot be approved" : "held until you approve the packet",
+    recordId: `rec-${i}`,
+    outcome: blocked
+      ? { tone: "destructive", text: "Blocked — UCPath shows this person separated 06/30/2026. Not included in Approve." }
+      : { tone: "muted", text: "Held — this signer runs only after you approve the packet.", action: "Open review" },
+    steps: [
+      { label: "CRM verify", state: "pending", system: "crm" },
+      { label: "UCPath auth", state: "pending", system: "ucpath" },
+      { label: "Sign oath", state: "pending", system: "ucpath" },
+    ],
+    lines: [
+      { ts: "2:22:51", kind: "event", text: `Member created from ${`page ${p.page}`} — waiting on packet approval`, step: "Queued" },
+    ],
+    data: [],
+    receipt: { tone: "muted", headline: "Receipt — pending", note: "Nothing has run for this person yet." },
+    shots: [],
+  };
+}
+
+// ===========================================================================
+// Document + catalog Run Rows — the two Run Row variants the rest of the demo
+// does not otherwise exercise.
+// ===========================================================================
+
+const ouPacket: DemoRow = {
+  id: "ou-packet",
+  rowType: "run",
+  subjectKind: "file",
+  wfLabel: "Oath Upload",
+  title: "Signed_Oaths_0724.pdf",
+  trace: "ou-101204-3b8e",
+  status: "verifiedDone",
+  time: "10:12 AM",
+  run: 7,
+  duration: "6m 12s",
+  receiptShield: "TKT0094412",
+  facts: [
+    { label: "pages", value: "4" },
+    { label: "ticket", value: "TKT0094412" },
+  ],
+  outcome: { tone: "success", text: "Filed — ServiceNow ticket TKT0094412 · 4 signed oaths attached", action: "Open receipt" },
+  steps: [
+    { label: "OCR prep", state: "done", system: "i9", durationSec: 96, keyLines: ["4 signed oaths recognised"] },
+    { label: "Your review", state: "done", durationSec: 141, keyLines: ["approved 4/4 at 10:15 AM"] },
+    { label: "Wait signatures", state: "done", system: "ucpath", durationSec: 92 },
+    { label: "File ticket", state: "done", system: "servicenow", durationSec: 43, hasShot: true },
+  ],
+  lines: [
+    { ts: "10:12:04", kind: "event", text: "Upload — Signed_Oaths_0724.pdf · 4 pages", step: "OCR prep" },
+    { ts: "10:13:40", kind: "ok", system: "i9", text: "4 signed oaths recognised · all 4 matched to signed UCPath records", step: "OCR prep" },
+    { ts: "10:15:01", kind: "event", text: "You approved 4 of 4", step: "Your review" },
+    { ts: "10:17:33", kind: "write", system: "servicenow", pills: [{ dir: "write", label: "ticket", value: "TKT0094412" }], step: "File ticket" },
+    { ts: "10:18:16", kind: "ok", system: "servicenow", text: "Ticket filed and read back — 4 attachments confirmed", duration: "43s", step: "File ticket" },
+  ],
+  data: [
+    { step: "OCR prep", dir: "read", field: "Signed oaths found", value: "4", system: "i9", ts: "10:13:40" },
+    { step: "File ticket", dir: "write", field: "ServiceNow ticket", value: "TKT0094412", system: "servicenow", ts: "10:17:33" },
+    { step: "File ticket", dir: "write", field: "Attachments", value: "4 pages", system: "servicenow", ts: "10:17:33" },
+  ],
+  receipt: {
+    tone: "success",
+    headline: "Verified done · ticket TKT0094412",
+    lines: [
+      { label: "Ticket", value: "TKT0094412", verified: true },
+      { label: "Attachments", value: "4 signed oaths · read back", verified: true },
+      { label: "Filed", value: "10:18 AM · 6m 12s" },
+    ],
+    note: "One row, one document, one ticket — this workflow files its own ticket instead of fanning out. Nothing else to check.",
+  },
+  shots: [
+    { label: "Ticket confirmation", kind: "step" },
+    { label: "Attachment list", kind: "form" },
+  ],
+};
+
+const krReports: DemoRow = {
+  id: "kr-reports",
+  rowType: "run",
+  subjectKind: "catalog",
+  wfLabel: "Kronos Reports",
+  title: "Pay-period exception reports",
+  trace: "kr-140455-6c22",
+  status: "running",
+  time: "2:04 PM",
+  run: 12,
+  elapsedSec: 386,
+  liveText: "Downloading report 4 of 7 — Missed Punch Detail",
+  facts: [
+    { label: "selection", value: "7 reports" },
+    { label: "period", value: "07/06 – 07/19" },
+  ],
+  outcome: { tone: "info", text: "Running — 3 of 7 reports downloaded · 4 workers", action: "Open folder" },
+  steps: [
+    { label: "Kronos auth", state: "done", system: "kronos", durationSec: 26 },
+    { label: "Select reports", state: "done", system: "kronos", durationSec: 18, keyLines: ["7 of 34 catalog reports selected"] },
+    { label: "Download", state: "current", system: "kronos" },
+    { label: "Archive", state: "pending" },
+  ],
+  lines: [
+    { ts: "2:04:55", kind: "ok", system: "kronos", text: "Authenticated · 4 download workers", step: "Kronos auth" },
+    { ts: "2:05:41", kind: "ok", system: "kronos", text: "Selected 7 reports for 07/06 – 07/19", step: "Select reports" },
+    { ts: "2:07:02", kind: "write", system: "kronos", pills: [{ dir: "write", label: "saved", value: "Hours_Detail.xlsx" }], step: "Download" },
+    { ts: "2:09:14", kind: "write", system: "kronos", pills: [{ dir: "write", label: "saved", value: "Overtime_Summary.xlsx" }], step: "Download" },
+    { ts: "2:10:48", kind: "write", system: "kronos", pills: [{ dir: "write", label: "saved", value: "Comp_Time.xlsx" }], step: "Download" },
+  ],
+  data: [
+    { step: "Select reports", dir: "read", field: "Reports selected", value: "7 of 34", system: "kronos", ts: "2:05:41" },
+    { step: "Download", dir: "write", field: "Files saved", value: "3 of 7", system: "kronos", ts: "2:10:48" },
+  ],
+  receipt: { tone: "muted", headline: "Receipt — pending", note: "Lists every file saved with its size and the pay period it covers, once all 7 finish." },
+  shots: [{ label: "Report picker", kind: "form" }],
+};
+
+// ===========================================================================
 // Assembly + ordering helpers
 // ===========================================================================
 
@@ -942,17 +1304,22 @@ export const DEMO_ROWS: Record<string, DemoRow> = Object.fromEntries(
     cdSamuel,
     wsPriya,
     ecTomas,
+    oathSummer,
+    ocrSummer,
+    ouPacket,
+    krReports,
     ...i9MemberIds.map((_, i) => i9Member(i)),
     ...oathMemberIds.map((_, i) => oathMember(i)),
+    ...summerMemberIds.map((_, i) => summerMember(i)),
   ].map((r) => [r.id, r]),
 );
 
 /** queue order inside attention bands */
 export const BAND_ORDER: { key: "attention" | "active" | "queued" | "finished"; label: string; ids: string[] }[] = [
-  { key: "attention", label: "Needs you", ids: ["sep-maria", "sep-rosa"] },
-  { key: "active", label: "Active", ids: ["pl-daniel", "i9-batch"] },
+  { key: "attention", label: "Needs you", ids: ["oath-summer", "ocr-summer", "sep-maria", "sep-rosa"] },
+  { key: "active", label: "Active", ids: ["pl-daniel", "i9-batch", "kr-reports"] },
   { key: "queued", label: "Queued", ids: ["ws-priya"] },
-  { key: "finished", label: "Finished today", ids: ["oath-batch", "onb-jordan", "kp-marcus", "ob-elena", "cd-samuel", "ec-tomas"] },
+  { key: "finished", label: "Finished today", ids: ["oath-batch", "ou-packet", "onb-jordan", "kp-marcus", "ob-elena", "cd-samuel", "ec-tomas"] },
 ];
 
 export const ATTENTION_STATUSES: ProposedStatus[] = ["failed", "waiting", "doneWarnings", "parked"];
