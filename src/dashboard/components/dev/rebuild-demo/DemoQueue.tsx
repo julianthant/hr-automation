@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils";
 import { QueueRowCard } from "@/components/queue-panel/QueueRowCard";
 import { StatusCounts } from "@/components/queue-panel/StatusCounts";
 import { IconActionButton } from "@/components/shared/IconActionButton";
-import { PROPOSED_STATUS, StatusBadge, type ProposedStatus } from "../proposals/proposal-rows";
+import { PROPOSED_STATUS, StatusBadge, type ProposedStatus } from "./demo-status";
 import {
   ATTENTION_STATUSES,
   BAND_ORDER,

@@ -8,7 +8,7 @@
  * screenshots, no randomness).
  */
 
-import type { ProposedStatus } from "../proposals/proposal-rows";
+import type { ProposedStatus } from "./demo-status";
 
 export type SystemKey = "kuali" | "ucpath" | "kronos" | "crm" | "servicenow" | "onbase" | "i9";
 
