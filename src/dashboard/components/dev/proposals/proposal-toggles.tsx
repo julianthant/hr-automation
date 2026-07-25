@@ -25,7 +25,16 @@ export type ProposalKey =
   | "l2" // step-grouped stream
   | "l3" // step-strip hover detail
   | "l4" // data provenance inline
-  | "l5"; // event cards in-stream
+  | "l5" // event cards in-stream
+  | "l6" // pinned outcome/blocker header
+  | "l7" // stream search with match navigation
+  | "l8" // jump-to-live new-lines pill
+  | "l9" // step screenshot filmstrip
+  | "l10" // step time waterfall
+  | "g1" // group density ladder (compact member lines)
+  | "g2" // status matrix on 20+ group cards
+  | "g3" // triage drill-in table
+  | "g4"; // review conveyor + operator check-marks
 
 interface ToggleSpec {
   key: ProposalKey;
@@ -65,6 +74,25 @@ export const PROPOSAL_GROUPS: { title: string; toggles: ToggleSpec[] }[] = [
       { key: "l5", label: "L5 event cards" },
     ],
   },
+  {
+    title: "Log panel v2",
+    toggles: [
+      { key: "l6", label: "L6 pinned outcome" },
+      { key: "l7", label: "L7 stream search" },
+      { key: "l8", label: "L8 new-lines pill" },
+      { key: "l9", label: "L9 filmstrip" },
+      { key: "l10", label: "L10 waterfall" },
+    ],
+  },
+  {
+    title: "Group scale",
+    toggles: [
+      { key: "g1", label: "G1 density ladder" },
+      { key: "g2", label: "G2 status matrix" },
+      { key: "g3", label: "G3 triage table" },
+      { key: "g4", label: "G4 review conveyor" },
+    ],
+  },
 ];
 
 const ALL_KEYS = PROPOSAL_GROUPS.flatMap((g) => g.toggles.map((t) => t.key));
@@ -82,6 +110,12 @@ export function useProposals(): ProposalToggleState {
   const ctx = useContext(ProposalTogglesContext);
   if (!ctx) throw new Error("useProposals must be used inside ProposalTogglesProvider");
   return ctx;
+}
+
+/** Render children only while proposal `k` is toggled on. */
+export function WhenOn({ k, children }: { k: ProposalKey; children: ReactNode }) {
+  const { on } = useProposals();
+  return on(k) ? <>{children}</> : null;
 }
 
 export function ProposalTogglesProvider({ children }: { children: ReactNode }) {
