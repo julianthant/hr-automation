@@ -11,12 +11,9 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  CircleHelp,
   Clock3,
   Eye,
-  FileScan,
-  FileSignature,
-  FileStack,
-  FolderDown,
   HelpCircle,
   LayoutDashboard,
   Loader2,
@@ -26,11 +23,6 @@ import {
   Search,
   Settings,
   ShieldCheck,
-  Timer,
-  UserMinus,
-  UserPlus,
-  UserSearch,
-  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DEMO_ROWS, fmtElapsed, type DemoRow } from "./demo-data";
@@ -168,96 +160,112 @@ export function DemoTopBar({
 // Workflow Panel (left rail)
 // ---------------------------------------------------------------------------
 
-interface RailEntry {
-  label: string;
-  icon: typeof Users;
-}
-
-const RAIL_GROUPS: { label: string; entries: RailEntry[] }[] = [
+const RAIL_GROUPS: { label: string; entries: { label: string }[] }[] = [
   {
     label: "People",
     entries: [
-      { label: "Separations", icon: UserMinus },
-      { label: "Onboarding", icon: UserPlus },
-      { label: "Person Lookup", icon: UserSearch },
-      { label: "Work-Study", icon: Users },
-      { label: "Kronos Pay Rule", icon: Timer },
+      { label: "Separations" },
+      { label: "Onboarding" },
+      { label: "Person Lookup" },
+      { label: "Work-Study" },
+      { label: "Kronos Pay Rule" },
     ],
   },
   {
     label: "Documents",
     entries: [
-      { label: "OCR", icon: FileScan },
-      { label: "Oath Signature", icon: FileSignature },
-      { label: "Oath Upload", icon: FileStack },
-      { label: "Emergency Contact", icon: ShieldCheck },
-      { label: "OnBase", icon: FileStack },
-      { label: "I-9 Check", icon: FileScan },
+      { label: "OCR" },
+      { label: "Oath Signature" },
+      { label: "Oath Upload" },
+      { label: "Emergency Contact" },
+      { label: "OnBase" },
+      { label: "I-9 Check" },
     ],
   },
-  { label: "Data", entries: [{ label: "CRM Doc Download", icon: FolderDown }, { label: "Kronos Reports", icon: FolderDown }] },
+  { label: "Data", entries: [{ label: "CRM Doc Download" }, { label: "Kronos Reports" }] },
 ];
 
 export function DemoWorkflowPanel({ active, onActive }: { active: string; onActive: (label: string) => void }) {
   const counts = useMemo(() => {
-    const map = new Map<string, { total: number; attention: number }>();
+    const map = new Map<string, { total: number; queued: number }>();
     for (const r of topLevelRows()) {
-      const e = map.get(r.wfLabel) ?? { total: 0, attention: 0 };
+      const e = map.get(r.wfLabel) ?? { total: 0, queued: 0 };
       e.total += 1;
-      if (ATTENTION.includes(r.status)) e.attention += 1;
+      if (r.status === "queued") e.queued += 1;
       map.set(r.wfLabel, e);
     }
     return map;
   }, []);
 
   return (
-    <nav aria-label="Workflow Panel" className="flex w-[190px] shrink-0 flex-col overflow-y-auto border-r border-border bg-sidebar/40 py-2">
+    <nav aria-label="Workflow Panel" className="flex w-[200px] shrink-0 flex-col overflow-y-auto bg-card py-3">
       <button
         type="button"
         aria-pressed={active === "All"}
         onClick={() => onActive("All")}
         className={cn(
-          "mx-2 mb-2 flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          active === "All" ? "bg-accent font-semibold text-foreground shadow-[inset_2px_0_0_var(--primary)]" : "text-muted-foreground hover:text-foreground",
+          "mx-1.5 mb-4 flex h-10 items-stretch gap-2 rounded-md py-0 pl-1 pr-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary",
+          active === "All" ? "bg-accent/40" : "hover:bg-secondary",
         )}
       >
-        <LayoutDashboard aria-hidden className="size-3.5 shrink-0" />
-        Dashboard
+        <span aria-hidden className={cn("my-1.5 w-[3px] rounded-r-full", active === "All" ? "bg-primary" : "bg-transparent")} />
+        <span className="flex flex-1 items-center">
+          <span className={cn("text-[13px]", active === "All" ? "font-semibold text-foreground" : "font-medium text-foreground/90")}>Dashboard</span>
+        </span>
       </button>
 
       {RAIL_GROUPS.map((g) => (
-        <div key={g.label} className="mb-1.5">
-          <div className="px-4 pb-1 pt-1.5 text-[9.5px] font-semibold uppercase tracking-wider text-muted-foreground/70">{g.label}</div>
-          {g.entries.map((e) => {
-            const c = counts.get(e.label);
-            const on = active === e.label;
-            const Icon = e.icon;
-            return (
-              <button
-                key={e.label}
-                type="button"
-                aria-pressed={on}
-                onClick={() => onActive(e.label)}
-                className={cn(
-                  "mx-2 flex w-[calc(100%-1rem)] items-center gap-2 rounded-md px-2 py-1 text-left text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  on ? "bg-accent font-semibold text-foreground shadow-[inset_2px_0_0_var(--primary)]" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <Icon aria-hidden className="size-3.5 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">{e.label}</span>
-                {c && c.total > 0 && (
-                  <span
+        <div key={g.label} className="mb-4">
+          <div className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{g.label}</div>
+          <ul className="flex flex-col gap-px px-1.5">
+            {g.entries.map((e) => {
+              const c = counts.get(e.label);
+              const on = active === e.label;
+              return (
+                <li key={e.label}>
+                  {/* Rows are deliberately icon-free — the workflow icons live on
+                      Session Cards and the add-worker picker, not here. */}
+                  <button
+                    type="button"
+                    aria-current={on ? "page" : undefined}
+                    onClick={() => onActive(e.label)}
                     className={cn(
-                      "shrink-0 rounded px-1 font-mono text-[10px] tabular-nums",
-                      c.attention > 0 ? "bg-warning/15 text-warning" : "bg-secondary text-muted-foreground",
+                      "group flex h-10 w-full items-stretch gap-2 rounded-md py-0 pl-1 pr-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                      on ? "bg-accent/40" : "hover:bg-secondary",
                     )}
                   >
-                    {c.total}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+                    <span
+                      aria-hidden
+                      className={cn("my-1.5 w-[3px] rounded-r-full transition-colors", on ? "bg-primary" : "bg-transparent group-hover:bg-border")}
+                    />
+                    <span className="flex min-w-0 flex-1 items-center">
+                      <span className={cn("truncate text-[13px]", on ? "font-semibold text-foreground" : "font-medium text-foreground/90")}>
+                        {e.label}
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {c && c.queued > 0 && (
+                        <span
+                          title={`${c.queued} queued`}
+                          className="rounded-sm bg-warning/15 px-1 py-0.5 font-mono text-[9px] font-semibold leading-none tabular-nums text-warning"
+                        >
+                          {c.queued}
+                        </span>
+                      )}
+                      <span
+                        className={cn(
+                          "font-mono text-[11px] leading-none tabular-nums",
+                          !c || c.total === 0 ? "text-muted-foreground/50" : on ? "font-semibold text-primary" : "text-foreground",
+                        )}
+                      >
+                        {c?.total ?? 0}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       ))}
 
@@ -323,7 +331,8 @@ export function DemoStatusBar({
 // Session Panel (bottom drawer)
 // ---------------------------------------------------------------------------
 
-type BrowserHealth = "healthy" | "refreshing" | "unhealthy" | "failed" | "paused";
+/** `unknown` = never probed. It must NOT read as healthy — that is a live bug today. */
+type BrowserHealth = "healthy" | "refreshing" | "unhealthy" | "failed" | "paused" | "unknown";
 type SessionPhase = "authenticating" | "running" | "idle" | "keepalive" | "complete" | "failed";
 
 interface DemoBrowser {
@@ -343,6 +352,11 @@ interface DemoSession {
   subline: string;
   elapsedSec: number;
   browsers: DemoBrowser[];
+  /** items waiting in the shared queue for this workflow */
+  queued?: number;
+  /** micro pipeline — one dot per step of the item in flight */
+  steps?: { label: string; state: "done" | "current" | "pending" }[];
+  crashed?: boolean;
 }
 
 const DEMO_SESSIONS: DemoSession[] = [
@@ -354,6 +368,15 @@ const DEMO_SESSIONS: DemoSession[] = [
     step: "UCPath transaction",
     subline: "se-140211-9f3a",
     elapsedSec: 1112,
+    queued: 2,
+    steps: [
+      { label: "Kuali extraction", state: "done" },
+      { label: "Identity check", state: "done" },
+      { label: "Job summary", state: "done" },
+      { label: "Kronos search", state: "done" },
+      { label: "UCPath transaction", state: "current" },
+      { label: "Kuali finalization", state: "pending" },
+    ],
     browsers: [
       { id: "b1", label: "kuali", health: "healthy", url: "kuali.ucsd.edu/space/HR" },
       { id: "b2", label: "ucpath", health: "healthy", url: "ucpath.universityofcalifornia.edu" },
@@ -368,7 +391,13 @@ const DEMO_SESSIONS: DemoSession[] = [
     step: "Person lookup",
     subline: "ic-134001-m31",
     elapsedSec: 2410,
-    browsers: [{ id: "b4", label: "ucpath", health: "healthy", url: "ucpath…/PersonSearch" }],
+    queued: 6,
+    steps: [
+      { label: "Person match", state: "done" },
+      { label: "Person lookup", state: "current" },
+      { label: "Roster match", state: "pending" },
+    ],
+    browsers: [{ id: "b4", label: "ucpath", health: "unknown", url: "ucpath…/PersonSearch" }],
   },
   {
     id: "s-ocr",
@@ -393,8 +422,9 @@ const DEMO_SESSIONS: DemoSession[] = [
     id: "s-crm",
     workflow: "CRM Doc Download",
     phase: "failed",
-    subline: "Crashed on launch — browser never opened",
+    subline: "Check the queue row for details",
     elapsedSec: 0,
+    crashed: true,
     browsers: [{ id: "b8", label: "crm", health: "failed", url: "about:blank" }],
   },
 ];
@@ -410,6 +440,7 @@ const PHASE_TONE: Record<SessionPhase, { dot: string; label: string; text: strin
 
 const HEALTH_TONE: Record<BrowserHealth, { cls: string; icon: typeof Activity; label: string }> = {
   healthy: { cls: "border-border bg-secondary/40 text-muted-foreground", icon: CheckCircle2, label: "Ready" },
+  unknown: { cls: "border-border bg-secondary/20 text-muted-foreground", icon: CircleHelp, label: "Not checked" },
   refreshing: { cls: "border-info/45 bg-info/10 text-info", icon: RotateCw, label: "Refreshing" },
   unhealthy: { cls: "border-warning/45 bg-warning/10 text-warning", icon: AlertTriangle, label: "Unhealthy" },
   failed: { cls: "border-destructive/45 bg-destructive/10 text-destructive", icon: AlertTriangle, label: "Failed" },
@@ -481,6 +512,22 @@ function BrowserTile({ b }: { b: DemoBrowser }) {
 function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
   const tone = PHASE_TONE[s.phase];
   const inFlight = s.phase === "running";
+
+  // A daemon that died before its browser opened is a different object: no
+  // tiles, no timer, nothing to stop. Keep it visible so the failure is learned.
+  if (s.crashed) {
+    return (
+      <article className="flex w-[268px] shrink-0 flex-col gap-1 rounded-lg border border-destructive/40 bg-destructive/5 p-2.5">
+        <div className="flex items-center gap-2">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-destructive" />
+          <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-foreground">{s.workflow}</span>
+          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-destructive">Launch failed</span>
+        </div>
+        <p className="text-[10.5px] leading-tight text-destructive/80">{s.subline}</p>
+      </article>
+    );
+  }
+
   return (
     <article className={cn("flex w-[268px] shrink-0 flex-col rounded-lg border bg-card p-2.5", s.phase === "failed" ? "border-destructive/40" : "border-border")}>
       <div className="flex items-center gap-2">
@@ -497,8 +544,34 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
         ))}
       </div>
 
+      {/* micro pipeline — where the in-flight item is, without opening anything */}
+      {s.steps && s.steps.length >= 2 && (
+        <div aria-hidden className="mt-1.5 flex items-center gap-0" title={s.steps.map((st) => st.label).join(" · ")}>
+          {s.steps.map((st, i) => (
+            <span key={st.label} className="flex flex-1 items-center last:flex-none">
+              <span
+                className={cn(
+                  "size-1.5 shrink-0 rounded-full",
+                  st.state === "done" && "bg-success/85",
+                  st.state === "current" && "bg-primary shadow-[0_0_0_2px_color-mix(in_srgb,var(--primary)_18%,transparent)]",
+                  st.state === "pending" && "border border-border bg-muted",
+                )}
+              />
+              {i < s.steps!.length - 1 && (
+                <span className={cn("h-px min-w-[3px] flex-1", st.state === "done" ? "bg-success/30" : "bg-border")} />
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="mt-1.5 flex items-center gap-2 border-t border-border/60 pt-1.5 text-[10px] text-muted-foreground">
         <span className="font-mono tabular-nums">{s.elapsedSec > 0 ? fmtElapsed(s.elapsedSec + tick) : "—"}</span>
+        {s.queued ? (
+          <span className="inline-flex shrink-0 items-center gap-1 rounded bg-primary/10 px-1.5 py-px leading-none text-primary">
+            <span className="font-medium">{s.queued}</span> queued
+          </span>
+        ) : null}
         <span className="min-w-0 flex-1 truncate">{s.step ?? ""}</span>
         <button
           type="button"
