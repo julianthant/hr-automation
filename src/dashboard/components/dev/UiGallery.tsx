@@ -29,6 +29,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import type { AuthState } from "@/components/shared/types";
 import { buildWorkflowRunProjection } from "../../../domain/workflow-runtime/projection.js";
 import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
+import { ProposalsTab } from "./proposals/ProposalsTab";
 
 /**
  * TEMPORARY DEV ROUTE — `?view=ui-gallery`.
@@ -45,6 +46,9 @@ import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/typ
  *                     idle, keepalive, complete, failed, crashed).
  *   - Controls     → toolbar buttons, stat/filter pills, sort, and the small
  *                    indicators (Live pill, browser chips, empty state).
+ *   - Proposals    → the queue-row / log-panel data-enrichment proposals
+ *                    (dev/proposals/) rendered in the real skin with per-
+ *                    proposal toggles — a decision surface, not production UI.
  *
  * Reusing the real components means design regressions show up here. Remove
  * this file + its `?view=ui-gallery` gate in App.tsx when done.
@@ -1114,11 +1118,12 @@ function ControlsTab() {
 // Gallery shell — tabbed.
 // ===========================================================================
 
-type TabKey = "rows" | "sessions" | "controls";
+type TabKey = "rows" | "sessions" | "controls" | "proposals";
 const TABS: { key: TabKey; label: string }[] = [
   { key: "rows", label: "Queue Rows" },
   { key: "sessions", label: "Session Cards" },
   { key: "controls", label: "Controls" },
+  { key: "proposals", label: "Proposals" },
 ];
 
 export function UiGallery() {
@@ -1160,6 +1165,7 @@ export function UiGallery() {
             {tab === "rows" && <QueueRowsTab />}
             {tab === "sessions" && <SessionCardsTab />}
             {tab === "controls" && <ControlsTab />}
+            {tab === "proposals" && <ProposalsTab />}
           </div>
         </div>
       </TooltipProvider>
