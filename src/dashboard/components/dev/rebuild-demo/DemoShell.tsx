@@ -1,8 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ComponentType, type SVGProps } from "react";
 import {
   Activity,
   AlertTriangle,
-  Ban,
   Bell,
   Calendar,
   Camera,
@@ -12,11 +11,9 @@ import {
   ChevronRight,
   ChevronUp,
   CircleHelp,
-  Clock3,
   Eye,
   HelpCircle,
   LayoutDashboard,
-  Loader2,
   Pause,
   Plus,
   RotateCw,
@@ -25,8 +22,8 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { DEMO_ROWS, fmtElapsed, type DemoRow } from "./demo-data";
-import type { ProposedStatus } from "./demo-status";
+import { DEMO_ROWS, effectiveStatus, fmtElapsed, type DemoRow } from "./demo-data";
+import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
 
 /**
  * DEV-ONLY — the replica shell around the rebuild demo.
@@ -48,25 +45,54 @@ const NOOP = () => {};
 // One counting path — the whole point
 // ---------------------------------------------------------------------------
 
-export type StatusBucket = "all" | "attention" | "running" | "queued" | "done" | "failed" | "cancelled";
+/**
+ * `all` + a composite `Needs you` + the eight ratified statuses. Every status is
+ * reachable; none is folded away.
+ *
+ * The old bar had SEVEN buckets and counted some rows twice — a
+ * Done-with-warnings row landed in both `attention` and `done`, so the pills
+ * summed to more than the queue held. Here each row lands in exactly one status
+ * bucket, and `needsYou` is the only deliberate overlap (it is a composite of
+ * two of them, labelled as such).
+ */
+export type StatusBucket = "all" | "needsYou" | ProposedStatus;
 
-const ATTENTION: ProposedStatus[] = ["waiting", "parked", "failed", "doneWarnings"];
+export const ALL_WORKFLOWS = "All";
 
 /** every top-level row (members belong to their group, never to the counts) */
 export function topLevelRows(): DemoRow[] {
   return Object.values(DEMO_ROWS).filter((r) => r.rowType !== "member");
 }
 
+export function rowsForWorkflow(rows: DemoRow[], workflow: string): DemoRow[] {
+  return workflow === ALL_WORKFLOWS ? rows : rows.filter((r) => r.wfLabel === workflow);
+}
+
+export function rowInBucket(row: DemoRow, bucket: StatusBucket): boolean {
+  if (bucket === "all") return true;
+  const s = effectiveStatus(row);
+  if (bucket === "needsYou") return s === "waiting" || s === "parked";
+  return s === bucket;
+}
+
 export function countRows(rows: DemoRow[]): Record<StatusBucket, number> {
-  const out: Record<StatusBucket, number> = { all: 0, attention: 0, running: 0, queued: 0, done: 0, failed: 0, cancelled: 0 };
+  const out: Record<StatusBucket, number> = {
+    all: 0,
+    needsYou: 0,
+    queued: 0,
+    running: 0,
+    waiting: 0,
+    parked: 0,
+    verifiedDone: 0,
+    doneWarnings: 0,
+    failed: 0,
+    cancelled: 0,
+  };
   for (const r of rows) {
+    const s = effectiveStatus(r);
     out.all += 1;
-    if (ATTENTION.includes(r.status)) out.attention += 1;
-    if (r.status === "running") out.running += 1;
-    if (r.status === "queued") out.queued += 1;
-    if (r.status === "verifiedDone" || r.status === "doneWarnings") out.done += 1;
-    if (r.status === "failed") out.failed += 1;
-    if (r.status === "cancelled") out.cancelled += 1;
+    out[s] += 1;
+    if (s === "waiting" || s === "parked") out.needsYou += 1;
   }
   return out;
 }
@@ -160,13 +186,20 @@ export function DemoTopBar({
 // Workflow Panel (left rail)
 // ---------------------------------------------------------------------------
 
-const RAIL_GROUPS: { label: string; entries: { label: string }[] }[] = [
+const RAIL_GROUPS: { label: string; entries: { label: string; note?: string }[] }[] = [
   {
     label: "People",
     entries: [
       { label: "Separations" },
       { label: "Onboarding" },
       { label: "Person Lookup" },
+      {
+        label: "Person Match",
+        // Deliberately kept at zero. It has no callers today, but it is a real
+        // workflow that can be run on its own, and an entry that disappears
+        // when idle teaches the operator that the rail is not the whole system.
+        note: "No runs today. Kept visible on purpose — a workflow that vanishes when idle is a workflow you stop trusting the rail about.",
+      },
       { label: "Work-Study" },
       { label: "Kronos Pay Rule" },
     ],
@@ -186,31 +219,44 @@ const RAIL_GROUPS: { label: string; entries: { label: string }[] }[] = [
 ];
 
 export function DemoWorkflowPanel({ active, onActive }: { active: string; onActive: (label: string) => void }) {
+  // Same counting path as the Status Bar and the queue. Not a second tally.
   const counts = useMemo(() => {
+    const rows = topLevelRows();
     const map = new Map<string, { total: number; queued: number }>();
-    for (const r of topLevelRows()) {
-      const e = map.get(r.wfLabel) ?? { total: 0, queued: 0 };
-      e.total += 1;
-      if (r.status === "queued") e.queued += 1;
-      map.set(r.wfLabel, e);
+    for (const g of RAIL_GROUPS) {
+      for (const e of g.entries) {
+        const c = countRows(rowsForWorkflow(rows, e.label));
+        map.set(e.label, { total: c.all, queued: c.queued });
+      }
     }
     return map;
   }, []);
+  const allCount = useMemo(() => countRows(topLevelRows()).all, []);
 
   return (
     <nav aria-label="Workflow Panel" className="flex w-[200px] shrink-0 flex-col overflow-y-auto bg-card py-3">
       <button
         type="button"
-        aria-pressed={active === "All"}
-        onClick={() => onActive("All")}
+        aria-pressed={active === ALL_WORKFLOWS}
+        onClick={() => onActive(ALL_WORKFLOWS)}
         className={cn(
           "mx-1.5 mb-4 flex h-10 items-stretch gap-2 rounded-md py-0 pl-1 pr-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary",
-          active === "All" ? "bg-accent/40" : "hover:bg-secondary",
+          active === ALL_WORKFLOWS ? "bg-accent/40" : "hover:bg-secondary",
         )}
       >
-        <span aria-hidden className={cn("my-1.5 w-[3px] rounded-r-full", active === "All" ? "bg-primary" : "bg-transparent")} />
+        <span aria-hidden className={cn("my-1.5 w-[3px] rounded-r-full", active === ALL_WORKFLOWS ? "bg-primary" : "bg-transparent")} />
         <span className="flex flex-1 items-center">
-          <span className={cn("text-[13px]", active === "All" ? "font-semibold text-foreground" : "font-medium text-foreground/90")}>Dashboard</span>
+          <span className={cn("text-[13px]", active === ALL_WORKFLOWS ? "font-semibold text-foreground" : "font-medium text-foreground/90")}>
+            All workflows
+          </span>
+        </span>
+        <span
+          className={cn(
+            "flex shrink-0 items-center font-mono text-[11px] leading-none tabular-nums",
+            active === ALL_WORKFLOWS ? "font-semibold text-primary" : "text-foreground",
+          )}
+        >
+          {allCount}
         </span>
       </button>
 
@@ -228,6 +274,7 @@ export function DemoWorkflowPanel({ active, onActive }: { active: string; onActi
                   <button
                     type="button"
                     aria-current={on ? "page" : undefined}
+                    title={e.note}
                     onClick={() => onActive(e.label)}
                     className={cn(
                       "group flex h-10 w-full items-stretch gap-2 rounded-md py-0 pl-1 pr-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary",
@@ -270,7 +317,7 @@ export function DemoWorkflowPanel({ active, onActive }: { active: string; onActi
       ))}
 
       <p className="mt-auto px-4 pt-3 text-[9.5px] leading-relaxed text-muted-foreground/70">
-        Badges, Status Bar pills and the queue all read one server projection — they cannot disagree.
+        Badges, Status Bar pills and the queue all go through one counting path — they cannot disagree.
       </p>
     </nav>
   );
@@ -280,15 +327,32 @@ export function DemoWorkflowPanel({ active, onActive }: { active: string; onActi
 // Status Bar (count pills)
 // ---------------------------------------------------------------------------
 
-const PILLS: { key: StatusBucket; label: string; icon: typeof Eye; tone: string }[] = [
-  { key: "all", label: "All", icon: LayoutDashboard, tone: "text-muted-foreground" },
-  { key: "attention", label: "Needs you", icon: Eye, tone: "text-warning" },
-  { key: "running", label: "Running", icon: Loader2, tone: "text-primary" },
-  { key: "queued", label: "Queued", icon: Clock3, tone: "text-muted-foreground" },
-  { key: "done", label: "Done", icon: CheckCircle2, tone: "text-success" },
-  { key: "failed", label: "Failed", icon: AlertTriangle, tone: "text-destructive" },
-  { key: "cancelled", label: "Cancelled", icon: Ban, tone: "text-warning" },
+/**
+ * One row: `All`, the composite `Needs you`, then every one of the eight
+ * statuses. Nothing is hidden behind an overflow menu — a status you cannot
+ * click is a status you cannot triage — and nothing is counted twice.
+ */
+const STATUS_PILL_ORDER: ProposedStatus[] = [
+  "queued",
+  "running",
+  "waiting",
+  "parked",
+  "verifiedDone",
+  "doneWarnings",
+  "failed",
+  "cancelled",
 ];
+
+const STATUS_PILL_TONE: Record<ProposedStatus, string> = {
+  queued: "text-warning",
+  running: "text-primary",
+  waiting: "text-warning",
+  parked: "text-log-violet",
+  verifiedDone: "text-success",
+  doneWarnings: "text-warning",
+  failed: "text-destructive",
+  cancelled: "text-warning",
+};
 
 export function DemoStatusBar({
   counts,
@@ -299,30 +363,44 @@ export function DemoStatusBar({
   active: StatusBucket;
   onSelect: (b: StatusBucket) => void;
 }) {
+  const pill = (
+    key: StatusBucket,
+    label: string,
+    Icon: ComponentType<SVGProps<SVGSVGElement>>,
+    tone: string,
+    title?: string,
+    spin?: boolean,
+  ) => {
+    const on = active === key;
+    const n = counts[key];
+    return (
+      <button
+        key={key}
+        type="button"
+        aria-pressed={on}
+        title={title}
+        onClick={() => onSelect(on ? "all" : key)}
+        className={cn(
+          "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          on ? "border-primary/45 bg-primary/12 font-semibold text-foreground" : "border-border bg-card text-muted-foreground hover:text-foreground",
+          n === 0 && !on && "opacity-45",
+        )}
+      >
+        <Icon aria-hidden className={cn("size-3", tone, spin && n > 0 && "animate-spin motion-reduce:animate-none")} />
+        {label}
+        <span className="font-mono tabular-nums">{n}</span>
+      </button>
+    );
+  };
+
   return (
-    <div role="group" aria-label="Status Bar" className="flex flex-wrap items-center gap-1 border-b border-border/60 px-2 py-1.5">
-      {PILLS.map((p) => {
-        const Icon = p.icon;
-        const on = active === p.key;
-        const n = counts[p.key];
-        return (
-          <button
-            key={p.key}
-            type="button"
-            aria-pressed={on}
-            onClick={() => onSelect(p.key)}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              on ? "border-primary/45 bg-primary/12 font-semibold text-foreground" : "border-border bg-card text-muted-foreground hover:text-foreground",
-              n === 0 && !on && "opacity-45",
-            )}
-          >
-            <Icon aria-hidden className={cn("size-3", p.tone, p.key === "running" && n > 0 && "animate-spin motion-reduce:animate-none")} />
-            {p.label}
-            <span className="font-mono tabular-nums">{n}</span>
-          </button>
-        );
-      })}
+    <div role="group" aria-label="Status Bar" className="flex items-center gap-1 overflow-x-auto border-b border-border/60 px-2 py-1.5">
+      {pill("all", "All", LayoutDashboard, "text-muted-foreground", "Every row in this view")}
+      {pill("needsYou", "Needs you", Eye, "text-warning", "Waiting on you + Write parked — the two states that are stuck on a decision from you")}
+      <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-border" />
+      {STATUS_PILL_ORDER.map((s) =>
+        pill(s, PROPOSED_STATUS[s].label, PROPOSED_STATUS[s].icon, STATUS_PILL_TONE[s], PROPOSED_STATUS[s].meaning, s === "running"),
+      )}
     </div>
   );
 }
