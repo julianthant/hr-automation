@@ -15,6 +15,7 @@ import {
   ClipboardList,
   Database,
   FileText,
+  GitBranch,
   History,
   Loader2,
   Pause,
@@ -35,7 +36,10 @@ import { StatusBadge, type ProposedStatus } from "./demo-status";
 import { panelKindOf, panelKindSpec, rowVariantSpec } from "./demo-catalog";
 import {
   DEMO_ROWS,
+  effectiveStatus,
   fmtElapsed,
+  gateAge,
+  linkedGroupSummary,
   LIVE_SEQUENCE,
   memberAttentionIds,
   orderedMemberIds,
@@ -79,16 +83,17 @@ export function tabsFor(row: DemoRow): DemoTab[] {
 
 export function defaultTabFor(row: DemoRow): DemoTab {
   const kind = panelKindOf(row);
+  const status = effectiveStatus(row);
   if (kind === "review") return "review";
   if (kind === "group") {
     const attention = (row.memberIds ?? []).some((id) => {
       const m = DEMO_ROWS[id];
-      return m && !m.displayOnly && (m.status === "failed" || m.status === "waiting" || m.status === "doneWarnings");
+      return m && m.containment !== "rejected" && (m.status === "failed" || m.status === "waiting" || m.status === "doneWarnings");
     });
-    if (attention || row.status === "waiting") return "people";
-    return TERMINAL.includes(row.status) ? "receipt" : "logs";
+    if (attention || status === "waiting") return "people";
+    return TERMINAL.includes(status) ? "receipt" : "logs";
   }
-  return TERMINAL.includes(row.status) ? "receipt" : "logs";
+  return TERMINAL.includes(status) ? "receipt" : "logs";
 }
 
 export interface DemoLogPanelProps {
@@ -96,6 +101,8 @@ export interface DemoLogPanelProps {
   tab: DemoTab | null;
   onTab: (t: DemoTab) => void;
   onSelect: (id: string) => void;
+  /** jump to another Workflow Panel entry and select a row inside it */
+  onOpenPanel: (workflow: string, id: string) => void;
   checkedIds: ReadonlySet<string>;
   onToggleChecked: (id: string) => void;
   tick: number;
@@ -191,11 +198,21 @@ function GateCardView({ row, wide }: { row: DemoRow; wide?: boolean }) {
               <span className="w-32 shrink-0 text-[11px] text-muted-foreground">{s.field}</span>
               <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">{s.value}</span>
               <SystemChip system={s.system} />
-              <span className="shrink-0 rounded border border-warning/40 px-1 text-[9.5px] font-semibold text-warning">staged</span>
+              {s.unconfirmed ? (
+                <span
+                  title="Sent to UCPath, but we never read the outcome back"
+                  className="shrink-0 rounded border border-log-violet/45 px-1 text-[9.5px] font-semibold text-log-violet"
+                >
+                  unconfirmed
+                </span>
+              ) : (
+                <span className="shrink-0 rounded border border-warning/40 px-1 text-[9.5px] font-semibold text-warning">staged</span>
+              )}
             </div>
           ))}
         </div>
       )}
+      <ParkResolutions gate={gate} />
       <div className="mt-2 flex flex-wrap gap-1.5">
         {gate.actions.map((a, i) => (
           <button
@@ -204,7 +221,7 @@ function GateCardView({ row, wide }: { row: DemoRow; wide?: boolean }) {
             onClick={NOOP}
             className={cn(
               "rounded-md border px-2.5 py-0.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              i === 0
+              i === 0 && !gate.resolutions
                 ? "border-primary bg-primary font-semibold text-primary-foreground"
                 : "border-border bg-card font-medium text-secondary-foreground",
             )}
@@ -214,6 +231,43 @@ function GateCardView({ row, wide }: { row: DemoRow; wide?: boolean }) {
         ))}
       </div>
       {wide && <div className="mt-2 border-t border-border/40 pt-2 text-[11px] leading-relaxed text-muted-foreground">{gate.note}</div>}
+    </div>
+  );
+}
+
+/**
+ * The only two exits from Write parked. Both are the operator reporting what
+ * they SAW in the system of record — neither one re-submits anything. There is
+ * no Resume button here on purpose: resuming an unknown write is how you
+ * terminate somebody twice.
+ */
+function ParkResolutions({ gate }: { gate: NonNullable<DemoRow["gate"]> }) {
+  if (!gate.resolutions) return null;
+  return (
+    <div className="mt-2 grid gap-1.5 min-[560px]:grid-cols-2">
+      {gate.resolutions.map((r) => {
+        const present = r.key === "confirmed-present";
+        const Icon = present ? CheckCircle2 : CircleSlash;
+        return (
+          <button
+            key={r.key}
+            type="button"
+            onClick={NOOP}
+            className={cn(
+              "flex flex-col items-start gap-0.5 rounded-md border px-2.5 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              present
+                ? "border-success/45 bg-success/8 hover:bg-success/12"
+                : "border-destructive/40 bg-destructive/6 hover:bg-destructive/10",
+            )}
+          >
+            <span className={cn("inline-flex items-center gap-1.5 text-[11.5px] font-semibold", present ? "text-success" : "text-destructive")}>
+              <Icon aria-hidden className="size-3" />
+              {r.label}
+            </span>
+            <span className="text-[10.5px] leading-snug text-muted-foreground">{r.detail}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -402,16 +456,23 @@ function EvidenceBar({ row }: { row: DemoRow }) {
 function GateBanner({ row }: { row: DemoRow }) {
   const gate = row.gate;
   if (!gate) return null;
+  // Parked is not a gate you answer with a click — it is an unknown you resolve
+  // by looking. It gets its own tone so the two never read as the same thing.
+  const parked = gate.kind === "parked";
+  const Icon = parked ? Pause : ClipboardList;
   return (
-    <div className="border-b border-warning/30 bg-warning/8 px-3 py-2">
+    <div className={cn("border-b px-3 py-2", parked ? "border-log-violet/30 bg-log-violet/8" : "border-warning/30 bg-warning/8")}>
       <div className="flex items-center gap-2">
-        <ClipboardList aria-hidden className="size-3.5 shrink-0 text-warning" />
-        <span className="min-w-0 truncate text-[12px] font-semibold text-warning">{gate.title}</span>
-        <span className="ml-auto shrink-0 font-mono text-[10px] text-warning/80">
+        <Icon aria-hidden className={cn("size-3.5 shrink-0", parked ? "text-log-violet" : "text-warning")} />
+        <span className={cn("min-w-0 truncate text-[12px] font-semibold", parked ? "text-log-violet" : "text-warning")}>{gate.title}</span>
+        <span className={cn("ml-auto shrink-0 font-mono text-[10px]", parked ? "text-log-violet/80" : "text-warning/80")}>
           open {gate.waiting} · since {gate.openedAt}
         </span>
       </div>
       <p className="mt-1 pl-5 text-[11px] leading-relaxed text-muted-foreground">{gate.note}</p>
+      <div className="pl-5">
+        <ParkResolutions gate={gate} />
+      </div>
       <div className="mt-1.5 flex flex-wrap gap-1.5 pl-5">
         {gate.actions.map((a, i) => (
           <button
@@ -420,7 +481,7 @@ function GateBanner({ row }: { row: DemoRow }) {
             onClick={NOOP}
             className={cn(
               "rounded-md border px-2.5 py-0.5 text-[11px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              i === 0 ? "border-warning/55 bg-warning/15 text-warning" : "border-border bg-card text-secondary-foreground",
+              i === 0 && !gate.resolutions ? "border-warning/55 bg-warning/15 text-warning" : "border-border bg-card text-secondary-foreground",
             )}
           >
             {a}
@@ -549,9 +610,10 @@ function DataTab({ row }: { row: DemoRow }) {
   const reads = row.data.filter((d) => d.dir === "read");
   const writes = row.data.filter((d) => d.dir === "write");
   const staged = writes.filter((d) => d.staged).length;
+  const unconfirmed = writes.filter((d) => d.unconfirmed).length;
   const steps = [...new Set(row.data.map((d) => d.step))];
   const changed = reads.filter((d) => edits[d.field] !== undefined && edits[d.field] !== d.value);
-  const live = row.status === "running" || row.status === "queued";
+  const live = effectiveStatus(row) === "running" || effectiveStatus(row) === "queued";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -565,6 +627,14 @@ function DataTab({ row }: { row: DemoRow }) {
             <ArrowUpFromLine aria-hidden className="size-3" />
             {writes.length} written
             {staged > 0 && <span className="rounded border border-warning/40 px-1 text-[9.5px] font-semibold text-warning">{staged} staged</span>}
+            {unconfirmed > 0 && (
+              <span
+                title="Sent, but never read back — the outcome is unknown until you resolve the park"
+                className="rounded border border-log-violet/45 px-1 text-[9.5px] font-semibold text-log-violet"
+              >
+                {unconfirmed} unconfirmed
+              </span>
+            )}
           </span>
         )}
         <span className="ml-auto">
@@ -610,6 +680,9 @@ function DataTab({ row }: { row: DemoRow }) {
                       <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">{d.value}</span>
                     )}
                     {d.staged && <span className="shrink-0 rounded border border-warning/40 px-1 text-[9.5px] font-semibold text-warning">staged</span>}
+                    {d.unconfirmed && (
+                      <span className="shrink-0 rounded border border-log-violet/45 px-1 text-[9.5px] font-semibold text-log-violet">unconfirmed</span>
+                    )}
                     <SystemChip system={d.system} />
                     <span className="w-14 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground">{d.ts}</span>
                   </div>
@@ -695,14 +768,21 @@ function ReviewTab({ row }: { row: DemoRow }) {
   const [idx, setIdx] = useState(0);
   const [reviewed, setReviewed] = useState<ReadonlySet<string>>(new Set());
   const [approved, setApproved] = useState<ReadonlySet<string>>(new Set());
+  const [edits, setEdits] = useState<Record<string, string>>({});
   useEffect(() => {
     setIdx(0);
     setReviewed(new Set());
     setApproved(new Set());
+    setEdits({});
   }, [row.id]);
 
   if (records.length === 0) {
-    return (
+    return row.status === "failed" ? (
+      <EmptyTab
+        icon={TriangleAlert}
+        text="Nothing to review — the extraction failed before it produced a single record, so there is no person and no page to look at. Re-upload a better scan."
+      />
+    ) : (
       <EmptyTab
         icon={ClipboardList}
         text="No records on this row. Only an OCR review row carries people to review — other rows show their decision in the banner above."
@@ -791,26 +871,52 @@ function ReviewTab({ row }: { row: DemoRow }) {
         </div>
 
         <div className="flex flex-col p-3">
-          <span className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">Extracted from this page</span>
-          {rec.fields.map((f) => (
-            <div key={f.label} className="flex items-baseline gap-2 border-b border-border/40 py-[5px] text-[12px] last:border-b-0">
-              <span className="w-28 shrink-0 text-muted-foreground">{f.label}</span>
-              <span className={cn("min-w-0 flex-1 font-mono text-[11.5px]", f.warn ? "text-warning" : "text-foreground")}>{f.value}</span>
-              <span className={cn("shrink-0 rounded border px-1 text-[9px] font-semibold uppercase", SOURCE_CHIP[f.source].cls)}>
-                {SOURCE_CHIP[f.source].label}
-              </span>
-              {f.confidence !== undefined && (
-                <span
-                  className={cn(
-                    "w-8 shrink-0 text-right font-mono text-[10px] tabular-nums",
-                    f.confidence < 0.6 ? "text-warning" : "text-muted-foreground",
-                  )}
-                >
-                  {f.confidence.toFixed(2)}
+          <span className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+            Extracted from this page — editable here, and only here
+          </span>
+          {rec.fields.map((f) => {
+            const key = `${rec.id}:${f.label}`;
+            const value = edits[key] ?? f.value;
+            const dirty = value !== f.value;
+            return (
+              <div key={f.label} className="flex items-baseline gap-2 border-b border-border/40 py-[5px] text-[12px] last:border-b-0">
+                <span className="flex w-28 shrink-0 items-center gap-1.5 text-muted-foreground">
+                  {f.label}
+                  {dirty && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warning" />}
                 </span>
-              )}
-            </div>
-          ))}
+                {/* A value may only change with its page on screen — which is
+                    why the packet row offers bulk approve but never an edit,
+                    and why the input lives beside the scan rather than in a
+                    form somewhere else. */}
+                {f.editable ? (
+                  <input
+                    aria-label={`${f.label} — correct against the page shown beside it`}
+                    value={value}
+                    onChange={(e) => setEdits((prev) => ({ ...prev, [key]: e.target.value }))}
+                    className={cn(
+                      "min-w-0 flex-1 rounded border bg-transparent px-1.5 py-0.5 font-mono text-[11.5px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      dirty ? "border-warning/50 bg-warning/5 text-warning" : "border-transparent text-foreground hover:border-border focus:border-border",
+                    )}
+                  />
+                ) : (
+                  <span className={cn("min-w-0 flex-1 font-mono text-[11.5px]", f.warn ? "text-warning" : "text-foreground")}>{f.value}</span>
+                )}
+                <span className={cn("shrink-0 rounded border px-1 text-[9px] font-semibold uppercase", SOURCE_CHIP[f.source].cls)}>
+                  {SOURCE_CHIP[f.source].label}
+                </span>
+                {f.confidence !== undefined && (
+                  <span
+                    className={cn(
+                      "w-8 shrink-0 text-right font-mono text-[10px] tabular-nums",
+                      f.confidence < 0.6 ? "text-warning" : "text-muted-foreground",
+                    )}
+                  >
+                    {f.confidence.toFixed(2)}
+                  </span>
+                )}
+              </div>
+            );
+          })}
           {rec.fields.some((f) => f.warn) && (
             <p className="mt-1.5 text-[11px] leading-relaxed text-warning">{rec.fields.find((f) => f.warn)?.warn}</p>
           )}
@@ -827,6 +933,22 @@ function ReviewTab({ row }: { row: DemoRow }) {
               </div>
             );
           })}
+
+          {/* Depth 2 — the person lookup this record delegated. It is shown on
+              the row that owns the record and nowhere else: the packet group
+              lists people, not the runs those people spawned. */}
+          {rec.lookup && (
+            <>
+              <span className="mb-1 mt-3 text-[10px] uppercase tracking-wider text-muted-foreground">Delegated lookup (depth 2)</span>
+              <div className="flex items-center gap-2 rounded-md border border-border/60 bg-secondary/25 px-2.5 py-1.5 text-[11.5px]">
+                <GitBranch aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+                <span className="shrink-0 text-muted-foreground">Person Lookup</span>
+                <span className="min-w-0 flex-1 truncate text-secondary-foreground">{rec.lookup.note}</span>
+                <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{rec.lookup.trace}</span>
+                <StatusBadge status={rec.lookup.status} />
+              </div>
+            </>
+          )}
 
           {rec.note && (
             <p
@@ -887,13 +1009,63 @@ const PEOPLE_FILTERS = [
   { key: "done", label: "Finished" },
 ] as const;
 
+/**
+ * A packet that has not been approved has no member rows — but it does know the
+ * people it read. Showing them here (read-only, straight off the review row)
+ * beats an empty list that implies the extraction found nobody. The rows are
+ * flat text on purpose: there is no run behind them yet to open.
+ */
+function ExtractedPeoplePreview({ row, onOpenPanel }: { row: DemoRow; onOpenPanel: (workflow: string, id: string) => void }) {
+  const reviewRow = row.reviewRunId ? DEMO_ROWS[row.reviewRunId] : undefined;
+  const records = reviewRow?.records ?? [];
+  if (records.length === 0) return <EmptyTab icon={Users} text="No people yet — this group has not fanned out." />;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border/60 px-3 py-1.5 text-[11px]">
+        <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+          <Users aria-hidden className="size-3 text-muted-foreground" />
+          {records.length} people extracted
+        </span>
+        <span className="text-muted-foreground">
+          Member rows do not exist yet — approving is what creates them, one run per approved person.
+        </span>
+        {reviewRow && (
+          <button
+            type="button"
+            onClick={() => onOpenPanel(reviewRow.wfLabel, reviewRow.id)}
+            className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-primary/45 bg-primary/12 px-2 py-0.5 text-[10.5px] font-semibold text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Open review
+            <ArrowRight aria-hidden className="size-3" />
+          </button>
+        )}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {records.map((r) => (
+          <div key={r.id} className="flex w-full items-center gap-2 border-b border-border/40 px-3 py-1.5">
+            <FileText aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="w-40 shrink-0 truncate text-[12.5px] font-medium text-foreground">{r.name}</span>
+            <span className="w-20 shrink-0 font-mono text-[10.5px] text-muted-foreground">{r.eid ?? "—"}</span>
+            <span className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground">{r.note ?? r.pageNote}</span>
+            <span className={cn("shrink-0 rounded-md border px-1.5 py-px text-[10px] font-semibold", RECORD_STATE[r.state].cls)}>
+              {RECORD_STATE[r.state].label}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PeopleTab({
   row,
   onSelect,
+  onOpenPanel,
   checkedIds,
 }: {
   row: DemoRow;
   onSelect: (id: string) => void;
+  onOpenPanel: (workflow: string, id: string) => void;
   checkedIds: ReadonlySet<string>;
 }) {
   // default to the attention lane only when there IS one — otherwise the tab
@@ -903,13 +1075,15 @@ function PeopleTab({
   useEffect(() => setFilter(startFilter), [row.id, startFilter]);
   const ordered = orderedMemberIds(row.id);
   if (ordered.length === 0) {
-    return <EmptyTab icon={Users} text="No people yet — this group has not fanned out." />;
+    return <ExtractedPeoplePreview row={row} onOpenPanel={onOpenPanel} />;
   }
   const attention = memberAttentionIds(row.id);
   const shown = ordered.filter((id) => {
     const m = DEMO_ROWS[id];
     if (filter === "all") return true;
-    if (filter === "attention") return attention.includes(id) || m.displayOnly;
+    // a rejected page is always in the attention lane — it is the one thing
+    // stopping the packet from reading as clean
+    if (filter === "attention") return attention.includes(id) || m.containment === "rejected";
     return m.status === "verifiedDone";
   });
   const checkedCount = ordered.filter((id) => checkedIds.has(id)).length;
@@ -950,8 +1124,9 @@ function PeopleTab({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {shown.map((id) => {
           const m = DEMO_ROWS[id];
+          const rejected = m.containment === "rejected";
           const spec = MEMBER_ROW_ICON[m.status];
-          const Icon = m.displayOnly ? CircleSlash : spec.icon;
+          const Icon = rejected ? CircleSlash : spec.icon;
           return (
             <button
               key={id}
@@ -959,14 +1134,17 @@ function PeopleTab({
               onClick={() => onSelect(id)}
               className="flex w-full items-center gap-2 border-b border-border/40 px-3 py-1.5 text-left outline-none hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <Icon aria-hidden className={cn("size-3.5 shrink-0", m.displayOnly ? "text-muted-foreground" : spec.cls)} />
-              <span className="w-40 shrink-0 truncate text-[12.5px] font-medium text-foreground">{m.title}</span>
+              <Icon aria-hidden className={cn("size-3.5 shrink-0", rejected ? "text-muted-foreground" : spec.cls)} />
+              <span className={cn("w-40 shrink-0 truncate text-[12.5px] font-medium text-foreground", rejected && "italic font-normal text-muted-foreground")}>
+                {m.title}
+              </span>
               <span className="w-20 shrink-0 font-mono text-[10.5px] text-muted-foreground">{m.eid ?? "—"}</span>
               <span className={cn("min-w-0 flex-1 truncate text-[11.5px]", m.status === "failed" ? "text-destructive" : "text-muted-foreground")}>
                 {m.memberFact ?? m.outcome.text}
               </span>
               {checkedIds.has(id) && <Check aria-hidden className="size-3 shrink-0 text-success" />}
-              <StatusBadge status={m.status} />
+              {/* a rejected page is not a failed person — it never became work */}
+              <StatusBadge status={m.status} label={rejected ? "Rejected" : undefined} />
             </button>
           );
         })}
@@ -987,7 +1165,8 @@ function ReceiptTab({ row }: { row: DemoRow }) {
           : "border-border bg-secondary/20";
   const headCls =
     r.tone === "success" ? "text-success" : r.tone === "warning" ? "text-warning" : r.tone === "destructive" ? "text-destructive" : "text-secondary-foreground";
-  const staged = row.data.filter((d) => d.staged);
+  const staged = row.data.filter((d) => d.staged || d.unconfirmed);
+  const stagedAreUnconfirmed = staged.some((d) => d.unconfirmed);
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="flex flex-col gap-3 px-3 py-3">
@@ -1015,12 +1194,43 @@ function ReceiptTab({ row }: { row: DemoRow }) {
               ))}
             </div>
           )}
+          {/* Per-member confirmation numbers, INLINE. The alternative — a link
+              per person — turns filing one packet into opening twelve rows and
+              copying twelve numbers out of them. */}
+          {r.members && (
+            <div className={cn("mt-2 border-t pt-2", r.tone === "success" ? "border-success/20" : "border-border/50")}>
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Per-person confirmations ({r.members.length})
+              </div>
+              {r.members.map((m) => (
+                <div key={m.name} className="flex items-center gap-2 py-[2px] text-[12px]">
+                  {m.failed ? (
+                    <X aria-hidden className="size-3 shrink-0 text-destructive" />
+                  ) : (
+                    <Check aria-hidden className="size-3 shrink-0 text-success" />
+                  )}
+                  <span className="w-36 shrink-0 truncate text-muted-foreground">{m.name}</span>
+                  <span className={cn("min-w-0 flex-1 truncate font-mono text-[11.5px]", m.failed ? "text-destructive" : "text-foreground")}>
+                    {m.value}
+                  </span>
+                  {m.verified && <span className="shrink-0 text-[10px] font-semibold text-success">read-back</span>}
+                </div>
+              ))}
+            </div>
+          )}
           {r.note && <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{r.note}</p>}
         </div>
         {staged.length > 0 && (
           <div>
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Staged — goes live on resume</div>
-            <div className="rounded-lg border border-border bg-secondary/20 px-3 py-1.5">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {stagedAreUnconfirmed ? "Unconfirmed — resolve present or absent" : "Staged — goes live when the run continues"}
+            </div>
+            <div
+              className={cn(
+                "rounded-lg border px-3 py-1.5",
+                stagedAreUnconfirmed ? "border-log-violet/35 bg-log-violet/6" : "border-border bg-secondary/20",
+              )}
+            >
               {staged.map((d) => (
                 <div key={d.field} className="flex items-center gap-2 py-[3px] text-[12px]">
                   <ArrowUpFromLine aria-hidden className="size-3 text-log-teal" />
@@ -1084,7 +1294,7 @@ function ConveyorHeader({
           onClick={() => onSelect(siblings[(idx + 1) % total])}
         />
         <span className="ml-1 min-w-0 truncate text-[13px] font-semibold text-foreground">{row.title}</span>
-        <StatusBadge status={row.status} />
+        <StatusBadge status={row.status} label={row.containment === "rejected" ? "Rejected" : undefined} />
         {nextAttention && nextAttention !== row.id && (
           <button
             type="button"
@@ -1167,16 +1377,19 @@ const OUTCOME_TONE: Record<DemoRow["outcome"]["tone"], { bar: string; dot: strin
   muted: { bar: "border-border bg-secondary/20 text-muted-foreground", dot: "bg-muted-foreground", btn: "border-border bg-card text-secondary-foreground" },
 };
 
-export function DemoLogPanel({ row, tab, onTab, onSelect, checkedIds, onToggleChecked, tick, liveCount }: DemoLogPanelProps) {
+export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedIds, onToggleChecked, tick, liveCount }: DemoLogPanelProps) {
   const available = tabsFor(row);
   const fallback = defaultTabFor(row);
   const effectiveTab = tab && available.includes(tab) ? tab : fallback;
   const panel = panelKindSpec(row);
   const variant = rowVariantSpec(row);
   const isMember = row.rowType === "member";
+  const status = effectiveStatus(row);
   const tone = OUTCOME_TONE[row.outcome.tone];
   const elapsed = row.elapsedSec !== undefined ? fmtElapsed(row.elapsedSec + tick) : undefined;
-  const attentionMember = isMember && (row.status === "failed" || row.status === "waiting" || row.status === "doneWarnings");
+  const attentionMember = isMember && (status === "failed" || status === "waiting" || status === "doneWarnings");
+  const linkedTarget = row.reviewRunId ?? row.reviewOf ?? row.linkedParentId;
+  const linked = linkedGroupSummary(row);
 
   return (
     <section aria-label="Run detail" className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
@@ -1188,7 +1401,7 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, checkedIds, onToggleCh
       ) : (
         <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2.5">
           <span className="min-w-0 truncate text-[13.5px] font-semibold text-foreground">{row.title}</span>
-          <StatusBadge status={row.status} />
+          <StatusBadge status={status} age={gateAge(row)} />
           {elapsed && <span className="font-mono text-[10.5px] text-primary/85 tabular-nums">{elapsed}</span>}
           <span
             title={`${variant.name} → ${panel.name}`}
@@ -1200,19 +1413,38 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, checkedIds, onToggleCh
         </div>
       )}
 
-      {/* cross-panel delegation link — the parent packet and its OCR review row
-          point at each other instead of duplicating the run (D4). */}
-      {(row.reviewRunId || row.reviewOf) && (
+      {/* cross-panel delegation link — a `linked` child and its parent point at
+          each other instead of duplicating the run, and the link CHANGES PANEL
+          rather than pulling a copy of the row into this one. */}
+      {linkedTarget && DEMO_ROWS[linkedTarget] && (
         <button
           type="button"
-          onClick={() => onSelect((row.reviewRunId ?? row.reviewOf) as string)}
+          onClick={() => onOpenPanel(DEMO_ROWS[linkedTarget].wfLabel, linkedTarget)}
           className="flex items-center gap-2 border-b border-info/25 bg-info/6 px-3 py-1.5 text-left text-[11.5px] text-info outline-none hover:bg-info/10 focus-visible:ring-2 focus-visible:ring-ring"
         >
           <ClipboardList aria-hidden className="size-3.5 shrink-0" />
           <span className="min-w-0 truncate">
             {row.reviewRunId
-              ? `Records live on the OCR review row — ${DEMO_ROWS[row.reviewRunId]?.records?.length ?? 0} people to review`
-              : `Part of ${DEMO_ROWS[row.reviewOf as string]?.title ?? "the packet"} — open the packet row`}
+              ? `Records live on the OCR review row — open the OCR panel (${DEMO_ROWS[row.reviewRunId]?.records?.length ?? 0} people)`
+              : row.reviewOf
+                ? `Delegated by ${DEMO_ROWS[row.reviewOf]?.title ?? "the packet"} — open the packet row`
+                : `Released by ${DEMO_ROWS[linkedTarget]?.title} — open it in the ${DEMO_ROWS[linkedTarget]?.wfLabel} panel`}
+          </span>
+          <ArrowRight aria-hidden className="ml-auto size-3 shrink-0" />
+        </button>
+      )}
+
+      {/* a SET of linked children — Oath Upload's signers. A chip, never a
+          member list: each signer is a run of its own in another panel. */}
+      {linked && (
+        <button
+          type="button"
+          onClick={() => onOpenPanel(linked.panel, linked.firstId)}
+          className="flex items-center gap-2 border-b border-info/25 bg-info/6 px-3 py-1.5 text-left text-[11.5px] text-info outline-none hover:bg-info/10 focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Users aria-hidden className="size-3.5 shrink-0" />
+          <span className="min-w-0 truncate">
+            {linked.label} — each signer is its own run in the {linked.panel} panel, counted there and not here
           </span>
           <ArrowRight aria-hidden className="ml-auto size-3 shrink-0" />
         </button>
@@ -1275,13 +1507,15 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, checkedIds, onToggleCh
       {effectiveTab === "logs" && <LogsTab row={row} liveCount={liveCount} />}
       {effectiveTab === "data" && <DataTab row={row} />}
       {effectiveTab === "review" && <ReviewTab row={row} />}
-      {effectiveTab === "people" && <PeopleTab row={row} onSelect={onSelect} checkedIds={checkedIds} />}
+      {effectiveTab === "people" && <PeopleTab row={row} onSelect={onSelect} onOpenPanel={onOpenPanel} checkedIds={checkedIds} />}
       {effectiveTab === "receipt" && <ReceiptTab row={row} />}
 
-      {/* member action bar */}
-      {isMember && !row.displayOnly && (
+      {/* member action bar — a rejected row gets none of it: there is no task
+          behind it to retry, so the buttons are structurally absent, not
+          disabled. Delete lives on the row footer. */}
+      {isMember && row.containment !== "rejected" && (
         <div className="mt-auto flex items-center gap-1.5 border-t border-border/60 bg-secondary/20 px-3 py-2">
-          {(row.status === "failed" || row.status === "doneWarnings") && (
+          {(status === "failed" || status === "doneWarnings") && (
             <button
               type="button"
               onClick={NOOP}

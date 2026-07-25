@@ -14,6 +14,8 @@ import {
   Clock,
   CornerDownRight,
   Eye,
+  FileText,
+  GitBranch,
   Loader2,
   PauseCircle,
   RotateCcw,
@@ -21,33 +23,44 @@ import {
   SearchX,
   ShieldCheck,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { QueueRowCard } from "@/components/queue-panel/QueueRowCard";
 import { StatusCounts } from "@/components/queue-panel/StatusCounts";
 import { IconActionButton } from "@/components/shared/IconActionButton";
-import { PROPOSED_STATUS, StatusBadge, type ProposedStatus } from "./demo-status";
+import { PROPOSED_STATUS, StatusBadge, statusText, type ProposedStatus } from "./demo-status";
+import { rowInBucket, type StatusBucket } from "./DemoShell";
 import {
   ATTENTION_STATUSES,
-  BAND_ORDER,
+  bandsFor,
   DEMO_ROWS,
+  densityRung,
+  effectiveStatus,
   fmtElapsed,
+  gateAge,
   groupCounts,
+  linkedGroupSummary,
   orderedMemberIds,
   type DemoRow,
 } from "./demo-data";
 
 /**
- * DEV-ONLY — the rebuild demo's queue panel. Attention bands, working filter
- * pills, enriched rows for all 3 ratified row types, the 50-member status
- * matrix, inline compact members for medium groups, and the triage drill-in.
- * Rendering rides the REAL QueueRowCard/RowFooter/StatusCounts chrome.
+ * DEV-ONLY — the rebuild demo's queue panel. Attention bands, the four-rung
+ * density ladder, the 41+ status matrix, and the triage drill-in, rendered on
+ * the REAL QueueRowCard/RowFooter/StatusCounts chrome.
+ *
+ * The rows this panel receives are already scoped to the selected Workflow
+ * Panel entry, and it filters them with the SAME predicate the Status Bar
+ * counts with (`rowInBucket`). There is no second definition of "does this row
+ * belong in this view", which is the only reason the badges and the rows are
+ * structurally unable to disagree.
  */
 
 const NOOP = () => {};
 
-export type DemoFilter = "all" | "attention" | "running" | "queued" | "done" | "failed" | "cancelled";
+export type DemoFilter = StatusBucket;
 export type DemoView = { kind: "queue" } | { kind: "drill"; groupId: string };
 
 export interface DemoQueueState {
@@ -66,40 +79,38 @@ export interface DemoQueueHandlers {
   onDrillIn: (groupId: string) => void;
   onBack: () => void;
   onToggleGroup: (groupId: string) => void;
+  /** jump to another Workflow Panel entry and select a row inside it */
+  onOpenPanel: (workflow: string, id: string) => void;
 }
 
-function rowMatchesFilter(row: DemoRow, filter: DemoFilter): boolean {
-  switch (filter) {
-    case "all":
-      return true;
-    case "attention":
-      return ATTENTION_STATUSES.includes(row.status);
-    case "running":
-      return row.status === "running";
-    case "queued":
-      return row.status === "queued";
-    case "done":
-      return row.status === "verifiedDone" || row.status === "doneWarnings";
-    case "failed":
-      return row.status === "failed";
-    case "cancelled":
-      return row.status === "cancelled";
+/**
+ * Which of a group's members are actually on screen — and therefore which ones
+ * j/k should walk. Deriving traversal from the SAME rung that renders them is
+ * what keeps the keyboard and the eye in the same place.
+ */
+export function visibleMemberIds(row: DemoRow, expandedGroups: ReadonlySet<string>): string[] {
+  const ids = orderedMemberIds(row.id);
+  switch (densityRung(ids.length)) {
+    case "inline":
+      return ids;
+    case "compact":
+      return expandedGroups.has(row.id) ? ids : ids.slice(0, 4);
+    case "well":
+      return ids;
+    case "matrix":
+      // cells, not rows — the drill-in is where you walk these people
+      return [];
   }
 }
 
-/** the j/k traversal order for the current view — shared with the shell */
-export function computeVisibleIds(state: Pick<DemoQueueState, "view" | "filter" | "expandedGroups">): string[] {
+/** the j/k traversal order for the current view */
+export function computeVisibleIds(rows: DemoRow[], state: Pick<DemoQueueState, "view" | "filter" | "expandedGroups">): string[] {
   if (state.view.kind === "drill") return orderedMemberIds(state.view.groupId);
   const ids: string[] = [];
-  for (const band of BAND_ORDER) {
-    for (const id of band.ids) {
-      const row = DEMO_ROWS[id];
-      if (!rowMatchesFilter(row, state.filter)) continue;
-      ids.push(id);
-      // an expanded, list-density group puts its members in the traversal order
-      if (row.rowType === "group" && state.expandedGroups.has(id) && (row.memberIds?.length ?? 0) <= 20) {
-        ids.push(...orderedMemberIds(id));
-      }
+  for (const band of bandsFor(rows.filter((r) => rowInBucket(r, state.filter)))) {
+    for (const row of band.rows) {
+      ids.push(row.id);
+      if (row.rowType === "group") ids.push(...visibleMemberIds(row, state.expandedGroups));
     }
   }
   return ids;
@@ -176,12 +187,20 @@ const MATRIX_CELL: Record<ProposedStatus, string> = {
 };
 
 function headerChips(row: DemoRow, checked: ReadonlySet<string>): ReactNode {
+  const status = effectiveStatus(row);
+  const lookups = (row.records ?? []).filter((r) => r.lookup).length;
   return (
     <>
-      {row.waitingLabel && (
-        <span className="inline-flex items-center gap-1 rounded-md bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
-          <Clock aria-hidden className="size-3" />
-          {row.waitingLabel}
+      {/* Depth 2 lives here and nowhere else. The packet that delegated this
+          run deliberately does not repeat it — two levels of run in a queue row
+          is already the limit of what stays readable. */}
+      {lookups > 0 && (
+        <span
+          title={`${lookups} delegated person lookups — one per record. Reachable only from this review row; the packet never lists them.`}
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary/50 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+        >
+          <GitBranch aria-hidden className="size-3" />
+          {lookups} lookups
         </span>
       )}
       {row.attempt && (
@@ -194,7 +213,10 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>): ReactNode {
         </span>
       )}
       {row.warnings && (
-        <span className="inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/12 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+        <span
+          title={row.warnings.first}
+          className="inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/12 px-1.5 py-0.5 text-[10px] font-semibold text-warning"
+        >
           <AlertTriangle aria-hidden className="size-3" />
           {row.warnings.count}
         </span>
@@ -220,25 +242,34 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>): ReactNode {
           <span className="sr-only">checked</span>
         </span>
       )}
-      {row.status === "running" && row.rowType !== "group" && <MicroSteps row={row} />}
-      <StatusBadge status={row.status} />
+      {status === "running" && row.rowType !== "group" && <MicroSteps row={row} />}
+      {/* A collapsed row says how OLD the decision is, not only that there is
+          one. Age is the whole triage signal. */}
+      <StatusBadge status={status} age={gateAge(row)} />
     </>
   );
 }
 
 function sublineFor(row: DemoRow): { tone: string; text: string; action?: string; actionTone?: string } | null {
-  if (row.status === "failed" && row.error) return { tone: "text-destructive", text: row.error };
-  if (row.status === "waiting" && row.gate)
+  const status = effectiveStatus(row);
+  if (status === "failed" && row.error)
+    return { tone: "text-destructive", text: row.error, action: row.mirroredFrom ? "Re-upload" : undefined, actionTone: "destructive" };
+  if (status === "waiting" && row.gate)
     return {
       tone: "text-warning",
-      text: row.gate.kind === "identity" && row.gate.candidates ? `${row.gate.title.replace("Waiting on you — ", "")} — ${row.gate.candidates[0].name} vs ${row.gate.candidates[1].name}` : row.gate.title,
+      text:
+        row.gate.kind === "identity" && row.gate.candidates
+          ? `${row.gate.title.replace("Waiting on you — ", "")} — ${row.gate.candidates[0].name} vs ${row.gate.candidates[1].name}`
+          : row.gate.title,
       action: "Review",
       actionTone: "info",
     };
-  if (row.status === "parked") return { tone: "text-muted-foreground", text: "UCPath termination write verified & staged — parked before submit", action: "Resume", actionTone: "violet" };
-  if (row.status === "cancelled") return { tone: "text-muted-foreground", text: "Cancelled by you — nothing written" };
-  if (row.status === "running" && row.liveText) return { tone: "text-primary/85", text: row.liveText };
-  if (row.rowType === "group" && row.ocrPhase) return { tone: "text-muted-foreground", text: row.ocrPhase, action: "Open review", actionTone: "info" };
+  // Parked is an UNKNOWN outcome, never a hold you resume. The subline says so
+  // in the row's own words rather than a hardcoded caption.
+  if (status === "parked") return { tone: "text-log-violet", text: row.outcome.text, action: "Resolve", actionTone: "violet" };
+  if (status === "cancelled") return { tone: "text-muted-foreground", text: "Cancelled by you — nothing written" };
+  if (status === "running" && row.liveText) return { tone: "text-primary/85", text: row.liveText };
+  if (row.rowType === "group" && row.ocrPhase) return { tone: "text-muted-foreground", text: row.ocrPhase };
   return null;
 }
 
@@ -258,28 +289,39 @@ export function DemoRowCard({
   nested?: boolean;
 }) {
   const selected = state.selectedId === row.id;
+  const status = effectiveStatus(row);
   const sub = sublineFor(row);
   const elapsed = row.elapsedSec !== undefined ? fmtElapsed(row.elapsedSec + state.tick) : undefined;
   const isGroup = row.rowType === "group";
   const counts = isGroup ? groupCounts(row.id) : null;
-  const StatusIcon = PROPOSED_STATUS[row.status].icon;
+  const memberCount = row.memberIds?.length ?? 0;
+  const StatusIcon = PROPOSED_STATUS[status].icon;
+  const linked = linkedGroupSummary(row);
 
   const actions =
-    row.status === "running" || row.status === "waiting" || row.status === "parked" ? (
+    status === "running" || status === "waiting" || status === "parked" ? (
       isGroup ? (
+        // Cancelling a group cancels the whole tree — this row, its delegated
+        // OCR review and every member. It is final: no confirm dialog, no undo.
         <span className="flex items-center gap-1">
-          <span className="mr-1 hidden text-[10px] font-sans text-muted-foreground min-[400px]:inline">Cancel remaining</span>
-          <IconActionButton tone="muted" icon={<X aria-hidden className="size-3.5" />} label="Cancel remaining" onClick={NOOP} />
+          <span className="mr-1 hidden text-[10px] font-sans text-muted-foreground min-[400px]:inline">Cancel group</span>
+          <IconActionButton
+            tone="muted"
+            icon={<X aria-hidden className="size-3.5" />}
+            label="Cancel group and everything under it"
+            title="Cancels this group, its delegated OCR review and every member. Final — there is no undo."
+            onClick={NOOP}
+          />
         </span>
       ) : (
         <IconActionButton tone="muted" icon={<X aria-hidden className="size-3.5" />} label="Cancel" onClick={NOOP} />
       )
-    ) : row.status === "queued" ? (
+    ) : status === "queued" ? (
       <>
         <IconActionButton tone="primary" icon={<ChevronsUp aria-hidden className="size-3.5" />} label="Bump" onClick={NOOP} />
         <IconActionButton tone="muted" icon={<X aria-hidden className="size-3.5" />} label="Cancel" onClick={NOOP} />
       </>
-    ) : row.displayOnly ? (
+    ) : row.containment === "rejected" ? (
       <IconActionButton tone="destructive" icon={<Trash2 aria-hidden className="size-3.5" />} label="Delete" onClick={NOOP} />
     ) : (
       <>
@@ -297,7 +339,7 @@ export function DemoRowCard({
         role: "button",
         tabIndex: 0,
         "aria-pressed": selected,
-        "aria-label": `${row.title} — ${PROPOSED_STATUS[row.status].label.toLowerCase()}`,
+        "aria-label": `${row.title} — ${statusText(status, gateAge(row)).toLowerCase()}`,
         "data-demo-row-id": row.id,
         onKeyDown: (e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -305,7 +347,7 @@ export function DemoRowCard({
             handlers.onSelect(row.id);
           }
         },
-        className: cn(row.status === "running" && "border-primary/30"),
+        className: cn(status === "running" && "border-primary/30"),
       }}
       footer={{
         time: row.time,
@@ -320,8 +362,13 @@ export function DemoRowCard({
       <div className="px-3.5 py-2.5">
         <div className="flex min-w-0 items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <StatusIcon aria-hidden className={cn("h-3.5 w-3.5 shrink-0", PROPOSED_STATUS[row.status].iconClass)} />
-            <span className={cn("truncate text-[14px] font-semibold text-foreground", row.displayOnly && "italic font-normal text-muted-foreground")}>
+            <StatusIcon aria-hidden className={cn("h-3.5 w-3.5 shrink-0", PROPOSED_STATUS[status].iconClass)} />
+            <span
+              className={cn(
+                "truncate text-[14px] font-semibold text-foreground",
+                row.containment === "rejected" && "italic font-normal text-muted-foreground",
+              )}
+            >
               {row.title}
             </span>
             {/* which workflow owns this row — needed the moment the queue shows
@@ -342,14 +389,15 @@ export function DemoRowCard({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (isGroup) handlers.onDrillIn(row.id);
-                  else handlers.onSelect(row.id);
+                  handlers.onSelect(row.id);
                 }}
                 className={cn(
                   "ml-auto shrink-0 rounded-md border px-2 py-px text-[10.5px] font-sans font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   sub.actionTone === "violet"
                     ? "border-log-violet/40 bg-log-violet/8 text-log-violet"
-                    : "border-info/40 bg-info/8 text-info",
+                    : sub.actionTone === "destructive"
+                      ? "border-destructive/40 bg-destructive/8 text-destructive"
+                      : "border-info/40 bg-info/8 text-info",
                 )}
               >
                 {sub.action}
@@ -359,32 +407,44 @@ export function DemoRowCard({
         )}
 
         {/* Linked delegation. A `linked` child keeps its own row in its own
-            panel (D4) and the two point at each other — one chip each, never a
+            panel and the two point at each other — one chip each, never a
             duplicated run. `member` children live in the body instead. */}
-        {(row.reviewRunId || row.reviewOf) && (
+        {(row.reviewRunId || row.reviewOf) && <LinkedReviewChip row={row} handlers={handlers} />}
+
+        {/* A SET of linked children — Oath Upload's signers. Still a chip, not
+            a member list: each signer is an Oath Signature run with its own row
+            in that panel, counted there exactly once. */}
+        {linked && (
           <div className="mt-1.5 ml-5">
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                handlers.onSelect((row.reviewRunId ?? row.reviewOf) as string);
+                handlers.onOpenPanel(linked.panel, linked.firstId);
               }}
+              title={`Open the ${linked.panel} panel — these runs live there, not under this row`}
               className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-info/35 bg-info/8 px-2 py-0.5 text-[10.5px] text-info outline-none hover:bg-info/15 focus-visible:ring-2 focus-visible:ring-ring"
             >
-              {row.reviewOf ? (
-                <>
-                  <CornerDownRight aria-hidden className="size-3 shrink-0" />
-                  <span className="truncate">Delegated by {DEMO_ROWS[row.reviewOf]?.title}</span>
-                </>
-              ) : (
-                <>
-                  <ClipboardList aria-hidden className="size-3 shrink-0" />
-                  <span className="truncate">
-                    OCR review · {PROPOSED_STATUS[DEMO_ROWS[row.reviewRunId as string]?.status ?? "queued"].label.toLowerCase()}
-                  </span>
-                  <ArrowUpRight aria-hidden className="size-3 shrink-0" />
-                </>
-              )}
+              <Users aria-hidden className="size-3 shrink-0" />
+              <span className="truncate">{linked.label}</span>
+              <ArrowUpRight aria-hidden className="size-3 shrink-0" />
+            </button>
+          </div>
+        )}
+
+        {row.linkedParentId && !row.reviewOf && (
+          <div className="mt-1.5 ml-5">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                const parent = DEMO_ROWS[row.linkedParentId as string];
+                handlers.onOpenPanel(parent.wfLabel, parent.id);
+              }}
+              className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 py-0.5 text-[10.5px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <CornerDownRight aria-hidden className="size-3 shrink-0" />
+              <span className="truncate">Released by {DEMO_ROWS[row.linkedParentId]?.title}</span>
             </button>
           </div>
         )}
@@ -397,7 +457,7 @@ export function DemoRowCard({
           </div>
         )}
 
-        {isGroup && counts && (
+        {isGroup && counts && (memberCount > 0 ? (
           <>
             <div className="mt-1.5 ml-5 flex items-center gap-2.5 text-[11px]">
               <StatusCounts counts={{ done: counts.done + counts.warnings, running: counts.running, queued: counts.queued, failed: counts.failed }} />
@@ -407,43 +467,166 @@ export function DemoRowCard({
                   {counts.waiting}
                 </span>
               )}
+              {/* Rejected is its own tally. Folding it into done is how a packet
+                  with an unreadable page comes to read as clean. */}
               {counts.rejected > 0 && (
-                <span className="inline-flex items-center gap-1 text-muted-foreground" aria-label={`${counts.rejected} rejected`}>
+                <span
+                  className="inline-flex items-center gap-1 text-muted-foreground"
+                  title={`${counts.rejected} rejected — never became work, excluded from the rollup, and the reason this group cannot read as Verified done`}
+                >
                   <SearchX aria-hidden className="size-3" />
-                  {counts.rejected}
+                  {counts.rejected} rejected
                 </span>
               )}
               <span className="ml-auto inline-flex items-center gap-1 text-success" aria-label="checked progress">
                 <CheckCircle2 aria-hidden className="size-3" />
-                {[...(row.memberIds ?? [])].filter((id) => state.checkedIds.has(id)).length}/{row.memberIds?.length} checked
+                {[...(row.memberIds ?? [])].filter((id) => state.checkedIds.has(id)).length}/{memberCount} checked
               </span>
             </div>
-            {/* Density ladder (ratified): 20+ members collapse to the status
-                matrix; anything smaller stays a readable member list. Member
-                count is a continuous property — never a fourth row type. */}
-            {(row.memberIds?.length ?? 0) > 20 ? (
-              <GroupMatrix row={row} state={state} handlers={handlers} />
-            ) : (
-              <GroupMemberList row={row} state={state} handlers={handlers} />
-            )}
+            <GroupBody row={row} state={state} handlers={handlers} />
           </>
-        )}
+        ) : (
+          <PacketBeforeFanout row={row} handlers={handlers} />
+        ))}
       </div>
     </QueueRowCard>
   );
 }
 
+function LinkedReviewChip({ row, handlers }: { row: DemoRow; handlers: DemoQueueHandlers }) {
+  const targetId = (row.reviewRunId ?? row.reviewOf) as string;
+  const target = DEMO_ROWS[targetId];
+  if (!target) return null;
+  return (
+    <div className="mt-1.5 ml-5">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          handlers.onOpenPanel(target.wfLabel, target.id);
+        }}
+        title={
+          row.reviewOf
+            ? `Open ${target.title} in the ${target.wfLabel} panel`
+            : `Open the OCR panel and select this packet's review row — the records live there, not here`
+        }
+        className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-info/35 bg-info/8 px-2 py-0.5 text-[10.5px] text-info outline-none hover:bg-info/15 focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {row.reviewOf ? (
+          <>
+            <CornerDownRight aria-hidden className="size-3 shrink-0" />
+            <span className="truncate">Delegated by {target.title}</span>
+          </>
+        ) : (
+          <>
+            <ClipboardList aria-hidden className="size-3 shrink-0" />
+            <span className="truncate">OCR review · {statusText(effectiveStatus(target)).toLowerCase()}</span>
+          </>
+        )}
+        <ArrowUpRight aria-hidden className="size-3 shrink-0" />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * A packet parked at review has NO members: member rows are created by the
+ * fan-out, and the fan-out is exactly what approval releases. So the row shows
+ * the extracted count — the thing it genuinely knows — and offers the bulk
+ * approval right here. Editing a value is deliberately NOT offered: a value may
+ * only change with its scanned page on screen.
+ */
+function PacketBeforeFanout({ row, handlers }: { row: DemoRow; handlers: DemoQueueHandlers }) {
+  const bulk = row.bulkApprove;
+  if (row.extractedCount === undefined) return null;
+  return (
+    <div className="mt-1.5 ml-5 flex flex-col gap-1.5">
+      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+        <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/50 px-2 py-0.5 font-medium text-secondary-foreground">
+          <Users aria-hidden className="size-3 text-muted-foreground" />
+          {row.extractedCount} people
+        </span>
+        <span className="text-muted-foreground">extracted — no member rows yet, they are created when you approve</span>
+      </div>
+      {bulk && (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-warning/35 bg-warning/6 px-2.5 py-1.5">
+          <button
+            type="button"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-warning/55 bg-warning/15 px-2.5 py-0.5 text-[11px] font-semibold text-warning outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <CheckCircle2 aria-hidden className="size-3" />
+            Approve {bulk.approvable} of {bulk.total}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (row.reviewRunId) handlers.onOpenPanel(DEMO_ROWS[row.reviewRunId].wfLabel, row.reviewRunId);
+            }}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-0.5 text-[11px] font-semibold text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Open review
+            <ArrowUpRight aria-hidden className="size-3" />
+          </button>
+          <span className="min-w-0 flex-1 text-[10.5px] leading-snug text-muted-foreground">
+            {bulk.blockedNote} {bulk.editNote}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Group internals — matrix (50) + compact list (12)
+// Density ladder — 1–3 inline · 4–12 compact · 13–40 scroll well · 41+ matrix
 // ---------------------------------------------------------------------------
+
+function GroupBody({ row, state, handlers }: { row: DemoRow; state: DemoQueueState; handlers: DemoQueueHandlers }) {
+  const ids = orderedMemberIds(row.id);
+  const rung = densityRung(ids.length);
+  if (rung === "matrix") return <GroupMatrix row={row} state={state} handlers={handlers} />;
+  if (rung === "inline") {
+    // At three people or fewer the group IS its members — a chevron here is
+    // pure friction, so they are always open and rendered as full rows.
+    return (
+      <div className="mt-1.5 ml-5 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()} role="presentation">
+        {ids.map((id) => (
+          <DemoRowCard key={id} row={DEMO_ROWS[id]} state={state} handlers={handlers} nested />
+        ))}
+      </div>
+    );
+  }
+  return <GroupMemberList row={row} state={state} handlers={handlers} rung={rung} />;
+}
 
 function GroupMatrix({ row, state, handlers }: { row: DemoRow; state: DemoQueueState; handlers: DemoQueueHandlers }) {
   const attention = useMemo(
-    () => (row.memberIds ?? []).filter((id) => !DEMO_ROWS[id].displayOnly && ATTENTION_STATUSES.includes(DEMO_ROWS[id].status)),
+    () => (row.memberIds ?? []).filter((id) => DEMO_ROWS[id].containment !== "rejected" && ATTENTION_STATUSES.includes(DEMO_ROWS[id].status)),
     [row.memberIds],
   );
   return (
     <>
+      {/* The strip sits ABOVE the matrix on purpose. Fifty cells is a texture,
+          not a message — the sentence that names who needs you has to be read
+          first, or the matrix becomes decoration. */}
+      <div className="mt-2 ml-5 flex items-center gap-2 rounded-md border border-warning/35 bg-warning/6 px-2.5 py-1.5">
+        <AlertTriangle aria-hidden className="size-3.5 shrink-0 text-warning" />
+        <span className="min-w-0 flex-1 truncate text-[11.5px] text-warning">
+          {attention.length} need attention — {attentionBreakdown(row.id)}
+        </span>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            handlers.onDrillIn(row.id);
+            if (attention[0]) handlers.onSelect(attention[0]);
+          }}
+          className="shrink-0 rounded-md border border-warning/45 bg-warning/12 px-2.5 py-0.5 text-[10.5px] font-semibold text-warning outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          Start review
+        </button>
+      </div>
       <div className="mt-1.5 ml-5 flex flex-wrap gap-[3px]" role="listbox" aria-label="Member status matrix">
         {(row.memberIds ?? []).map((id) => {
           const m = DEMO_ROWS[id];
@@ -462,30 +645,13 @@ function GroupMatrix({ row, state, handlers }: { row: DemoRow; state: DemoQueueS
               }}
               className={cn(
                 "size-3.5 rounded-[3px] outline-none transition-transform hover:scale-125 focus-visible:ring-2 focus-visible:ring-ring",
-                m.displayOnly ? "bg-muted-foreground/40" : MATRIX_CELL[m.status],
+                m.containment === "rejected" ? "bg-muted-foreground/40" : MATRIX_CELL[m.status],
                 cellSelected && "ring-2 ring-primary",
                 state.checkedIds.has(id) && "ring-1 ring-success/70",
               )}
             />
           );
         })}
-      </div>
-      <div className="mt-2 ml-5 flex items-center gap-2 rounded-md border border-warning/35 bg-warning/6 px-2.5 py-1.5">
-        <AlertTriangle aria-hidden className="size-3.5 shrink-0 text-warning" />
-        <span className="min-w-0 flex-1 truncate text-[11.5px] text-warning">
-          {attention.length} need attention — {attentionBreakdown(row.id)}
-        </span>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            handlers.onDrillIn(row.id);
-            if (attention[0]) handlers.onSelect(attention[0]);
-          }}
-          className="shrink-0 rounded-md border border-warning/45 bg-warning/12 px-2.5 py-0.5 text-[10.5px] font-semibold text-warning outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          Start review
-        </button>
       </div>
     </>
   );
@@ -497,23 +663,41 @@ function attentionBreakdown(groupId: string): string {
   const parts: string[] = [];
   if (c.failed) parts.push(`${c.failed} failed`);
   if (c.waiting) parts.push(`${c.waiting} waiting on you`);
+  if (c.parked) parts.push(`${c.parked} write parked`);
   if (c.warnings) parts.push(`${c.warnings} with warnings`);
   if (c.rejected) parts.push(`${c.rejected} rejected`);
   return parts.join(" · ") || "all clear";
 }
 
-function GroupMemberList({ row, state, handlers }: { row: DemoRow; state: DemoQueueState; handlers: DemoQueueHandlers }) {
+function GroupMemberList({
+  row,
+  state,
+  handlers,
+  rung,
+}: {
+  row: DemoRow;
+  state: DemoQueueState;
+  handlers: DemoQueueHandlers;
+  rung: "compact" | "well";
+}) {
   const ids = orderedMemberIds(row.id);
   const expanded = state.expandedGroups.has(row.id);
-  const visible = expanded ? ids : ids.slice(0, 4);
+  // 13–40 people: every line stays available, but inside a fixed-height well so
+  // a group of 40 is the same size on screen as a group of 13.
+  const visible = rung === "well" ? ids : expanded ? ids : ids.slice(0, 4);
   const noun = row.wfLabel === "Oath Signature" ? "signers" : "people";
   return (
     <div className="mt-1.5 ml-5">
-      <div className="divide-y divide-border/40 overflow-hidden rounded-md border border-border/60">
+      <div
+        className={cn(
+          "divide-y divide-border/40 overflow-hidden rounded-md border border-border/60",
+          rung === "well" && "max-h-[8.5rem] overflow-y-auto",
+        )}
+      >
         {visible.map((id) => {
           const m = DEMO_ROWS[id];
           const spec = MEMBER_STATUS_ICON[m.status];
-          const Icon = spec.icon;
+          const Icon = m.containment === "rejected" ? SearchX : spec.icon;
           return (
             <button
               key={id}
@@ -527,27 +711,43 @@ function GroupMemberList({ row, state, handlers }: { row: DemoRow; state: DemoQu
                 state.selectedId === id && "bg-info/8",
               )}
             >
-              <Icon aria-hidden className={cn("size-3 shrink-0", spec.cls)} />
-              <span className="min-w-0 flex-1 truncate text-foreground">{m.title}</span>
-              <span className={cn("shrink-0 truncate font-mono text-[10px]", m.status === "failed" ? "text-destructive" : "text-muted-foreground")}>
+              <Icon aria-hidden className={cn("size-3 shrink-0", m.containment === "rejected" ? "text-muted-foreground" : spec.cls)} />
+              <span className={cn("min-w-0 flex-1 truncate text-foreground", m.containment === "rejected" && "italic text-muted-foreground")}>
+                {m.title}
+              </span>
+              <span className={cn("shrink-0 truncate font-mono text-[10px]", m.status === "failed" && m.containment !== "rejected" ? "text-destructive" : "text-muted-foreground")}>
                 {m.memberFact}
               </span>
-              <span className="w-16 shrink-0 text-right font-mono text-[10px] text-muted-foreground tabular-nums">{m.eid}</span>
+              <span className="w-16 shrink-0 text-right font-mono text-[10px] text-muted-foreground tabular-nums">{m.eid ?? "—"}</span>
             </button>
           );
         })}
       </div>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          handlers.onToggleGroup(row.id);
-        }}
-        className="mt-1 inline-flex items-center gap-1 text-[10.5px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        {expanded ? <ChevronUp aria-hidden className="size-3" /> : <ChevronDown aria-hidden className="size-3" />}
-        {expanded ? "Collapse" : `Show all ${ids.length} ${noun}`}
-      </button>
+      {rung === "well" ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            handlers.onDrillIn(row.id);
+          }}
+          className="mt-1 inline-flex items-center gap-1 text-[10.5px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ArrowRight aria-hidden className="size-3" />
+          Open all {ids.length} {noun}
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            handlers.onToggleGroup(row.id);
+          }}
+          className="mt-1 inline-flex items-center gap-1 text-[10.5px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {expanded ? <ChevronUp aria-hidden className="size-3" /> : <ChevronDown aria-hidden className="size-3" />}
+          {expanded ? "Collapse" : `Show all ${ids.length} ${noun}`}
+        </button>
+      )}
     </div>
   );
 }
@@ -560,7 +760,7 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
   const group = DEMO_ROWS[groupId];
   const ids = orderedMemberIds(groupId);
   const counts = groupCounts(groupId);
-  const attentionN = counts.failed + counts.waiting + counts.warnings;
+  const attentionN = counts.failed + counts.waiting + counts.warnings + counts.parked;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-1.5 border-b border-border/60 px-3 py-2">
@@ -591,8 +791,9 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
       <div role="listbox" aria-label="Group members, attention first" className="min-h-0 flex-1 divide-y divide-border/30 overflow-y-auto">
         {ids.map((id) => {
           const m = DEMO_ROWS[id];
+          const rejected = m.containment === "rejected";
           const spec = MEMBER_STATUS_ICON[m.status];
-          const Icon = m.displayOnly ? SearchX : spec.icon;
+          const Icon = rejected ? SearchX : spec.icon;
           const isSel = state.selectedId === id;
           return (
             <button
@@ -608,20 +809,18 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
                 isSel && "bg-info/8 shadow-[inset_2px_0_0_var(--info)]",
               )}
             >
-              <Icon aria-hidden className={cn("size-3.5", m.displayOnly ? "text-muted-foreground" : spec.cls)} />
+              <Icon aria-hidden className={cn("size-3.5", rejected ? "text-muted-foreground" : spec.cls)} />
               <span className="flex min-w-0 items-center gap-1.5">
-                <span className={cn("truncate font-medium text-foreground", m.displayOnly && "italic font-normal text-muted-foreground")}>
-                  {m.title}
-                </span>
+                <span className={cn("truncate font-medium text-foreground", rejected && "italic font-normal text-muted-foreground")}>{m.title}</span>
                 {state.checkedIds.has(id) && <CheckCircle2 aria-hidden className="size-3 shrink-0 text-success" />}
               </span>
               <span className="font-mono text-[10.5px] text-muted-foreground tabular-nums">{m.eid ?? "—"}</span>
               <span
                 className={cn(
                   "truncate font-mono text-[10.5px]",
-                  m.status === "failed" && !m.displayOnly && "text-destructive",
+                  m.status === "failed" && !rejected && "text-destructive",
                   (m.status === "waiting" || m.status === "doneWarnings") && "text-warning",
-                  (m.status === "verifiedDone" || m.status === "running" || m.displayOnly) && "text-muted-foreground",
+                  (m.status === "verifiedDone" || m.status === "running" || rejected) && "text-muted-foreground",
                   m.status === "queued" && "text-muted-foreground/70",
                 )}
               >
@@ -655,16 +854,15 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
 // The panel
 // ---------------------------------------------------------------------------
 
-
-export function DemoQueue({ state, handlers }: { state: DemoQueueState; handlers: DemoQueueHandlers }) {
-  const topLevel = BAND_ORDER.flatMap((b) => b.ids).map((id) => DEMO_ROWS[id]);
-  const countFor = (f: DemoFilter) => topLevel.filter((r) => rowMatchesFilter(r, f)).length;
-  const finished = BAND_ORDER.find((b) => b.key === "finished")?.ids.map((id) => DEMO_ROWS[id]) ?? [];
+export function DemoQueue({ rows, state, handlers }: { rows: DemoRow[]; state: DemoQueueState; handlers: DemoQueueHandlers }) {
+  const inView = rows.filter((r) => rowInBucket(r, state.filter));
+  const bands = bandsFor(inView);
+  const finished = bands.find((b) => b.key === "finished")?.rows ?? [];
   const digest = {
-    done: finished.filter((r) => r.status === "verifiedDone").length,
-    warned: finished.filter((r) => r.status === "doneWarnings").length,
-    failed: finished.filter((r) => r.status === "failed").length,
-    cancelled: finished.filter((r) => r.status === "cancelled").length,
+    done: finished.filter((r) => effectiveStatus(r) === "verifiedDone").length,
+    warned: finished.filter((r) => effectiveStatus(r) === "doneWarnings").length,
+    failed: finished.filter((r) => effectiveStatus(r) === "failed").length,
+    cancelled: finished.filter((r) => effectiveStatus(r) === "cancelled").length,
   };
 
   if (state.view.kind === "drill") {
@@ -678,13 +876,20 @@ export function DemoQueue({ state, handlers }: { state: DemoQueueState; handlers
   return (
     <section aria-label="Queue" className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2 text-[12px] text-muted-foreground">
-        <span className="text-[13px] font-semibold text-foreground">Queue</span>· Jul 24
-        <span className="ml-auto font-mono text-[10px]">{countFor("all")} runs</span>
+        <span className="text-[13px] font-semibold text-foreground">Queue</span>· Jul 25
+        <span className="ml-auto font-mono text-[10px]">{inView.length} runs</span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto pb-3">
-        {BAND_ORDER.map((band) => {
-          const ids = band.ids.filter((id) => rowMatchesFilter(DEMO_ROWS[id], state.filter));
-          if (ids.length === 0) return null;
+        {inView.length === 0 && (
+          <div className="flex flex-col items-center gap-1.5 px-6 py-12 text-center">
+            <FileText aria-hidden className="size-5 text-muted-foreground/60" />
+            <p className="max-w-[34ch] text-[11.5px] text-muted-foreground">
+              Nothing in this view. The badge beside the workflow and the pill above both read zero — they are the same count.
+            </p>
+          </div>
+        )}
+        {bands.map((band) => {
+          if (band.rows.length === 0) return null;
           return (
             <div key={band.key}>
               <div
@@ -694,8 +899,13 @@ export function DemoQueue({ state, handlers }: { state: DemoQueueState; handlers
                 )}
               >
                 {band.label}
-                <span className={cn("rounded-full border px-1.5 font-mono text-[10px] tabular-nums", band.key === "attention" ? "border-warning/50" : "border-border")}>
-                  {ids.length}
+                <span
+                  className={cn(
+                    "rounded-full border px-1.5 font-mono text-[10px] tabular-nums",
+                    band.key === "attention" ? "border-warning/50" : "border-border",
+                  )}
+                >
+                  {band.rows.length}
                 </span>
                 <span aria-hidden className="h-px flex-1 bg-border/60" />
               </div>
@@ -722,8 +932,8 @@ export function DemoQueue({ state, handlers }: { state: DemoQueueState; handlers
                   )}
                 </div>
               )}
-              {ids.map((id) => (
-                <DemoRowCard key={id} row={DEMO_ROWS[id]} state={state} handlers={handlers} />
+              {band.rows.map((row) => (
+                <DemoRowCard key={row.id} row={row} state={state} handlers={handlers} />
               ))}
             </div>
           );
