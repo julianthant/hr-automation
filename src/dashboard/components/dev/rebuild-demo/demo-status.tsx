@@ -93,7 +93,21 @@ export const PROPOSED_STATUS: Record<ProposedStatus, ProposedStatusSpec> = {
   },
 };
 
-export function StatusBadge({ status, label }: { status: ProposedStatus; label?: string }) {
+/**
+ * A collapsed row must say how OLD the decision is, not just that there is one.
+ * "Waiting on you" is a state; "Waiting on you · 10m" is a priority — it is the
+ * difference between a queue you scan and a queue you triage.
+ */
+export function statusText(status: ProposedStatus, age?: string): string {
+  const base = PROPOSED_STATUS[status].label;
+  return age ? `${base} · ${age}` : base;
+}
+
+export function StatusBadge({ status, label, age }: { status: ProposedStatus; label?: string; age?: string }) {
   const spec = PROPOSED_STATUS[status];
-  return <span className={cn("rounded-md px-2 py-0.5 font-sans text-[10px] font-medium tracking-wide", spec.badge)}>{label ?? spec.label}</span>;
+  return (
+    <span className={cn("shrink-0 rounded-md px-2 py-0.5 font-sans text-[10px] font-medium tracking-wide", spec.badge)}>
+      {label ?? statusText(status, age)}
+    </span>
+  );
 }
