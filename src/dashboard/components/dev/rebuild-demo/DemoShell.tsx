@@ -473,7 +473,7 @@ function BrowserTile({ b }: { b: DemoBrowser }) {
           }
         }}
         className={cn(
-          "flex w-[112px] cursor-pointer flex-col gap-0.5 rounded-md border px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "flex w-full min-w-0 cursor-pointer flex-col gap-0.5 rounded-md border px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring",
           tone.cls,
           open && "ring-1 ring-ring/60",
         )}
@@ -534,11 +534,16 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
         <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
         {/* the trailing instance ordinal is always stripped from the title */}
         <span className="min-w-0 truncate text-[12.5px] font-semibold text-foreground">{s.workflow}</span>
+        {s.queued ? (
+          <span className="shrink-0 rounded bg-primary/10 px-1.5 py-px text-[10px] leading-none text-primary">
+            <span className="font-medium">{s.queued}</span> queued
+          </span>
+        ) : null}
         <span className={cn("ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-wider", tone.text)}>{tone.label}</span>
       </div>
       <span className={cn("mt-0.5 truncate text-[10.5px]", inFlight ? "font-mono text-muted-foreground" : "text-muted-foreground")}>{s.subline}</span>
 
-      <div className="mt-1.5 flex flex-wrap gap-1">
+      <div className="mt-1.5 grid grid-cols-2 gap-1">
         {s.browsers.map((b) => (
           <BrowserTile key={b.id} b={b} />
         ))}
@@ -567,11 +572,6 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
 
       <div className="mt-1.5 flex items-center gap-2 border-t border-border/60 pt-1.5 text-[10px] text-muted-foreground">
         <span className="font-mono tabular-nums">{s.elapsedSec > 0 ? fmtElapsed(s.elapsedSec + tick) : "—"}</span>
-        {s.queued ? (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded bg-primary/10 px-1.5 py-px leading-none text-primary">
-            <span className="font-medium">{s.queued}</span> queued
-          </span>
-        ) : null}
         <span className="min-w-0 flex-1 truncate">{s.step ?? ""}</span>
         <button
           type="button"

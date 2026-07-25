@@ -40,7 +40,6 @@ import {
   memberAttentionIds,
   orderedMemberIds,
   SYSTEM_ACCENT,
-  WATERFALL_ACCENT,
   type DemoLine,
   type DemoRecord,
   type DemoRecordCheck,
@@ -235,93 +234,133 @@ function FailureCardView({ row }: { row: DemoRow }) {
 // strip + waterfall + filmstrip
 // ---------------------------------------------------------------------------
 
-function StepChipView({ step }: { step: DemoStep }) {
-  const stateCls =
-    step.state === "done"
-      ? "border-success/35 text-success"
-      : step.state === "current"
-        ? "border-primary/50 bg-primary/8 text-primary"
-        : step.state === "waiting"
-          ? "border-warning/45 bg-warning/8 text-warning"
-          : step.state === "failed"
-            ? "border-destructive/50 bg-destructive/8 text-destructive"
-            : step.state === "cancelled"
-              ? "border-warning/40 bg-warning/6 text-warning"
-              : "border-border text-muted-foreground";
-  return (
-    <span className="group relative">
-      <button
-        type="button"
-        onClick={NOOP}
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          stateCls,
-        )}
-      >
-        {step.state === "done" && <Check aria-hidden className="size-3" />}
-        {step.state === "current" && <span aria-hidden className="size-1.5 rounded-full bg-primary animate-pulse motion-reduce:animate-none" />}
-        {step.state === "waiting" && <Pause aria-hidden className="size-3" />}
-        {step.state === "failed" && <X aria-hidden className="size-3" />}
-        {step.state === "cancelled" && <Ban aria-hidden className="size-3" />}
-        {step.label}
-        {step.durationSec !== undefined && <span className="font-mono text-[10px] text-muted-foreground">{fmtElapsed(step.durationSec)}</span>}
-        {step.attempts && step.attempts > 1 && (
-          <span className="rounded border border-warning/40 px-1 text-[9px] font-bold text-warning">×{step.attempts}</span>
-        )}
-      </button>
-      {(step.keyLines || step.durationSec !== undefined) && (
-        <span className="absolute left-0 top-full z-50 mt-1.5 hidden w-60 rounded-lg border border-border bg-popover p-2.5 text-left shadow-lg group-hover:block group-focus-within:block">
-          <span className="mb-1 block text-[11.5px] font-semibold text-foreground">{step.label}</span>
-          <span className="flex items-center justify-between text-[10.5px]">
-            <span className="text-muted-foreground">Status</span>
-            <span className="font-mono text-secondary-foreground">{step.state}</span>
-          </span>
-          {step.durationSec !== undefined && (
-            <span className="flex items-center justify-between text-[10.5px]">
-              <span className="text-muted-foreground">Duration</span>
-              <span className="font-mono text-secondary-foreground">{fmtElapsed(step.durationSec)}</span>
-            </span>
-          )}
-          {step.attempts && (
-            <span className="flex items-center justify-between text-[10.5px]">
-              <span className="text-muted-foreground">Attempts</span>
-              <span className={cn("font-mono", step.attempts > 1 ? "text-warning" : "text-secondary-foreground")}>{step.attempts}</span>
-            </span>
-          )}
-          {step.keyLines && (
-            <span className="mt-1.5 flex flex-col border-t border-border/60 pt-1.5 font-mono text-[10px] leading-relaxed text-secondary-foreground">
-              {step.keyLines.map((l) => (
-                <span key={l}>{l}</span>
-              ))}
-            </span>
-          )}
-          {step.hasShot && <span className="mt-1 block text-[10.5px] text-info">Step screenshot →</span>}
-        </span>
-      )}
-    </span>
-  );
-}
+/**
+ * Timeline — the run's real shape, to scale.
+ *
+ * Replaces the old pill strip + separate progress bar. Those told you the
+ * ORDER of the steps and, separately, how much bar was filled; neither told you
+ * where the time actually went. Here each step is a track segment sized by its
+ * REAL recorded duration, so a 1-minute Kronos search dwarfs a 12-second
+ * identity check the way it does in life, and an 18-minute wait at a gate is
+ * visibly the whole run. Nothing is fabricated: a step with no duration yet
+ * (pending, or currently running) gets a minimum slot and a hatched fill rather
+ * than an invented width.
+ */
+const STEP_TONE: Record<DemoStep["state"], { bar: string; text: string; dot: string }> = {
+  done: { bar: "bg-success/55", text: "text-success", dot: "bg-success" },
+  current: { bar: "bg-primary/70", text: "text-primary", dot: "bg-primary" },
+  waiting: { bar: "bg-warning/60", text: "text-warning", dot: "bg-warning" },
+  failed: { bar: "bg-destructive/65", text: "text-destructive", dot: "bg-destructive" },
+  cancelled: { bar: "bg-warning/40", text: "text-warning", dot: "bg-warning" },
+  pending: { bar: "bg-border", text: "text-muted-foreground", dot: "bg-border" },
+};
 
-function Waterfall({ row }: { row: DemoRow }) {
-  const segs = row.steps.filter((s) => s.durationSec);
-  if (segs.length < 2) return null;
-  const active = segs.reduce((a, s) => a + (s.durationSec ?? 0), 0);
+/** a step with no recorded time still needs a visible slot — this is its floor */
+const MIN_SLOT_SEC = 8;
+
+function Timeline({ row }: { row: DemoRow }) {
+  const steps = row.steps;
+  if (steps.length === 0) return null;
+
+  const active = steps.reduce((a, s) => a + (s.durationSec ?? 0), 0);
+  const gateSec = row.gate ? Math.max(active, 90) : 0;
+  const slot = (s: DemoStep) => Math.max(s.durationSec ?? 0, MIN_SLOT_SEC);
+  const total = steps.reduce((a, s) => a + slot(s), 0) + gateSec;
+
   return (
-    <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
-      <span aria-hidden className="flex h-1.5 flex-1 overflow-hidden rounded-full bg-secondary">
-        {segs.map((s, i) => (
-          <span
-            key={i}
-            className={s.system ? WATERFALL_ACCENT[s.system] : "bg-log-slate/60"}
-            style={{ flexGrow: s.durationSec }}
-            title={`${s.label} — ${fmtElapsed(s.durationSec ?? 0)}`}
-          />
-        ))}
-        {row.gate && <span className="bg-warning/45" style={{ flexGrow: Math.max(active, 60) }} title={`Waiting — ${row.gate.waiting}`} />}
-      </span>
-      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-        {fmtElapsed(active)} active{row.gate ? ` · ${row.gate.waiting} waiting` : ""}
-      </span>
+    <div className="border-b border-border/60 px-3 py-2">
+      <div className="flex items-stretch gap-[3px]">
+        {steps.map((s) => {
+          const tone = STEP_TONE[s.state];
+          const width = `${(slot(s) / total) * 100}%`;
+          const timed = s.durationSec !== undefined;
+          return (
+            <div key={s.label} className="group relative min-w-0" style={{ width }}>
+              {/* label rail — truncates hard; the hover card carries the detail */}
+              <div className="flex min-w-0 items-center gap-1">
+                <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot, s.state === "current" && "animate-pulse motion-reduce:animate-none")} />
+                <span className={cn("min-w-0 truncate text-[10.5px]", s.state === "pending" ? "text-muted-foreground" : tone.text)}>{s.label}</span>
+              </div>
+              {/* the track segment — width IS the duration */}
+              <button
+                type="button"
+                onClick={NOOP}
+                aria-label={`${s.label} — ${s.state}${timed ? `, ${fmtElapsed(s.durationSec ?? 0)}` : ""}`}
+                className={cn(
+                  "mt-1 block h-2 w-full rounded-[3px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  tone.bar,
+                  !timed && s.state !== "pending" && "opacity-70",
+                  s.state === "pending" && "border border-dashed border-border bg-transparent",
+                )}
+              />
+              <div className="mt-0.5 flex min-w-0 items-baseline gap-1">
+                <span className="truncate font-mono text-[9.5px] tabular-nums text-muted-foreground">{timed ? fmtElapsed(s.durationSec ?? 0) : ""}</span>
+                {s.attempts && s.attempts > 1 && <span className="shrink-0 font-mono text-[9px] font-bold text-warning">×{s.attempts}</span>}
+              </div>
+
+              {(s.keyLines || timed) && (
+                <span className="absolute left-0 top-full z-50 mt-1 hidden w-60 rounded-lg border border-border bg-popover p-2.5 text-left shadow-lg group-hover:block group-focus-within:block">
+                  <span className="mb-1 block text-[11.5px] font-semibold text-foreground">{s.label}</span>
+                  <span className="flex items-center justify-between text-[10.5px]">
+                    <span className="text-muted-foreground">Status</span>
+                    <span className={cn("font-mono", tone.text)}>{s.state}</span>
+                  </span>
+                  {timed && (
+                    <span className="flex items-center justify-between text-[10.5px]">
+                      <span className="text-muted-foreground">Took</span>
+                      <span className="font-mono text-secondary-foreground">{fmtElapsed(s.durationSec ?? 0)}</span>
+                    </span>
+                  )}
+                  {s.system && (
+                    <span className="flex items-center justify-between text-[10.5px]">
+                      <span className="text-muted-foreground">System</span>
+                      <span className="font-mono text-secondary-foreground">{s.system}</span>
+                    </span>
+                  )}
+                  {s.attempts && s.attempts > 1 && (
+                    <span className="flex items-center justify-between text-[10.5px]">
+                      <span className="text-muted-foreground">Attempts</span>
+                      <span className="font-mono text-warning">{s.attempts}</span>
+                    </span>
+                  )}
+                  {s.keyLines && (
+                    <span className="mt-1.5 flex flex-col border-t border-border/60 pt-1.5 font-mono text-[10px] leading-relaxed text-secondary-foreground">
+                      {s.keyLines.map((l) => (
+                        <span key={l}>{l}</span>
+                      ))}
+                    </span>
+                  )}
+                  {s.hasShot && <span className="mt-1 block text-[10.5px] text-info">Step screenshot →</span>}
+                </span>
+              )}
+            </div>
+          );
+        })}
+
+        {/* the wait is part of the run's time, so it is part of the timeline */}
+        {row.gate && (
+          <div className="group relative min-w-0" style={{ width: `${(gateSec / total) * 100}%` }}>
+            <div className="flex min-w-0 items-center gap-1">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warning animate-pulse motion-reduce:animate-none" />
+              <span className="min-w-0 truncate text-[10.5px] text-warning">Waiting on you</span>
+            </div>
+            <span
+              aria-hidden
+              className="mt-1 block h-2 w-full rounded-[3px] bg-[repeating-linear-gradient(45deg,var(--color-warning)_0_4px,transparent_4px_8px)] opacity-70"
+            />
+            <span className="mt-0.5 block truncate font-mono text-[9.5px] tabular-nums text-warning">{row.gate.waiting}</span>
+          </div>
+        )}
+      </div>
+
+      {/* axis — when it started, how long it has been, where the time went */}
+      <div className="mt-1.5 flex items-baseline gap-2 border-t border-border/40 pt-1 font-mono text-[9.5px] text-muted-foreground">
+        <span>{row.time}</span>
+        <span aria-hidden className="h-px flex-1 bg-border/50" />
+        <span className="tabular-nums">
+          {fmtElapsed(active)} working{row.gate ? ` · ${row.gate.waiting} waiting on you` : ""}
+        </span>
+      </div>
     </div>
   );
 }
@@ -334,36 +373,23 @@ function Waterfall({ row }: { row: DemoRow }) {
  */
 function EvidenceBar({ row }: { row: DemoRow }) {
   if (row.shots.length === 0) return null;
-  const errors = row.shots.filter((s) => s.kind === "error").length;
   return (
-    <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5">
-      <span className="flex shrink-0 items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-        <Camera aria-hidden className="size-3" />
-        Evidence
-        <span className="font-mono normal-case tracking-normal text-muted-foreground/80">{row.shots.length}</span>
-        {errors > 0 && (
-          <span className="rounded border border-destructive/40 px-1 font-mono text-[9px] normal-case tracking-normal text-destructive">
-            {errors} at failure
-          </span>
-        )}
-      </span>
-      <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
-        {row.shots.map((s) => (
-          <button
-            key={s.label}
-            type="button"
-            onClick={NOOP}
-            title={`Open screenshot — ${s.label}`}
-            className={cn(
-              "flex h-10 w-[4.75rem] shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border bg-secondary/40 outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              s.kind === "error" ? "border-destructive/45 hover:border-destructive" : "border-border hover:border-info/50",
-            )}
-          >
-            <Camera aria-hidden className={cn("size-3", s.kind === "error" ? "text-destructive" : "text-muted-foreground")} />
-            <span className="max-w-full truncate px-1 text-[8.5px] text-muted-foreground">{s.label}</span>
-          </button>
-        ))}
-      </div>
+    <div className="flex gap-1.5 overflow-x-auto border-b border-border/60 px-3 py-1.5">
+      {row.shots.map((s) => (
+        <button
+          key={s.label}
+          type="button"
+          onClick={NOOP}
+          title={`Open screenshot — ${s.label}`}
+          className={cn(
+            "flex h-10 w-[4.75rem] shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border bg-secondary/40 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            s.kind === "error" ? "border-destructive/45 hover:border-destructive" : "border-border hover:border-info/50",
+          )}
+        >
+          <Camera aria-hidden className={cn("size-3", s.kind === "error" ? "text-destructive" : "text-muted-foreground")} />
+          <span className="max-w-full truncate px-1 text-[8.5px] text-muted-foreground">{s.label}</span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -496,196 +522,145 @@ function LogsTab({ row, liveCount }: { row: DemoRow; liveCount: number }) {
 }
 
 /**
- * Data tab — two modes over ONE ledger.
- *  · Recorded  — every value the run read or wrote, in order (the audit view).
- *  · Edit & re-run — change what was extracted and continue from those values,
- *    optionally seeded from a prior run of the same person. This is the
- *    "the extraction was wrong, fix it and go" path; it replaces retyping the
- *    whole input in the Run modal.
+ * Data tab — ONE surface, not two modes.
+ *
+ * Every value the run touched, in order, grouped by step, with where it came
+ * from and when. The values the run READ are editable in place: change one and
+ * the footer offers to start a fresh run from these values. So the audit view
+ * and the "the extraction was wrong, fix it and go" path are the same screen —
+ * you never have to switch modes to see what you are about to change, and you
+ * never retype a whole input into the Run modal to correct one field.
+ *
+ * Writes are shown but never editable: what a run put into UCPath is a record
+ * of what happened, not a form.
  */
 function DataTab({ row }: { row: DemoRow }) {
-  const [mode, setMode] = useState<"recorded" | "edit">("recorded");
-  useEffect(() => setMode("recorded"), [row.id]);
-  const stopped = TERMINAL.includes(row.status) || row.status === "waiting" || row.status === "parked";
-  const editable = row.data.filter((d) => d.dir === "read");
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [seededFrom, setSeededFrom] = useState<number | null>(null);
+  useEffect(() => {
+    setEdits({});
+    setSeededFrom(null);
+  }, [row.id]);
 
   if (row.data.length === 0) {
     return <EmptyTab icon={Database} text="No data points recorded — this run has not read or written anything yet." />;
   }
 
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-1 border-b border-border/60 px-3 py-1.5">
-        <div className="inline-flex rounded-md border border-border bg-secondary/40 p-0.5">
-          {(["recorded", "edit"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              aria-pressed={mode === m}
-              disabled={m === "edit" && (!stopped || editable.length === 0)}
-              onClick={() => setMode(m)}
-              className={cn(
-                "rounded px-2 py-0.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40",
-                mode === m ? "bg-card font-semibold text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {m === "recorded" ? "Recorded" : "Edit & re-run"}
-            </button>
-          ))}
-        </div>
-        {!stopped && (
-          <span className="text-[10.5px] text-muted-foreground">Editing unlocks when the run stops</span>
-        )}
-      </div>
-      {mode === "recorded" ? <RecordedData row={row} /> : <EditData row={row} />}
-    </div>
-  );
-}
-
-function EditData({ row }: { row: DemoRow }) {
-  const fields = row.data.filter((d) => d.dir === "read");
-  const [edits, setEdits] = useState<Record<string, string>>({});
-  const [seeded, setSeeded] = useState(false);
-  useEffect(() => {
-    setEdits({});
-    setSeeded(false);
-  }, [row.id]);
-  const changed = Object.entries(edits).filter(([k, v]) => v !== fields.find((f) => f.field === k)?.value);
-  const steps = [...new Set(fields.map((d) => d.step))];
-
-  return (
-    <>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-2xl px-3 py-3">
-          <div className="rounded-lg border border-warning/35 bg-warning/6 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-            <span className="font-semibold text-warning">Override what was extracted.</span> Re-running replays this run from the
-            values below instead of re-reading the source. Nothing is written until you press Re-run — and the run keeps its
-            history, so the original extraction stays on the record.
-          </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              setSeeded(true);
-              setEdits((e) => ({ ...e, ...Object.fromEntries(fields.slice(0, 2).map((f) => [f.field, f.value])) }));
-            }}
-            className="mt-2.5 inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <History aria-hidden className="size-3" />
-            Copy from a prior run
-            <span className="font-mono text-[10px] text-muted-foreground">#{Math.max(row.run - 1, 1)}</span>
-          </button>
-          {seeded && (
-            <span className="ml-2 text-[10.5px] text-info">Seeded from run #{Math.max(row.run - 1, 1)} — edit anything below.</span>
-          )}
-
-          {steps.map((step) => (
-            <div key={step} className="mt-3">
-              <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold text-secondary-foreground">
-                {step}
-                <span aria-hidden className="h-px flex-1 bg-border/60" />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {fields
-                  .filter((d) => d.step === step)
-                  .map((d) => {
-                    const value = edits[d.field] ?? d.value;
-                    const dirty = value !== d.value;
-                    return (
-                      <label key={d.field} className="flex flex-col gap-1">
-                        <span className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
-                          {d.field}
-                          {dirty && <span aria-hidden className="size-1.5 rounded-full bg-warning" />}
-                          <SystemChip system={d.system} />
-                        </span>
-                        <input
-                          value={value}
-                          onChange={(e) => setEdits((prev) => ({ ...prev, [d.field]: e.target.value }))}
-                          className={cn(
-                            "rounded-md border bg-secondary/30 px-2 py-1 font-mono text-[11.5px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                            dirty ? "border-warning/50" : "border-border",
-                          )}
-                        />
-                      </label>
-                    );
-                  })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="flex items-center gap-2 border-t border-border/60 bg-secondary/20 px-3 py-2">
-        <span className="text-[11px] text-muted-foreground">
-          {changed.length === 0 ? "No changes yet" : `${changed.length} value${changed.length === 1 ? "" : "s"} changed`}
-        </span>
-        <button
-          type="button"
-          onClick={() => setEdits({})}
-          disabled={changed.length === 0}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
-        >
-          <RotateCcw aria-hidden className="size-3" />
-          Reset
-        </button>
-        <button
-          type="button"
-          onClick={NOOP}
-          disabled={changed.length === 0}
-          className="inline-flex items-center gap-1.5 rounded-md border border-primary/50 bg-primary/15 px-2.5 py-1 text-[11px] font-semibold text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
-        >
-          <Play aria-hidden className="size-3" />
-          Re-run with these values
-        </button>
-      </div>
-    </>
-  );
-}
-
-function RecordedData({ row }: { row: DemoRow }) {
-  const reads = row.data.filter((d) => d.dir === "read").length;
+  const reads = row.data.filter((d) => d.dir === "read");
   const writes = row.data.filter((d) => d.dir === "write");
   const staged = writes.filter((d) => d.staged).length;
   const steps = [...new Set(row.data.map((d) => d.step))];
+  const changed = reads.filter((d) => edits[d.field] !== undefined && edits[d.field] !== d.value);
+  const live = row.status === "running" || row.status === "queued";
+
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto pb-3">
-      <div className="flex items-center gap-3 border-b border-border/40 px-3 py-2 text-[11px] text-muted-foreground">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/40 px-3 py-2 text-[11px] text-muted-foreground">
         <span className="inline-flex items-center gap-1 text-log-cyan">
           <ArrowDownToLine aria-hidden className="size-3" />
-          {reads} reads
+          {reads.length} read
         </span>
         {writes.length > 0 && (
           <span className="inline-flex items-center gap-1 text-log-teal">
             <ArrowUpFromLine aria-hidden className="size-3" />
-            {writes.length} writes
-            {staged > 0 && <span className="rounded border border-warning/40 px-1 text-[9.5px] font-semibold text-warning">staged</span>}
+            {writes.length} written
+            {staged > 0 && <span className="rounded border border-warning/40 px-1 text-[9.5px] font-semibold text-warning">{staged} staged</span>}
           </span>
         )}
-        <span className="ml-auto">every value the run touched, in order</span>
+        <span className="ml-auto">
+          {live ? "Values appear as the run reads them." : "Read values are editable — change one to launch a new run from it."}
+        </span>
       </div>
-      {steps.map((step) => (
-        <div key={step}>
-          <div className="flex items-center gap-2 px-3 pb-0.5 pt-2.5 text-[11px] font-semibold text-secondary-foreground">
-            {step}
-            <span aria-hidden className="h-px flex-1 bg-border/60" />
+
+      <div className="min-h-0 flex-1 overflow-y-auto pb-3">
+        {steps.map((step) => (
+          <div key={step}>
+            <div className="flex items-center gap-2 px-3 pb-0.5 pt-2.5 text-[11px] font-semibold text-secondary-foreground">
+              {step}
+              <span aria-hidden className="h-px flex-1 bg-border/60" />
+            </div>
+            {row.data
+              .filter((d) => d.step === step)
+              .map((d, i) => {
+                const editable = d.dir === "read" && !live;
+                const value = edits[d.field] ?? d.value;
+                const dirty = value !== d.value;
+                return (
+                  <div key={`${d.field}-${i}`} className="flex items-center gap-2.5 px-3 py-[5px] text-[12px] hover:bg-accent/30">
+                    {d.dir === "read" ? (
+                      <ArrowDownToLine aria-hidden className="size-3 shrink-0 text-log-cyan" />
+                    ) : (
+                      <ArrowUpFromLine aria-hidden className="size-3 shrink-0 text-log-teal" />
+                    )}
+                    <span className="flex w-36 shrink-0 items-center gap-1.5 truncate text-muted-foreground">
+                      {d.field}
+                      {dirty && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warning" />}
+                    </span>
+                    {editable ? (
+                      <input
+                        aria-label={`${d.field} — edit to launch a new run from this value`}
+                        value={value}
+                        onChange={(e) => setEdits((prev) => ({ ...prev, [d.field]: e.target.value }))}
+                        className={cn(
+                          "min-w-0 flex-1 rounded border bg-transparent px-1.5 py-0.5 font-mono text-[11.5px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          dirty ? "border-warning/50 bg-warning/5" : "border-transparent hover:border-border focus:border-border",
+                        )}
+                      />
+                    ) : (
+                      <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">{d.value}</span>
+                    )}
+                    {d.staged && <span className="shrink-0 rounded border border-warning/40 px-1 text-[9.5px] font-semibold text-warning">staged</span>}
+                    <SystemChip system={d.system} />
+                    <span className="w-14 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground">{d.ts}</span>
+                  </div>
+                );
+              })}
           </div>
-          {row.data
-            .filter((d) => d.step === step)
-            .map((d, i) => (
-              <div key={i} className="flex items-center gap-2.5 px-3 py-[5px] text-[12px] hover:bg-accent/30">
-                {d.dir === "read" ? (
-                  <ArrowDownToLine aria-hidden className="size-3 shrink-0 text-log-cyan" />
-                ) : (
-                  <ArrowUpFromLine aria-hidden className="size-3 shrink-0 text-log-teal" />
-                )}
-                <span className="w-36 shrink-0 truncate text-muted-foreground">{d.field}</span>
-                <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">{d.value}</span>
-                {d.staged && <span className="shrink-0 rounded border border-warning/40 px-1 text-[9.5px] font-semibold text-warning">staged</span>}
-                <SystemChip system={d.system} />
-                <span className="w-14 shrink-0 text-right font-mono text-[10px] text-muted-foreground tabular-nums">{d.ts}</span>
-              </div>
-            ))}
+        ))}
+      </div>
+
+      {!live && reads.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-border/60 bg-secondary/20 px-3 py-2">
+          <button
+            type="button"
+            onClick={() => {
+              setSeededFrom(Math.max(row.run - 1, 1));
+              setEdits(Object.fromEntries(reads.slice(0, 2).map((f) => [f.field, f.value])));
+            }}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <History aria-hidden className="size-3" />
+            Load a prior run
+          </button>
+          <span className="text-[11px] text-muted-foreground">
+            {seededFrom !== null && changed.length === 0
+              ? `Loaded run #${seededFrom} — edit anything above.`
+              : changed.length === 0
+                ? "Unchanged — a new run would use exactly these values."
+                : `${changed.length} value${changed.length === 1 ? "" : "s"} changed`}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setEdits({});
+              setSeededFrom(null);
+            }}
+            disabled={changed.length === 0 && seededFrom === null}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+          >
+            <RotateCcw aria-hidden className="size-3" />
+            Reset
+          </button>
+          <button
+            type="button"
+            onClick={NOOP}
+            className="inline-flex items-center gap-1.5 rounded-md border border-primary/50 bg-primary/15 px-2.5 py-1 text-[11px] font-semibold text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Play aria-hidden className="size-3" />
+            {changed.length > 0 ? "Start run with these values" : "Start a run from this data"}
+          </button>
         </div>
-      ))}
+      )}
     </div>
   );
 }
@@ -1258,18 +1233,12 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, checkedIds, onToggleCh
         )}
       </div>
 
-      {/* persistent strip */}
-      <div className="flex flex-wrap gap-1 border-b border-border/60 px-3 py-2">
-        {row.steps.map((s) => (
-          <StepChipView key={s.label} step={s} />
-        ))}
-      </div>
 
       {/* the gate is pinned above the tabs — visible from every tab, on every
           panel kind, instead of hiding inside a Review tab most rows lack */}
       {row.gate && panelKindOf(row) !== "review" && <GateBanner row={row} />}
 
-      <Waterfall row={row} />
+      <Timeline row={row} />
       <EvidenceBar row={row} />
 
       {/* tabs — derived from the panel kind, never a fixed five */}
