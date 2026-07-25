@@ -14,7 +14,8 @@ import {
 } from "./proposal-rows";
 import { ProposedQueue } from "./proposal-rows";
 import { ProposalLogPanel } from "./ProposalLogPanel";
-import { ProposalToggleBar, ProposalTogglesProvider } from "./proposal-toggles";
+import { GroupCardFifty, GroupCardMedium, MemberConveyorPanel, TriageTable } from "./proposal-groups";
+import { ProposalToggleBar, ProposalTogglesProvider, WhenOn } from "./proposal-toggles";
 
 /**
  * DEV-ONLY — UI gallery "Proposals" tab.
@@ -213,6 +214,60 @@ const LEDGER: { code: string; title: string; tag: SourceTag; note: string }[] = 
     tag: "render-only",
     note: "Gate opening + step failure render as cards at their point in the timeline (identity candidates + actions; classified error + screenshot + what happened next) instead of a detached top banner.",
   },
+  {
+    code: "L6",
+    title: "Pinned outcome/blocker bar",
+    tag: "render-only",
+    note: "One slim bar that always states the run's current fact + the one action that matters (paused on gate → Review; failed → error class + Retry; done → receipt line), visible on every tab and scroll position. Derived from status + gates already on the wire.",
+  },
+  {
+    code: "L7",
+    title: "Stream search with match navigation",
+    tag: "render-only",
+    note: "The filter box becomes a real search: match count, up/down navigation (n/N), highlighted matches in place, current match emphasized. Pure client-side over the loaded stream.",
+  },
+  {
+    code: "L8",
+    title: "Jump-to-live pill",
+    tag: "render-only",
+    note: "When scrolled up from the tail and new lines arrive, a floating “N new lines” pill appears; click snaps back to live follow. Standard console UX the panel lacks today.",
+  },
+  {
+    code: "L9",
+    title: "Step screenshot filmstrip",
+    tag: "render-only",
+    note: "The kernel already captures one screenshot per completed step — surface them as a horizontal filmstrip under the strip for visual verification without leaving Logs; click opens the Screenshots tab at that step.",
+  },
+  {
+    code: "L10",
+    title: "Step time waterfall",
+    tag: "render-only",
+    note: "A thin proportional bar showing where the run's time went, colored by system, with active-vs-waiting split. Derived from stepDurations + gate timestamps already recorded.",
+  },
+  {
+    code: "G1",
+    title: "Group density ladder",
+    tag: "render-only",
+    note: "Group Row presentation adapts to member count: ≤5 full member rows (today), 6–20 compact single-line members, 20+ matrix + drill-in. A projection rule over memberRollup — no new row type, no wire change.",
+  },
+  {
+    code: "G2",
+    title: "Status matrix on 20+ groups",
+    tag: "render-only",
+    note: "One colored cell per member on the collapsed card (46 green / 3 amber / 1 red at a glance); hover names the member + status + key fact, click jumps to it. Operator-checked members carry a subtle ring.",
+  },
+  {
+    code: "G3",
+    title: "Triage drill-in table",
+    tag: "render-only",
+    note: "The existing operation drill-in becomes a dense, virtualized, attention-first table: filter chips with counts, search, sortable columns, per-row quick actions, j/k + Enter + n keyboard flow. Client-side over data already in the panel.",
+  },
+  {
+    code: "G4",
+    title: "Review conveyor + operator check-marks",
+    tag: "new stamp",
+    note: "“Start review” walks attention items one at a time: prev/next member in the log-panel header, per-member action bar (Retry / Mark checked / Skip), n advances after acting, and a checked-progress bar (12/50). Needs a data.operatorChecked stamp + a small API to persist the check-mark — the one genuinely new capability here.",
+  },
 ];
 
 function Ledger() {
@@ -250,6 +305,40 @@ export function ProposalsTab() {
         </div>
         <ProposalLogPanel />
       </div>
+
+      <div className="grid grid-cols-1 items-start gap-4 min-[980px]:grid-cols-2">
+        <SectionHead
+          title="Group at scale — is 3 row types enough?"
+          sub="Yes — a 50-member group is still a Group Row; member count is a continuous property, so it scales through PRESENTATION, not new types: a density ladder by size (G1: ≤5 full rows · 6–20 compact lines · 20+ matrix), a status matrix on the card (G2 — hover a cell for name+status, click to jump), and expanding a 20+ group routes to the triage drill-in below instead of an inline list."
+        />
+        <Cell
+          label="G2 — 50-member Group Row (collapsed)"
+          note="rollup + matrix + attention entry point; toggle G2 off for today's name-preview treatment"
+        >
+          <GroupCardFifty />
+        </Cell>
+        <Cell
+          label="G1 — medium group (12 signers) · compact lines"
+          note="the 6–20 density: one line per member (status · name · key fact · EID), no full cards"
+        >
+          <WhenOn k="g1">
+            <GroupCardMedium />
+          </WhenOn>
+        </Cell>
+      </div>
+
+      <WhenOn k="g3">
+        <div className="grid grid-cols-1 items-start gap-4 min-[1150px]:grid-cols-[minmax(0,1fr)_400px]">
+          <SectionHead
+            title="G3 + G4 — triage drill-in & review conveyor"
+            sub="Expanding a big group opens a dense, virtualized, attention-first table: filter chips, search, per-row quick actions, full keyboard flow. Beside it, the member log panel becomes a conveyor — prev/next member, jump to next attention item, per-member actions, and an operator check-mark (G4) that tracks your manual-verification progress through the batch (12/50 checked)."
+          />
+          <TriageTable />
+          <WhenOn k="g4">
+            <MemberConveyorPanel />
+          </WhenOn>
+        </div>
+      </WhenOn>
 
       <div className="grid grid-cols-1 items-start gap-4 min-[980px]:grid-cols-2">
         <SectionHead
