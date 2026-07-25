@@ -3,13 +3,16 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  ArrowUpRight,
   Ban,
   Camera,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   ChevronsUp,
+  ClipboardList,
   Clock,
+  CornerDownRight,
   Eye,
   Loader2,
   PauseCircle,
@@ -52,7 +55,8 @@ export interface DemoQueueState {
   filter: DemoFilter;
   selectedId: string;
   checkedIds: ReadonlySet<string>;
-  oathExpanded: boolean;
+  /** which Group Rows are expanded — groups default collapsed (D5) */
+  expandedGroups: ReadonlySet<string>;
   tick: number;
 }
 
@@ -61,7 +65,7 @@ export interface DemoQueueHandlers {
   onFilter: (f: DemoFilter) => void;
   onDrillIn: (groupId: string) => void;
   onBack: () => void;
-  onToggleOath: () => void;
+  onToggleGroup: (groupId: string) => void;
 }
 
 function rowMatchesFilter(row: DemoRow, filter: DemoFilter): boolean {
@@ -84,16 +88,17 @@ function rowMatchesFilter(row: DemoRow, filter: DemoFilter): boolean {
 }
 
 /** the j/k traversal order for the current view — shared with the shell */
-export function computeVisibleIds(state: Pick<DemoQueueState, "view" | "filter" | "oathExpanded">): string[] {
+export function computeVisibleIds(state: Pick<DemoQueueState, "view" | "filter" | "expandedGroups">): string[] {
   if (state.view.kind === "drill") return orderedMemberIds(state.view.groupId);
   const ids: string[] = [];
   for (const band of BAND_ORDER) {
     for (const id of band.ids) {
-      if (rowMatchesFilter(DEMO_ROWS[id], state.filter)) {
-        ids.push(id);
-        if (id === "oath-batch" && state.oathExpanded) {
-          ids.push(...orderedMemberIds("oath-batch"));
-        }
+      const row = DEMO_ROWS[id];
+      if (!rowMatchesFilter(row, state.filter)) continue;
+      ids.push(id);
+      // an expanded, list-density group puts its members in the traversal order
+      if (row.rowType === "group" && state.expandedGroups.has(id) && (row.memberIds?.length ?? 0) <= 20) {
+        ids.push(...orderedMemberIds(id));
       }
     }
   }
@@ -319,6 +324,12 @@ export function DemoRowCard({
             <span className={cn("truncate text-[14px] font-semibold text-foreground", row.displayOnly && "italic font-normal text-muted-foreground")}>
               {row.title}
             </span>
+            {/* which workflow owns this row — needed the moment the queue shows
+                more than one workflow, and the only thing that tells a packet
+                apart from the OCR review row that shares its filename */}
+            <span className="shrink-0 rounded border border-border bg-secondary/50 px-1.5 py-px text-[9.5px] uppercase tracking-wider text-muted-foreground">
+              {row.wfLabel}
+            </span>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">{headerChips(row, state.checkedIds)}</div>
         </div>
@@ -344,6 +355,37 @@ export function DemoRowCard({
                 {sub.action}
               </button>
             )}
+          </div>
+        )}
+
+        {/* Linked delegation. A `linked` child keeps its own row in its own
+            panel (D4) and the two point at each other — one chip each, never a
+            duplicated run. `member` children live in the body instead. */}
+        {(row.reviewRunId || row.reviewOf) && (
+          <div className="mt-1.5 ml-5">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handlers.onSelect((row.reviewRunId ?? row.reviewOf) as string);
+              }}
+              className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-info/35 bg-info/8 px-2 py-0.5 text-[10.5px] text-info outline-none hover:bg-info/15 focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {row.reviewOf ? (
+                <>
+                  <CornerDownRight aria-hidden className="size-3 shrink-0" />
+                  <span className="truncate">Delegated by {DEMO_ROWS[row.reviewOf]?.title}</span>
+                </>
+              ) : (
+                <>
+                  <ClipboardList aria-hidden className="size-3 shrink-0" />
+                  <span className="truncate">
+                    OCR review · {PROPOSED_STATUS[DEMO_ROWS[row.reviewRunId as string]?.status ?? "queued"].label.toLowerCase()}
+                  </span>
+                  <ArrowUpRight aria-hidden className="size-3 shrink-0" />
+                </>
+              )}
+            </button>
           </div>
         )}
 
@@ -376,10 +418,13 @@ export function DemoRowCard({
                 {[...(row.memberIds ?? [])].filter((id) => state.checkedIds.has(id)).length}/{row.memberIds?.length} checked
               </span>
             </div>
-            {row.id === "i9-batch" ? (
+            {/* Density ladder (ratified): 20+ members collapse to the status
+                matrix; anything smaller stays a readable member list. Member
+                count is a continuous property — never a fourth row type. */}
+            {(row.memberIds?.length ?? 0) > 20 ? (
               <GroupMatrix row={row} state={state} handlers={handlers} />
             ) : (
-              <OathMembers row={row} state={state} handlers={handlers} />
+              <GroupMemberList row={row} state={state} handlers={handlers} />
             )}
           </>
         )}
@@ -428,7 +473,7 @@ function GroupMatrix({ row, state, handlers }: { row: DemoRow; state: DemoQueueS
       <div className="mt-2 ml-5 flex items-center gap-2 rounded-md border border-warning/35 bg-warning/6 px-2.5 py-1.5">
         <AlertTriangle aria-hidden className="size-3.5 shrink-0 text-warning" />
         <span className="min-w-0 flex-1 truncate text-[11.5px] text-warning">
-          {attention.length} need attention — 2 failed · 1 waiting · 1 warning
+          {attention.length} need attention — {attentionBreakdown(row.id)}
         </span>
         <button
           type="button"
@@ -446,9 +491,22 @@ function GroupMatrix({ row, state, handlers }: { row: DemoRow; state: DemoQueueS
   );
 }
 
-function OathMembers({ row, state, handlers }: { row: DemoRow; state: DemoQueueState; handlers: DemoQueueHandlers }) {
+/** "2 failed · 1 waiting · 1 warning" — derived, never a hardcoded caption. */
+function attentionBreakdown(groupId: string): string {
+  const c = groupCounts(groupId);
+  const parts: string[] = [];
+  if (c.failed) parts.push(`${c.failed} failed`);
+  if (c.waiting) parts.push(`${c.waiting} waiting on you`);
+  if (c.warnings) parts.push(`${c.warnings} with warnings`);
+  if (c.rejected) parts.push(`${c.rejected} rejected`);
+  return parts.join(" · ") || "all clear";
+}
+
+function GroupMemberList({ row, state, handlers }: { row: DemoRow; state: DemoQueueState; handlers: DemoQueueHandlers }) {
   const ids = orderedMemberIds(row.id);
-  const visible = state.oathExpanded ? ids : ids.slice(0, 4);
+  const expanded = state.expandedGroups.has(row.id);
+  const visible = expanded ? ids : ids.slice(0, 4);
+  const noun = row.wfLabel === "Oath Signature" ? "signers" : "people";
   return (
     <div className="mt-1.5 ml-5">
       <div className="divide-y divide-border/40 overflow-hidden rounded-md border border-border/60">
@@ -483,12 +541,12 @@ function OathMembers({ row, state, handlers }: { row: DemoRow; state: DemoQueueS
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          handlers.onToggleOath();
+          handlers.onToggleGroup(row.id);
         }}
         className="mt-1 inline-flex items-center gap-1 text-[10.5px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
       >
-        {state.oathExpanded ? <ChevronUp aria-hidden className="size-3" /> : <ChevronDown aria-hidden className="size-3" />}
-        {state.oathExpanded ? "Collapse" : `Show all ${ids.length} signers`}
+        {expanded ? <ChevronUp aria-hidden className="size-3" /> : <ChevronDown aria-hidden className="size-3" />}
+        {expanded ? "Collapse" : `Show all ${ids.length} ${noun}`}
       </button>
     </div>
   );
@@ -597,19 +655,17 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
 // The panel
 // ---------------------------------------------------------------------------
 
-const FILTERS: { key: DemoFilter; label: string; tone?: "warning" }[] = [
-  { key: "all", label: "All" },
-  { key: "attention", label: "Needs you", tone: "warning" },
-  { key: "running", label: "Running" },
-  { key: "queued", label: "Queued" },
-  { key: "done", label: "Done" },
-  { key: "failed", label: "Failed" },
-  { key: "cancelled", label: "Cancelled" },
-];
 
 export function DemoQueue({ state, handlers }: { state: DemoQueueState; handlers: DemoQueueHandlers }) {
   const topLevel = BAND_ORDER.flatMap((b) => b.ids).map((id) => DEMO_ROWS[id]);
   const countFor = (f: DemoFilter) => topLevel.filter((r) => rowMatchesFilter(r, f)).length;
+  const finished = BAND_ORDER.find((b) => b.key === "finished")?.ids.map((id) => DEMO_ROWS[id]) ?? [];
+  const digest = {
+    done: finished.filter((r) => r.status === "verifiedDone").length,
+    warned: finished.filter((r) => r.status === "doneWarnings").length,
+    failed: finished.filter((r) => r.status === "failed").length,
+    cancelled: finished.filter((r) => r.status === "cancelled").length,
+  };
 
   if (state.view.kind === "drill") {
     return (
@@ -625,34 +681,6 @@ export function DemoQueue({ state, handlers }: { state: DemoQueueState; handlers
         <span className="text-[13px] font-semibold text-foreground">Queue</span>· Jul 24
         <span className="ml-auto font-mono text-[10px]">{countFor("all")} runs</span>
       </div>
-      <div className="flex flex-wrap gap-1 border-b border-border/60 px-2.5 py-1.5">
-        {FILTERS.map((f) => {
-          const n = countFor(f.key);
-          const active = state.filter === f.key;
-          if (f.key !== "all" && n === 0) return null;
-          return (
-            <button
-              key={f.key}
-              type="button"
-              aria-pressed={active}
-              onClick={() => handlers.onFilter(active ? "all" : f.key)}
-              className={cn(
-                "rounded-full border px-2 py-0.5 text-[10.5px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                active
-                  ? f.tone === "warning"
-                    ? "border-warning/50 bg-warning/12 text-warning"
-                    : "border-primary/50 bg-primary/12 text-foreground"
-                  : f.tone === "warning"
-                    ? "border-warning/40 bg-card text-warning/90"
-                    : "border-border bg-card text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {f.label} <span className="font-mono tabular-nums">{n}</span>
-            </button>
-          );
-        })}
-      </div>
-
       <div className="min-h-0 flex-1 overflow-y-auto pb-3">
         {BAND_ORDER.map((band) => {
           const ids = band.ids.filter((id) => rowMatchesFilter(DEMO_ROWS[id], state.filter));
@@ -675,15 +703,23 @@ export function DemoQueue({ state, handlers }: { state: DemoQueueState; handlers
                 <div className="mx-3 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-dashed border-border px-3 py-1.5 text-[11px] text-muted-foreground">
                   <span className="font-semibold text-secondary-foreground">Today:</span>
                   <span>
-                    <span className="font-semibold text-success">2</span> done
+                    <span className="font-semibold text-success">{digest.done}</span> verified
                   </span>
-                  <span className="text-warning">
-                    <span className="font-semibold">2</span> with warnings
-                  </span>
-                  <span className="text-destructive">
-                    <span className="font-semibold">1</span> failed
-                  </span>
-                  <span className="ml-auto font-mono text-[10.5px]">2 transactions · 11 oaths</span>
+                  {digest.warned > 0 && (
+                    <span className="text-warning">
+                      <span className="font-semibold">{digest.warned}</span> with warnings
+                    </span>
+                  )}
+                  {digest.failed > 0 && (
+                    <span className="text-destructive">
+                      <span className="font-semibold">{digest.failed}</span> failed
+                    </span>
+                  )}
+                  {digest.cancelled > 0 && (
+                    <span>
+                      <span className="font-semibold">{digest.cancelled}</span> cancelled
+                    </span>
+                  )}
                 </div>
               )}
               {ids.map((id) => (
