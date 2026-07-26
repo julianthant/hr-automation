@@ -3,6 +3,7 @@ import { Keyboard } from "lucide-react";
 import { DemoLogPanel, tabsFor, type DemoTab } from "./DemoLogPanel";
 import { computeVisibleIds, DemoQueue, type DemoFilter, type DemoQueueState, type DemoView } from "./DemoQueue";
 import { DemoCatalogView } from "./DemoCatalogView";
+import { DemoUiKit } from "./DemoUiKit";
 import { CommandResultFeed, ConfirmCommandDialog, type PendingCommand } from "./DemoActions";
 import { RenameRunDialog, type PendingRename } from "./DemoRunIdentity";
 import { submitDemoCommand, type DemoCommandResult } from "./demo-commands";
@@ -15,6 +16,7 @@ import {
   DemoStatusBar,
   DemoTopBar,
   DemoWorkflowPanel,
+  type DemoShellView,
   rowInBucket,
   rowsForWorkflow,
   topLevelRows,
@@ -47,7 +49,7 @@ import {
 
 export function RebuildDemo() {
   const [selectedId, setSelectedId] = useState("oath-summer");
-  const [shellView, setShellView] = useState<"queue" | "catalog">("queue");
+  const [shellView, setShellView] = useState<DemoShellView>("queue");
   const [activeWorkflow, setActiveWorkflow] = useState(ALL_WORKFLOWS);
   const [view, setView] = useState<DemoView>({ kind: "queue" });
   const [filter, setFilter] = useState<DemoFilter>("all");
@@ -313,7 +315,13 @@ export function RebuildDemo() {
     <div className="flex h-screen flex-col bg-background text-foreground">
       <DemoTopBar view={shellView} onView={setShellView} attention={allCounts.needsYou} />
 
-      {shellView === "catalog" ? (
+      {shellView === "kit" ? (
+        /* every primitive in every state — the thing a builder skims BEFORE
+           choosing a component, so no surface hand-rolls one that exists */
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <DemoUiKit />
+        </div>
+      ) : shellView === "catalog" ? (
         <DemoCatalogView onOpenExample={openExample} />
       ) : (
         <div className="flex min-h-0 flex-1">
