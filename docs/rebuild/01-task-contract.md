@@ -1,6 +1,7 @@
 # 01 — The Task Contract & Per-System Task Stores
 
-Status: **Phase 0 revised design — 2026-07-22 whole-plan/legacy-code corrections integrated.**
+Status: **Phase 0 revised design — 2026-07-22 whole-plan/legacy-code corrections integrated;
+amended 2026-07-26 (Round 8, §2.7 — the three-tier authoring floor + scaffold generators, D79f).**
 Conforms to `00-charter.md` and the binding reconciliation memo `04-reconciliation.md`. The
 abandoned Step-0 spike is evidence only and has been deleted; all three effect overloads must be
 re-proved.
