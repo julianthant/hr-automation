@@ -7,6 +7,7 @@ import { CommandResultFeed, ConfirmCommandDialog, type PendingCommand } from "./
 import { RenameRunDialog, type PendingRename } from "./DemoRunIdentity";
 import { submitDemoCommand, type DemoCommandResult } from "./demo-commands";
 import type { ActionDescriptorWire } from "./demo-wire";
+import { DemoQueueToolbar, runBulkCommand, type BulkOutcome } from "./DemoBulkBar";
 import {
   ALL_WORKFLOWS,
   countRows,
@@ -14,6 +15,7 @@ import {
   DemoStatusBar,
   DemoTopBar,
   DemoWorkflowPanel,
+  rowInBucket,
   rowsForWorkflow,
   topLevelRows,
 } from "./DemoShell";
@@ -21,6 +23,7 @@ import {
   ATTENTION_STATUSES,
   DEMO_ROWS,
   type DemoRow,
+  type DemoSortKey,
   densityRung,
   effectiveStatus,
   groupNeedsExpanding,
@@ -64,6 +67,12 @@ export function RebuildDemo() {
     () => new Set(Object.values(DEMO_ROWS).filter((r) => r.checkedByDefault).map((r) => r.id)),
   );
   const [tick, setTick] = useState(0);
+
+  // ---- sort + bulk selection --------------------------------------------
+  const [sort, setSort] = useState<DemoSortKey>("attention");
+  const [selectMode, setSelectMode] = useState(false);
+  const [bulkIds, setBulkIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [bulkOutcome, setBulkOutcome] = useState<BulkOutcome | null>(null);
 
   /**
    * Operator-given names. The demo's mock server would persist `displayName`
@@ -159,9 +168,18 @@ export function RebuildDemo() {
   const counts = useMemo(() => countRows(scopedRows), [scopedRows]);
 
   const state: DemoQueueState = useMemo(
-    () => ({ view, filter, selectedId, checkedIds, expandedGroups, tick }),
-    [view, filter, selectedId, checkedIds, expandedGroups, tick],
+    () => ({ view, filter, selectedId, checkedIds, expandedGroups, sort, selectMode, bulkIds, tick }),
+    [view, filter, selectedId, checkedIds, expandedGroups, sort, selectMode, bulkIds, tick],
   );
+
+  /** the top-level rows on screen right now — all Select all may ever take */
+  const bulkCandidates = useMemo(() => scopedRows.filter((r) => rowInBucket(r, filter)), [scopedRows, filter]);
+
+  // A selection you cannot see is a bulk command you cannot predict, so the
+  // target set is dropped whenever the view it was made in changes.
+  useEffect(() => {
+    setBulkIds(new Set());
+  }, [activeWorkflow, filter]);
 
   /** open another Workflow Panel entry and land on a specific row inside it */
   const openPanel = useCallback(
@@ -189,6 +207,13 @@ export function RebuildDemo() {
           else next.add(groupId);
           return next;
         }),
+      onToggleBulk: (id: string) =>
+        setBulkIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(id)) next.delete(id);
+          else next.add(id);
+          return next;
+        }),
     }),
     [select, openPanel, runAction],
   );
@@ -214,7 +239,7 @@ export function RebuildDemo() {
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
-      const visible = computeVisibleIds(scopedRows, { view, filter, expandedGroups });
+      const visible = computeVisibleIds(scopedRows, { view, filter, expandedGroups, sort });
       const idx = visible.indexOf(selectedId);
 
       if (e.key === "j" || e.key === "ArrowDown") {
@@ -262,7 +287,7 @@ export function RebuildDemo() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view, filter, expandedGroups, selectedId, select, toggleChecked, scopedRows]);
+  }, [view, filter, expandedGroups, sort, selectedId, select, toggleChecked, scopedRows]);
 
   // keep the selected row visible when keyboard-navigating
   useEffect(() => {
@@ -322,6 +347,29 @@ export function RebuildDemo() {
 
             <DemoStatusBar counts={counts} active={filter} onSelect={setFilter} />
 
+            {/* sort · select · bulk commands, with the full partial-result
+                vector. Selection reorders and acts; it never filters, so no
+                count can move because of it. */}
+            <DemoQueueToolbar
+              sort={sort}
+              onSort={setSort}
+              selectMode={selectMode}
+              onSelectMode={(on) => {
+                setSelectMode(on);
+                if (!on) setBulkIds(new Set());
+              }}
+              selectedIds={bulkIds}
+              visibleIds={bulkCandidates.map((r) => r.id)}
+              onSelectAll={() => setBulkIds(new Set(bulkCandidates.map((r) => r.id)))}
+              onClearSelection={() => setBulkIds(new Set())}
+              onBulk={(command, label) =>
+                setBulkOutcome(runBulkCommand(bulkCandidates.filter((r) => bulkIds.has(r.id)), command, label, tick))
+              }
+              outcome={bulkOutcome}
+              onDismissOutcome={() => setBulkOutcome(null)}
+              onSelectRow={select}
+            />
+
             {/* applied · conflict · rejected — all three, side by side, never
                 collapsed into a single "Done" */}
             <CommandResultFeed
@@ -335,7 +383,12 @@ export function RebuildDemo() {
             />
 
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 min-[1180px]:grid-cols-[470px_minmax(0,1fr)]">
-              <DemoQueue rows={scopedRows} state={state} handlers={handlers} />
+              <DemoQueue
+                rows={scopedRows}
+                state={state}
+                handlers={handlers}
+                workflowLabel={activeWorkflow === ALL_WORKFLOWS ? "" : activeWorkflow}
+              />
               <DemoLogPanel
                 row={row}
                 tab={tab}

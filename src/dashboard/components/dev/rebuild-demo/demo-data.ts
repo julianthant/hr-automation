@@ -3491,6 +3491,57 @@ export const DENSITY_RUNGS: { key: DensityRung; range: string; what: string; exa
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Sort — applied WITHIN the attention bands, never across them
+// ---------------------------------------------------------------------------
+
+export type DemoSortKey = "attention" | "newest" | "oldest" | "longest";
+
+export const DEMO_SORTS: { key: DemoSortKey; label: string; note: string }[] = [
+  { key: "attention", label: "Attention first", note: "What needs you, then what broke, then everything else — the default." },
+  { key: "newest", label: "Newest first", note: "Most recently started at the top." },
+  { key: "oldest", label: "Oldest first", note: "The rows that have been sitting the longest." },
+  { key: "longest", label: "Longest running", note: "Biggest elapsed or recorded duration first — where the time is going." },
+];
+
+const SORT_STATUS_RANK: Record<ProposedStatus, number> = {
+  waiting: 0,
+  failed: 1,
+  parked: 2,
+  running: 3,
+  queued: 4,
+  doneWarnings: 5,
+  verifiedDone: 6,
+  cancelled: 7,
+};
+
+/** how long this row has been working — recorded when it ended, live while it runs */
+export function runSeconds(row: DemoRow, tick = 0): number {
+  if (row.startedAt && row.endedAt) return secondsBetween(row.startedAt, row.endedAt);
+  if (row.startedAt) return secondsSince(row.startedAt, tick);
+  return 0;
+}
+
+/**
+ * Sorting is a view over the SAME row set the bands and the counts use — it
+ * reorders, it never filters, so no sort can change what a badge says.
+ */
+export function sortDemoRows(rows: DemoRow[], key: DemoSortKey, tick = 0): DemoRow[] {
+  const born = (r: DemoRow) => Date.parse(r.startedAt ?? r.enqueuedAt);
+  return [...rows].sort((a, b) => {
+    switch (key) {
+      case "newest":
+        return born(b) - born(a);
+      case "oldest":
+        return born(a) - born(b);
+      case "longest":
+        return runSeconds(b, tick) - runSeconds(a, tick);
+      case "attention":
+        return SORT_STATUS_RANK[effectiveStatus(a)] - SORT_STATUS_RANK[effectiveStatus(b)] || born(b) - born(a);
+    }
+  });
+}
+
 /** a group auto-expands when a member is stuck on you or has broken */
 export function groupNeedsExpanding(row: DemoRow): boolean {
   return (row.memberIds ?? []).some((id) => {
