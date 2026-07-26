@@ -13,6 +13,14 @@ import { RenameRunDialog, type PendingRename } from "./DemoRunIdentity";
 import { submitDemoCommand, type DemoCommandResult } from "./demo-commands";
 import type { ActionDescriptorWire } from "./demo-wire";
 import { DemoQueueToolbar, runBulkCommand, type BulkOutcome } from "./DemoBulkBar";
+/* Tier 4b: the periphery — Settings (provenance · System URLs · budgets ·
+   doctor · storage health · version registry), the read-only Archive, the
+   Explorer and the activity report. Self-contained: everything they need
+   lives in Demo{Settings,VersionBump,Archive,Explorer,ActivityReport}.tsx and
+   demo-{settings,archive,explorer,report}-wire.ts. */
+import { DemoSettingsPage, DemoStorageBanner } from "./DemoSettings";
+import { DemoArchivePage } from "./DemoArchive";
+import type { StorageMode } from "./demo-settings-wire";
 import {
   ALL_WORKFLOWS,
   countRows,
@@ -78,6 +86,11 @@ export function RebuildDemo() {
     () => new Set(Object.values(DEMO_ROWS).filter((r) => r.checkedByDefault).map((r) => r.id)),
   );
   const [tick, setTick] = useState(0);
+  /* Which storage snapshot the mock server is serving. Degraded is a real
+     served state, not a UI mood — it drives the app-wide banner AND the
+     server's refusal of every settings write. Switched from Settings →
+     Storage health. */
+  const [storage, setStorage] = useState<StorageMode>("read-write");
 
   // ---- sort + bulk selection --------------------------------------------
   const [sort, setSort] = useState<DemoSortKey>("attention");
@@ -352,7 +365,20 @@ export function RebuildDemo() {
     <div className="flex h-screen flex-col bg-background text-foreground">
       <DemoTopBar view={shellView} onView={setShellView} day={day} onDay={changeDay} onNavigate={navigateTo} tick={tick} />
 
-      {shellView === "kit" ? (
+      {/* A degraded dashboard says so on every view, not only on the page that
+          explains it — the operator has to know before they click, not after. */}
+      <DemoStorageBanner storage={storage} onOpenSettings={() => setShellView("settings")} />
+
+      {shellView === "settings" ? (
+        <DemoSettingsPage
+          storage={storage}
+          onStorage={setStorage}
+          onOpenView={setShellView}
+          onBack={() => setShellView("queue")}
+        />
+      ) : shellView === "archive" ? (
+        <DemoArchivePage onBack={() => setShellView("queue")} onOpenSettings={() => setShellView("settings")} />
+      ) : shellView === "kit" ? (
         /* every primitive in every state — the thing a builder skims BEFORE
            choosing a component, so no surface hand-rolls one that exists */
         <div className="min-h-0 flex-1 overflow-y-auto">

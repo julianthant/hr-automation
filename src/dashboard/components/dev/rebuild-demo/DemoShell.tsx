@@ -104,10 +104,18 @@ export function countRows(rows: DemoRow[]): Record<StatusBucket, number> {
 // Top Bar
 // ---------------------------------------------------------------------------
 
-/** the demo's three top-level views — the app, the specimen catalog, the kit */
-export type DemoShellView = "queue" | "catalog" | "kit";
+/**
+ * The demo's top-level views. The first three are the switcher in the Top Bar
+ * (the app, the specimen catalog, the kit); the rest are FULL-PAGE TAKEOVERS
+ * reached from the gear — Settings, and the three pages Settings launches into.
+ * A seven-entry segmented control in a 44px bar would be unreadable, and these
+ * four are not places the operator toggles between while triaging.
+ */
+export type DemoShellView = "queue" | "catalog" | "kit" | "settings" | "archive" | "explorer" | "report";
 
-const SHELL_VIEW_LABEL: Record<DemoShellView, string> = {
+const SWITCHER_VIEWS = ["queue", "catalog", "kit"] as const;
+
+const SHELL_VIEW_LABEL: Record<(typeof SWITCHER_VIEWS)[number], string> = {
   queue: "Dashboard",
   catalog: "Row & panel catalog",
   kit: "Design system",
@@ -143,7 +151,7 @@ export function DemoTopBar({
       </span>
 
       <div className="ml-2 inline-flex rounded-md border border-border bg-secondary/40 p-0.5">
-        {(["queue", "catalog", "kit"] as const).map((v) => (
+        {SWITCHER_VIEWS.map((v) => (
           <button
             key={v}
             type="button"
@@ -170,7 +178,19 @@ export function DemoTopBar({
         <button type="button" aria-label="Shortcuts" onClick={NOOP} className="rounded-md p-1.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
           <HelpCircle aria-hidden className="size-3.5" />
         </button>
-        <button type="button" aria-label="Settings" onClick={NOOP} className="rounded-md p-1.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+        {/* The gear opens the real Settings surface (provenance, System URLs,
+            budgets, doctor, storage health, version registry) and is the door
+            to the Archive / Explorer / Activity report takeovers. */}
+        <button
+          type="button"
+          aria-label="Settings"
+          aria-pressed={view === "settings"}
+          onClick={() => onView("settings")}
+          className={cn(
+            "rounded-md p-1.5 outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+            view === "settings" ? "bg-accent text-foreground" : "text-muted-foreground",
+          )}
+        >
           <Settings aria-hidden className="size-3.5" />
         </button>
       </span>
