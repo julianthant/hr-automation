@@ -6,11 +6,41 @@
  * pipeline, log stream, data ledger, gate, receipt, and screenshot set, so the
  * demo log panel derives entirely per-row. Deterministic content only (stable
  * screenshots, no randomness).
+ *
+ * The rows here are the WIRE shape (`demo-wire.ts`), not a view model. A fixture
+ * authors facts — instants, statuses, recorded durations — and `projectRow`
+ * below plays the mock server: it derives the trace id, the clock label, the
+ * elapsed timer, the run duration, the queue wait, the rollup and the whole
+ * `actions[]` set. Nothing in this file hand-writes a value that a backend
+ * would have computed.
  */
 
 import type { ProposedStatus } from "./demo-status";
+import {
+  agoSeconds,
+  at,
+  DEMO_APP_VERSION,
+  DEMO_OPERATOR,
+  DEMO_WORKFLOWS,
+  deriveActions,
+  fmtClock,
+  fmtClockSec,
+  fmtElapsed,
+  plusSeconds,
+  secondsBetween,
+  secondsSince,
+  tabsFor,
+  traceClock,
+  type ActionDescriptorWire,
+  type DemoTab,
+  type DemoWorkflowId,
+  type DemoWorkflowRef,
+  type GateOptionSpec,
+  type SystemKey,
+} from "./demo-wire";
 
-export type SystemKey = "kuali" | "ucpath" | "kronos" | "crm" | "servicenow" | "onbase" | "i9";
+export type { SystemKey } from "./demo-wire";
+export { fmtElapsed } from "./demo-wire";
 
 export const SYSTEM_ACCENT: Record<SystemKey, string> = {
   kuali: "bg-log-violet/15 text-log-violet",
@@ -80,31 +110,21 @@ export interface DemoDataPoint {
   unconfirmed?: boolean;
 }
 
-/**
- * The two typed resolutions of a Write-parked run. Parked means the outcome of a
- * write is genuinely UNKNOWN — never "held before submitting" (that is a gate,
- * i.e. Waiting on you). There are exactly two ways out, and both are the
- * operator TELLING us what they saw in the system of record.
- */
-export type ParkResolutionKey = "confirmed-present" | "confirmed-absent";
-
-export interface DemoParkResolution {
-  key: ParkResolutionKey;
-  label: string;
-  detail: string;
-}
-
 export interface DemoGate {
   kind: "identity" | "parked" | "approval";
   title: string;
+  /** the instant the gate opened — the ONLY input to the waiting age (D-Q7) */
   openedAt: string;
-  waiting: string;
   candidates?: { heading: string; name: string; sub: string }[];
   staged?: { field: string; value: string; system: SystemKey; unconfirmed?: boolean }[];
-  /** parked only — the two typed resolutions; renders instead of `actions` */
-  resolutions?: DemoParkResolution[];
-  /** first action renders primary */
-  actions: string[];
+  /**
+   * The typed answers this gate accepts. They become banner-placement entries in
+   * the row's `actions[]` — there is no second list of gate buttons anywhere.
+   * A Write-parked gate's two options (`resolve-write-present` /
+   * `resolve-write-absent`) are the ONLY two exits it has; there is no Resume,
+   * because resuming an unknown write is how you terminate somebody twice.
+   */
+  options: GateOptionSpec[];
   note: string;
 }
 
@@ -133,10 +153,14 @@ export interface DemoFact {
   warn?: boolean;
 }
 
+/**
+ * The one-line verdict. It carries NO button of its own — the thing to do about
+ * the row is the `outcome`-placement entry in `actions[]`, so the queue subline
+ * and the log panel's outcome bar offer exactly the same command.
+ */
 export interface DemoOutcome {
   tone: "warning" | "violet" | "info" | "success" | "destructive" | "muted";
   text: string;
-  action?: string;
 }
 
 /** One extracted person on an OCR packet — the unit of "review each person before approving". */
@@ -209,24 +233,68 @@ export interface DemoLinkedGroup {
   panel: string;
 }
 
-export interface DemoRow {
+export interface DemoEvidenceWire {
+  receiptId?: string;
+  failureId?: string;
+  /**
+   * How much of this row's outcome was read back from the system of record.
+   * `verified` = read back · `partial` = some of it · `unknown` = none.
+   */
+  confidence: "verified" | "partial" | "unknown";
+}
+
+/**
+ * What a FIXTURE authors: facts only. Everything presentational — trace id,
+ * clock label, elapsed, duration, rollup, actions — is derived in `projectRow`.
+ */
+export interface DemoRowSpec {
   id: string;
   rowType: "run" | "group" | "member";
   /** what the row is ABOUT — drives title/subtitle and the Run Row variant name */
   subjectKind?: "person" | "file" | "catalog";
-  wfLabel: string;
+  /** the registry entry; `workflow`, `wfLabel` and the trace prefix all come from it */
+  workflowId: DemoWorkflowId;
   title: string;
+  /** the operator's own name for this run — rides the row and the receipt */
+  displayName?: string;
   eid?: string;
-  trace: string;
+  /** first 4 chars of the runId — the trace id's log-greppable tail */
+  runId4: string;
+  /** the run's stable business key in the source system */
+  itemId?: string;
   status: ProposedStatus;
-  time: string;
   run: number;
-  /** live rows tick from this offset (seconds) in the shell */
-  elapsedSec?: number;
-  duration?: string;
+  /** attempt number of this run; >1 means `retryOf` points at the prior one */
+  attempt?: number;
+  retryOf?: string;
+  /** the server's CURRENT version of this row (CAS target) */
+  version?: number;
+  /**
+   * The version the surface the operator is HOLDING was projected at. Lower
+   * than `version` means the view is stale and every command on it will come
+   * back `conflict` — the demo authors one row that way on purpose.
+   */
+  projectedVersion?: number;
+  /** the rehearsal/real separator — a dry run writes nothing anywhere */
+  dryRun?: boolean;
+  priority?: "interactive" | "bulk";
+  /** per-system prod/test resolution; a system left out resolved to prod */
+  instance?: Partial<Record<SystemKey, "prod" | "test">>;
+  /** the descriptor version this run executed under (defaults to the registry's current) */
+  workflowVersion?: number;
+  /** actor attribution — every row and every command records one */
+  requestedBy?: string;
+  /** accepted into the queue */
+  enqueuedAt: string;
+  /** a worker picked it up — absent while queued */
+  startedAt?: string;
+  /** reached a terminal state — absent while live */
+  endedAt?: string;
+  evidence?: DemoEvidenceWire;
   facts?: DemoFact[];
   warnings?: { count: number; first: string };
-  attempt?: { n: number; prior: string };
+  /** cross-run retry lineage shown as a chip — `retryOf` is the id it replays */
+  attemptHistory?: { n: number; prior: string };
   failShots?: number;
   receiptShield?: string;
   error?: string;
@@ -280,6 +348,162 @@ export interface DemoRow {
   checkedByDefault?: boolean;
 }
 
+/**
+ * `QueueSurfaceWire` — one Queue Row as the backend will serve it. Every field
+ * the spec left optional is resolved here, and every presentational value is
+ * DERIVED. The React components consume only this.
+ */
+export interface DemoRow extends DemoRowSpec {
+  /** identity — stamped once at enqueue, immutable */
+  runId: string;
+  itemId: string;
+  workflow: DemoWorkflowRef;
+  /** convenience mirror of `workflow.label` — the rail and the row chip read it */
+  wfLabel: string;
+  /** `<code>-<HHMMSS>-<runId4>`, frozen at enqueue */
+  trace: string;
+  /** the "EID if present, else the trace id" rule, resolved server-side */
+  subtitle: string;
+  parentRunId?: string;
+
+  version: number;
+  projectedVersion: number;
+  attempt: number;
+  dryRun: boolean;
+  priority: "interactive" | "bulk";
+  resolvedInstance: Partial<Record<SystemKey, "prod" | "test">>;
+  workflowVersion: number;
+  appVersion: string;
+  requestedBy: string;
+  evidence: DemoEvidenceWire;
+
+  /** footer/banner/outcome/menu controls — the ONLY source of buttons */
+  actions: ActionDescriptorWire[];
+  /** capability-driven tabs for this row's panel kind */
+  detailSurfaces: DemoTab[];
+
+  /** derived clock label of the moment the row became real */
+  time: string;
+  /** derived from startedAt→endedAt; absent while the run is live */
+  duration?: string;
+  /** derived from startedAt→now; absent once the run ends. The shell adds its tick. */
+  elapsedSec?: number;
+  /** derived from enqueuedAt→startedAt — how long the row sat in the queue */
+  queueWaitSec?: number;
+
+  /** group only — ids, never nested trees (D10) */
+  memberRunIds?: string[];
+  memberRollup?: { status: ProposedStatus; count: number }[];
+  /** excluded from the rollup — a rejected page is work that never existed (D3) */
+  rejectedCount?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Rollup — ONE function, never recomputed per surface
+// ---------------------------------------------------------------------------
+
+/**
+ * Ratified precedence. Read it as "what does this group most need from me":
+ * a decision beats a breakage beats an unknown write beats work in flight.
+ * Cancelled is last because a group nobody stopped is never cancelled.
+ */
+export const ROLLUP_PRECEDENCE: ProposedStatus[] = [
+  "waiting",
+  "failed",
+  "parked",
+  "running",
+  "queued",
+  "doneWarnings",
+  "verifiedDone",
+  "cancelled",
+];
+
+/**
+ * `rejected` rows are excluded from the rollup — they never became work, so
+ * they cannot count toward done. But they must not read as clean either, so an
+ * otherwise-verified group with a rejected page settles at Done with warnings
+ * until each rejection is deleted or acknowledged.
+ */
+export function rollupStatus(memberStatuses: ProposedStatus[], rejected: number, fallback: ProposedStatus): ProposedStatus {
+  const winner = memberStatuses.length === 0 ? fallback : (ROLLUP_PRECEDENCE.find((s) => memberStatuses.includes(s)) ?? fallback);
+  return rejected > 0 && winner === "verifiedDone" ? "doneWarnings" : winner;
+}
+
+// ---------------------------------------------------------------------------
+// The projection — the mock server turning facts into a surface
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything a fixture did NOT write. Run once per row, at assembly, with the
+ * whole raw corpus in hand so a group can roll its members up.
+ *
+ * This is the seam that makes the demo honest: if a component wants something
+ * that cannot be computed here from served facts, the contract is missing a
+ * field and we find out now instead of in production.
+ */
+function projectRow(spec: DemoRowSpec, rawById: Map<string, DemoRowSpec>): DemoRow {
+  const workflow = DEMO_WORKFLOWS[spec.workflowId];
+  const version = spec.version ?? 1;
+  const projectedVersion = spec.projectedVersion ?? version;
+  const bornAt = spec.startedAt ?? spec.enqueuedAt;
+  const trace = `${workflow.code}-${traceClock(bornAt)}-${spec.runId4}`;
+
+  const memberSpecs = (spec.memberIds ?? []).map((id) => rawById.get(id)).filter((m): m is DemoRowSpec => Boolean(m));
+  const realMembers = memberSpecs.filter((m) => m.containment !== "rejected");
+  const rejectedCount = memberSpecs.length - realMembers.length;
+  const status = spec.rowType === "group" ? rollupStatus(realMembers.map((m) => m.status), rejectedCount, spec.status) : spec.status;
+
+  const rollupCounts = new Map<ProposedStatus, number>();
+  for (const m of realMembers) rollupCounts.set(m.status, (rollupCounts.get(m.status) ?? 0) + 1);
+
+  const resolvedInstance: Partial<Record<SystemKey, "prod" | "test">> = {};
+  for (const system of workflow.systems) resolvedInstance[system] = spec.instance?.[system] ?? "prod";
+
+  const stagedWrites = spec.data.filter((d) => d.dir === "write" && d.staged).length;
+
+  return {
+    ...spec,
+    runId: `run-${spec.id}`,
+    itemId: spec.itemId ?? `${workflow.code}:${spec.id}`,
+    workflow,
+    wfLabel: workflow.label,
+    trace,
+    subtitle: spec.eid ?? trace,
+    parentRunId: spec.parentId ?? spec.linkedParentId,
+
+    version,
+    projectedVersion,
+    attempt: spec.attempt ?? 1,
+    dryRun: spec.dryRun ?? false,
+    priority: spec.priority ?? "interactive",
+    resolvedInstance,
+    workflowVersion: spec.workflowVersion ?? workflow.version,
+    appVersion: DEMO_APP_VERSION,
+    requestedBy: spec.requestedBy ?? DEMO_OPERATOR,
+    evidence: spec.evidence ?? { confidence: "unknown" },
+
+    actions: deriveActions(spec, {
+      status,
+      projectedVersion,
+      memberCount: realMembers.length,
+      rejectedCount,
+      title: spec.displayName ?? spec.title,
+      workflow,
+      stagedWrites,
+    }),
+    detailSurfaces: tabsFor(spec),
+
+    time: fmtClock(bornAt),
+    duration: spec.startedAt && spec.endedAt ? fmtElapsed(secondsBetween(spec.startedAt, spec.endedAt)) : undefined,
+    elapsedSec: spec.startedAt && !spec.endedAt ? secondsSince(spec.startedAt) : undefined,
+    queueWaitSec: spec.startedAt ? secondsBetween(spec.enqueuedAt, spec.startedAt) : undefined,
+
+    memberRunIds: spec.memberIds,
+    memberRollup: spec.rowType === "group" ? [...rollupCounts].map(([s, count]) => ({ status: s, count })) : undefined,
+    rejectedCount: spec.rowType === "group" ? rejectedCount : undefined,
+  };
+}
+
 // ===========================================================================
 // Synthetic-name pool (shared by the row fixtures and the member factories)
 // ===========================================================================
@@ -299,16 +523,20 @@ function pad(n: number, w: number): string {
 // Top-level rows — every ratified status appears at least once.
 // ===========================================================================
 
-const sepMaria: DemoRow = {
+const sepMaria: DemoRowSpec = {
   id: "sep-maria",
   rowType: "run",
-  wfLabel: "Separations",
+  workflowId: "separations",
   title: "Maria Lopez-Garcia",
-  trace: "se-140211-9f3a",
+  runId4: "9f3a",
+  itemId: "kuali:4-VMPHRW",
   status: "waiting",
-  time: "2:02 PM",
   run: 4,
-  outcome: { tone: "warning", text: "Paused on identity approval — 18m in gate · nothing written yet", action: "Review" },
+  version: 4,
+  enqueuedAt: at("14:02:04"),
+  startedAt: at("14:02:11"),
+  evidence: { confidence: "unknown" },
+  outcome: { tone: "warning", text: "Paused on identity approval — 18m in gate · nothing written yet" },
   steps: [
     { label: "Kuali extraction", state: "done", system: "kuali", durationSec: 41, hasShot: true, keyLines: ["last day worked = 07/15/2026", "termination type = Voluntary"] },
     { label: "Identity check", state: "done", system: "ucpath", durationSec: 12, keyLines: ["input: Maria Lopez", "match: M. Lopez-Garcia (10583942)"] },
@@ -346,13 +574,28 @@ const sepMaria: DemoRow = {
   gate: {
     kind: "identity",
     title: "Waiting on you — identity approval",
-    openedAt: "2:03 PM",
-    waiting: "18m",
+    openedAt: at("14:03:34"),
     candidates: [
       { heading: "On the input record", name: "Maria Lopez", sub: "no EID · Kuali doc 4-VMPHRW" },
       { heading: "UCPath name match (proposed)", name: "M. Lopez-Garcia", sub: "10583942 · Dept 000371 · Blank Ast 3" },
     ],
-    actions: ["Use 10583942", "Enter EID…", "Dismiss"],
+    options: [
+      { key: "use-eid", label: "Use 10583942", intent: "primary", command: "resolve-gate", resolution: "pick-eid:10583942" },
+      { key: "manual-eid", label: "Enter EID…", intent: "neutral", command: "resolve-gate", resolution: "manual-eid" },
+      {
+        key: "dismiss",
+        label: "Dismiss",
+        intent: "neutral",
+        command: "resolve-gate",
+        resolution: "dismiss",
+        confirm: {
+          title: "End this separation with nothing written?",
+          body: "Maria Lopez-Garcia stays employed in UCPath and the Kuali document stays open. The 2 staged writes are discarded. This does not undo the Kuali extraction — it just stops here.",
+          confirmLabel: "Dismiss and end the run",
+          tone: "destructive",
+        },
+      },
+    ],
     note: "Resolving returns the run to Running at UCPath transaction; the staged writes in the Data tab go live. Dismiss ends the run with nothing written.",
   },
   receipt: {
@@ -385,20 +628,24 @@ const sepMaria: DemoRow = {
  * operator reporting what they SAW in UCPath: confirmed-present or
  * confirmed-absent.
  */
-const sepRosa: DemoRow = {
+const sepRosa: DemoRowSpec = {
   id: "sep-rosa",
   rowType: "run",
-  wfLabel: "Separations",
+  workflowId: "separations",
   title: "Rosa Delgado",
   eid: "10577201",
-  trace: "se-134802-c2d7",
+  runId4: "c2d7",
+  itemId: "kuali:3-KQ2LMN",
   status: "parked",
-  time: "1:48 PM",
   run: 3,
+  version: 6,
+  enqueuedAt: at("13:47:55"),
+  startedAt: at("13:48:02"),
+  // the write was attempted and never read back — that IS the unknown
+  evidence: { confidence: "unknown" },
   outcome: {
     tone: "violet",
     text: "Write outcome unknown — submit sent, confirmation never came back. Do not re-run until you resolve it.",
-    action: "Resolve",
   },
   steps: [
     { label: "Kuali extraction", state: "done", system: "kuali", durationSec: 38, hasShot: true },
@@ -441,25 +688,41 @@ const sepRosa: DemoRow = {
   gate: {
     kind: "parked",
     title: "Write parked — outcome unknown, resolve present or absent",
-    openedAt: "1:52 PM",
-    waiting: "32m",
+    openedAt: at("13:52:10"),
     staged: [
       { field: "Separation date", value: "07/18/2026", system: "ucpath", unconfirmed: true },
       { field: "Action", value: "Voluntary termination", system: "ucpath", unconfirmed: true },
     ],
-    resolutions: [
+    options: [
       {
         key: "confirmed-present",
         label: "Confirmed present",
         detail: "You found the termination in UCPath. The run closes as Verified done and records the transaction you read.",
+        intent: "success",
+        command: "resolve-write-present",
+        confirm: {
+          title: "Record the termination as PRESENT?",
+          body: "This closes Rosa Delgado as Verified done against a write you read with your own eyes, and files a ledger entry attributed to you. If you are wrong, the queue will show a termination that does not exist.",
+          confirmLabel: "I saw it — record present",
+          tone: "neutral",
+        },
       },
       {
         key: "confirmed-absent",
         label: "Confirmed absent",
         detail: "You found nothing in UCPath. The run closes as Failed and becomes safely retryable — the retry cannot duplicate.",
+        intent: "destructive",
+        command: "resolve-write-absent",
+        confirm: {
+          title: "Record the termination as ABSENT?",
+          body: "This closes Rosa Delgado as Failed and UNLOCKS retry — the next run will submit a voluntary termination for 07/18/2026. If the first one did land, that is a duplicate termination.",
+          confirmLabel: "I looked — nothing is there",
+          tone: "destructive",
+        },
       },
+      { key: "open-shot", label: "Open the last screenshot", intent: "neutral", command: "resolve-gate", resolution: "view-evidence", icon: "external" },
+      { key: "open-ucpath", label: "Open Rosa in UCPath", intent: "neutral", command: "resolve-gate", resolution: "view-system", icon: "external" },
     ],
-    actions: ["Open the last screenshot", "Open Rosa in UCPath"],
     note: "Open Rosa Delgado in UCPath and look for a 07/18/2026 voluntary termination, then tell us which you saw. There is no Resume — resuming would submit a second time, and there is no auto-retry for the same reason.",
   },
   receipt: {
@@ -480,17 +743,19 @@ const sepRosa: DemoRow = {
   ],
 };
 
-const plDaniel: DemoRow = {
+const plDaniel: DemoRowSpec = {
   id: "pl-daniel",
   rowType: "run",
-  wfLabel: "Person Lookup",
+  workflowId: "person-lookup",
   title: "Daniel Okafor",
   eid: "10488213",
-  trace: "pl-141904-72e1",
+  runId4: "72e1",
   status: "running",
-  time: "2:19 PM",
   run: 12,
-  elapsedSec: 14,
+  version: 2,
+  enqueuedAt: at("14:25:41"),
+  startedAt: at("14:25:46"),
+  evidence: { confidence: "unknown" },
   liveText: "Cross-verification — matching CRM record by start date",
   outcome: { tone: "info", text: "Running — cross-verification · matching CRM record by start date" },
   steps: [
@@ -500,14 +765,14 @@ const plDaniel: DemoRow = {
     { label: "CRM dates", state: "pending", system: "crm" },
   ],
   lines: [
-    { ts: "2:19:04", kind: "search", system: "ucpath", text: "Person search: “Daniel Okafor” — 1 active match", step: "Searching" },
-    { ts: "2:19:08", kind: "read", system: "ucpath", pills: [{ dir: "read", label: "EID", value: "10488213" }, { dir: "read", label: "dept", value: "000512" }], step: "Searching" },
-    { ts: "2:19:10", kind: "ok", text: "Searching complete", duration: "6s", step: "Searching" },
-    { ts: "2:19:11", kind: "nav", system: "crm", text: "CRM onboarding record open", step: "Cross-verification" },
+    { ts: "2:25:46", kind: "search", system: "ucpath", text: "Person search: “Daniel Okafor” — 1 active match", step: "Searching" },
+    { ts: "2:25:50", kind: "read", system: "ucpath", pills: [{ dir: "read", label: "EID", value: "10488213" }, { dir: "read", label: "dept", value: "000512" }], step: "Searching" },
+    { ts: "2:25:52", kind: "ok", text: "Searching complete", duration: "6s", step: "Searching" },
+    { ts: "2:25:53", kind: "nav", system: "crm", text: "CRM onboarding record open", step: "Cross-verification" },
   ],
   data: [
-    { step: "Searching", dir: "read", field: "EID", value: "10488213", system: "ucpath", ts: "2:19:08" },
-    { step: "Searching", dir: "read", field: "Department", value: "000512", system: "ucpath", ts: "2:19:08" },
+    { step: "Searching", dir: "read", field: "EID", value: "10488213", system: "ucpath", ts: "2:25:50" },
+    { step: "Searching", dir: "read", field: "Department", value: "000512", system: "ucpath", ts: "2:25:50" },
   ],
   receipt: { tone: "muted", headline: "Receipt — pending", note: "Person Lookup is read-only — its receipt records what was looked up and where, never a write." },
   shots: [{ label: "UCPath search", kind: "step" }],
@@ -515,28 +780,31 @@ const plDaniel: DemoRow = {
 
 /** canned live-sim lines the shell appends on a timer for the running row */
 export const LIVE_SEQUENCE: DemoLine[] = [
-  { ts: "2:19:18", kind: "read", system: "crm", pills: [{ dir: "read", label: "start date", value: "07/01/2026" }], step: "Cross-verification" },
-  { ts: "2:19:21", kind: "ok", text: "CRM record matched by start date", step: "Cross-verification" },
-  { ts: "2:19:23", kind: "nav", system: "ucpath", text: "Checking HR status — active flag", step: "Active status" },
-  { ts: "2:19:26", kind: "read", system: "ucpath", pills: [{ dir: "read", label: "HR status", value: "Active" }], step: "Active status" },
+  { ts: "2:26:00", kind: "read", system: "crm", pills: [{ dir: "read", label: "start date", value: "07/01/2026" }], step: "Cross-verification" },
+  { ts: "2:26:03", kind: "ok", text: "CRM record matched by start date", step: "Cross-verification" },
+  { ts: "2:26:05", kind: "nav", system: "ucpath", text: "Checking HR status — active flag", step: "Active status" },
+  { ts: "2:26:08", kind: "read", system: "ucpath", pills: [{ dir: "read", label: "HR status", value: "Active" }], step: "Active status" },
 ];
 
 const oathMemberIds = Array.from({ length: 12 }, (_, i) => `oath-m-${i}`);
 const i9MemberIds = Array.from({ length: 50 }, (_, i) => `i9-m-${i}`);
 
-const i9Batch: DemoRow = {
+const i9Batch: DemoRowSpec = {
   id: "i9-batch",
   rowType: "group",
-  wfLabel: "I-9 Check",
+  workflowId: "i9-check",
   title: "I9_Quarterly_Retention.pdf",
-  trace: "ic-134001-77aa",
+  runId4: "77aa",
   status: "running",
-  time: "1:40 PM",
   run: 8,
-  elapsedSec: 1325,
+  version: 51,
+  priority: "bulk",
+  enqueuedAt: at("13:39:52"),
+  startedAt: at("13:40:01"),
+  evidence: { confidence: "unknown" },
   ocrPhase: "UCPath search · roster re-match — 44/50 people processed",
   memberIds: i9MemberIds,
-  outcome: { tone: "info", text: "Fan-out running — 44/50 people processed · 4 need attention", action: "Start review" },
+  outcome: { tone: "info", text: "Fan-out running — 44/50 people processed · 4 need attention" },
   steps: [
     { label: "OCR extraction", state: "done", system: "i9", durationSec: 190, keyLines: ["50 people found on 62 pages"] },
     { label: "Roster match", state: "done", system: "i9", durationSec: 44, keyLines: ["48 matched · 1 ambiguous · 1 no name"] },
@@ -562,23 +830,27 @@ const i9Batch: DemoRow = {
   ],
 };
 
-const oathBatch: DemoRow = {
+const oathBatch: DemoRowSpec = {
   id: "oath-batch",
   rowType: "group",
   subjectKind: "file",
-  wfLabel: "Oath Signature",
+  workflowId: "oath-signature",
   title: "Oath_Packet_Spring.pdf",
-  trace: "os-110501-c2f0",
+  runId4: "c2f0",
   // authored as a fallback only — with members present the badge comes from the
   // shared rollup (one failed member outranks eleven verified ones)
   status: "failed",
-  time: "11:05 AM",
   run: 4,
-  duration: "18m 40s",
+  version: 14,
+  priority: "bulk",
+  enqueuedAt: at("11:05:22"),
+  startedAt: at("11:05:31"),
+  endedAt: at("11:24:11"),
+  evidence: { receiptId: "rcpt-os-c2f0", failureId: "fail-os-c2f0-m2", confidence: "partial" },
   warnings: { count: 1, first: "1 signer failed — signature field never rendered" },
   memberIds: oathMemberIds,
   reviewRunId: "ocr-spring",
-  outcome: { tone: "destructive", text: "11/12 signed · Grace Egan failed — signature field never rendered", action: "Open failure" },
+  outcome: { tone: "destructive", text: "11/12 signed · Grace Egan failed — signature field never rendered" },
   steps: [
     { label: "OCR extraction", state: "done", system: "i9", durationSec: 130, keyLines: ["12 signers on 12 pages"] },
     { label: "Approval", state: "done", durationSec: 260, keyLines: ["approved 12/12 records 11:12 AM"] },
@@ -621,17 +893,20 @@ const oathBatch: DemoRow = {
   ],
 };
 
-const onbJordan: DemoRow = {
+const onbJordan: DemoRowSpec = {
   id: "onb-jordan",
   rowType: "run",
-  wfLabel: "Onboarding",
+  workflowId: "onboarding",
   title: "Jordan Whitfield",
   eid: "10633092",
-  trace: "on-114203-4f9b",
+  runId4: "4f9b",
   status: "verifiedDone",
-  time: "11:42 AM",
   run: 2,
-  duration: "6m 41s",
+  version: 9,
+  enqueuedAt: at("11:41:58"),
+  startedAt: at("11:42:03"),
+  endedAt: at("11:48:44"),
+  evidence: { receiptId: "rcpt-on-4f9b", confidence: "verified" },
   receiptShield: "Receipt — UCPath read-back verified · TXN-0891245",
   facts: [
     { label: "wage", value: "$18.50/hr" },
@@ -682,17 +957,23 @@ const onbJordan: DemoRow = {
   ],
 };
 
-const kpMarcus: DemoRow = {
+const kpMarcus: DemoRowSpec = {
   id: "kp-marcus",
   rowType: "run",
-  wfLabel: "Kronos Pay Rule",
+  workflowId: "kronos-pay-rule",
   title: "Marcus Bell",
   eid: "10312007",
-  trace: "kp-101502-d6a0",
+  runId4: "d6a0",
   status: "verifiedDone",
-  time: "10:15 AM",
   run: 6,
-  duration: "1m 12s",
+  version: 5,
+  // the one row that ran against a TEST instance — the badge exists so a
+  // rehearsal against a test system can never be mistaken for a real filing
+  instance: { kronos: "test" },
+  enqueuedAt: at("10:14:55"),
+  startedAt: at("10:15:02"),
+  endedAt: at("10:16:14"),
+  evidence: { receiptId: "rcpt-kp-d6a0", confidence: "verified" },
   receiptShield: "Receipt — pay rule read back after save",
   facts: [
     { label: "pay rule", value: "SDCMP", arrowTo: "SDCMP-WS" },
@@ -726,23 +1007,26 @@ const kpMarcus: DemoRow = {
   shots: [{ label: "Pay rule after save", kind: "step" }],
 };
 
-const obElena: DemoRow = {
+const obElena: DemoRowSpec = {
   id: "ob-elena",
   rowType: "run",
-  wfLabel: "OnBase",
+  workflowId: "onbase",
   title: "Elena Vasquez",
   eid: "10590114",
-  trace: "ob-095204-77b2",
+  runId4: "77b2",
   status: "doneWarnings",
-  time: "9:52 AM",
   run: 3,
-  duration: "2m 55s",
+  version: 7,
+  enqueuedAt: at("09:51:58"),
+  startedAt: at("09:52:04"),
+  endedAt: at("09:54:59"),
+  evidence: { receiptId: "rcpt-ob-77b2", confidence: "partial" },
   warnings: { count: 1, first: "keyset autofill fell back — verify keywords" },
   facts: [
     { label: "doc", value: "I-9 Supporting" },
     { label: "page", value: "4" },
   ],
-  outcome: { tone: "warning", text: "Imported with 1 warning — keyset autofill fell back, verify keywords", action: "Open import" },
+  outcome: { tone: "warning", text: "Imported with 1 warning — keyset autofill fell back, verify keywords" },
   steps: [
     { label: "Authenticate", state: "done", system: "onbase", durationSec: 21 },
     { label: "Prepare import", state: "done", system: "onbase", durationSec: 34 },
@@ -774,20 +1058,25 @@ const obElena: DemoRow = {
   ],
 };
 
-const cdSamuel: DemoRow = {
+const cdSamuel: DemoRowSpec = {
   id: "cd-samuel",
   rowType: "run",
-  wfLabel: "CRM Doc Download",
+  workflowId: "crm-doc-download",
   title: "Samuel Ortiz",
-  trace: "cd-131202-5e19",
+  runId4: "5e19",
   status: "failed",
-  time: "1:12 PM",
   run: 9,
-  duration: "48s",
-  attempt: { n: 2, prior: "Attempt 1 failed 12:58 PM — timeout" },
+  version: 4,
+  attempt: 2,
+  retryOf: "run-cd-samuel-a1",
+  enqueuedAt: at("13:11:55"),
+  startedAt: at("13:12:02"),
+  endedAt: at("13:12:50"),
+  evidence: { failureId: "fail-cd-5e19", confidence: "unknown" },
+  attemptHistory: { n: 2, prior: "Attempt 1 failed 12:58 PM — timeout" },
   failShots: 3,
   error: "CRM search returned no record for samuel.ortiz@ucsd.edu — download step never reached",
-  outcome: { tone: "destructive", text: "Failed — CRM search returned no record for samuel.ortiz@ucsd.edu", action: "Retry" },
+  outcome: { tone: "destructive", text: "Failed — CRM search returned no record for samuel.ortiz@ucsd.edu" },
   steps: [
     { label: "CRM auth", state: "done", system: "crm", durationSec: 19 },
     { label: "Search record", state: "failed", system: "crm", durationSec: 29, attempts: 2, keyLines: ["no record for samuel.ortiz@ucsd.edu", "attempt 1 (12:58) timed out"] },
@@ -817,16 +1106,25 @@ const cdSamuel: DemoRow = {
   failCard: { title: "Run failed — no CRM record", meta: "Searched samuel.ortiz@ucsd.edu in onboarding records: 0 results. Likely a mistyped email on the roster." },
 };
 
-const wsPriya: DemoRow = {
+const wsPriya: DemoRowSpec = {
   id: "ws-priya",
   rowType: "run",
-  wfLabel: "Work-Study",
+  workflowId: "work-study",
   title: "Priya Natarajan",
   eid: "10601188",
-  trace: "ws-142401-e8c3",
+  runId4: "e8c3",
   status: "queued",
-  time: "2:24 PM",
   run: 5,
+  // THE STALE-VIEW SPECIMEN. The server is at version 5; the surface the
+  // operator is holding was projected at 3, because two members were bumped
+  // ahead of this row after it was pushed. Every command carries
+  // expectedVersion 3 and comes back `conflict` until the row is refreshed.
+  version: 5,
+  projectedVersion: 3,
+  // a rehearsal: this run will read UCPath and write nothing
+  dryRun: true,
+  enqueuedAt: at("14:24:01"),
+  evidence: { confidence: "unknown" },
   queueNote: "in queue 3m · 2 ahead",
   outcome: { tone: "muted", text: "Queued — 2 items ahead · a worker picks this up next" },
   steps: [
@@ -841,17 +1139,23 @@ const wsPriya: DemoRow = {
   shots: [],
 };
 
-const ecTomas: DemoRow = {
+const ecTomas: DemoRowSpec = {
   id: "ec-tomas",
   rowType: "run",
-  wfLabel: "Emergency Contact",
+  workflowId: "emergency-contact",
   title: "Tomás Rivera",
   eid: "10443321",
-  trace: "ec-091500-4a02",
+  runId4: "4a02",
   status: "cancelled",
-  time: "9:15 AM",
   run: 1,
-  duration: "22s",
+  version: 3,
+  // ran under the PREVIOUS descriptor — the version chip is how an archived
+  // run tells you it is not comparable with today's
+  workflowVersion: 3,
+  enqueuedAt: at("09:14:52"),
+  startedAt: at("09:15:00"),
+  endedAt: at("09:15:22"),
+  evidence: { confidence: "unknown" },
   outcome: { tone: "warning", text: "Cancelled by you at Navigation — nothing written" },
   steps: [
     { label: "Navigation", state: "cancelled", system: "ucpath", durationSec: 22 },
@@ -888,24 +1192,29 @@ const I9_SPECIAL: Record<number, ProposedStatus> = {
 };
 const I9_REJECTED_INDEX = 46;
 
-function i9Member(i: number): DemoRow {
+function i9Member(i: number): DemoRowSpec {
   const name = i === I9_REJECTED_INDEX ? "Page 31" : `${FIRST[i % 25]} ${LAST[i % 10]}`;
   const eid = `105${pad(31000 + i * 137, 5)}`;
   const status: ProposedStatus = i === I9_REJECTED_INDEX ? "failed" : (I9_SPECIAL[i] ?? "verifiedDone");
-  const ts = `1:${pad(45 + (i % 14), 2)} PM`;
-  const trace = `ic-134001-m${pad(i, 2)}`;
-  const base: Omit<DemoRow, "outcome" | "steps" | "lines" | "receipt"> = {
+  const startedAt = at(`13:${pad(45 + (i % 14), 2)}:${pad((i * 7) % 60, 2)}`);
+  const ts = fmtClockSec(startedAt);
+  const base: Omit<DemoRowSpec, "outcome" | "steps" | "lines" | "receipt"> = {
     id: `i9-m-${i}`,
     rowType: "member",
     parentId: "i9-batch",
     containment: i === I9_REJECTED_INDEX ? "rejected" : "member",
-    wfLabel: "I-9 Check",
+    workflowId: "i9-check",
     title: name,
     eid,
-    trace,
+    runId4: `m${pad(i, 3)}`,
     status,
-    time: ts,
     run: 1,
+    version: 2,
+    priority: "bulk",
+    // the whole fan-out was accepted at once; workers picked people up one at a
+    // time, which is why the queue wait differs per member
+    enqueuedAt: at("13:44:10"),
+    startedAt,
     data: [],
     shots: [],
     checkedByDefault: status === "verifiedDone" && i < 12,
@@ -913,9 +1222,11 @@ function i9Member(i: number): DemoRow {
   if (i === I9_REJECTED_INDEX) {
     return {
       ...base,
+      // A rejected page never became a task, so it has no start and no end.
+      // The footer shows no duration because there genuinely is none.
+      startedAt: undefined,
       displayOnly: true,
       memberFact: "no searchable name",
-      duration: "—",
       outcome: { tone: "muted", text: "Rejected page — no searchable name on the form. Display-only: no task exists, delete is the only action." },
       steps: [{ label: "OCR extraction", state: "failed", system: "i9", keyLines: ["page 31: no name field detected"] }],
       lines: [{ ts: "1:44:06", kind: "warn", system: "i9", text: "Page 31 — OCR found no searchable name; page cannot be checked", step: "OCR extraction" }],
@@ -932,16 +1243,17 @@ function i9Member(i: number): DemoRow {
       return {
         ...base,
         memberFact: "no UCPath match",
-        duration: "41s",
+        endedAt: plusSeconds(startedAt, 41),
+        evidence: { failureId: `fail-ic-m${pad(i, 3)}`, confidence: "unknown" },
         error: `UCPath person search found no match for “${name}” or EID ${eid}`,
-        outcome: { tone: "destructive", text: `No UCPath match for “${name}” — roster row left unmatched`, action: "Retry" },
+        outcome: { tone: "destructive", text: `No UCPath match for “${name}” — roster row left unmatched` },
         steps: [
           { label: "Person match", state: "failed", system: "ucpath", durationSec: 41, keyLines: [`“${name}” → 0 rows`, `EID ${eid} → 0 rows`] },
           { label: "Person lookup", state: "pending", system: "ucpath" },
           { label: "Roster match", state: "pending", system: "i9" },
         ],
         lines: [
-          { ts: "2:41:07", kind: "search", system: "ucpath", text: `Person search: “${name}” → no rows · retried by EID → no rows`, card: "failure", step: "Person match" },
+          { ts, kind: "search", system: "ucpath", text: `Person search: “${name}” → no rows · retried by EID → no rows`, card: "failure", step: "Person match" },
         ],
         failCard: { title: "Person search found no match", meta: `Searched “${name}” + EID ${eid} in UCPath — 0 results either way.` },
         receipt: { tone: "destructive", headline: "No receipt — person not found", lines: [{ label: "Failed at", value: "Person match" }, { label: "Roster row", value: `${i + 1} — left unmatched` }], note: "Check the roster spelling; retry replays this one person only." },
@@ -951,25 +1263,40 @@ function i9Member(i: number): DemoRow {
       return {
         ...base,
         memberFact: "2 name candidates",
-        outcome: { tone: "warning", text: "Two active UCPath people match this name — pick one", action: "Review" },
+        outcome: { tone: "warning", text: "Two active UCPath people match this name — pick one" },
         steps: [
           { label: "Person match", state: "waiting", system: "ucpath", keyLines: ["2 active candidates share this name"] },
           { label: "Person lookup", state: "pending", system: "ucpath" },
           { label: "Roster match", state: "pending", system: "i9" },
         ],
         lines: [
-          { ts: "1:58:12", kind: "warn", system: "ucpath", text: "2 active people named on this form — pausing for a decision", card: "gate", step: "Person match" },
+          { ts, kind: "warn", system: "ucpath", text: "2 active people named on this form — pausing for a decision", card: "gate", step: "Person match" },
         ],
         gate: {
           kind: "identity",
           title: "Waiting on you — which person is on the form?",
-          openedAt: "1:58 PM",
-          waiting: "26m",
+          openedAt: plusSeconds(startedAt, 12),
           candidates: [
             { heading: "Candidate A", name: `${name}`, sub: `10531548 · Dept 000371 · hired 03/12/2024` },
             { heading: "Candidate B", name: `${name} (2nd match)`, sub: `10577940 · Dept 000512 · hired 09/02/2019` },
           ],
-          actions: ["Use 10531548", "Use 10577940", "Skip person"],
+          options: [
+            { key: "use-a", label: "Use 10531548", intent: "primary", command: "resolve-gate", resolution: "pick-eid:10531548" },
+            { key: "use-b", label: "Use 10577940", intent: "neutral", command: "resolve-gate", resolution: "pick-eid:10577940" },
+            {
+              key: "skip",
+              label: "Skip person",
+              intent: "neutral",
+              command: "resolve-gate",
+              resolution: "dismiss",
+              confirm: {
+                title: `Skip ${name}?`,
+                body: "This person is left unchecked and the roster row stays unmatched. The packet still completes; nothing is written for them.",
+                confirmLabel: "Skip this person",
+                tone: "destructive",
+              },
+            },
+          ],
           note: "The I-9 hire date on the form (03/12/2024) matches candidate A within tolerance — shown first.",
         },
         receipt: { tone: "muted", headline: "Receipt — pending", note: "Blocked on the identity decision; nothing recorded yet." },
@@ -979,7 +1306,8 @@ function i9Member(i: number): DemoRow {
       return {
         ...base,
         memberFact: "S2 missing — flag",
-        duration: `${34 + (i % 5) * 7}s`,
+        endedAt: plusSeconds(startedAt, 34 + (i % 5) * 7),
+        evidence: { receiptId: `rcpt-ic-m${pad(i, 3)}`, confidence: "partial" },
         warnings: { count: 1, first: "Section 2 page not found in packet" },
         outcome: { tone: "warning", text: "Checked with 1 warning — Section 2 page missing from packet" },
         steps: doneSteps,
@@ -1001,7 +1329,7 @@ function i9Member(i: number): DemoRow {
     case "running":
       return {
         ...base,
-        elapsedSec: 34,
+        startedAt: agoSeconds(34),
         memberFact: "person-lookup…",
         liveText: "Person lookup — cross-verifying hire date",
         outcome: { tone: "info", text: "Running — person lookup, cross-verifying hire date" },
@@ -1011,8 +1339,8 @@ function i9Member(i: number): DemoRow {
           { label: "Roster match", state: "pending", system: "i9" },
         ],
         lines: [
-          { ts: "2:23:44", kind: "ok", system: "ucpath", text: "Person matched — 1 active row", step: "Person match" },
-          { ts: "2:23:51", kind: "nav", system: "ucpath", text: "Opening person profile for hire-date check", step: "Person lookup" },
+          { ts: fmtClockSec(agoSeconds(25)), kind: "ok", system: "ucpath", text: "Person matched — 1 active row", step: "Person match" },
+          { ts: fmtClockSec(agoSeconds(18)), kind: "nav", system: "ucpath", text: "Opening person profile for hire-date check", step: "Person lookup" },
         ],
         receipt: { tone: "muted", headline: "Receipt — pending", note: "Still running." },
         shots: [],
@@ -1020,6 +1348,7 @@ function i9Member(i: number): DemoRow {
     case "queued":
       return {
         ...base,
+        startedAt: undefined,
         memberFact: "—",
         queueNote: `in queue · position ${i - 37}`,
         outcome: { tone: "muted", text: "Queued behind the running member" },
@@ -1036,7 +1365,8 @@ function i9Member(i: number): DemoRow {
       return {
         ...base,
         memberFact: "S1 + S2 · retain 3y",
-        duration: `${34 + (i % 5) * 7}s`,
+        endedAt: plusSeconds(startedAt, 34 + (i % 5) * 7),
+        evidence: { receiptId: `rcpt-ic-m${pad(i, 3)}`, confidence: "verified" },
         facts: [
           { label: "S1", value: `p${(i % 30) + 2}` },
           { label: "S2", value: `p${(i % 20) + 1}` },
@@ -1062,29 +1392,36 @@ function i9Member(i: number): DemoRow {
   }
 }
 
-function oathMember(i: number): DemoRow {
+function oathMember(i: number): DemoRowSpec {
   const name = `${FIRST[(i * 3) % 25]} ${LAST[(i * 7) % 10]}`;
   const eid = `105${pad(31000 + i * 91, 5)}`;
   const failed = i === 2;
-  const signTime = `11:${pad(8 + i, 2)} AM`;
+  const startedAt = at(`11:${pad(8 + i, 2)}:04`);
+  const signTime = fmtClock(startedAt);
   return {
     id: `oath-m-${i}`,
     rowType: "member",
     parentId: "oath-batch",
     containment: "member",
     recordId: `spring-rec-${i}`,
-    wfLabel: "Oath Signature",
+    workflowId: "oath-signature",
     title: name,
     eid,
-    trace: `os-110501-m${pad(i, 2)}`,
+    runId4: `m${pad(i, 3)}`,
     status: failed ? "failed" : "verifiedDone",
-    time: signTime,
     run: 1,
-    duration: failed ? "1m 2s" : `${35 + (i % 6)}s`,
+    version: 2,
+    priority: "bulk",
+    enqueuedAt: at("11:12:02"),
+    startedAt,
+    endedAt: plusSeconds(startedAt, failed ? 62 : 35 + (i % 6)),
+    evidence: failed
+      ? { failureId: `fail-os-m${pad(i, 3)}`, confidence: "unknown" }
+      : { receiptId: `rcpt-os-m${pad(i, 3)}`, confidence: "verified" },
     memberFact: failed ? "signature field never rendered" : `signed ${signTime}`,
     error: failed ? "Signature field never rendered after 3 attempts" : undefined,
     outcome: failed
-      ? { tone: "destructive", text: "Signature field never rendered after 3 attempts", action: "Retry" }
+      ? { tone: "destructive", text: "Signature field never rendered after 3 attempts" }
       : { tone: "success", text: `Oath signed ${signTime} — CRM verified` },
     steps: failed
       ? [
@@ -1098,14 +1435,14 @@ function oathMember(i: number): DemoRow {
           { label: "Sign oath", state: "done", system: "ucpath", durationSec: 18 + (i % 5), hasShot: true },
         ],
     lines: failed
-      ? [{ ts: "11:23:44", kind: "error", system: "ucpath", text: "Signature field never rendered (3 attempts, fresh page each)", card: "failure", step: "Sign oath" }]
+      ? [{ ts: fmtClockSec(plusSeconds(startedAt, 62)), kind: "error", system: "ucpath", text: "Signature field never rendered (3 attempts, fresh page each)", card: "failure", step: "Sign oath" }]
       : [
-          { ts: signTime.replace(" AM", ":21"), kind: "ok", system: "crm", text: "CRM onboarding record verified", step: "CRM verify" },
-          { ts: signTime.replace(" AM", ":40"), kind: "write", system: "ucpath", pills: [{ dir: "write", label: "oath signed", value: signTime }], step: "Sign oath" },
+          { ts: fmtClockSec(plusSeconds(startedAt, 17)), kind: "ok", system: "crm", text: "CRM onboarding record verified", step: "CRM verify" },
+          { ts: fmtClockSec(plusSeconds(startedAt, 36)), kind: "write", system: "ucpath", pills: [{ dir: "write", label: "oath signed", value: signTime }], step: "Sign oath" },
         ],
     data: failed
       ? []
-      : [{ step: "Sign oath", dir: "write", field: "Oath signature", value: signTime, system: "ucpath", ts: signTime }],
+      : [{ step: "Sign oath", dir: "write", field: "Oath signature", value: signTime, system: "ucpath", ts: fmtClockSec(plusSeconds(startedAt, 36)) }],
     failCard: failed ? { title: "Signature field never rendered", meta: "3 attempts on fresh pages — the oath form's canvas never mounted for this person." } : undefined,
     receipt: failed
       ? { tone: "destructive", headline: "No receipt — oath not signed", note: "Retry replays just this signer; the PDF and other signers are untouched." }
@@ -1211,17 +1548,20 @@ function summerRecord(i: number): DemoRecord {
 
 const SUMMER_RECORDS: DemoRecord[] = SUMMER_PEOPLE.map((_, i) => summerRecord(i));
 
-const oathSummer: DemoRow = {
+const oathSummer: DemoRowSpec = {
   id: "oath-summer",
   rowType: "group",
   subjectKind: "file",
-  wfLabel: "Oath Signature",
+  workflowId: "oath-signature",
   title: "Oath_Packet_Summer.pdf",
-  trace: "os-142012-b410",
+  runId4: "b410",
   status: "waiting",
-  time: "2:20 PM",
   run: 5,
-  elapsedSec: 640,
+  version: 8,
+  priority: "bulk",
+  enqueuedAt: at("14:20:05"),
+  startedAt: at("14:20:12"),
+  evidence: { confidence: "unknown" },
   ocrPhase: "6 people extracted — waiting on your review",
   // No members yet, on purpose: member rows are created by the fan-out, and the
   // fan-out is what approval releases. Until then the packet reports what it
@@ -1238,7 +1578,6 @@ const oathSummer: DemoRow = {
   outcome: {
     tone: "warning",
     text: "Waiting on you — approve 5 of 6 people, or open the review to work through them.",
-    action: "Review people",
   },
   steps: [
     { label: "OCR extraction", state: "done", system: "i9", durationSec: 128, keyLines: ["6 people on 8 pages", "2 pages had no form"] },
@@ -1263,10 +1602,25 @@ const oathSummer: DemoRow = {
   gate: {
     kind: "approval",
     title: "Waiting on you — approve the people to sign",
-    openedAt: "2:22 PM",
-    waiting: "10m",
+    openedAt: at("14:22:31"),
     note: "Approve straight from here if the packet reads clean; open the review to look at each person beside their page. Approving fans out one signer task per approved person — that is when member rows appear. Diego Diaz is blocked (inactive) and is excluded from the count.",
-    actions: ["Approve 5 of 6", "Open review", "Discard packet"],
+    options: [
+      { key: "approve-5", label: "Approve 5 of 6", intent: "primary", command: "resolve-gate", resolution: "approve:5" },
+      { key: "open-review", label: "Open review", intent: "neutral", command: "resolve-gate", resolution: "open-review", icon: "review" },
+      {
+        key: "discard",
+        label: "Discard packet",
+        intent: "destructive",
+        command: "resolve-gate",
+        resolution: "discard",
+        confirm: {
+          title: "Discard Oath_Packet_Summer.pdf?",
+          body: "All 6 extracted people are thrown away and no signer runs are created. Nothing has been written yet, so nothing is undone — but the packet has to be re-uploaded to try again.",
+          confirmLabel: "Discard the packet",
+          tone: "destructive",
+        },
+      },
+    ],
   },
   receipt: {
     tone: "muted",
@@ -1279,17 +1633,19 @@ const oathSummer: DemoRow = {
   ],
 };
 
-const ocrSummer: DemoRow = {
+const ocrSummer: DemoRowSpec = {
   id: "ocr-summer",
   rowType: "run",
   subjectKind: "file",
-  wfLabel: "OCR",
+  workflowId: "ocr",
   title: "Oath_Packet_Summer.pdf",
-  trace: "oc-142012-d771",
+  runId4: "d771",
   status: "waiting",
-  time: "2:20 PM",
   run: 5,
-  elapsedSec: 640,
+  version: 8,
+  enqueuedAt: at("14:20:06"),
+  startedAt: at("14:20:12"),
+  evidence: { confidence: "unknown" },
   containment: "linked",
   linkedParentId: "oath-summer",
   reviewOf: "oath-summer",
@@ -1297,7 +1653,6 @@ const ocrSummer: DemoRow = {
   outcome: {
     tone: "warning",
     text: "6 people extracted — 0 reviewed · 1 blocked · 2 flagged. Approve to release the signers.",
-    action: "Start review",
   },
   steps: [
     { label: "Split pages", state: "done", system: "i9", durationSec: 9, keyLines: ["8 pages · 6 with a readable form"] },
@@ -1326,10 +1681,25 @@ const ocrSummer: DemoRow = {
   gate: {
     kind: "approval",
     title: "Waiting on you — 6 people to review",
-    openedAt: "2:23 PM",
-    waiting: "10m",
+    openedAt: at("14:22:34"),
     note: "Each person is shown beside the page they were read from. Approve per person; the packet fans out only what you approved.",
-    actions: ["Approve 5 of 6", "Reupload packet", "Discard"],
+    options: [
+      { key: "approve-5", label: "Approve 5 of 6", intent: "primary", command: "resolve-gate", resolution: "approve:5" },
+      { key: "reupload", label: "Reupload packet", intent: "neutral", command: "rerun-with-different-input", resolution: "reupload" },
+      {
+        key: "discard",
+        label: "Discard",
+        intent: "destructive",
+        command: "resolve-gate",
+        resolution: "discard",
+        confirm: {
+          title: "Discard these 6 records?",
+          body: "The extraction is thrown away and Oath_Packet_Summer.pdf is released with no signers. Nothing has been written, so nothing is undone.",
+          confirmLabel: "Discard the extraction",
+          tone: "destructive",
+        },
+      },
+    ],
   },
   receipt: { tone: "muted", headline: "Receipt — pending", note: "An OCR run's receipt records what was read and what you approved — the signing receipts belong to the member rows." },
   shots: [
@@ -1370,22 +1740,25 @@ function springRecord(i: number): DemoRecord {
   };
 }
 
-const ocrSpring: DemoRow = {
+const ocrSpring: DemoRowSpec = {
   id: "ocr-spring",
   rowType: "run",
   subjectKind: "file",
-  wfLabel: "OCR",
+  workflowId: "ocr",
   title: "Oath_Packet_Spring.pdf",
-  trace: "oc-110501-a19c",
+  runId4: "a19c",
   status: "verifiedDone",
-  time: "11:05 AM",
   run: 4,
-  duration: "6m 31s",
+  version: 11,
+  enqueuedAt: at("11:04:55"),
+  startedAt: at("11:05:01"),
+  endedAt: at("11:11:32"),
+  evidence: { receiptId: "rcpt-oc-a19c", confidence: "verified" },
   containment: "linked",
   linkedParentId: "oath-batch",
   reviewOf: "oath-batch",
   records: Array.from({ length: 12 }, (_, i) => springRecord(i)),
-  outcome: { tone: "success", text: "12 of 12 read and approved at 11:12 AM — the packet fanned out 12 signers", action: "Open packet" },
+  outcome: { tone: "success", text: "12 of 12 read and approved at 11:12 AM — the packet fanned out 12 signers" },
   steps: [
     { label: "Split pages", state: "done", system: "i9", durationSec: 11 },
     { label: "Read forms", state: "done", system: "i9", durationSec: 178, keyLines: ["tier-1 model · 12/12 read"] },
@@ -1428,39 +1801,50 @@ const ocrSpring: DemoRow = {
 
 const OU_SIGNER_IDS = Array.from({ length: 6 }, (_, i) => `ou-s-${i}`);
 
-const OU_SIGNERS: { name: string; eid: string; status: ProposedStatus; fact: string; time: string }[] = [
-  { name: "Nadia Osei", eid: "10612004", status: "verifiedDone", fact: "signed 10:19 AM", time: "10:19 AM" },
-  { name: "Ravi Chandran", eid: "10598337", status: "verifiedDone", fact: "signed 10:21 AM", time: "10:21 AM" },
-  { name: "Lena Hoffmann", eid: "10604412", status: "verifiedDone", fact: "signed 10:24 AM", time: "10:24 AM" },
-  { name: "Tobias Frey", eid: "10587760", status: "running", fact: "signing…", time: "10:26 AM" },
-  { name: "Priya Anand", eid: "10620118", status: "queued", fact: "—", time: "10:26 AM" },
-  { name: "Marcus Boone", eid: "10577903", status: "queued", fact: "—", time: "10:26 AM" },
+/**
+ * The signers a single uploaded PDF fanned out to. Each one is a REAL Oath
+ * Signature run that lives in the Oath Signature panel (D6: oath-upload is ONE
+ * Run Row and its signers are `linked` children, never a member list) — so each
+ * carries its own start instant and its own recorded duration.
+ */
+const OU_SIGNERS: { name: string; eid: string; status: ProposedStatus; startedAt?: string; durationSec?: number }[] = [
+  { name: "Nadia Osei", eid: "10612004", status: "verifiedDone", startedAt: at("14:19:02"), durationSec: 28 },
+  { name: "Ravi Chandran", eid: "10598337", status: "verifiedDone", startedAt: at("14:21:14"), durationSec: 31 },
+  { name: "Lena Hoffmann", eid: "10604412", status: "verifiedDone", startedAt: at("14:24:06"), durationSec: 34 },
+  { name: "Tobias Frey", eid: "10587760", status: "running", startedAt: agoSeconds(47) },
+  { name: "Priya Anand", eid: "10620118", status: "queued" },
+  { name: "Marcus Boone", eid: "10577903", status: "queued" },
 ];
 
-function ouSigner(i: number): DemoRow {
+function ouSigner(i: number): DemoRowSpec {
   const s = OU_SIGNERS[i];
   const done = s.status === "verifiedDone";
   const running = s.status === "running";
+  const signedAt = s.startedAt && s.durationSec !== undefined ? plusSeconds(s.startedAt, s.durationSec) : undefined;
+  const signedClock = signedAt ? fmtClock(signedAt) : "";
   return {
     id: `ou-s-${i}`,
     rowType: "run",
-    wfLabel: "Oath Signature",
+    workflowId: "oath-signature",
     title: s.name,
     eid: s.eid,
-    trace: `os-1012${pad(30 + i * 2, 2)}-s${pad(i, 2)}`,
+    runId4: `s${pad(i, 3)}`,
     status: s.status,
-    time: s.time,
     run: 1,
+    version: 2,
+    priority: "bulk",
     // linked, not member: this row is the signer's own run and lives here, in
     // the Oath Signature panel, exactly once.
     containment: "linked",
     linkedParentId: "ou-packet",
-    duration: done ? `${28 + i * 3}s` : undefined,
-    elapsedSec: running ? 47 : undefined,
+    enqueuedAt: at("14:18:40"),
+    startedAt: s.startedAt,
+    endedAt: signedAt,
+    evidence: done ? { receiptId: `rcpt-os-s${pad(i, 3)}`, confidence: "verified" } : { confidence: "unknown" },
     queueNote: s.status === "queued" ? "in queue · behind the running signer" : undefined,
     liveText: running ? "Signing oath — UCPath signature canvas" : undefined,
     outcome: done
-      ? { tone: "success", text: `Oath signed ${s.time} — CRM verified` }
+      ? { tone: "success", text: `Oath signed ${signedClock} — CRM verified` }
       : running
         ? { tone: "info", text: "Running — signing the oath in UCPath" }
         : { tone: "muted", text: "Queued — a worker picks this signer up next" },
@@ -1483,19 +1867,27 @@ function ouSigner(i: number): DemoRow {
           ],
     lines: done
       ? [
-          { ts: s.time.replace(" AM", ":11"), kind: "ok", system: "crm", text: "CRM onboarding record verified", step: "CRM verify" },
-          { ts: s.time.replace(" AM", ":38"), kind: "write", system: "ucpath", pills: [{ dir: "write", label: "oath signed", value: s.time }], step: "Sign oath" },
+          { ts: fmtClockSec(plusSeconds(s.startedAt ?? "", 9)), kind: "ok", system: "crm", text: "CRM onboarding record verified", step: "CRM verify" },
+          {
+            ts: fmtClockSec(signedAt ?? ""),
+            kind: "write",
+            system: "ucpath",
+            pills: [{ dir: "write", label: "oath signed", value: signedClock }],
+            step: "Sign oath",
+          },
         ]
       : running
-        ? [{ ts: "10:26:04", kind: "nav", system: "ucpath", text: "Signature canvas open", step: "Sign oath" }]
-        : [{ ts: "10:26:10", kind: "event", text: "Enqueued by Signed_Oaths_0724.pdf — waiting for a worker", step: "Queued" }],
-    data: done ? [{ step: "Sign oath", dir: "write", field: "Oath signature", value: s.time, system: "ucpath", ts: s.time }] : [],
+        ? [{ ts: fmtClockSec(agoSeconds(43)), kind: "nav", system: "ucpath", text: "Signature canvas open", step: "Sign oath" }]
+        : [{ ts: "2:18:40", kind: "event", text: "Enqueued by Signed_Oaths_0724.pdf — waiting for a worker", step: "Queued" }],
+    data: done
+      ? [{ step: "Sign oath", dir: "write", field: "Oath signature", value: signedClock, system: "ucpath", ts: fmtClockSec(signedAt ?? "") }]
+      : [],
     receipt: done
       ? {
           tone: "success",
           headline: "Verified done · oath signed",
           lines: [
-            { label: "Signed", value: s.time, verified: true },
+            { label: "Signed", value: signedClock, verified: true },
             { label: "From", value: "Signed_Oaths_0724.pdf" },
           ],
         }
@@ -1509,17 +1901,20 @@ function ouSigner(i: number): DemoRow {
 // does not otherwise exercise.
 // ===========================================================================
 
-const ouPacket: DemoRow = {
+const ouPacket: DemoRowSpec = {
   id: "ou-packet",
   rowType: "run",
   subjectKind: "file",
-  wfLabel: "Oath Upload",
+  workflowId: "oath-upload",
   title: "Signed_Oaths_0724.pdf",
-  trace: "ou-101204-3b8e",
+  runId4: "3b8e",
   status: "running",
-  time: "10:12 AM",
   run: 7,
-  elapsedSec: 884,
+  version: 19,
+  priority: "bulk",
+  enqueuedAt: at("14:11:58"),
+  startedAt: at("14:12:04"),
+  evidence: { confidence: "unknown" },
   liveText: "Waiting on signatures — 3 of 6 signers done",
   // The signers are LINKED runs in the Oath Signature panel. This is a chip,
   // not a member list: one row, one home, one count.
@@ -1531,7 +1926,6 @@ const ouPacket: DemoRow = {
   outcome: {
     tone: "info",
     text: "Waiting on signatures — 3 of 6 signed. The ticket is filed by this row once every signer is terminal.",
-    action: "Open signers",
   },
   steps: [
     { label: "OCR prep", state: "done", system: "i9", durationSec: 96, keyLines: ["6 signed oaths recognised"] },
@@ -1540,19 +1934,19 @@ const ouPacket: DemoRow = {
     { label: "File ticket", state: "pending", system: "servicenow" },
   ],
   lines: [
-    { ts: "10:12:04", kind: "event", text: "Upload — Signed_Oaths_0724.pdf · 6 pages", step: "OCR prep" },
-    { ts: "10:13:40", kind: "ok", system: "i9", text: "6 signed oaths recognised · all 6 matched to UCPath records", step: "OCR prep" },
-    { ts: "10:15:01", kind: "event", text: "You approved 6 of 6", step: "Your review" },
+    { ts: "2:12:04", kind: "event", text: "Upload — Signed_Oaths_0724.pdf · 6 pages", step: "OCR prep" },
+    { ts: "2:13:40", kind: "ok", system: "i9", text: "6 signed oaths recognised · all 6 matched to UCPath records", step: "OCR prep" },
+    { ts: "2:15:01", kind: "event", text: "You approved 6 of 6", step: "Your review" },
     {
-      ts: "10:15:04",
+      ts: "2:15:04",
       kind: "event",
       text: "Released 6 signer runs into the Oath Signature panel — they are linked, not copied: this row waits on them and shows a chip",
       step: "Wait signatures",
     },
-    { ts: "10:24:12", kind: "ok", system: "ucpath", text: "3 of 6 signers done — waiting on the remaining 3", step: "Wait signatures" },
+    { ts: "2:24:12", kind: "ok", system: "ucpath", text: "3 of 6 signers done — waiting on the remaining 3", step: "Wait signatures" },
   ],
   data: [
-    { step: "OCR prep", dir: "read", field: "Signed oaths found", value: "6", system: "i9", ts: "10:13:40" },
+    { step: "OCR prep", dir: "read", field: "Signed oaths found", value: "6", system: "i9", ts: "2:13:40" },
     { step: "File ticket", dir: "write", field: "ServiceNow ticket", value: "one ticket for the document", system: "servicenow", ts: "—", staged: true },
   ],
   receipt: {
@@ -1566,23 +1960,28 @@ const ouPacket: DemoRow = {
   ],
 };
 
-const krReports: DemoRow = {
+const krReports: DemoRowSpec = {
   id: "kr-reports",
   rowType: "run",
   subjectKind: "catalog",
-  wfLabel: "Kronos Reports",
+  workflowId: "kronos-reports",
   title: "Pay-period exception reports",
-  trace: "kr-140455-6c22",
+  // THE RENAMED SPECIMEN — the operator's own name rides the row and the
+  // receipt; the trace id underneath is untouched, so history still matches.
+  displayName: "Friday exception pack",
+  runId4: "6c22",
   status: "running",
-  time: "2:04 PM",
   run: 12,
-  elapsedSec: 386,
+  version: 6,
+  enqueuedAt: at("14:04:48"),
+  startedAt: at("14:04:55"),
+  evidence: { confidence: "unknown" },
   liveText: "Downloading report 4 of 7 — Missed Punch Detail",
   facts: [
     { label: "selection", value: "7 reports" },
     { label: "period", value: "07/06 – 07/19" },
   ],
-  outcome: { tone: "info", text: "Running — 3 of 7 reports downloaded · 4 workers", action: "Open folder" },
+  outcome: { tone: "info", text: "Running — 3 of 7 reports downloaded · 4 workers" },
   steps: [
     { label: "Kronos auth", state: "done", system: "kronos", durationSec: 26 },
     { label: "Select reports", state: "done", system: "kronos", durationSec: 18, keyLines: ["7 of 34 catalog reports selected"] },
@@ -1614,23 +2013,27 @@ const wsMemberIds = Array.from({ length: 18 }, (_, i) => `ws-m-${i}`);
 
 const WS_SPECIAL: Record<number, ProposedStatus> = { 5: "doneWarnings", 12: "running", 16: "queued", 17: "queued" };
 
-function wsMember(i: number): DemoRow {
+function wsMember(i: number): DemoRowSpec {
   const name = `${FIRST[(i * 5) % 25]} ${LAST[(i * 3) % 10]}`;
   const eid = `106${pad(12000 + i * 211, 5)}`;
   const status: ProposedStatus = WS_SPECIAL[i] ?? "verifiedDone";
-  const ts = `9:${pad(12 + i, 2)} AM`;
-  const base: Omit<DemoRow, "outcome" | "steps" | "lines" | "receipt"> = {
+  const startedAt = at(`14:${pad(8 + i, 2)}:${pad((i * 11) % 60, 2)}`);
+  const ts = fmtClockSec(startedAt);
+  const base: Omit<DemoRowSpec, "outcome" | "steps" | "lines" | "receipt"> = {
     id: `ws-m-${i}`,
     rowType: "member",
     parentId: "ws-batch",
     containment: "member",
-    wfLabel: "Work-Study",
+    workflowId: "work-study",
     title: name,
     eid,
-    trace: `ws-091104-w${pad(i, 2)}`,
+    runId4: `w${pad(i, 3)}`,
     status,
-    time: ts,
     run: 1,
+    version: 2,
+    priority: "bulk",
+    enqueuedAt: at("14:07:04"),
+    startedAt,
     data: [],
     shots: [],
   };
@@ -1641,7 +2044,7 @@ function wsMember(i: number): DemoRow {
   if (status === "running") {
     return {
       ...base,
-      elapsedSec: 51,
+      startedAt: agoSeconds(51),
       memberFact: "filling transaction…",
       liveText: "UCPath transaction — effective 07/01/2026",
       outcome: { tone: "info", text: "Running — filling the work-study transaction" },
@@ -1649,13 +2052,14 @@ function wsMember(i: number): DemoRow {
         { label: "UCPath auth", state: "done", system: "ucpath", durationSec: 8 },
         { label: "Transaction", state: "current", system: "ucpath" },
       ],
-      lines: [{ ts: "9:24:11", kind: "nav", system: "ucpath", text: "Work-study transaction template open", step: "Transaction" }],
+      lines: [{ ts: fmtClockSec(agoSeconds(44)), kind: "nav", system: "ucpath", text: "Work-study transaction template open", step: "Transaction" }],
       receipt: { tone: "muted", headline: "Receipt — pending", note: "Still running." },
     };
   }
   if (status === "queued") {
     return {
       ...base,
+      startedAt: undefined,
       memberFact: "—",
       queueNote: `in queue · position ${i - 15}`,
       outcome: { tone: "muted", text: "Queued behind the running person" },
@@ -1663,14 +2067,15 @@ function wsMember(i: number): DemoRow {
         { label: "UCPath auth", state: "pending", system: "ucpath" },
         { label: "Transaction", state: "pending", system: "ucpath" },
       ],
-      lines: [{ ts: "9:11:04", kind: "event", text: "Fanned out from the typed roster", step: "Queued" }],
+      lines: [{ ts: "2:07:04", kind: "event", text: "Fanned out from the typed roster", step: "Queued" }],
       receipt: { tone: "muted", headline: "Receipt — pending", note: "Nothing has run yet." },
     };
   }
   if (status === "doneWarnings") {
     return {
       ...base,
-      duration: "38s",
+      endedAt: plusSeconds(startedAt, 38),
+      evidence: { receiptId: `rcpt-ws-w${pad(i, 3)}`, confidence: "partial" },
       memberFact: "effective date moved",
       warnings: { count: 1, first: "effective date fell before the pay period — moved to 07/01" },
       outcome: { tone: "warning", text: "Saved with 1 warning — the effective date was moved to the pay-period start" },
@@ -1688,7 +2093,8 @@ function wsMember(i: number): DemoRow {
   }
   return {
     ...base,
-    duration: `${24 + (i % 7)}s`,
+    endedAt: plusSeconds(startedAt, 24 + (i % 7)),
+    evidence: { receiptId: `rcpt-ws-w${pad(i, 3)}`, confidence: "verified" },
     memberFact: `award $${2000 + i * 100}`,
     outcome: { tone: "success", text: `Work-study award saved and read back — $${2000 + i * 100}` },
     steps: doneSteps,
@@ -1704,31 +2110,34 @@ function wsMember(i: number): DemoRow {
   };
 }
 
-const wsBatch: DemoRow = {
+const wsBatch: DemoRowSpec = {
   id: "ws-batch",
   rowType: "group",
   subjectKind: "person",
-  wfLabel: "Work-Study",
+  workflowId: "work-study",
   title: "Work-study awards — 18 people",
-  trace: "ws-091104-2d5f",
+  runId4: "2d5f",
   status: "running",
-  time: "9:11 AM",
   run: 3,
-  elapsedSec: 1140,
+  version: 27,
+  priority: "bulk",
+  enqueuedAt: at("14:06:58"),
+  startedAt: at("14:07:04"),
+  evidence: { confidence: "unknown" },
   memberIds: wsMemberIds,
   ocrPhase: "16 of 18 processed — 1 running, 2 queued",
-  outcome: { tone: "info", text: "Fan-out running — 16 of 18 processed · 1 flagged", action: "Open all 18" },
+  outcome: { tone: "info", text: "Fan-out running — 16 of 18 processed · 1 flagged" },
   steps: [
     { label: "Parse input", state: "done", durationSec: 3, keyLines: ["18 typed EIDs · all resolved"] },
     { label: "Member fan-out", state: "current", system: "ucpath" },
     { label: "Rollup", state: "pending" },
   ],
   lines: [
-    { ts: "9:11:04", kind: "event", text: "18 people typed into the input panel — one group, not 18 loose rows", step: "Parse input" },
-    { ts: "9:11:07", kind: "event", text: "Fanned out 18 member tasks", step: "Member fan-out" },
-    { ts: "9:22:41", kind: "warn", text: "1 member moved an effective date to the pay-period start", step: "Member fan-out" },
+    { ts: "2:07:04", kind: "event", text: "18 people typed into the input panel — one group, not 18 loose rows", step: "Parse input" },
+    { ts: "2:07:07", kind: "event", text: "Fanned out 18 member tasks", step: "Member fan-out" },
+    { ts: "2:18:41", kind: "warn", text: "1 member moved an effective date to the pay-period start", step: "Member fan-out" },
   ],
-  data: [{ step: "Parse input", dir: "read", field: "People typed", value: "18", system: "ucpath", ts: "9:11:04" }],
+  data: [{ step: "Parse input", dir: "read", field: "People typed", value: "18", system: "ucpath", ts: "2:07:04" }],
   receipt: { tone: "muted", headline: "Receipt — pending", note: "Rolls up when all 18 members are terminal — every award with the value read back after save." },
   shots: [],
 };
@@ -1743,11 +2152,12 @@ const wsBatch: DemoRow = {
 const ecPacketMemberIds = Array.from({ length: 6 }, (_, i) => `ecp-m-${i}`);
 const EC_REJECTED_INDEX = 5;
 
-function ecPacketMember(i: number): DemoRow {
+function ecPacketMember(i: number): DemoRowSpec {
   const rejected = i === EC_REJECTED_INDEX;
   const name = rejected ? "Page 7" : `${FIRST[(i * 9) % 25]} ${LAST[(i * 4) % 10]}`;
   const eid = `104${pad(41000 + i * 173, 5)}`;
-  const ts = `3:${pad(31 + i, 2)} PM`;
+  const startedAt = at(`11:${pad(31 + i, 2)}:${pad((i * 13) % 60, 2)}`);
+  const ts = fmtClockSec(startedAt);
   if (rejected) {
     return {
       id: `ecp-m-${i}`,
@@ -1755,20 +2165,22 @@ function ecPacketMember(i: number): DemoRow {
       parentId: "ec-packet",
       containment: "rejected",
       displayOnly: true,
-      wfLabel: "Emergency Contact",
+      workflowId: "emergency-contact",
       title: name,
-      trace: `ec-152800-r${pad(i, 2)}`,
+      runId4: `r${pad(i, 3)}`,
       status: "failed",
-      time: "3:29 PM",
       run: 1,
-      duration: "—",
+      version: 1,
+      // no task, no start, no end — a rejected page is work that never existed
+      enqueuedAt: at("11:29:44"),
+      evidence: { confidence: "unknown" },
       memberFact: "no contact block on the page",
       outcome: {
         tone: "muted",
         text: "Rejected page — the form has no emergency-contact block. Display-only: no task exists, delete is the only action.",
       },
       steps: [{ label: "OCR extraction", state: "failed", system: "i9", keyLines: ["page 7: no contact fields detected"] }],
-      lines: [{ ts: "3:29:44", kind: "warn", system: "i9", text: "Page 7 — no emergency-contact block; the page cannot become work", step: "OCR extraction" }],
+      lines: [{ ts: "11:29:44", kind: "warn", system: "i9", text: "Page 7 — no emergency-contact block; the page cannot become work", step: "OCR extraction" }],
       data: [],
       receipt: { tone: "muted", headline: "No receipt — rejected page", note: "Delete it once you have confirmed the page is a cover sheet or a duplicate scan." },
       shots: [],
@@ -1779,14 +2191,18 @@ function ecPacketMember(i: number): DemoRow {
     rowType: "member",
     parentId: "ec-packet",
     containment: "member",
-    wfLabel: "Emergency Contact",
+    workflowId: "emergency-contact",
     title: name,
     eid,
-    trace: `ec-152800-m${pad(i, 2)}`,
+    runId4: `m${pad(i, 3)}`,
     status: "verifiedDone",
-    time: ts,
     run: 1,
-    duration: `${29 + i * 4}s`,
+    version: 2,
+    priority: "bulk",
+    enqueuedAt: at("11:31:10"),
+    startedAt,
+    endedAt: plusSeconds(startedAt, 29 + i * 4),
+    evidence: { receiptId: `rcpt-ec-m${pad(i, 3)}`, confidence: "verified" },
     memberFact: `contact saved · ${["spouse", "parent", "sibling", "partner", "parent"][i]}`,
     outcome: { tone: "success", text: "Emergency contact saved and read back from UCPath" },
     steps: [
@@ -1805,23 +2221,26 @@ function ecPacketMember(i: number): DemoRow {
   };
 }
 
-const ecPacket: DemoRow = {
+const ecPacket: DemoRowSpec = {
   id: "ec-packet",
   rowType: "group",
   subjectKind: "file",
-  wfLabel: "Emergency Contact",
+  workflowId: "emergency-contact",
   title: "EC_Forms_0722.pdf",
-  trace: "ec-152800-9b31",
+  runId4: "9b31",
   status: "doneWarnings",
-  time: "3:28 PM",
   run: 2,
-  duration: "4m 06s",
+  version: 16,
+  priority: "bulk",
+  enqueuedAt: at("11:27:54"),
+  startedAt: at("11:28:02"),
+  endedAt: at("11:32:08"),
+  evidence: { receiptId: "rcpt-ec-9b31", confidence: "partial" },
   memberIds: ecPacketMemberIds,
   warnings: { count: 1, first: "1 page could not be turned into work" },
   outcome: {
     tone: "warning",
     text: "5 done · 1 rejected — the packet stays at Done with warnings until the rejected page is deleted or acknowledged.",
-    action: "Open rejected page",
   },
   steps: [
     { label: "OCR extraction", state: "done", system: "i9", durationSec: 88, keyLines: ["6 pages · 5 with a contact block"] },
@@ -1830,20 +2249,20 @@ const ecPacket: DemoRow = {
     { label: "Rollup", state: "done", durationSec: 2, keyLines: ["5 verified · 1 rejected page excluded from the rollup"] },
   ],
   lines: [
-    { ts: "3:28:02", kind: "event", text: "Upload — EC_Forms_0722.pdf · 6 pages", step: "OCR extraction" },
-    { ts: "3:29:44", kind: "warn", system: "i9", text: "Page 7 has no contact block — rejected member row emitted (delete-only)", step: "OCR extraction" },
-    { ts: "3:31:10", kind: "event", text: "You approved 5 of 5 readable records", step: "Your review" },
-    { ts: "3:32:08", kind: "ok", text: "All 5 contacts saved and read back", step: "Member fan-out" },
+    { ts: "11:28:02", kind: "event", text: "Upload — EC_Forms_0722.pdf · 6 pages", step: "OCR extraction" },
+    { ts: "11:29:44", kind: "warn", system: "i9", text: "Page 7 has no contact block — rejected member row emitted (delete-only)", step: "OCR extraction" },
+    { ts: "11:31:10", kind: "event", text: "You approved 5 of 5 readable records", step: "Your review" },
+    { ts: "11:32:08", kind: "ok", text: "All 5 contacts saved and read back", step: "Member fan-out" },
     {
-      ts: "3:32:10",
+      ts: "11:32:10",
       kind: "warn",
       text: "Rollup — 5 of 5 real members verified, but 1 rejected page is unresolved, so the packet is Done with warnings, not Verified done",
       step: "Rollup",
     },
   ],
   data: [
-    { step: "OCR extraction", dir: "read", field: "Pages with a contact block", value: "5 of 6", system: "i9", ts: "3:29:44" },
-    { step: "Member fan-out", dir: "write", field: "Contacts saved", value: "5 of 5", system: "ucpath", ts: "3:32:08" },
+    { step: "OCR extraction", dir: "read", field: "Pages with a contact block", value: "5 of 6", system: "i9", ts: "11:29:44" },
+    { step: "Member fan-out", dir: "write", field: "Contacts saved", value: "5 of 5", system: "ucpath", ts: "11:32:08" },
   ],
   receipt: {
     tone: "warning",
@@ -1871,19 +2290,22 @@ const ecPacket: DemoRow = {
 // upload of six, and would hide the packet the person came from.
 // ===========================================================================
 
-const ecSingleMember: DemoRow = {
+const ecSingleMember: DemoRowSpec = {
   id: "ecs-m-0",
   rowType: "member",
   parentId: "ec-single",
   containment: "member",
-  wfLabel: "Emergency Contact",
+  workflowId: "emergency-contact",
   title: "Yara Ito",
   eid: "10466920",
-  trace: "ec-160412-m00",
+  runId4: "m000",
   status: "verifiedDone",
-  time: "4:05 PM",
   run: 1,
-  duration: "31s",
+  version: 3,
+  enqueuedAt: at("12:04:52"),
+  startedAt: at("12:05:00"),
+  endedAt: at("12:05:31"),
+  evidence: { receiptId: "rcpt-ec-m000", confidence: "verified" },
   memberFact: "contact saved · parent",
   outcome: { tone: "success", text: "Emergency contact saved and read back from UCPath" },
   steps: [
@@ -1891,8 +2313,8 @@ const ecSingleMember: DemoRow = {
     { label: "Fill form", state: "done", system: "ucpath", durationSec: 15 },
     { label: "Save", state: "done", system: "ucpath", durationSec: 7, hasShot: true },
   ],
-  lines: [{ ts: "4:05:31", kind: "write", system: "ucpath", pills: [{ dir: "write", label: "contact", value: "parent" }], step: "Fill form" }],
-  data: [{ step: "Fill form", dir: "write", field: "Relationship", value: "parent", system: "ucpath", ts: "4:05:31" }],
+  lines: [{ ts: "12:05:31", kind: "write", system: "ucpath", pills: [{ dir: "write", label: "contact", value: "parent" }], step: "Fill form" }],
+  data: [{ step: "Fill form", dir: "write", field: "Relationship", value: "parent", system: "ucpath", ts: "12:05:31" }],
   receipt: {
     tone: "success",
     headline: "Verified done · contact saved",
@@ -1901,19 +2323,22 @@ const ecSingleMember: DemoRow = {
   shots: [{ label: "Saved contact", kind: "step" }],
 };
 
-const ecSingle: DemoRow = {
+const ecSingle: DemoRowSpec = {
   id: "ec-single",
   rowType: "group",
   subjectKind: "file",
-  wfLabel: "Emergency Contact",
+  workflowId: "emergency-contact",
   title: "EC_Form_Ito.pdf",
-  trace: "ec-160412-3a77",
+  runId4: "3a77",
   status: "verifiedDone",
-  time: "4:04 PM",
   run: 1,
-  duration: "1m 48s",
+  version: 6,
+  enqueuedAt: at("12:04:06"),
+  startedAt: at("12:04:12"),
+  endedAt: at("12:06:00"),
+  evidence: { receiptId: "rcpt-ec-3a77", confidence: "verified" },
   memberIds: ["ecs-m-0"],
-  outcome: { tone: "success", text: "1 of 1 saved — a packet of one is still a packet", action: "Open receipt" },
+  outcome: { tone: "success", text: "1 of 1 saved — a packet of one is still a packet" },
   steps: [
     { label: "OCR extraction", state: "done", system: "i9", durationSec: 34, keyLines: ["1 page · 1 contact block"] },
     { label: "Your review", state: "done", durationSec: 41 },
@@ -1921,11 +2346,11 @@ const ecSingle: DemoRow = {
     { label: "Rollup", state: "done", durationSec: 2 },
   ],
   lines: [
-    { ts: "4:04:12", kind: "event", text: "Upload — EC_Form_Ito.pdf · 1 page", step: "OCR extraction" },
-    { ts: "4:05:02", kind: "event", text: "You approved 1 of 1", step: "Your review" },
-    { ts: "4:06:00", kind: "ok", text: "Rollup complete — 1 contact saved", step: "Rollup" },
+    { ts: "12:04:12", kind: "event", text: "Upload — EC_Form_Ito.pdf · 1 page", step: "OCR extraction" },
+    { ts: "12:05:02", kind: "event", text: "You approved 1 of 1", step: "Your review" },
+    { ts: "12:06:00", kind: "ok", text: "Rollup complete — 1 contact saved", step: "Rollup" },
   ],
-  data: [{ step: "Member fan-out", dir: "write", field: "Contacts saved", value: "1 of 1", system: "ucpath", ts: "4:06:00" }],
+  data: [{ step: "Member fan-out", dir: "write", field: "Contacts saved", value: "1 of 1", system: "ucpath", ts: "12:06:00" }],
   receipt: {
     tone: "success",
     headline: "Verified done · 1 of 1 saved",
@@ -1942,24 +2367,27 @@ const ecSingle: DemoRow = {
 // here, because nobody is being asked to decide anything: something broke.
 // ===========================================================================
 
-const ocrOnbase: DemoRow = {
+const ocrOnbase: DemoRowSpec = {
   id: "ocr-onbase",
   rowType: "run",
   subjectKind: "file",
-  wfLabel: "OCR",
+  workflowId: "ocr",
   title: "OnBase_Import_0722.pdf",
-  trace: "oc-155902-e440",
+  runId4: "e440",
   status: "failed",
-  time: "3:59 PM",
   run: 2,
-  duration: "1m 12s",
+  version: 4,
+  enqueuedAt: at("11:58:55"),
+  startedAt: at("11:59:02"),
+  endedAt: at("12:00:14"),
+  evidence: { failureId: "fail-oc-e440", confidence: "unknown" },
   containment: "linked",
   linkedParentId: "ob-packet",
   reviewOf: "ob-packet",
   records: [],
   error: "0 of 14 pages were readable — the PDF is a flattened fax scan at 96 dpi",
   failShots: 2,
-  outcome: { tone: "destructive", text: "OCR failed — 0 of 14 pages readable (96 dpi fax scan)", action: "Re-upload" },
+  outcome: { tone: "destructive", text: "OCR failed — 0 of 14 pages readable (96 dpi fax scan)" },
   steps: [
     { label: "Split pages", state: "done", system: "i9", durationSec: 8, keyLines: ["14 pages"] },
     { label: "Read forms", state: "failed", system: "i9", durationSec: 64, attempts: 2, keyLines: ["0 of 14 pages produced a record", "page raster is 96 dpi — below the readable floor"] },
@@ -1967,10 +2395,10 @@ const ocrOnbase: DemoRow = {
     { label: "Your review", state: "pending" },
   ],
   lines: [
-    { ts: "3:59:10", kind: "event", system: "i9", text: "Split 14 pages", step: "Split pages" },
-    { ts: "4:00:14", kind: "error", system: "i9", text: "0 of 14 pages produced a record — the raster is 96 dpi, below the readable floor", card: "failure", step: "Read forms" },
+    { ts: "11:59:10", kind: "event", system: "i9", text: "Split 14 pages", step: "Split pages" },
+    { ts: "12:00:14", kind: "error", system: "i9", text: "0 of 14 pages produced a record — the raster is 96 dpi, below the readable floor", card: "failure", step: "Read forms" },
   ],
-  data: [{ step: "Read forms", dir: "read", field: "Records read", value: "0 of 14", system: "i9", ts: "4:00:14" }],
+  data: [{ step: "Read forms", dir: "read", field: "Records read", value: "0 of 14", system: "i9", ts: "12:00:14" }],
   receipt: {
     tone: "destructive",
     headline: "No receipt — nothing was read",
@@ -1987,17 +2415,20 @@ const ocrOnbase: DemoRow = {
   failCard: { title: "OCR could not read the packet", meta: "14 pages split, 0 records produced. The page raster is 96 dpi — a fax scan, not a document scan." },
 };
 
-const obPacket: DemoRow = {
+const obPacket: DemoRowSpec = {
   id: "ob-packet",
   rowType: "group",
   subjectKind: "file",
-  wfLabel: "OnBase",
+  workflowId: "onbase",
   title: "OnBase_Import_0722.pdf",
-  trace: "ob-155900-1c08",
+  runId4: "1c08",
   status: "failed",
-  time: "3:59 PM",
   run: 2,
-  duration: "1m 20s",
+  version: 5,
+  enqueuedAt: at("11:58:52"),
+  startedAt: at("11:59:00"),
+  endedAt: at("12:00:20"),
+  evidence: { failureId: "fail-ob-1c08", confidence: "unknown" },
   memberIds: [],
   reviewRunId: "ocr-onbase",
   mirroredFrom: "ocr-onbase",
@@ -2005,7 +2436,6 @@ const obPacket: DemoRow = {
   outcome: {
     tone: "destructive",
     text: "Failed — its OCR run could not read the packet: 0 of 14 pages readable (96 dpi fax scan)",
-    action: "Re-upload",
   },
   steps: [
     { label: "OCR extraction", state: "failed", system: "i9", durationSec: 72, keyLines: ["delegated to oc-155902-e440", "child failed — 0 of 14 pages readable"] },
@@ -2014,10 +2444,10 @@ const obPacket: DemoRow = {
     { label: "Rollup", state: "pending" },
   ],
   lines: [
-    { ts: "3:59:00", kind: "event", text: "Upload — OnBase_Import_0722.pdf · 14 pages", step: "OCR extraction" },
-    { ts: "3:59:02", kind: "event", text: "Delegated extraction to the OCR panel — oc-155902-e440", step: "OCR extraction" },
+    { ts: "11:59:00", kind: "event", text: "Upload — OnBase_Import_0722.pdf · 14 pages", step: "OCR extraction" },
+    { ts: "11:59:02", kind: "event", text: "Delegated extraction to the OCR panel — oc-155902-e440", step: "OCR extraction" },
     {
-      ts: "4:00:20",
+      ts: "12:00:20",
       kind: "error",
       text: "The OCR run failed: 0 of 14 pages readable (96 dpi fax scan). There is nothing to review, so this packet is Failed — not Waiting on you.",
       card: "failure",
@@ -2045,7 +2475,12 @@ const obPacket: DemoRow = {
 // Assembly + ordering helpers
 // ===========================================================================
 
-export const DEMO_ROWS: Record<string, DemoRow> = Object.fromEntries(
+/**
+ * The raw corpus — facts as the fixtures authored them, before projection.
+ * Kept separate so a group can be rolled up from its members' statuses while
+ * the projected map is still being built.
+ */
+const RAW_ROWS: DemoRowSpec[] = [
   [
     // needs you
     oathSummer,
@@ -2079,39 +2514,13 @@ export const DEMO_ROWS: Record<string, DemoRow> = Object.fromEntries(
     ...ecPacketMemberIds.map((_, i) => ecPacketMember(i)),
     ecSingleMember,
     ...OU_SIGNER_IDS.map((_, i) => ouSigner(i)),
-  ].map((r) => [r.id, r]),
-);
+  ],
+].flat();
 
-// ---------------------------------------------------------------------------
-// Rollup — ONE function, never recomputed per surface
-// ---------------------------------------------------------------------------
+const RAW_BY_ID = new Map(RAW_ROWS.map((r) => [r.id, r]));
 
-/**
- * Ratified precedence. Read it as "what does this group most need from me":
- * a decision beats a breakage beats an unknown write beats work in flight.
- * Cancelled is last because a group nobody stopped is never cancelled.
- */
-export const ROLLUP_PRECEDENCE: ProposedStatus[] = [
-  "waiting",
-  "failed",
-  "parked",
-  "running",
-  "queued",
-  "doneWarnings",
-  "verifiedDone",
-  "cancelled",
-];
-
-/**
- * `rejected` rows are excluded from the rollup — they never became work, so
- * they cannot count toward done. But they must not read as clean either, so an
- * otherwise-verified group with a rejected page settles at Done with warnings
- * until each rejection is deleted or acknowledged.
- */
-export function rollupStatus(memberStatuses: ProposedStatus[], rejected: number, fallback: ProposedStatus): ProposedStatus {
-  const winner = memberStatuses.length === 0 ? fallback : (ROLLUP_PRECEDENCE.find((s) => memberStatuses.includes(s)) ?? fallback);
-  return rejected > 0 && winner === "verifiedDone" ? "doneWarnings" : winner;
-}
+/** the projected wire surfaces — the ONLY thing any component reads */
+export const DEMO_ROWS: Record<string, DemoRow> = Object.fromEntries(RAW_ROWS.map((spec) => [spec.id, projectRow(spec, RAW_BY_ID)]));
 
 /** the status every surface renders — a group's is always the rollup */
 export function effectiveStatus(row: DemoRow): ProposedStatus {
@@ -2125,9 +2534,19 @@ export function effectiveStatus(row: DemoRow): ProposedStatus {
   );
 }
 
-/** the age of the decision this row is sitting on, if it is sitting on one */
-export function gateAge(row: DemoRow): string | undefined {
-  return row.gate?.waiting;
+/**
+ * The age of the decision this row is sitting on — DERIVED from the instant the
+ * gate opened, never a stored string. This is the whole triage signal on a
+ * collapsed row, and it is also the width of the timeline's waiting wedge, so
+ * the two can never tell different stories.
+ */
+export function gateWaitSec(row: DemoRow, tick = 0): number | undefined {
+  return row.gate ? secondsSince(row.gate.openedAt, tick) : undefined;
+}
+
+export function gateAge(row: DemoRow, tick = 0): string | undefined {
+  const sec = gateWaitSec(row, tick);
+  return sec === undefined ? undefined : fmtElapsed(sec);
 }
 
 // ---------------------------------------------------------------------------
@@ -2293,9 +2712,4 @@ export function groupCounts(groupId: string): GroupCounts {
   return out;
 }
 
-/** seconds → "14s" / "1m 4s" / "1h 3m" */
-export function fmtElapsed(sec: number): string {
-  if (sec < 60) return `${sec}s`;
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
-  return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
-}
+

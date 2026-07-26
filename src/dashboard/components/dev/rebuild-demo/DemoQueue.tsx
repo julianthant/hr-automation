@@ -9,7 +9,6 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  ChevronsUp,
   ClipboardList,
   Clock,
   CornerDownRight,
@@ -22,15 +21,13 @@ import {
   Search,
   SearchX,
   ShieldCheck,
-  Trash2,
   Users,
-  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { QueueRowCard } from "@/components/queue-panel/QueueRowCard";
 import { StatusCounts } from "@/components/queue-panel/StatusCounts";
-import { IconActionButton } from "@/components/shared/IconActionButton";
 import { PROPOSED_STATUS, StatusBadge, statusText, type ProposedStatus } from "./demo-status";
+import { FooterActions, OutcomeActionButton, RowActionMenu, type DemoActionHandler } from "./DemoActions";
 import { rowInBucket, type StatusBucket } from "./DemoShell";
 import {
   ATTENTION_STATUSES,
@@ -58,8 +55,6 @@ import {
  * structurally unable to disagree.
  */
 
-const NOOP = () => {};
-
 export type DemoFilter = StatusBucket;
 export type DemoView = { kind: "queue" } | { kind: "drill"; groupId: string };
 
@@ -75,6 +70,8 @@ export interface DemoQueueState {
 
 export interface DemoQueueHandlers {
   onSelect: (id: string) => void;
+  /** every control on a row goes through here — see `DemoActions` */
+  onAction: DemoActionHandler;
   onFilter: (f: DemoFilter) => void;
   onDrillIn: (groupId: string) => void;
   onBack: () => void;
@@ -186,7 +183,7 @@ const MATRIX_CELL: Record<ProposedStatus, string> = {
   cancelled: "bg-warning/60",
 };
 
-function headerChips(row: DemoRow, checked: ReadonlySet<string>): ReactNode {
+function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): ReactNode {
   const status = effectiveStatus(row);
   const lookups = (row.records ?? []).filter((r) => r.lookup).length;
   return (
@@ -203,13 +200,42 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>): ReactNode {
           {lookups} lookups
         </span>
       )}
-      {row.attempt && (
+      {/* a run started against a TEST instance can never be mistaken for a
+          real filing, and a rehearsal says so before you read its receipt */}
+      {Object.entries(row.resolvedInstance).some(([, v]) => v === "test") && (
         <span
-          title={row.attempt.prior}
+          title={`Ran against the TEST instance of ${Object.entries(row.resolvedInstance)
+            .filter(([, v]) => v === "test")
+            .map(([k]) => k)
+            .join(", ")} — nothing here reached production.`}
+          className="inline-flex items-center gap-1 rounded-md border border-info/45 bg-info/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-info"
+        >
+          test
+        </span>
+      )}
+      {row.dryRun && (
+        <span
+          title="Dry run — this rehearsal reads the systems and writes nothing."
+          className="inline-flex items-center gap-1 rounded-md border border-log-violet/45 bg-log-violet/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-log-violet"
+        >
+          dry run
+        </span>
+      )}
+      {row.workflowVersion !== row.workflow.version && (
+        <span
+          title={`Ran under ${row.workflow.label} v${row.workflowVersion}; runs are served by v${row.workflow.version} now. Archived runs are not comparable with today's.`}
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+        >
+          v{row.workflowVersion}
+        </span>
+      )}
+      {row.attemptHistory && (
+        <span
+          title={row.attemptHistory.prior}
           className="inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/12 px-1.5 py-0.5 text-[10px] font-semibold text-warning"
         >
           <RotateCcw aria-hidden className="size-3" />
-          attempt {row.attempt.n}
+          attempt {row.attemptHistory.n}
         </span>
       )}
       {row.warnings && (
@@ -245,15 +271,20 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>): ReactNode {
       {status === "running" && row.rowType !== "group" && <MicroSteps row={row} />}
       {/* A collapsed row says how OLD the decision is, not only that there is
           one. Age is the whole triage signal. */}
-      <StatusBadge status={status} age={gateAge(row)} />
+      <StatusBadge status={status} age={gateAge(row, tick)} />
     </>
   );
 }
 
-function sublineFor(row: DemoRow): { tone: string; text: string; action?: string; actionTone?: string } | null {
+/**
+ * The subline is TEXT ONLY. The button beside it is the row's own
+ * `outcome`-placement descriptor (`OutcomeActionButton`), so the queue and the
+ * log panel offer literally the same command with the same label — and a row
+ * that sends no outcome action simply has no button.
+ */
+function sublineFor(row: DemoRow): { tone: string; text: string } | null {
   const status = effectiveStatus(row);
-  if (status === "failed" && row.error)
-    return { tone: "text-destructive", text: row.error, action: row.mirroredFrom ? "Re-upload" : undefined, actionTone: "destructive" };
+  if (status === "failed" && row.error) return { tone: "text-destructive", text: row.error };
   if (status === "waiting" && row.gate)
     return {
       tone: "text-warning",
@@ -261,12 +292,9 @@ function sublineFor(row: DemoRow): { tone: string; text: string; action?: string
         row.gate.kind === "identity" && row.gate.candidates
           ? `${row.gate.title.replace("Waiting on you — ", "")} — ${row.gate.candidates[0].name} vs ${row.gate.candidates[1].name}`
           : row.gate.title,
-      action: "Review",
-      actionTone: "info",
     };
-  // Parked is an UNKNOWN outcome, never a hold you resume. The subline says so
-  // in the row's own words rather than a hardcoded caption.
-  if (status === "parked") return { tone: "text-log-violet", text: row.outcome.text, action: "Resolve", actionTone: "violet" };
+  // Parked is an UNKNOWN outcome, never a hold you resume.
+  if (status === "parked") return { tone: "text-log-violet", text: row.outcome.text };
   if (status === "cancelled") return { tone: "text-muted-foreground", text: "Cancelled by you — nothing written" };
   if (status === "running" && row.liveText) return { tone: "text-primary/85", text: row.liveText };
   if (row.rowType === "group" && row.ocrPhase) return { tone: "text-muted-foreground", text: row.ocrPhase };
@@ -298,37 +326,14 @@ export function DemoRowCard({
   const StatusIcon = PROPOSED_STATUS[status].icon;
   const linked = linkedGroupSummary(row);
 
-  const actions =
-    status === "running" || status === "waiting" || status === "parked" ? (
-      isGroup ? (
-        // Cancelling a group cancels the whole tree — this row, its delegated
-        // OCR review and every member. It is final: no confirm dialog, no undo.
-        <span className="flex items-center gap-1">
-          <span className="mr-1 hidden text-[10px] font-sans text-muted-foreground min-[400px]:inline">Cancel group</span>
-          <IconActionButton
-            tone="muted"
-            icon={<X aria-hidden className="size-3.5" />}
-            label="Cancel group and everything under it"
-            title="Cancels this group, its delegated OCR review and every member. Final — there is no undo."
-            onClick={NOOP}
-          />
-        </span>
-      ) : (
-        <IconActionButton tone="muted" icon={<X aria-hidden className="size-3.5" />} label="Cancel" onClick={NOOP} />
-      )
-    ) : status === "queued" ? (
-      <>
-        <IconActionButton tone="primary" icon={<ChevronsUp aria-hidden className="size-3.5" />} label="Bump" onClick={NOOP} />
-        <IconActionButton tone="muted" icon={<X aria-hidden className="size-3.5" />} label="Cancel" onClick={NOOP} />
-      </>
-    ) : row.containment === "rejected" ? (
-      <IconActionButton tone="destructive" icon={<Trash2 aria-hidden className="size-3.5" />} label="Delete" onClick={NOOP} />
-    ) : (
-      <>
-        <IconActionButton tone="primary" icon={<RotateCcw aria-hidden className="size-3.5" />} label="Retry" onClick={NOOP} />
-        <IconActionButton tone="destructive" icon={<Trash2 aria-hidden className="size-3.5" />} label="Delete" onClick={NOOP} />
-      </>
-    );
+  // NO status branching here. The footer renders exactly the descriptors the
+  // surface sent for this row; an action the server did not send has no button.
+  const actions = (
+    <>
+      <FooterActions row={row} onAction={handlers.onAction} />
+      <RowActionMenu row={row} onAction={handlers.onAction} />
+    </>
+  );
 
   return (
     <QueueRowCard
@@ -339,7 +344,7 @@ export function DemoRowCard({
         role: "button",
         tabIndex: 0,
         "aria-pressed": selected,
-        "aria-label": `${row.title} — ${statusText(status, gateAge(row)).toLowerCase()}`,
+        "aria-label": `${row.displayName ?? row.title} — ${statusText(status, gateAge(row, state.tick)).toLowerCase()}`,
         "data-demo-row-id": row.id,
         onKeyDown: (e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -352,7 +357,7 @@ export function DemoRowCard({
       footer={{
         time: row.time,
         runNumber: row.run,
-        secondaryId: row.trace,
+        secondaryId: row.subtitle,
         suppressIdWhenEquals: row.title,
         elapsed: elapsed ?? row.queueNote ?? null,
         duration: row.duration ?? null,
@@ -364,12 +369,13 @@ export function DemoRowCard({
           <div className="flex min-w-0 items-center gap-2">
             <StatusIcon aria-hidden className={cn("h-3.5 w-3.5 shrink-0", PROPOSED_STATUS[status].iconClass)} />
             <span
+              title={row.displayName ? `Named by you — subject is ${row.title}` : undefined}
               className={cn(
                 "truncate text-[14px] font-semibold text-foreground",
                 row.containment === "rejected" && "italic font-normal text-muted-foreground",
               )}
             >
-              {row.title}
+              {row.displayName ?? row.title}
             </span>
             {/* which workflow owns this row — needed the moment the queue shows
                 more than one workflow, and the only thing that tells a packet
@@ -378,31 +384,13 @@ export function DemoRowCard({
               {row.wfLabel}
             </span>
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">{headerChips(row, state.checkedIds)}</div>
+          <div className="flex shrink-0 items-center gap-1.5">{headerChips(row, state.checkedIds, state.tick)}</div>
         </div>
 
         {sub && (
           <div className={cn("mt-1.5 ml-5 flex min-w-0 items-center gap-2 text-[11px] font-mono", sub.tone)}>
             <span className="min-w-0 truncate">{sub.text}</span>
-            {sub.action && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handlers.onSelect(row.id);
-                }}
-                className={cn(
-                  "ml-auto shrink-0 rounded-md border px-2 py-px text-[10.5px] font-sans font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  sub.actionTone === "violet"
-                    ? "border-log-violet/40 bg-log-violet/8 text-log-violet"
-                    : sub.actionTone === "destructive"
-                      ? "border-destructive/40 bg-destructive/8 text-destructive"
-                      : "border-info/40 bg-info/8 text-info",
-                )}
-              >
-                {sub.action}
-              </button>
-            )}
+            <OutcomeActionButton row={row} onAction={handlers.onAction} className="ml-auto" />
           </div>
         )}
 

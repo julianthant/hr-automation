@@ -61,8 +61,14 @@ const STATIC_STATE: DemoQueueState = {
   tick: 0,
 };
 
+/**
+ * The gallery shows specimens, not a working app: controls render (from each
+ * row's own `actions[]`, so the button set is the real one) but do nothing.
+ * `?view=rebuild-demo` is where commands actually run.
+ */
 const STATIC_HANDLERS: DemoQueueHandlers = {
   onSelect: NOOP,
+  onAction: NOOP,
   onFilter: NOOP,
   onDrillIn: NOOP,
   onBack: NOOP,
@@ -312,6 +318,7 @@ function LogPanelsTab() {
                 tab={null}
                 onTab={NOOP}
                 onSelect={NOOP}
+                onAction={NOOP}
                 onOpenPanel={NOOP}
                 checkedIds={new Set()}
                 onToggleChecked={NOOP}
