@@ -34,11 +34,14 @@ import { cn } from "@/lib/utils";
 import { IconActionButton } from "@/components/shared/IconActionButton";
 import { StatusBadge, type ProposedStatus } from "./demo-status";
 import { panelKindOf, panelKindSpec, rowVariantSpec } from "./demo-catalog";
+import { BannerActions, OutcomeActionButton, ParkResolutions, type DemoActionHandler } from "./DemoActions";
+import { fmtClock, tabsFor as tabsForKind, type DemoTab } from "./demo-wire";
 import {
   DEMO_ROWS,
   effectiveStatus,
   fmtElapsed,
   gateAge,
+  gateWaitSec,
   linkedGroupSummary,
   LIVE_SEQUENCE,
   memberAttentionIds,
@@ -64,7 +67,7 @@ import {
 
 const NOOP = () => {};
 
-export type DemoTab = "logs" | "data" | "review" | "receipt" | "people";
+export type { DemoTab } from "./demo-wire";
 
 const TERMINAL: ProposedStatus[] = ["verifiedDone", "doneWarnings", "failed", "cancelled"];
 
@@ -74,11 +77,13 @@ const TERMINAL: ProposedStatus[] = ["verifiedDone", "doneWarnings", "failed", "c
  *  - People exists only on a Group Row.
  *  - Screenshots is not a tab at all — evidence rides the bar above the tabs.
  */
+/**
+ * The tabs a row gets are SERVED (`detailSurfaces`), not decided here. The
+ * derivation still lives in `demo-wire` so the mock server and the client agree
+ * by construction; this reads the row's own field.
+ */
 export function tabsFor(row: DemoRow): DemoTab[] {
-  const kind = panelKindOf(row);
-  if (kind === "review") return ["review", "logs", "data", "receipt"];
-  if (kind === "group") return ["people", "logs", "data", "receipt"];
-  return ["logs", "data", "receipt"];
+  return row.detailSurfaces ?? tabsForKind(row);
 }
 
 export function defaultTabFor(row: DemoRow): DemoTab {
@@ -105,6 +110,8 @@ export interface DemoLogPanelProps {
   onOpenPanel: (workflow: string, id: string) => void;
   checkedIds: ReadonlySet<string>;
   onToggleChecked: (id: string) => void;
+  /** every control in the panel goes through here — see `DemoActions` */
+  onAction: DemoActionHandler;
   tick: number;
   liveCount: number;
 }
@@ -166,7 +173,7 @@ function Pill({ dir, label, value }: { dir: "read" | "write"; label: string; val
   );
 }
 
-function GateCardView({ row, wide }: { row: DemoRow; wide?: boolean }) {
+function GateCardView({ row, wide, onAction }: { row: DemoRow; wide?: boolean; onAction: DemoActionHandler }) {
   const gate = row.gate;
   if (!gate) return null;
   const violet = gate.kind === "parked";
@@ -212,62 +219,9 @@ function GateCardView({ row, wide }: { row: DemoRow; wide?: boolean }) {
           ))}
         </div>
       )}
-      <ParkResolutions gate={gate} />
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {gate.actions.map((a, i) => (
-          <button
-            key={a}
-            type="button"
-            onClick={NOOP}
-            className={cn(
-              "rounded-md border px-2.5 py-0.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              i === 0 && !gate.resolutions
-                ? "border-primary bg-primary font-semibold text-primary-foreground"
-                : "border-border bg-card font-medium text-secondary-foreground",
-            )}
-          >
-            {a}
-          </button>
-        ))}
-      </div>
+      <ParkResolutions row={row} onAction={onAction} />
+      <BannerActions row={row} onAction={onAction} />
       {wide && <div className="mt-2 border-t border-border/40 pt-2 text-[11px] leading-relaxed text-muted-foreground">{gate.note}</div>}
-    </div>
-  );
-}
-
-/**
- * The only two exits from Write parked. Both are the operator reporting what
- * they SAW in the system of record — neither one re-submits anything. There is
- * no Resume button here on purpose: resuming an unknown write is how you
- * terminate somebody twice.
- */
-function ParkResolutions({ gate }: { gate: NonNullable<DemoRow["gate"]> }) {
-  if (!gate.resolutions) return null;
-  return (
-    <div className="mt-2 grid gap-1.5 min-[560px]:grid-cols-2">
-      {gate.resolutions.map((r) => {
-        const present = r.key === "confirmed-present";
-        const Icon = present ? CheckCircle2 : CircleSlash;
-        return (
-          <button
-            key={r.key}
-            type="button"
-            onClick={NOOP}
-            className={cn(
-              "flex flex-col items-start gap-0.5 rounded-md border px-2.5 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              present
-                ? "border-success/45 bg-success/8 hover:bg-success/12"
-                : "border-destructive/40 bg-destructive/6 hover:bg-destructive/10",
-            )}
-          >
-            <span className={cn("inline-flex items-center gap-1.5 text-[11.5px] font-semibold", present ? "text-success" : "text-destructive")}>
-              <Icon aria-hidden className="size-3" />
-              {r.label}
-            </span>
-            <span className="text-[10.5px] leading-snug text-muted-foreground">{r.detail}</span>
-          </button>
-        );
-      })}
     </div>
   );
 }
@@ -312,14 +266,25 @@ const STEP_TONE: Record<DemoStep["state"], { bar: string; text: string; dot: str
 /** a step with no recorded time still needs a visible slot — this is its floor */
 const MIN_SLOT_SEC = 8;
 
-function Timeline({ row }: { row: DemoRow }) {
+function Timeline({ row, tick }: { row: DemoRow; tick: number }) {
   const steps = row.steps;
   if (steps.length === 0) return null;
 
   const active = steps.reduce((a, s) => a + (s.durationSec ?? 0), 0);
-  const gateSec = row.gate ? Math.max(active, 90) : 0;
+  // The wait is as long as the wait REALLY is: now minus the instant the gate
+  // opened. It used to be `max(active, 90)` — a fabricated width that made
+  // every gate look like the whole run whether it was 2 minutes or 2 hours old.
+  const gateSec = gateWaitSec(row, tick) ?? 0;
   const slot = (s: DemoStep) => Math.max(s.durationSec ?? 0, MIN_SLOT_SEC);
-  const total = steps.reduce((a, s) => a + slot(s), 0) + gateSec;
+  const stepTotal = steps.reduce((a, s) => a + slot(s), 0);
+  // A 34-minute wait beside 3 minutes of work is a TRUE 91% of the track — and
+  // at 91% the step labels shrink to "3.¹2 4..". So the wedge is drawn clamped
+  // (never more than 3/5 of the track) while its LABEL still reads the real
+  // age. Clamping a bar and printing the true number is a chart convention;
+  // inventing the number was the bug this replaced.
+  const gateSlot = Math.min(gateSec, stepTotal * 1.5);
+  const gateClamped = gateSlot < gateSec;
+  const total = stepTotal + gateSlot;
 
   return (
     <div className="border-b border-border/60 px-3 py-2">
@@ -393,16 +358,21 @@ function Timeline({ row }: { row: DemoRow }) {
 
         {/* the wait is part of the run's time, so it is part of the timeline */}
         {row.gate && (
-          <div className="group relative min-w-0" style={{ width: `${(gateSec / total) * 100}%` }}>
+          <div className="group relative min-w-0" style={{ width: `${(gateSlot / total) * 100}%` }}>
             <div className="flex min-w-0 items-center gap-1">
               <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warning animate-pulse motion-reduce:animate-none" />
               <span className="min-w-0 truncate text-[10.5px] text-warning">Waiting on you</span>
             </div>
             <span
               aria-hidden
+              title={
+                gateClamped
+                  ? `Waiting ${fmtElapsed(gateSec)} — drawn shortened so the step labels stay readable`
+                  : `Waiting ${fmtElapsed(gateSec)}`
+              }
               className="mt-1 block h-2 w-full rounded-[3px] bg-[repeating-linear-gradient(45deg,var(--color-warning)_0_4px,transparent_4px_8px)] opacity-70"
             />
-            <span className="mt-0.5 block truncate font-mono text-[9.5px] tabular-nums text-warning">{row.gate.waiting}</span>
+            <span className="mt-0.5 block truncate font-mono text-[9.5px] tabular-nums text-warning">{gateAge(row, tick)}</span>
           </div>
         )}
       </div>
@@ -412,7 +382,7 @@ function Timeline({ row }: { row: DemoRow }) {
         <span>{row.time}</span>
         <span aria-hidden className="h-px flex-1 bg-border/50" />
         <span className="tabular-nums">
-          {fmtElapsed(active)} working{row.gate ? ` · ${row.gate.waiting} waiting on you` : ""}
+          {fmtElapsed(active)} working{row.gate ? ` · ${gateAge(row, tick)} waiting on you` : ""}
         </span>
       </div>
     </div>
@@ -453,7 +423,7 @@ function EvidenceBar({ row }: { row: DemoRow }) {
  * operator, so the decision is visible from EVERY tab instead of hiding behind
  * a Review tab that most rows should not have.
  */
-function GateBanner({ row }: { row: DemoRow }) {
+function GateBanner({ row, tick, onAction }: { row: DemoRow; tick: number; onAction: DemoActionHandler }) {
   const gate = row.gate;
   if (!gate) return null;
   // Parked is not a gate you answer with a click — it is an unknown you resolve
@@ -466,27 +436,13 @@ function GateBanner({ row }: { row: DemoRow }) {
         <Icon aria-hidden className={cn("size-3.5 shrink-0", parked ? "text-log-violet" : "text-warning")} />
         <span className={cn("min-w-0 truncate text-[12px] font-semibold", parked ? "text-log-violet" : "text-warning")}>{gate.title}</span>
         <span className={cn("ml-auto shrink-0 font-mono text-[10px]", parked ? "text-log-violet/80" : "text-warning/80")}>
-          open {gate.waiting} · since {gate.openedAt}
+          open {gateAge(row, tick)} · since {fmtClock(gate.openedAt)}
         </span>
       </div>
       <p className="mt-1 pl-5 text-[11px] leading-relaxed text-muted-foreground">{gate.note}</p>
       <div className="pl-5">
-        <ParkResolutions gate={gate} />
-      </div>
-      <div className="mt-1.5 flex flex-wrap gap-1.5 pl-5">
-        {gate.actions.map((a, i) => (
-          <button
-            key={a}
-            type="button"
-            onClick={NOOP}
-            className={cn(
-              "rounded-md border px-2.5 py-0.5 text-[11px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              i === 0 && !gate.resolutions ? "border-warning/55 bg-warning/15 text-warning" : "border-border bg-card text-secondary-foreground",
-            )}
-          >
-            {a}
-          </button>
-        ))}
+        <ParkResolutions row={row} onAction={onAction} />
+        <BannerActions row={row} onAction={onAction} />
       </div>
     </div>
   );
@@ -496,7 +452,7 @@ function GateBanner({ row }: { row: DemoRow }) {
 // tab bodies
 // ---------------------------------------------------------------------------
 
-function LogsTab({ row, liveCount }: { row: DemoRow; liveCount: number }) {
+function LogsTab({ row, liveCount, onAction }: { row: DemoRow; liveCount: number; onAction: DemoActionHandler }) {
   const [query, setQuery] = useState("");
   useEffect(() => setQuery(""), [row.id]);
   const lines = useMemo<DemoLine[]>(
@@ -543,7 +499,7 @@ function LogsTab({ row, liveCount }: { row: DemoRow; liveCount: number }) {
                   {line.duration && <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">{line.duration}</span>}
                 </span>
               </div>
-              {line.card === "gate" && <GateCardView row={row} />}
+              {line.card === "gate" && <GateCardView row={row} onAction={onAction} />}
               {line.card === "failure" && <FailureCardView row={row} />}
             </div>
           );
@@ -1377,7 +1333,7 @@ const OUTCOME_TONE: Record<DemoRow["outcome"]["tone"], { bar: string; dot: strin
   muted: { bar: "border-border bg-secondary/20 text-muted-foreground", dot: "bg-muted-foreground", btn: "border-border bg-card text-secondary-foreground" },
 };
 
-export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedIds, onToggleChecked, tick, liveCount }: DemoLogPanelProps) {
+export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedIds, onToggleChecked, onAction, tick, liveCount }: DemoLogPanelProps) {
   const available = tabsFor(row);
   const fallback = defaultTabFor(row);
   const effectiveTab = tab && available.includes(tab) ? tab : fallback;
@@ -1454,23 +1410,15 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
       <div className={cn("flex items-center gap-2 border-b px-3 py-1.5", tone.bar)}>
         <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
         <span className="min-w-0 truncate text-[11.5px]">{row.outcome.text}</span>
-        {row.outcome.action && (
-          <button
-            type="button"
-            onClick={NOOP}
-            className={cn("ml-auto shrink-0 rounded-md border px-2.5 py-0.5 text-[10.5px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring", tone.btn)}
-          >
-            {row.outcome.action}
-          </button>
-        )}
+        <OutcomeActionButton row={row} onAction={onAction} className="ml-auto" />
       </div>
 
 
       {/* the gate is pinned above the tabs — visible from every tab, on every
           panel kind, instead of hiding inside a Review tab most rows lack */}
-      {row.gate && panelKindOf(row) !== "review" && <GateBanner row={row} />}
+      {row.gate && panelKindOf(row) !== "review" && <GateBanner row={row} tick={tick} onAction={onAction} />}
 
-      <Timeline row={row} />
+      <Timeline row={row} tick={tick} />
       <EvidenceBar row={row} />
 
       {/* tabs — derived from the panel kind, never a fixed five */}
@@ -1504,7 +1452,7 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
         </span>
       </div>
 
-      {effectiveTab === "logs" && <LogsTab row={row} liveCount={liveCount} />}
+      {effectiveTab === "logs" && <LogsTab row={row} liveCount={liveCount} onAction={onAction} />}
       {effectiveTab === "data" && <DataTab row={row} />}
       {effectiveTab === "review" && <ReviewTab row={row} />}
       {effectiveTab === "people" && <PeopleTab row={row} onSelect={onSelect} onOpenPanel={onOpenPanel} checkedIds={checkedIds} />}
