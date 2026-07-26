@@ -15,7 +15,7 @@
  * would have computed.
  */
 
-import type { ProposedStatus } from "./demo-status";
+import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
 import {
   agoSeconds,
   at,
@@ -227,10 +227,65 @@ export type Containment = "member" | "linked" | "rejected";
 /** the parent's pointer at a set of `linked` children living in another panel */
 export interface DemoLinkedGroup {
   ids: string[];
-  /** "signers" / "contacts" — what the linked runs are */
+  /** "signers" / "contacts" / "person lookup" — what the linked runs are */
   noun: string;
   /** the Workflow Panel entry the chip jumps to */
   panel: string;
+  /**
+   * When the children were collapsed into ONE Group Row in their own panel
+   * (S7), this is that group — the chip jumps to the group, not to a member
+   * buried inside it.
+   */
+  groupId?: string;
+}
+
+/**
+ * What the PARENT will do with a delegated run's answer. Without this line a
+ * helper run seen from its own panel is context-free: you can read what it
+ * looked up but not why anyone wanted it (delegation §5-S7).
+ */
+export interface DemoFeedsInto {
+  /** `Oath_Packet_Summer.pdf · record 3 (Ben Brooks) EID` */
+  label: string;
+  /** the row that consumes the answer — the Data line links to it */
+  targetRunId?: string;
+}
+
+/** one prior (or current) attempt of the same work — the RunSelector's items */
+export interface DemoAttempt {
+  n: number;
+  /** the log-greppable tail; the trace id is DERIVED from this + startedAt */
+  runId4: string;
+  status: ProposedStatus;
+  startedAt: string;
+  endedAt?: string;
+  summary: string;
+}
+
+/**
+ * What changed between two attempts. `kind` is load-bearing: replayed data must
+ * never be presented as newly observed (12 §2.4), so a reused checkpoint and a
+ * fresh read are different rows with different words.
+ */
+export interface DemoRerunDiffEntry {
+  kind: "input" | "checkpoint" | "correction" | "proof";
+  label: string;
+  prior: string;
+  current: string;
+  note?: string;
+}
+
+export interface DemoAttemptLineage {
+  attempts: DemoAttempt[];
+  diff: DemoRerunDiffEntry[];
+}
+
+/** a saved input preset merged into this run's typed values at enqueue */
+export interface DemoPreset {
+  name: string;
+  /** where the preset came from — a saved mapping, a workflow constant set, … */
+  source: string;
+  merged: { field: string; value: string }[];
 }
 
 export interface DemoEvidenceWire {
@@ -295,6 +350,12 @@ export interface DemoRowSpec {
   warnings?: { count: number; first: string };
   /** cross-run retry lineage shown as a chip — `retryOf` is the id it replays */
   attemptHistory?: { n: number; prior: string };
+  /** the full attempt list + what changed between the last two (RunSelector) */
+  lineage?: DemoAttemptLineage;
+  /** a saved preset merged into this run's inputs at enqueue */
+  preset?: DemoPreset;
+  /** what the parent will do with this delegated run's answer (S7) */
+  feedsInto?: DemoFeedsInto;
   failShots?: number;
   receiptShield?: string;
   error?: string;
@@ -310,6 +371,12 @@ export interface DemoRowSpec {
   failCard?: { title: string; meta: string };
   /** group only */
   memberIds?: string[];
+  /**
+   * group only — the noun a COUNTED anchor titles itself with (`lookups`,
+   * `separations`). The count is derived from the member set at projection, so
+   * a title can never claim a number the group does not hold.
+   */
+  groupNoun?: string;
   ocrPhase?: string;
   /**
    * group only — how many people the OCR read out of the packet, BEFORE any
@@ -396,6 +463,11 @@ export interface DemoRow extends DemoRowSpec {
   memberRollup?: { status: ProposedStatus; count: number }[];
   /** excluded from the rollup — a rejected page is work that never existed (D3) */
   rejectedCount?: number;
+  /**
+   * group only — the first few member names, so a counted anchor with no title
+   * of its own ("5 separations") still says WHO is in it. Derived, never typed.
+   */
+  memberPreview?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -461,8 +533,22 @@ function projectRow(spec: DemoRowSpec, rawById: Map<string, DemoRowSpec>): DemoR
 
   const stagedWrites = spec.data.filter((d) => d.dir === "write" && d.staged).length;
 
+  // A counted anchor titles itself from the member set it actually holds —
+  // "5 separations", "6 lookups · Oath_Packet_Summer.pdf". The number is never
+  // typed into a fixture, so a title cannot drift from the group.
+  const title = spec.groupNoun
+    ? [`${realMembers.length} ${spec.groupNoun}`, spec.title].filter(Boolean).join(" · ")
+    : spec.title;
+  const previewNames = realMembers.slice(0, 3).map((m) => m.title);
+  const memberPreview =
+    spec.rowType === "group" && previewNames.length > 0
+      ? previewNames.join(", ") + (realMembers.length > previewNames.length ? ` +${realMembers.length - previewNames.length} more` : "")
+      : undefined;
+
   return {
     ...spec,
+    title,
+    memberPreview,
     runId: `run-${spec.id}`,
     itemId: spec.itemId ?? `${workflow.code}:${spec.id}`,
     workflow,
@@ -487,7 +573,7 @@ function projectRow(spec: DemoRowSpec, rawById: Map<string, DemoRowSpec>): DemoR
       projectedVersion,
       memberCount: realMembers.length,
       rejectedCount,
-      title: spec.displayName ?? spec.title,
+      title: spec.displayName ?? title,
       workflow,
       stagedWrites,
     }),
@@ -1074,6 +1160,55 @@ const cdSamuel: DemoRowSpec = {
   endedAt: at("13:12:50"),
   evidence: { failureId: "fail-cd-5e19", confidence: "unknown" },
   attemptHistory: { n: 2, prior: "Attempt 1 failed 12:58 PM — timeout" },
+  /**
+   * The full lineage behind that chip. `diff` is what a rerun MUST say out
+   * loud: which inputs changed, what was replayed from a checkpoint rather
+   * than observed again, and which operator correction is in play. Replayed
+   * data is never labelled as newly observed.
+   */
+  lineage: {
+    attempts: [
+      {
+        n: 1,
+        runId4: "0b8c",
+        status: "failed",
+        startedAt: at("12:58:02"),
+        endedAt: at("12:58:41"),
+        summary: "CRM search timed out after 30s — never reached the download step",
+      },
+      {
+        n: 2,
+        runId4: "5e19",
+        status: "failed",
+        startedAt: at("13:12:02"),
+        endedAt: at("13:12:50"),
+        summary: "CRM search returned 0 records for samuel.ortiz@ucsd.edu",
+      },
+    ],
+    diff: [
+      {
+        kind: "input",
+        label: "Email searched",
+        prior: "samuel.ortiz@ucsd.edu",
+        current: "samuel.ortiz@ucsd.edu",
+        note: "unchanged — attempt 2 replayed the same input, which is why it failed differently rather than better",
+      },
+      {
+        kind: "checkpoint",
+        label: "CRM authentication",
+        prior: "fresh login 12:58:04",
+        current: "reused checkpoint · 14m old",
+        note: "REPLAYED, not observed again — the session was still valid, so attempt 2 never re-authenticated",
+      },
+      {
+        kind: "correction",
+        label: "Roster email",
+        prior: "not corrected",
+        current: "not corrected",
+        note: "the roster still carries the address that finds nobody — a third attempt with the same input will fail the same way",
+      },
+    ],
+  },
   failShots: 3,
   error: "CRM search returned no record for samuel.ortiz@ucsd.edu — download step never reached",
   outcome: { tone: "destructive", text: "Failed — CRM search returned no record for samuel.ortiz@ucsd.edu" },
@@ -1550,6 +1685,14 @@ function summerRecord(i: number): DemoRecord {
 
 const SUMMER_RECORDS: DemoRecord[] = SUMMER_PEOPLE.map((_, i) => summerRecord(i));
 
+/**
+ * The delegated lookups, one per record. Declared here (not beside their
+ * fixtures) because `ocr-summer` points at them — a module const referenced
+ * before its declaration is a TDZ crash at page load, which typecheck cannot
+ * see.
+ */
+const PL_SUMMER_IDS = SUMMER_PEOPLE.map((_, i) => `pls-m-${i}`);
+
 const oathSummer: DemoRowSpec = {
   id: "oath-summer",
   rowType: "group",
@@ -1652,6 +1795,10 @@ const ocrSummer: DemoRowSpec = {
   linkedParentId: "oath-summer",
   reviewOf: "oath-summer",
   records: SUMMER_RECORDS,
+  // Depth 2 — the lookups this run delegated, collapsed into ONE Group Row in
+  // the Person Lookup panel (S7). Visible from HERE and from that panel, never
+  // from the packet (D10).
+  linkedGroup: { ids: PL_SUMMER_IDS, noun: "lookups", panel: "Person Lookup", groupId: "pl-summer" },
   outcome: {
     tone: "warning",
     text: "6 people extracted — 0 reviewed · 1 blocked · 2 flagged. Approve to release the signers.",
@@ -2474,6 +2621,714 @@ const obPacket: DemoRowSpec = {
 };
 
 // ===========================================================================
+// S7 — the helper run seen from ITS OWN panel.
+//
+// Six person lookups delegated by one OCR run do NOT become six loose rows in
+// the Person Lookup panel: they collapse into ONE Group Row titled by the
+// parent, carrying a back chip to it. Each member says, in its Data tab, what
+// the parent will do with the answer — without that line a delegated lookup is
+// context-free.
+//
+// The member trace ids are the SAME ids the OCR review row prints against each
+// record (`summerRecord`): both are `pl-<HHMMSS>-<runId4>` over the same
+// instants, so the two surfaces cannot tell different stories about which run
+// answered which record.
+// ===========================================================================
+
+function plSummerMember(i: number): DemoRowSpec {
+  const p = SUMMER_PEOPLE[i];
+  const startedAt = at(`14:23:${pad(20 + i * 3, 2)}`);
+  const blocked = p.state === "blocked";
+  const ts = fmtClockSec(plusSeconds(startedAt, 4));
+  return {
+    id: `pls-m-${i}`,
+    rowType: "member",
+    parentId: "pl-summer",
+    containment: "member",
+    workflowId: "person-lookup",
+    title: p.name,
+    eid: p.eid,
+    runId4: `${pad(i, 2)}a1`,
+    status: blocked ? "doneWarnings" : "verifiedDone",
+    run: 1,
+    version: 2,
+    priority: "bulk",
+    enqueuedAt: at("14:23:15"),
+    startedAt,
+    endedAt: plusSeconds(startedAt, 6 + (i % 3)),
+    evidence: { receiptId: `rcpt-pl-${pad(i, 2)}a1`, confidence: "verified" },
+    memberFact: blocked ? "found · INACTIVE" : `resolved ${p.eid}`,
+    warnings: blocked ? { count: 1, first: "person is separated — the packet cannot sign them" } : undefined,
+    feedsInto: {
+      label: `Oath_Packet_Summer.pdf · record ${i + 1} (${p.name}) EID`,
+      targetRunId: "ocr-summer",
+    },
+    outcome: blocked
+      ? { tone: "warning", text: "Found the person, but UCPath reports them separated — the packet blocks this record" }
+      : { tone: "success", text: `Resolved ${p.name} → ${p.eid} from the printed name` },
+    steps: [
+      { label: "Searching", state: "done", system: "ucpath", durationSec: 4, keyLines: [`input: “${p.name}” (read off page ${p.page})`] },
+      { label: "Active status", state: "done", system: "ucpath", durationSec: 2 },
+    ],
+    lines: [
+      { ts: fmtClockSec(startedAt), kind: "search", system: "ucpath", text: `Person search: “${p.name}” — 1 match`, step: "Searching" },
+      blocked
+        ? { ts, kind: "warn", system: "ucpath", text: "HR status Inactive — separated 06/30/2026", step: "Active status" }
+        : { ts, kind: "read", system: "ucpath", pills: [{ dir: "read", label: "EID", value: p.eid }], step: "Active status" },
+    ],
+    data: [
+      { step: "Searching", dir: "read", field: "Employee ID", value: p.eid, system: "ucpath", ts },
+      { step: "Active status", dir: "read", field: "HR status", value: blocked ? "Inactive" : "Active", system: "ucpath", ts },
+    ],
+    receipt: {
+      tone: blocked ? "warning" : "success",
+      headline: blocked ? "Done with warnings · person is inactive" : "Verified done · person resolved",
+      lines: [
+        { label: "Employee ID", value: p.eid, verified: true },
+        { label: "HR status", value: blocked ? "Inactive — separated 06/30/2026" : "Active", verified: true },
+      ],
+      note: "Person Lookup writes nothing — its receipt records what was read and where it goes next.",
+    },
+    shots: [{ label: "UCPath search", kind: "step" }],
+  };
+}
+
+const plSummer: DemoRowSpec = {
+  id: "pl-summer",
+  rowType: "group",
+  subjectKind: "person",
+  workflowId: "person-lookup",
+  // no title of its own — the count + the parent name ARE the title (S7)
+  title: "Oath_Packet_Summer.pdf",
+  groupNoun: "lookups",
+  runId4: "8c30",
+  status: "verifiedDone",
+  run: 7,
+  version: 8,
+  priority: "bulk",
+  containment: "linked",
+  linkedParentId: "ocr-summer",
+  enqueuedAt: at("14:23:12"),
+  startedAt: at("14:23:18"),
+  endedAt: at("14:23:56"),
+  evidence: { confidence: "verified" },
+  memberIds: PL_SUMMER_IDS,
+  feedsInto: {
+    label: "Oath_Packet_Summer.pdf · one EID per extracted record",
+    targetRunId: "ocr-summer",
+  },
+  outcome: {
+    tone: "warning",
+    text: "6 lookups done for the OCR run — 5 resolved active, 1 separated (that record is blocked upstream)",
+  },
+  steps: [
+    { label: "Accept delegation", state: "done", durationSec: 2, keyLines: ["6 names handed over by oc-142012-d771"] },
+    { label: "Member fan-out", state: "done", system: "ucpath", durationSec: 36 },
+    { label: "Report back", state: "done", durationSec: 2, keyLines: ["6 answers returned to the OCR run"] },
+  ],
+  lines: [
+    { ts: "2:23:18", kind: "event", text: "Delegated by the OCR run on Oath_Packet_Summer.pdf — 6 names, one lookup each", step: "Accept delegation" },
+    { ts: "2:23:35", kind: "warn", system: "ucpath", text: "Diego Diaz — found, but Inactive (separated 06/30/2026)", step: "Member fan-out" },
+    { ts: "2:23:56", kind: "ok", text: "6 answers reported back to oc-142012-d771", duration: "38s", step: "Report back" },
+  ],
+  data: [
+    { step: "Member fan-out", dir: "read", field: "People resolved", value: "6 of 6", system: "ucpath", ts: "2:23:56" },
+    { step: "Member fan-out", dir: "read", field: "Active", value: "5 of 6", system: "ucpath", ts: "2:23:56" },
+  ],
+  receipt: {
+    tone: "success",
+    headline: "Verified done · 6 lookups answered",
+    lines: [{ label: "Delegated by", value: "OCR · Oath_Packet_Summer.pdf" }],
+    members: SUMMER_PEOPLE.map((p) => ({ name: p.name, value: p.eid, verified: p.state !== "blocked", failed: false })),
+    note: "Nothing was written. These answers are consumed by the OCR run's records — this group exists so the work is visible in the panel that executed it.",
+  },
+  shots: [],
+};
+
+// ===========================================================================
+// S1 — looked someone up mid-run (separations, CONDITIONAL).
+//
+// The happy path never delegates at all; this is the branch that does. The run
+// pauses, hands ONE sub-job to another workflow as a `linked` child (own row,
+// own panel), and resumes with the answer. The parent shows a chip, never a
+// copy of the child.
+// ===========================================================================
+
+const plNathan: DemoRowSpec = {
+  id: "pl-nathan",
+  rowType: "run",
+  workflowId: "person-lookup",
+  title: "Nathan Cole",
+  runId4: "5b12",
+  status: "running",
+  run: 14,
+  version: 2,
+  containment: "linked",
+  linkedParentId: "sep-nathan",
+  enqueuedAt: at("14:25:02"),
+  startedAt: at("14:25:09"),
+  evidence: { confidence: "unknown" },
+  liveText: "Searching UCPath — the Kuali name has no EID",
+  feedsInto: {
+    label: "Nathan Cole · separations identity check → EID for the termination write",
+    targetRunId: "sep-nathan",
+  },
+  outcome: { tone: "info", text: "Running — resolving the EID the separations run needs before it can write" },
+  steps: [
+    { label: "Searching", state: "current", system: "ucpath" },
+    { label: "Cross-verification", state: "pending", system: "crm" },
+  ],
+  lines: [
+    { ts: "2:25:09", kind: "event", text: "Delegated by the separations run for Nathan Cole — the Kuali document carries no EID", step: "Searching" },
+    { ts: "2:25:14", kind: "search", system: "ucpath", text: "Person search: “Nathan Cole”", step: "Searching" },
+  ],
+  data: [],
+  receipt: { tone: "muted", headline: "Receipt — pending", note: "Read-only run. Its receipt records what was looked up and which run consumed the answer." },
+  shots: [],
+};
+
+const sepNathan: DemoRowSpec = {
+  id: "sep-nathan",
+  rowType: "run",
+  workflowId: "separations",
+  title: "Nathan Cole",
+  runId4: "a704",
+  itemId: "kuali:5-TTQ8LP",
+  status: "running",
+  run: 5,
+  version: 3,
+  enqueuedAt: at("14:24:31"),
+  startedAt: at("14:24:38"),
+  evidence: { confidence: "unknown" },
+  // ONE linked child. Same mechanism the Oath Upload row uses for six signers —
+  // a set of one is still a set, and it still lives in its own panel.
+  linkedGroup: { ids: ["pl-nathan"], noun: "person lookup", panel: "Person Lookup" },
+  liveText: "Paused at Identity check — waiting on the delegated person lookup",
+  outcome: { tone: "info", text: "Running — handed the identity check to Person Lookup, waiting for the EID" },
+  steps: [
+    { label: "Kuali extraction", state: "done", system: "kuali", durationSec: 27, keyLines: ["last day worked = 08/01/2026", "no employee ID on the document"] },
+    { label: "Identity check", state: "current", system: "ucpath", keyLines: ["delegated to pl-142509-5b12", "this branch runs only when the document has no usable EID"] },
+    { label: "Job summary", state: "pending", system: "ucpath" },
+    { label: "Kronos search", state: "pending", system: "kronos" },
+    { label: "UCPath transaction", state: "pending", system: "ucpath" },
+    { label: "Kuali finalization", state: "pending", system: "kuali" },
+  ],
+  lines: [
+    { ts: "2:24:38", kind: "nav", system: "kuali", text: "Opened separation document 5-TTQ8LP", step: "Kuali extraction" },
+    { ts: "2:25:01", kind: "read", system: "kuali", pills: [{ dir: "read", label: "last day worked", value: "08/01/2026" }], step: "Kuali extraction" },
+    {
+      ts: "2:25:05",
+      kind: "warn",
+      text: "The document names a person but carries no employee ID — delegating a person lookup instead of guessing",
+      step: "Identity check",
+    },
+    { ts: "2:25:09", kind: "event", text: "Delegated pl-142509-5b12 · this run resumes at Identity check when the answer comes back", step: "Identity check" },
+  ],
+  data: [{ step: "Kuali extraction", dir: "read", field: "Last day worked", value: "08/01/2026", system: "kuali", ts: "2:25:01" }],
+  receipt: { tone: "muted", headline: "Receipt — pending", note: "Nothing written yet. The termination write cannot start until the delegated lookup returns an EID." },
+  shots: [{ label: "Kuali doc 5-TTQ8LP", kind: "step" }],
+};
+
+const plDana: DemoRowSpec = {
+  id: "pl-dana",
+  rowType: "run",
+  workflowId: "person-lookup",
+  title: "Dana Whitmore",
+  runId4: "e88f",
+  status: "failed",
+  run: 13,
+  version: 3,
+  containment: "linked",
+  linkedParentId: "sep-dana",
+  enqueuedAt: at("13:18:40"),
+  startedAt: at("13:18:47"),
+  endedAt: at("13:19:26"),
+  evidence: { failureId: "fail-pl-e88f", confidence: "unknown" },
+  failShots: 2,
+  error: "UCPath person search returned 0 matches for “Dana Whitmore” — the name on the Kuali document is not a UCPath person",
+  feedsInto: {
+    label: "Dana Whitmore · separations identity check → EID for the termination write",
+    targetRunId: "sep-dana",
+  },
+  outcome: {
+    tone: "destructive",
+    text: "Failed — 0 UCPath matches for “Dana Whitmore”; the separations run that asked for it is failed too",
+  },
+  steps: [
+    { label: "Searching", state: "failed", system: "ucpath", durationSec: 39, attempts: 2, keyLines: ["0 matches on the full name", "0 matches on last name + department"] },
+    { label: "Cross-verification", state: "pending", system: "crm" },
+  ],
+  lines: [
+    { ts: "1:18:47", kind: "event", text: "Delegated by the separations run for Dana Whitmore", step: "Searching" },
+    { ts: "1:19:02", kind: "search", system: "ucpath", text: "Person search: “Dana Whitmore” — 0 results", attempt: 1, step: "Searching" },
+    { ts: "1:19:26", kind: "error", system: "ucpath", text: "0 matches on last name + dept 000371 either — refusing to guess a person", card: "failure", step: "Searching" },
+  ],
+  data: [],
+  receipt: {
+    tone: "destructive",
+    headline: "No receipt — nobody was resolved",
+    lines: [{ label: "Searched", value: "“Dana Whitmore” · dept 000371" }],
+    note: "Nothing was written anywhere. Check the name on the Kuali document — a lookup that guesses is how the wrong person gets terminated.",
+  },
+  shots: [
+    { label: "Search results (0)", kind: "error" },
+    { label: "Name as typed", kind: "error" },
+  ],
+  failCard: { title: "Person lookup found nobody", meta: "0 matches on the full name and 0 on last-name + department. The name on the separation document does not exist in UCPath." },
+};
+
+const sepDana: DemoRowSpec = {
+  id: "sep-dana",
+  rowType: "run",
+  workflowId: "separations",
+  title: "Dana Whitmore",
+  runId4: "31c6",
+  itemId: "kuali:5-RWP2KD",
+  status: "failed",
+  run: 4,
+  version: 5,
+  enqueuedAt: at("13:18:11"),
+  startedAt: at("13:18:18"),
+  endedAt: at("13:19:28"),
+  evidence: { failureId: "fail-se-31c6", confidence: "unknown" },
+  linkedGroup: { ids: ["pl-dana"], noun: "person lookup", panel: "Person Lookup" },
+  // D13: a failed linked child makes the parent Failed — never "Waiting on you",
+  // because nobody is being asked to decide anything — and the child's error is
+  // mirrored verbatim so the parent never says "Unknown error".
+  mirroredFrom: "pl-dana",
+  error: "Person lookup failed — UCPath person search returned 0 matches for “Dana Whitmore”",
+  outcome: {
+    tone: "destructive",
+    text: "Failed — its person lookup found nobody: 0 UCPath matches for “Dana Whitmore”",
+  },
+  steps: [
+    { label: "Kuali extraction", state: "done", system: "kuali", durationSec: 24, hasShot: true },
+    { label: "Identity check", state: "failed", system: "ucpath", durationSec: 42, keyLines: ["delegated to pl-131847-e88f", "child failed — 0 matches, nothing to write against"] },
+    { label: "Job summary", state: "pending", system: "ucpath" },
+    { label: "Kronos search", state: "pending", system: "kronos" },
+    { label: "UCPath transaction", state: "pending", system: "ucpath" },
+    { label: "Kuali finalization", state: "pending", system: "kuali" },
+  ],
+  lines: [
+    { ts: "1:18:18", kind: "nav", system: "kuali", text: "Opened separation document 5-RWP2KD", step: "Kuali extraction" },
+    { ts: "1:18:47", kind: "event", text: "No EID on the document — delegated pl-131847-e88f", step: "Identity check" },
+    {
+      ts: "1:19:28",
+      kind: "error",
+      text: "The delegated lookup failed: UCPath person search returned 0 matches for “Dana Whitmore”. Nothing was written and no termination was staged.",
+      card: "failure",
+      step: "Identity check",
+    },
+  ],
+  data: [{ step: "Kuali extraction", dir: "read", field: "Last day worked", value: "07/31/2026", system: "kuali", ts: "1:18:36" }],
+  receipt: {
+    tone: "destructive",
+    headline: "No receipt — the run stopped at the identity check",
+    lines: [
+      { label: "Failed at", value: "Identity check (delegated)" },
+      { label: "Child run", value: "pl-131847-e88f — 0 UCPath matches" },
+    ],
+    note: "Nothing was written to UCPath, Kronos or Kuali. Fix the name on the separation document, then retry the lookup — the retry replays the CHILD and this run resumes behind it.",
+  },
+  shots: [{ label: "Kuali doc 5-RWP2KD", kind: "step" }],
+  failCard: {
+    title: "Delegated person lookup failed — mirrored here",
+    meta: "pl-131847-e88f searched “Dana Whitmore” in UCPath: 0 results on the name and 0 on last-name + dept 000371.",
+  },
+};
+
+// ===========================================================================
+// S5 — a list you typed.
+//
+// Five separations from five typed inputs: a Group Row with no OCR, no linked
+// child and no packet. Every member runs the IDENTICAL step list, which is the
+// one legitimate case of a group strip being a member aggregate — the strip is
+// the shared pipeline with a per-step fill bar (`Identity check 3/5`).
+//
+// One member trips the identity gate, which flips the group to Waiting on you
+// and auto-expands it (D5): you never have to open a row to find that out.
+// ===========================================================================
+
+const SEP_LIST_PEOPLE = ["Grace Egan", "Hugo Flores", "Iris Garcia", "Jonah Hahn", "Kara Ito"];
+const SEP_LIST_IDS = SEP_LIST_PEOPLE.map((_, i) => `sep-l-${i}`);
+const SEP_LIST_STEPS = ["Kuali extraction", "Identity check", "Job summary", "Kronos search", "UCPath transaction", "Kuali finalization"];
+
+function sepListMember(i: number): DemoRowSpec {
+  const name = SEP_LIST_PEOPLE[i];
+  const eid = `105${pad(30000 + i * 317, 5)}`;
+  const startedAt = at(`13:5${i}:0${(i * 3) % 10}`);
+  const ts = fmtClockSec(plusSeconds(startedAt, 30));
+  const status: ProposedStatus = i === 2 ? "waiting" : i === 3 ? "running" : i === 4 ? "queued" : "verifiedDone";
+  const step = (label: string, state: StepState, system?: SystemKey, durationSec?: number): DemoStep => ({ label, state, system, durationSec });
+  const base: Omit<DemoRowSpec, "outcome" | "steps" | "lines" | "receipt"> = {
+    id: `sep-l-${i}`,
+    rowType: "member",
+    parentId: "sep-list",
+    containment: "member",
+    workflowId: "separations",
+    title: name,
+    eid: status === "queued" ? undefined : eid,
+    runId4: `l${pad(i, 2)}c`,
+    status,
+    run: 1,
+    version: 3,
+    priority: "bulk",
+    enqueuedAt: at("13:49:40"),
+    startedAt: status === "queued" ? undefined : startedAt,
+    data: [],
+    shots: [],
+  };
+  if (status === "waiting") {
+    return {
+      ...base,
+      memberFact: "identity approval",
+      evidence: { confidence: "unknown" },
+      outcome: { tone: "warning", text: "Paused on identity approval — the typed name matched a different person in UCPath" },
+      steps: [
+        step("Kuali extraction", "done", "kuali", 31),
+        step("Identity check", "waiting", "ucpath"),
+        step("Job summary", "pending", "ucpath"),
+        step("Kronos search", "pending", "kronos"),
+        step("UCPath transaction", "pending", "ucpath"),
+        step("Kuali finalization", "pending", "kuali"),
+      ],
+      lines: [
+        { ts, kind: "search", system: "ucpath", text: `Person search: “${name}” — 1 match with a different middle name`, step: "Identity check" },
+        { ts, kind: "warn", text: "Resolved person differs from the typed name — pausing before any write", card: "gate", step: "Identity check" },
+      ],
+      data: [{ step: "Kuali extraction", dir: "read", field: "Last day worked", value: "07/28/2026", system: "kuali", ts }],
+      gate: {
+        kind: "identity",
+        title: "Waiting on you — identity approval",
+        openedAt: at("13:53:20"),
+        candidates: [
+          { heading: "As you typed it", name, sub: "no EID · typed into the input panel" },
+          { heading: "UCPath name match (proposed)", name: "I. R. Garcia", sub: `${eid} · Dept 000482 · Lab Ast 2` },
+        ],
+        options: [
+          { key: "use-eid", label: `Use ${eid}`, intent: "primary", command: "resolve-gate", resolution: `pick-eid:${eid}` },
+          { key: "manual-eid", label: "Enter EID…", intent: "neutral", command: "resolve-gate", resolution: "manual-eid" },
+          {
+            key: "dismiss",
+            label: "Dismiss",
+            intent: "neutral",
+            command: "resolve-gate",
+            resolution: "dismiss",
+            confirm: {
+              title: "Drop this person from the list?",
+              body: `${name} is removed from this group with nothing written. The other four separations are untouched and keep running.`,
+              confirmLabel: "Drop this person",
+              tone: "destructive",
+            },
+          },
+        ],
+        note: "Resolving returns this member to Running at Identity check. The other members never stopped — a group waits on nobody.",
+      },
+      receipt: { tone: "muted", headline: "Receipt — pending", note: "Nothing written. This member is holding the whole group at Waiting on you." },
+    };
+  }
+  if (status === "running") {
+    return {
+      ...base,
+      startedAt: agoSeconds(96),
+      memberFact: "job summary…",
+      liveText: "Job summary — reading the active job record",
+      evidence: { confidence: "unknown" },
+      outcome: { tone: "info", text: "Running — reading the job summary" },
+      steps: [
+        step("Kuali extraction", "done", "kuali", 28),
+        step("Identity check", "done", "ucpath", 11),
+        step("Job summary", "current", "ucpath"),
+        step("Kronos search", "pending", "kronos"),
+        step("UCPath transaction", "pending", "ucpath"),
+        step("Kuali finalization", "pending", "kuali"),
+      ],
+      lines: [{ ts, kind: "nav", system: "ucpath", text: "Job summary open — active job record 0", step: "Job summary" }],
+      receipt: { tone: "muted", headline: "Receipt — pending", note: "Still running." },
+    };
+  }
+  if (status === "queued") {
+    return {
+      ...base,
+      memberFact: "—",
+      queueNote: "in queue · position 1",
+      outcome: { tone: "muted", text: "Queued — one worker, five people; this one is last in line" },
+      steps: SEP_LIST_STEPS.map((label) => step(label, "pending")),
+      lines: [{ ts: "1:49:40", kind: "event", text: "Fanned out from the typed list", step: "Queued" }],
+      receipt: { tone: "muted", headline: "Receipt — pending", note: "Nothing has run yet." },
+    };
+  }
+  return {
+    ...base,
+    endedAt: plusSeconds(startedAt, 214 + i * 9),
+    evidence: { receiptId: `rcpt-se-l${pad(i, 2)}`, confidence: "verified" },
+    memberFact: `TXN-09${pad(11400 + i * 13, 5)}`,
+    outcome: { tone: "success", text: `Terminated 07/31/2026 · TXN-09${pad(11400 + i * 13, 5)} read back` },
+    steps: [
+      step("Kuali extraction", "done", "kuali", 29 + i),
+      step("Identity check", "done", "ucpath", 10),
+      step("Job summary", "done", "ucpath", 19),
+      step("Kronos search", "done", "kronos", 44),
+      step("UCPath transaction", "done", "ucpath", 96),
+      step("Kuali finalization", "done", "kuali", 22),
+    ],
+    lines: [
+      { ts, kind: "write", system: "ucpath", pills: [{ dir: "write", label: "separation date", value: "07/31/2026" }], step: "UCPath transaction" },
+      { ts, kind: "ok", text: `Transaction submitted — TXN-09${pad(11400 + i * 13, 5)} · read-back verified`, step: "UCPath transaction" },
+    ],
+    data: [
+      { step: "Kuali extraction", dir: "read", field: "Last day worked", value: "07/30/2026", system: "kuali", ts },
+      { step: "UCPath transaction", dir: "write", field: "Separation date", value: "07/31/2026", system: "ucpath", ts },
+    ],
+    receipt: {
+      tone: "success",
+      headline: "Verified done · termination submitted",
+      lines: [
+        { label: "Separation date", value: "07/31/2026", verified: true },
+        { label: "Transaction", value: `TXN-09${pad(11400 + i * 13, 5)}`, verified: true },
+      ],
+    },
+  };
+}
+
+const sepList: DemoRowSpec = {
+  id: "sep-list",
+  rowType: "group",
+  subjectKind: "person",
+  workflowId: "separations",
+  // deliberately empty: the anchor of a typed list has no subject of its own,
+  // so its title is the derived count and the member-name preview under it
+  title: "",
+  groupNoun: "separations",
+  runId4: "6ff2",
+  status: "running",
+  run: 6,
+  version: 12,
+  priority: "bulk",
+  enqueuedAt: at("13:49:31"),
+  startedAt: at("13:49:40"),
+  evidence: { confidence: "unknown" },
+  memberIds: SEP_LIST_IDS,
+  preset: {
+    name: "July separations",
+    source: "saved input preset",
+    merged: [
+      { field: "Termination type", value: "Voluntary" },
+      { field: "Timekeeper", value: "J. Hein" },
+      { field: "Notify supervisor", value: "yes" },
+    ],
+  },
+  outcome: { tone: "warning", text: "One member is waiting on you — the other four are unaffected and still running" },
+  steps: [
+    { label: "Parse typed input", state: "done", durationSec: 2, keyLines: ["5 names typed · preset “July separations” merged"] },
+    { label: "Member fan-out", state: "current" },
+    { label: "Rollup", state: "pending" },
+  ],
+  lines: [
+    { ts: "1:49:40", kind: "event", text: "5 names typed into the input panel — one group, not five loose rows", step: "Parse typed input" },
+    { ts: "1:49:41", kind: "event", text: "Preset “July separations” merged 3 constant fields into every member", step: "Parse typed input" },
+    { ts: "1:53:20", kind: "pause", text: "Iris Garcia hit the identity gate — the group reads Waiting on you until it is resolved", step: "Member fan-out" },
+  ],
+  data: [
+    { step: "Parse typed input", dir: "read", field: "Names typed", value: "5", system: "kuali", ts: "1:49:40" },
+    { step: "Parse typed input", dir: "read", field: "Preset merged", value: "July separations (3 fields)", system: "kuali", ts: "1:49:41" },
+  ],
+  receipt: {
+    tone: "muted",
+    headline: "Receipt — pending",
+    note: "Rolls up when all 5 members are terminal: one line per person with the transaction number read back after submit.",
+  },
+  shots: [],
+};
+
+// ===========================================================================
+// S6 — a read-only packet report (standalone OCR).
+//
+// A Run Row, never a group. It fans out lookups and finishes. There is NO
+// approve flow at all: approval IS delegation, and nothing is delegated to,
+// so the Review surface is read-only and the row can never be Waiting on you
+// or Write parked. It authors no gate, so the contract sends no approve action
+// and the button is structurally absent rather than merely hidden.
+// ===========================================================================
+
+const VERIFY_PEOPLE: { name: string; eid: string; page: number; state: DemoRecord["state"] }[] = [
+  { name: "Liam Jones", eid: "10604411", page: 1, state: "ready" },
+  { name: "Mona Alvarez", eid: "10611908", page: 2, state: "warn" },
+  { name: "Noel Brooks", eid: "10618730", page: 3, state: "ready" },
+];
+
+const PL_VERIFY_IDS = VERIFY_PEOPLE.map((_, i) => `plv-m-${i}`);
+
+function verifyRecord(i: number): DemoRecord {
+  const p = VERIFY_PEOPLE[i];
+  const incomplete = p.state === "warn";
+  return {
+    id: `vrec-${i}`,
+    name: p.name,
+    eid: p.eid,
+    page: p.page,
+    pageNote: `page ${p.page} of 3 · I-9 supporting packet`,
+    state: p.state,
+    fields: [
+      { label: "Printed name", value: p.name, source: "paper", confidence: 0.96 },
+      { label: "Employee ID", value: p.eid, source: "ucpath" },
+      { label: "Document type", value: incomplete ? "List B — unreadable" : "List A — Passport", source: "paper", confidence: incomplete ? 0.38 : 0.91 },
+      { label: "Department", value: "000482 · Facilities", source: "ucpath" },
+    ],
+    checks: [
+      { label: "UCPath person", state: "ok", value: `1 active match · ${p.eid}` },
+      { label: "Employment status", state: "ok", value: "Active" },
+      { label: "Section 1 signed", state: "ok", value: "yes — on paper" },
+      incomplete
+        ? { label: "Document list", state: "warn", value: "unreadable on the scan — re-check or pull the paper" }
+        : { label: "Document list", state: "ok", value: "List A — Passport" },
+      { label: "Section 2 dated", state: incomplete ? "fail" : "ok", value: incomplete ? "no date found on the page" : "07/02/2026" },
+    ],
+    note: incomplete
+      ? "Two completeness gaps on this page. This is a REPORT — there is nothing to approve and nothing downstream; re-check a line or pull the paper copy."
+      : undefined,
+    lookup: {
+      trace: `pl-1409${pad(10 + i * 4, 2)}-v${pad(i, 2)}a`,
+      status: "verifiedDone",
+      note: `resolved ${p.eid} from the printed name`,
+    },
+  };
+}
+
+function plVerifyMember(i: number): DemoRowSpec {
+  const p = VERIFY_PEOPLE[i];
+  const startedAt = at(`14:09:${pad(10 + i * 4, 2)}`);
+  const ts = fmtClockSec(plusSeconds(startedAt, 3));
+  return {
+    id: `plv-m-${i}`,
+    rowType: "member",
+    parentId: "pl-verify",
+    containment: "member",
+    workflowId: "person-lookup",
+    title: p.name,
+    eid: p.eid,
+    runId4: `v${pad(i, 2)}a`,
+    status: "verifiedDone",
+    run: 1,
+    version: 2,
+    priority: "bulk",
+    enqueuedAt: at("14:09:06"),
+    startedAt,
+    endedAt: plusSeconds(startedAt, 5),
+    evidence: { receiptId: `rcpt-pl-v${pad(i, 2)}a`, confidence: "verified" },
+    memberFact: `resolved ${p.eid}`,
+    feedsInto: {
+      label: `I9_Supporting_0724.pdf · record ${i + 1} (${p.name}) EID`,
+      targetRunId: "ocr-verify",
+    },
+    outcome: { tone: "success", text: `Resolved ${p.name} → ${p.eid}` },
+    steps: [{ label: "Searching", state: "done", system: "ucpath", durationSec: 5 }],
+    lines: [{ ts, kind: "read", system: "ucpath", pills: [{ dir: "read", label: "EID", value: p.eid }], step: "Searching" }],
+    data: [{ step: "Searching", dir: "read", field: "Employee ID", value: p.eid, system: "ucpath", ts }],
+    receipt: {
+      tone: "success",
+      headline: "Verified done · person resolved",
+      lines: [{ label: "Employee ID", value: p.eid, verified: true }],
+    },
+    shots: [],
+  };
+}
+
+const plVerify: DemoRowSpec = {
+  id: "pl-verify",
+  rowType: "group",
+  subjectKind: "person",
+  workflowId: "person-lookup",
+  title: "I9_Supporting_0724.pdf",
+  groupNoun: "lookups",
+  runId4: "b0d4",
+  status: "verifiedDone",
+  run: 6,
+  version: 4,
+  priority: "bulk",
+  containment: "linked",
+  linkedParentId: "ocr-verify",
+  enqueuedAt: at("14:09:02"),
+  startedAt: at("14:09:06"),
+  endedAt: at("14:09:23"),
+  evidence: { confidence: "verified" },
+  memberIds: PL_VERIFY_IDS,
+  feedsInto: { label: "I9_Supporting_0724.pdf · one EID per extracted record", targetRunId: "ocr-verify" },
+  outcome: { tone: "success", text: "3 lookups done for the standalone OCR report — all resolved active" },
+  steps: [
+    { label: "Accept delegation", state: "done", durationSec: 1 },
+    { label: "Member fan-out", state: "done", system: "ucpath", durationSec: 15 },
+    { label: "Report back", state: "done", durationSec: 1 },
+  ],
+  lines: [{ ts: "2:09:06", kind: "event", text: "Delegated by the standalone OCR report — 3 names", step: "Accept delegation" }],
+  data: [{ step: "Member fan-out", dir: "read", field: "People resolved", value: "3 of 3", system: "ucpath", ts: "2:09:23" }],
+  receipt: {
+    tone: "success",
+    headline: "Verified done · 3 lookups answered",
+    lines: [{ label: "Delegated by", value: "OCR · I9_Supporting_0724.pdf" }],
+    members: VERIFY_PEOPLE.map((p) => ({ name: p.name, value: p.eid, verified: true })),
+  },
+  shots: [],
+};
+
+const ocrVerify: DemoRowSpec = {
+  id: "ocr-verify",
+  rowType: "run",
+  subjectKind: "file",
+  workflowId: "ocr",
+  title: "I9_Supporting_0724.pdf",
+  runId4: "9a15",
+  status: "doneWarnings",
+  run: 11,
+  version: 4,
+  enqueuedAt: at("14:07:44"),
+  startedAt: at("14:07:52"),
+  endedAt: at("14:09:31"),
+  evidence: { receiptId: "rcpt-oc-9a15", confidence: "partial" },
+  warnings: { count: 2, first: "page 2 — document list unreadable, Section 2 undated" },
+  records: VERIFY_PEOPLE.map((_, i) => verifyRecord(i)),
+  // no `reviewOf` and no `linkedParentId`: nobody delegated this run, so there
+  // is nothing for an approval to release. The Review surface is read-only.
+  linkedGroup: { ids: PL_VERIFY_IDS, noun: "lookups", panel: "Person Lookup", groupId: "pl-verify" },
+  outcome: {
+    tone: "warning",
+    text: "Report complete — 3 people read, 2 completeness gaps on page 2. Nothing downstream: this run answers a question, it does not start work.",
+  },
+  steps: [
+    { label: "Split pages", state: "done", system: "i9", durationSec: 6, keyLines: ["3 pages · 3 readable forms"] },
+    { label: "Read forms", state: "done", system: "i9", durationSec: 61, keyLines: ["tier-1 model · 3/3 read", "page 2 document list below the confidence floor"] },
+    { label: "Person lookup", state: "done", system: "ucpath", durationSec: 21, keyLines: ["3 delegated lookups · all active"] },
+    { label: "Done", state: "done", durationSec: 1, keyLines: ["no approval phase — approval IS delegation, and nothing is delegated to"] },
+  ],
+  lines: [
+    { ts: "2:07:52", kind: "event", system: "i9", text: "Split 3 pages · 3 carry a readable form", step: "Split pages" },
+    { ts: "2:08:53", kind: "warn", system: "i9", text: "Page 2 — document list read at 0.38 confidence, and no Section 2 date found", step: "Read forms" },
+    { ts: "2:09:06", kind: "event", system: "ucpath", text: "Delegated 3 person lookups — each is its own run in the Person Lookup panel", step: "Person lookup" },
+    { ts: "2:09:31", kind: "ok", text: "Report complete — no approval step exists on a standalone run", duration: "1m 39s", step: "Done" },
+  ],
+  data: [
+    { step: "Read forms", dir: "read", field: "Records read", value: "3", system: "i9", ts: "2:08:53" },
+    { step: "Read forms", dir: "read", field: "Completeness gaps", value: "2 (page 2)", system: "i9", ts: "2:08:53" },
+    { step: "Person lookup", dir: "read", field: "People resolved", value: "3 of 3", system: "ucpath", ts: "2:09:23" },
+  ],
+  receipt: {
+    tone: "warning",
+    headline: "Done with warnings · read-only report",
+    lines: [
+      { label: "Pages read", value: "3 of 3", verified: true },
+      { label: "People resolved", value: "3 of 3", verified: true },
+      { label: "Gaps", value: "page 2 — document list unreadable, Section 2 undated" },
+      { label: "Written", value: "nothing — a standalone OCR run has no downstream" },
+    ],
+    note: "This receipt is the report. There is no approve step and no member fan-out: the answer is the record set above, and the two gaps are what you act on outside the tool.",
+  },
+  shots: [
+    { label: "Page 1 · Jones", kind: "form" },
+    { label: "Page 2 · Alvarez", kind: "form" },
+  ],
+};
+
+// ===========================================================================
 // Assembly + ordering helpers
 // ===========================================================================
 
@@ -2489,12 +3344,15 @@ const RAW_ROWS: DemoRowSpec[] = [
     ocrSummer,
     sepMaria,
     sepRosa,
+    sepList,
     // active
     i9Batch,
     ouPacket,
     wsBatch,
     plDaniel,
     krReports,
+    sepNathan,
+    plNathan,
     // queued
     wsPriya,
     // finished
@@ -2509,6 +3367,11 @@ const RAW_ROWS: DemoRowSpec[] = [
     obElena,
     cdSamuel,
     ecTomas,
+    sepDana,
+    plDana,
+    ocrVerify,
+    plSummer,
+    plVerify,
     // members + linked children
     ...i9MemberIds.map((_, i) => i9Member(i)),
     ...oathMemberIds.map((_, i) => oathMember(i)),
@@ -2516,6 +3379,9 @@ const RAW_ROWS: DemoRowSpec[] = [
     ...ecPacketMemberIds.map((_, i) => ecPacketMember(i)),
     ecSingleMember,
     ...OU_SIGNER_IDS.map((_, i) => ouSigner(i)),
+    ...SEP_LIST_IDS.map((_, i) => sepListMember(i)),
+    ...PL_SUMMER_IDS.map((_, i) => plSummerMember(i)),
+    ...PL_VERIFY_IDS.map((_, i) => plVerifyMember(i)),
   ],
 ].flat();
 
@@ -2641,16 +3507,77 @@ export interface LinkedGroupSummary {
   total: number;
   done: number;
   label: string;
-  firstId: string;
+  /** where the chip jumps: the collapsed Group Row if there is one, else the first child */
+  targetId: string;
   panel: string;
+  noun: string;
 }
 
+/**
+ * The chip a parent shows for its `linked` children. A set of ONE is still a
+ * set — it just reads as a state ("person lookup · running") instead of a
+ * tally, because "1 person lookup · 0 done" tells you nothing you wanted.
+ */
 export function linkedGroupSummary(row: DemoRow): LinkedGroupSummary | null {
   const g = row.linkedGroup;
   if (!g || g.ids.length === 0) return null;
   const rows = g.ids.map((id) => DEMO_ROWS[id]).filter(Boolean);
+  if (rows.length === 0) return null;
   const done = rows.filter((r) => r.status === "verifiedDone" || r.status === "doneWarnings").length;
-  return { total: rows.length, done, label: `${rows.length} ${g.noun} · ${done} done`, firstId: g.ids[0], panel: g.panel };
+  const label =
+    rows.length === 1
+      ? `${g.noun} · ${PROPOSED_STATUS[effectiveStatus(rows[0])].label.toLowerCase()}`
+      : `${rows.length} ${g.noun} · ${done} done`;
+  return { total: rows.length, done, label, targetId: g.groupId ?? g.ids[0], panel: g.panel, noun: g.noun };
+}
+
+// ---------------------------------------------------------------------------
+// The shared member pipeline — the one legitimate group-as-aggregate strip
+// ---------------------------------------------------------------------------
+
+export interface SharedStepFill {
+  label: string;
+  done: number;
+  total: number;
+  /** a member is actively in this step right now */
+  running: number;
+  /** a member is stuck on you (or has broken) in this step */
+  attention: number;
+}
+
+/**
+ * When every member of a group runs the IDENTICAL step list — a typed list
+ * (S5), not a packet — the group's strip is that shared pipeline with a
+ * per-step fill bar. Returns null the moment two members disagree about their
+ * steps, because an aggregate over different pipelines would be a fiction.
+ */
+export function sharedMemberPipeline(row: DemoRow): SharedStepFill[] | null {
+  if (row.rowType !== "group") return null;
+  const members = (row.memberIds ?? []).map((id) => DEMO_ROWS[id]).filter((m) => m && m.containment !== "rejected");
+  if (members.length < 2) return null;
+  const shape = members[0].steps.map((s) => s.label);
+  if (shape.length === 0) return null;
+  const identical = members.every((m) => m.steps.length === shape.length && m.steps.every((s, i) => s.label === shape[i]));
+  if (!identical) return null;
+  return shape.map((label, i) => ({
+    label,
+    done: members.filter((m) => m.steps[i].state === "done").length,
+    running: members.filter((m) => m.steps[i].state === "current").length,
+    attention: members.filter((m) => m.steps[i].state === "waiting" || m.steps[i].state === "failed").length,
+    total: members.length,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Attempt lineage — a prior attempt's trace id is DERIVED, never stored
+// ---------------------------------------------------------------------------
+
+export function attemptTrace(row: DemoRow, attempt: DemoAttempt): string {
+  return `${row.workflow.code}-${traceClock(attempt.startedAt)}-${attempt.runId4}`;
+}
+
+export function attemptDuration(attempt: DemoAttempt): string | undefined {
+  return attempt.endedAt ? fmtElapsed(secondsBetween(attempt.startedAt, attempt.endedAt)) : undefined;
 }
 
 export const ATTENTION_STATUSES: ProposedStatus[] = ["failed", "waiting", "doneWarnings", "parked"];

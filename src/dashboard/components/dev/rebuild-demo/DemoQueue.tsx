@@ -33,6 +33,7 @@ import {
   ATTENTION_STATUSES,
   bandsFor,
   DEMO_ROWS,
+  DENSITY_RUNGS,
   densityRung,
   effectiveStatus,
   fmtElapsed,
@@ -185,7 +186,10 @@ const MATRIX_CELL: Record<ProposedStatus, string> = {
 
 function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): ReactNode {
   const status = effectiveStatus(row);
-  const lookups = (row.records ?? []).filter((r) => r.lookup).length;
+  // Only when the delegated runs have no row of their own to point at. Once
+  // they do, the linked-set button in the body carries the count — two counts
+  // of the same thing is exactly the divergence this rebuild exists to kill.
+  const lookups = row.linkedGroup ? 0 : (row.records ?? []).filter((r) => r.lookup).length;
   return (
     <>
       {/* Depth 2 lives here and nowhere else. The packet that delegated this
@@ -298,6 +302,10 @@ function sublineFor(row: DemoRow): { tone: string; text: string } | null {
   if (status === "cancelled") return { tone: "text-muted-foreground", text: "Cancelled by you — nothing written" };
   if (status === "running" && row.liveText) return { tone: "text-primary/85", text: row.liveText };
   if (row.rowType === "group" && row.ocrPhase) return { tone: "text-muted-foreground", text: row.ocrPhase };
+  // A group's own decision lives on a member, so the group has no gate of its
+  // own to quote — its rolled-up outcome is the sentence that says what is
+  // blocked and what is at risk.
+  if (row.rowType === "group") return { tone: status === "waiting" ? "text-warning" : "text-muted-foreground", text: row.outcome.text };
   return null;
 }
 
@@ -387,6 +395,14 @@ export function DemoRowCard({
           <div className="flex shrink-0 items-center gap-1.5">{headerChips(row, state.checkedIds, state.tick)}</div>
         </div>
 
+        {/* A counted anchor ("5 separations") has no subject of its own, so the
+            names ARE its identity — without them the row is a number. */}
+        {row.memberPreview && row.groupNoun && (
+          <div className="mt-0.5 ml-5 truncate text-[11px] text-muted-foreground" title={row.memberPreview}>
+            {row.memberPreview}
+          </div>
+        )}
+
         {sub && (
           <div className={cn("mt-1.5 ml-5 flex min-w-0 items-center gap-2 text-[11px] font-mono", sub.tone)}>
             <span className="min-w-0 truncate">{sub.text}</span>
@@ -408,9 +424,9 @@ export function DemoRowCard({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                handlers.onOpenPanel(linked.panel, linked.firstId);
+                handlers.onOpenPanel(linked.panel, linked.targetId);
               }}
-              title={`Open the ${linked.panel} panel — these runs live there, not under this row`}
+              title={`Open the ${linked.panel} panel — ${linked.total === 1 ? "this run lives" : "these runs live"} there, not under this row`}
               className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-info/35 bg-info/8 px-2 py-0.5 text-[10.5px] text-info outline-none hover:bg-info/15 focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Users aria-hidden className="size-3 shrink-0" />
@@ -420,7 +436,9 @@ export function DemoRowCard({
           </div>
         )}
 
-        {row.linkedParentId && !row.reviewOf && (
+        {/* ONE level of back, never a breadcrumb trail: maximum real depth is 2,
+            so there is only ever one parent worth returning to. */}
+        {row.linkedParentId && !row.reviewOf && DEMO_ROWS[row.linkedParentId] && (
           <div className="mt-1.5 ml-5">
             <button
               type="button"
@@ -429,10 +447,13 @@ export function DemoRowCard({
                 const parent = DEMO_ROWS[row.linkedParentId as string];
                 handlers.onOpenPanel(parent.wfLabel, parent.id);
               }}
+              title={`Delegated by ${DEMO_ROWS[row.linkedParentId].wfLabel} · ${DEMO_ROWS[row.linkedParentId].title} — open it in its own panel`}
               className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 py-0.5 text-[10.5px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <CornerDownRight aria-hidden className="size-3 shrink-0" />
-              <span className="truncate">Released by {DEMO_ROWS[row.linkedParentId]?.title}</span>
+              <ArrowLeft aria-hidden className="size-3 shrink-0" />
+              <span className="truncate">
+                {DEMO_ROWS[row.linkedParentId].wfLabel} · {DEMO_ROWS[row.linkedParentId].title}
+              </span>
             </button>
           </div>
         )}
@@ -761,6 +782,15 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
           <ArrowLeft aria-hidden className="size-3.5" />
         </button>
         <span className="mr-2 truncate text-[13px] font-semibold text-foreground">{group.title}</span>
+        {/* This is the LAST RUNG of the density ladder, not a route: the same
+            group, the same members, opened to the size the set actually needs.
+            One back, no breadcrumb — there is only one parent to return to. */}
+        <span
+          title={`Density ladder — ${DENSITY_RUNGS.find((r) => r.key === densityRung(ids.length))?.range}. The drill-in is a rung, not a separate page.`}
+          className="rounded-full border border-border bg-secondary/40 px-2.5 py-0.5 text-[10.5px] text-muted-foreground"
+        >
+          {DENSITY_RUNGS.find((r) => r.key === densityRung(ids.length))?.range} · opened in place
+        </span>
         <span className="rounded-full border border-warning/50 bg-warning/12 px-2.5 py-0.5 text-[10.5px] font-medium text-warning">
           Attention <span className="font-mono tabular-nums">{attentionN}</span>
         </span>
