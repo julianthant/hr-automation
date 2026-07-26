@@ -1222,9 +1222,11 @@ function i9Member(i: number): DemoRowSpec {
   if (i === I9_REJECTED_INDEX) {
     return {
       ...base,
-      // A rejected page never became a task, so it has no start and no end.
-      // The footer shows no duration because there genuinely is none.
+      // A rejected page never became a task, so it has no start and no end,
+      // and there is no person on it — so no EID either, and the subtitle falls
+      // back to the trace id by the same rule every other row uses.
       startedAt: undefined,
+      eid: undefined,
       displayOnly: true,
       memberFact: "no searchable name",
       outcome: { tone: "muted", text: "Rejected page — no searchable name on the form. Display-only: no task exists, delete is the only action." },
