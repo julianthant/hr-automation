@@ -589,6 +589,38 @@ today's code does that do NOT fit that shape are explicitly **not tasks**:
 
 ---
 
+### 2.7 The authoring floor — three declaration tiers (D79f, 2026-07-24)
+
+**The problem this solves.** As written across docs 01–06, every task owes roughly ten artifacts:
+input/output schemas, `errorCodes`, freshness, provenance classification, subject spec, a mandatory
+`example`, a non-empty scenario tuple, naming compliance — and a commit adds `writeSafety` plus
+crash/subject scenarios. For a UCPath commit that is exactly right. For a pure transform in a
+workflow mini-store — a date-window calculation, a roster row projection — it is ceremony that
+makes workflows #2–#10 unpleasant to write, and unpleasant-to-write is how a codebase acquires
+copy-paste.
+
+**Three tiers. The floor scales with what the task can break.**
+
+| Tier | Applies to | Required | Optional until |
+|---|---|---|---|
+| **Light** | `workflow:<id>/…` mini-store pure reads and transforms (`sessions: []`, no page, no provider) | input/output schemas + `example` | scenarios required at the **first incident** — a bug fix here lands its regression scenario like any other |
+| **Standard** | browser `read` tasks | Light + freshness/provenance classification + subject spec + `errorCodes` + a happy scenario and its no-match/empty sibling | — |
+| **Full** | every `prepare`/`commit` (i.e. every task that can touch a real HR system) | Standard + `writeSafety` (completion arm + proof schema + idempotency) + probe policy + subject matcher + crash/mismatch/proof-unknown scenarios | nothing — a commit pays full fare, always |
+
+The tier is **derived, never declared**: it follows from `effect` + store kind, so a task cannot
+opt itself into a cheaper tier. A guard asserts the derivation rather than trusting an author.
+Promoting a light task later (a second workflow wants it, so it moves to a system store) raises its
+tier automatically and fails the build until the additional artifacts exist — which is the correct
+moment to pay, not before.
+
+**`scaffold new-task` / `scaffold new-workflow` are part of the base.** Nothing in docs 01–06
+previously promised a generator, and the read-only explorer (D55) does not emit code. The
+declaration toil is only acceptable if the boilerplate is *generated* — contract skeleton, impl
+stub, example, scenario stubs, and store registration, each with `TODO` markers that fail their
+guards until filled. This is the concrete answer to "will workflows #2–#10 be pleasant to write."
+
+---
+
 ## 3. Task stores per system plus pure workflow mini-stores
 
 ### 3.1 Layout in `temp_src`

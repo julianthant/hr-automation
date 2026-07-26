@@ -541,6 +541,17 @@ ran when exclusions exist.
 
 ### 5.1 Mobile photo capture is a recoverable artifact-intake source
 
+> **Scope trim (D79d, operator 2026-07-24) — read before implementing.** Phone capture is
+> **rarely used**: most documents arrive as scanned PDFs. So this section's durability obligations
+> are cut to the two that matter, and the rest is explicitly not built:
+> **KEEP** — durable capture sessions (an open session survives a dashboard restart) and **one
+> durable finalize outbox** (bundle → register → enqueue either succeeds visibly or fails visibly;
+> it can never return success and silently lose the handoff, which is the actual recorded failure).
+> **CUT** — the restart-between-every-state scenario matrix. Proving restart recovery from each of
+> six session states, for the lowest-stakes subsystem in the program, is ceremony. Two crash points
+> are covered: restart with an **open** session, and restart **mid-finalize**.
+> This trim touches test surface only; the schemas and the outbox contract below are unchanged.
+
 Capture is an input-acquisition service, not a workflow and not an in-memory callback. Its strict
 SQLite authority records are:
 
