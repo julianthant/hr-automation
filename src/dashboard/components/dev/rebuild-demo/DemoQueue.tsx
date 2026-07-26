@@ -33,6 +33,7 @@ import {
   ATTENTION_STATUSES,
   bandsFor,
   DEMO_ROWS,
+  DENSITY_RUNGS,
   densityRung,
   effectiveStatus,
   fmtElapsed,
@@ -40,7 +41,9 @@ import {
   groupCounts,
   linkedGroupSummary,
   orderedMemberIds,
+  sortDemoRows,
   type DemoRow,
+  type DemoSortKey,
 } from "./demo-data";
 
 /**
@@ -65,6 +68,11 @@ export interface DemoQueueState {
   checkedIds: ReadonlySet<string>;
   /** which Group Rows are expanded — groups default collapsed (D5) */
   expandedGroups: ReadonlySet<string>;
+  /** row order within the attention bands — never across them */
+  sort: DemoSortKey;
+  /** bulk-selection mode: checkboxes on top-level rows */
+  selectMode: boolean;
+  bulkIds: ReadonlySet<string>;
   tick: number;
 }
 
@@ -78,6 +86,8 @@ export interface DemoQueueHandlers {
   onToggleGroup: (groupId: string) => void;
   /** jump to another Workflow Panel entry and select a row inside it */
   onOpenPanel: (workflow: string, id: string) => void;
+  /** add/remove a row from the bulk target set */
+  onToggleBulk: (id: string) => void;
 }
 
 /**
@@ -100,12 +110,15 @@ export function visibleMemberIds(row: DemoRow, expandedGroups: ReadonlySet<strin
   }
 }
 
-/** the j/k traversal order for the current view */
-export function computeVisibleIds(rows: DemoRow[], state: Pick<DemoQueueState, "view" | "filter" | "expandedGroups">): string[] {
+/** the j/k traversal order for the current view — the SAME order the eye sees */
+export function computeVisibleIds(
+  rows: DemoRow[],
+  state: Pick<DemoQueueState, "view" | "filter" | "expandedGroups" | "sort">,
+): string[] {
   if (state.view.kind === "drill") return orderedMemberIds(state.view.groupId);
   const ids: string[] = [];
   for (const band of bandsFor(rows.filter((r) => rowInBucket(r, state.filter)))) {
-    for (const row of band.rows) {
+    for (const row of sortDemoRows(band.rows, state.sort)) {
       ids.push(row.id);
       if (row.rowType === "group") ids.push(...visibleMemberIds(row, state.expandedGroups));
     }
@@ -185,7 +198,10 @@ const MATRIX_CELL: Record<ProposedStatus, string> = {
 
 function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): ReactNode {
   const status = effectiveStatus(row);
-  const lookups = (row.records ?? []).filter((r) => r.lookup).length;
+  // Only when the delegated runs have no row of their own to point at. Once
+  // they do, the linked-set button in the body carries the count — two counts
+  // of the same thing is exactly the divergence this rebuild exists to kill.
+  const lookups = row.linkedGroup ? 0 : (row.records ?? []).filter((r) => r.lookup).length;
   return (
     <>
       {/* Depth 2 lives here and nowhere else. The packet that delegated this
@@ -298,6 +314,10 @@ function sublineFor(row: DemoRow): { tone: string; text: string } | null {
   if (status === "cancelled") return { tone: "text-muted-foreground", text: "Cancelled by you — nothing written" };
   if (status === "running" && row.liveText) return { tone: "text-primary/85", text: row.liveText };
   if (row.rowType === "group" && row.ocrPhase) return { tone: "text-muted-foreground", text: row.ocrPhase };
+  // A group's own decision lives on a member, so the group has no gate of its
+  // own to quote — its rolled-up outcome is the sentence that says what is
+  // blocked and what is at risk.
+  if (row.rowType === "group") return { tone: status === "waiting" ? "text-warning" : "text-muted-foreground", text: row.outcome.text };
   return null;
 }
 
@@ -367,6 +387,18 @@ export function DemoRowCard({
       <div className="px-3.5 py-2.5">
         <div className="flex min-w-0 items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
+            {/* Bulk selection is a TOP-LEVEL act: a member is acted on through
+                its group or on its own row, never half-selected inside one. */}
+            {state.selectMode && !nested && (
+              <input
+                type="checkbox"
+                checked={state.bulkIds.has(row.id)}
+                aria-label={`Select ${row.displayName || row.title || row.trace} for a bulk command`}
+                onClick={(e) => e.stopPropagation()}
+                onChange={() => handlers.onToggleBulk(row.id)}
+                className="size-3.5 shrink-0 accent-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            )}
             <StatusIcon aria-hidden className={cn("h-3.5 w-3.5 shrink-0", PROPOSED_STATUS[status].iconClass)} />
             <span
               title={row.displayName ? `Named by you — subject is ${row.title}` : undefined}
@@ -386,6 +418,14 @@ export function DemoRowCard({
           </div>
           <div className="flex shrink-0 items-center gap-1.5">{headerChips(row, state.checkedIds, state.tick)}</div>
         </div>
+
+        {/* A counted anchor ("5 separations") has no subject of its own, so the
+            names ARE its identity — without them the row is a number. */}
+        {row.memberPreview && row.groupNoun && (
+          <div className="mt-0.5 ml-5 truncate text-[11px] text-muted-foreground" title={row.memberPreview}>
+            {row.memberPreview}
+          </div>
+        )}
 
         {sub && (
           <div className={cn("mt-1.5 ml-5 flex min-w-0 items-center gap-2 text-[11px] font-mono", sub.tone)}>
@@ -408,9 +448,9 @@ export function DemoRowCard({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                handlers.onOpenPanel(linked.panel, linked.firstId);
+                handlers.onOpenPanel(linked.panel, linked.targetId);
               }}
-              title={`Open the ${linked.panel} panel — these runs live there, not under this row`}
+              title={`Open the ${linked.panel} panel — ${linked.total === 1 ? "this run lives" : "these runs live"} there, not under this row`}
               className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-info/35 bg-info/8 px-2 py-0.5 text-[10.5px] text-info outline-none hover:bg-info/15 focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Users aria-hidden className="size-3 shrink-0" />
@@ -420,7 +460,9 @@ export function DemoRowCard({
           </div>
         )}
 
-        {row.linkedParentId && !row.reviewOf && (
+        {/* ONE level of back, never a breadcrumb trail: maximum real depth is 2,
+            so there is only ever one parent worth returning to. */}
+        {row.linkedParentId && !row.reviewOf && DEMO_ROWS[row.linkedParentId] && (
           <div className="mt-1.5 ml-5">
             <button
               type="button"
@@ -429,10 +471,13 @@ export function DemoRowCard({
                 const parent = DEMO_ROWS[row.linkedParentId as string];
                 handlers.onOpenPanel(parent.wfLabel, parent.id);
               }}
+              title={`Delegated by ${DEMO_ROWS[row.linkedParentId].wfLabel} · ${DEMO_ROWS[row.linkedParentId].title} — open it in its own panel`}
               className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 py-0.5 text-[10.5px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <CornerDownRight aria-hidden className="size-3 shrink-0" />
-              <span className="truncate">Released by {DEMO_ROWS[row.linkedParentId]?.title}</span>
+              <ArrowLeft aria-hidden className="size-3 shrink-0" />
+              <span className="truncate">
+                {DEMO_ROWS[row.linkedParentId].wfLabel} · {DEMO_ROWS[row.linkedParentId].title}
+              </span>
             </button>
           </div>
         )}
@@ -645,6 +690,12 @@ function GroupMatrix({ row, state, handlers }: { row: DemoRow; state: DemoQueueS
   );
 }
 
+/** the status pill's own word, so the empty state names the filter the operator set */
+function filterWord(filter: DemoFilter): string {
+  if (filter === "needsYou") return "waiting on you or write parked";
+  return PROPOSED_STATUS[filter as ProposedStatus].label.toLowerCase();
+}
+
 /** "2 failed · 1 waiting · 1 warning" — derived, never a hardcoded caption. */
 function attentionBreakdown(groupId: string): string {
   const c = groupCounts(groupId);
@@ -761,6 +812,15 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
           <ArrowLeft aria-hidden className="size-3.5" />
         </button>
         <span className="mr-2 truncate text-[13px] font-semibold text-foreground">{group.title}</span>
+        {/* This is the LAST RUNG of the density ladder, not a route: the same
+            group, the same members, opened to the size the set actually needs.
+            One back, no breadcrumb — there is only one parent to return to. */}
+        <span
+          title={`Density ladder — ${DENSITY_RUNGS.find((r) => r.key === densityRung(ids.length))?.range}. The drill-in is a rung, not a separate page.`}
+          className="rounded-full border border-border bg-secondary/40 px-2.5 py-0.5 text-[10.5px] text-muted-foreground"
+        >
+          {DENSITY_RUNGS.find((r) => r.key === densityRung(ids.length))?.range} · opened in place
+        </span>
         <span className="rounded-full border border-warning/50 bg-warning/12 px-2.5 py-0.5 text-[10.5px] font-medium text-warning">
           Attention <span className="font-mono tabular-nums">{attentionN}</span>
         </span>
@@ -842,7 +902,18 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
 // The panel
 // ---------------------------------------------------------------------------
 
-export function DemoQueue({ rows, state, handlers }: { rows: DemoRow[]; state: DemoQueueState; handlers: DemoQueueHandlers }) {
+export function DemoQueue({
+  rows,
+  state,
+  handlers,
+  workflowLabel,
+}: {
+  rows: DemoRow[];
+  state: DemoQueueState;
+  handlers: DemoQueueHandlers;
+  /** the Workflow Panel entry this queue is scoped to — the empty state says so */
+  workflowLabel: string;
+}) {
   const inView = rows.filter((r) => rowInBucket(r, state.filter));
   const bands = bandsFor(inView);
   const finished = bands.find((b) => b.key === "finished")?.rows ?? [];
@@ -868,11 +939,24 @@ export function DemoQueue({ rows, state, handlers }: { rows: DemoRow[]; state: D
         <span className="ml-auto font-mono text-[10px]">{inView.length} runs</span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto pb-3">
+        {/* Empty is a STATE: what would be here, why it is not, and what to do
+            — in that order. "No rows" on its own teaches the operator nothing
+            and reads like a failure. */}
         {inView.length === 0 && (
-          <div className="flex flex-col items-center gap-1.5 px-6 py-12 text-center">
-            <FileText aria-hidden className="size-5 text-muted-foreground/60" />
-            <p className="max-w-[34ch] text-[11.5px] text-muted-foreground">
-              Nothing in this view. The badge beside the workflow and the pill above both read zero — they are the same count.
+          <div className="mx-3 mt-3 flex flex-col items-start gap-1.5 rounded-lg border border-dashed border-border px-4 py-6">
+            <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-foreground">
+              <FileText aria-hidden className="size-3.5 text-muted-foreground" />
+              {state.filter === "all" ? `No ${workflowLabel} runs on Jul 25` : `No ${workflowLabel} runs are ${filterWord(state.filter)}`}
+            </span>
+            <p className="max-w-[52ch] text-[11.5px] leading-relaxed text-muted-foreground">
+              {state.filter === "all"
+                ? "This workflow is registered and can be run — it simply has no runs today. A panel that vanishes when idle is a panel you stop trusting, so it stays."
+                : "Rows exist in this workflow, just none in this status. The badge beside the workflow and the pill above both read zero here because all three read the same count."}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {state.filter === "all"
+                ? "Start one from the run controls, or pick another workflow in the rail."
+                : "Clear the status pill to see everything in this workflow."}
             </p>
           </div>
         )}
@@ -920,7 +1004,9 @@ export function DemoQueue({ rows, state, handlers }: { rows: DemoRow[]; state: D
                   )}
                 </div>
               )}
-              {band.rows.map((row) => (
+              {/* sorting reorders WITHIN a band and never across one, so the
+                  attention band is always the attention band */}
+              {sortDemoRows(band.rows, state.sort, state.tick).map((row) => (
                 <DemoRowCard key={row.id} row={row} state={state} handlers={handlers} />
               ))}
             </div>

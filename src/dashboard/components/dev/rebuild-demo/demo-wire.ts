@@ -465,23 +465,45 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
 }
 
 function deriveOutcomeAction(spec: DemoRowSpec, ctx: ActionPolicyContext): ActionDescriptorWire | null {
+  // A row that failed because its LINKED child failed is fixed at the child,
+  // never here — but WHICH fix depends on what the child was reading. A packet
+  // came from a file, so the answer is a better file; a person's mid-run lookup
+  // came from a name, so the answer is to replay that lookup (keeping its task
+  // id, so the dependency reopens and this run resumes behind it).
   if (spec.mirroredFrom) {
-    return {
-      key: "reupload",
-      kind: "command",
-      command: "rerun-with-different-input",
-      label: "Re-upload",
-      intent: "destructive",
-      icon: "retry",
-      placement: ["outcome"],
-      expectedVersion: ctx.projectedVersion,
-      confirm: {
-        title: "Start a new run from a different file?",
-        body: `This row stays failed and keeps its evidence. A NEW ${ctx.workflow.label} run is enqueued from the file you pick — the two are separate runs with separate receipts.`,
-        confirmLabel: "Choose a file…",
-        tone: "neutral",
-      },
-    };
+    return spec.subjectKind === "file"
+      ? {
+          key: "reupload",
+          kind: "command",
+          command: "rerun-with-different-input",
+          label: "Re-upload",
+          intent: "destructive",
+          icon: "retry",
+          placement: ["outcome"],
+          expectedVersion: ctx.projectedVersion,
+          confirm: {
+            title: "Start a new run from a different file?",
+            body: `This row stays failed and keeps its evidence. A NEW ${ctx.workflow.label} run is enqueued from the file you pick — the two are separate runs with separate receipts.`,
+            confirmLabel: "Choose a file…",
+            tone: "neutral",
+          },
+        }
+      : {
+          key: "retry-child",
+          kind: "command",
+          command: "retry",
+          label: "Retry the lookup",
+          intent: "destructive",
+          icon: "retry",
+          placement: ["outcome"],
+          expectedVersion: ctx.projectedVersion,
+          confirm: {
+            title: "Replay the delegated lookup?",
+            body: `The CHILD run is replayed under its own task id, so this ${ctx.workflow.label} run resumes behind it instead of starting over. Nothing that already ran is repeated, and nothing has been written to ${ctx.workflow.systems.join(" / ")}.`,
+            confirmLabel: "Retry the lookup",
+            tone: "neutral",
+          },
+        };
   }
   switch (ctx.status) {
     case "waiting":

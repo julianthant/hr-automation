@@ -102,13 +102,22 @@ export function countRows(rows: DemoRow[]): Record<StatusBucket, number> {
 // Top Bar
 // ---------------------------------------------------------------------------
 
+/** the demo's three top-level views — the app, the specimen catalog, the kit */
+export type DemoShellView = "queue" | "catalog" | "kit";
+
+const SHELL_VIEW_LABEL: Record<DemoShellView, string> = {
+  queue: "Dashboard",
+  catalog: "Row & panel catalog",
+  kit: "Design system",
+};
+
 export function DemoTopBar({
   view,
   onView,
   attention,
 }: {
-  view: "queue" | "catalog";
-  onView: (v: "queue" | "catalog") => void;
+  view: DemoShellView;
+  onView: (v: DemoShellView) => void;
   attention: number;
 }) {
   return (
@@ -124,7 +133,7 @@ export function DemoTopBar({
       </span>
 
       <div className="ml-2 inline-flex rounded-md border border-border bg-secondary/40 p-0.5">
-        {(["queue", "catalog"] as const).map((v) => (
+        {(["queue", "catalog", "kit"] as const).map((v) => (
           <button
             key={v}
             type="button"
@@ -135,7 +144,7 @@ export function DemoTopBar({
               view === v ? "bg-card font-semibold text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {v === "queue" ? "Dashboard" : "Row & panel catalog"}
+            {SHELL_VIEW_LABEL[v]}
           </button>
         ))}
       </div>

@@ -14,6 +14,7 @@ import {
   CircleSlash,
   ClipboardList,
   Database,
+  Eye,
   FileText,
   GitBranch,
   History,
@@ -35,6 +36,7 @@ import { IconActionButton } from "@/components/shared/IconActionButton";
 import { StatusBadge, type ProposedStatus } from "./demo-status";
 import { panelKindOf, panelKindSpec, rowVariantSpec } from "./demo-catalog";
 import { BannerActions, OutcomeActionButton, ParkResolutions, type DemoActionHandler } from "./DemoActions";
+import { RunIdentityStrip, RunSelector } from "./DemoRunIdentity";
 import { fmtClock, tabsFor as tabsForKind, type DemoTab } from "./demo-wire";
 import {
   DEMO_ROWS,
@@ -46,6 +48,7 @@ import {
   LIVE_SEQUENCE,
   memberAttentionIds,
   orderedMemberIds,
+  sharedMemberPipeline,
   SYSTEM_ACCENT,
   type DemoLine,
   type DemoRecord,
@@ -395,6 +398,51 @@ function Timeline({ row, tick }: { row: DemoRow; tick: number }) {
  * away from whatever you are reading. Clicking opens the full-size viewer
  * (the thumbnail rail there is the old grid).
  */
+/**
+ * The one legitimate case of a group strip being a member AGGREGATE: a typed
+ * list (S5) whose members all run the identical step list. Each segment is a
+ * fill bar — `Identity check 3/5` — so the group answers "how far is everyone"
+ * without opening a single member. `sharedMemberPipeline` returns null the
+ * moment two members disagree about their steps, so this can never be drawn
+ * over pipelines that are not actually the same.
+ */
+function SharedPipelineStrip({ row }: { row: DemoRow }) {
+  const fills = sharedMemberPipeline(row);
+  if (!fills) return null;
+  return (
+    <div className="border-b border-border/60 px-3 py-2">
+      <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+        Shared member pipeline
+        <span className="font-mono normal-case tracking-normal">{fills[0].total} people · identical steps</span>
+      </div>
+      <div className="flex items-stretch gap-[3px]">
+        {fills.map((f) => (
+          <div key={f.label} className="min-w-0 flex-1">
+            {/* the count hugs its own label — floated right it reads as the
+                NEXT segment's count, which is the kind of small lie a dense
+                strip makes very easy */}
+            <div className="flex min-w-0 items-baseline gap-1">
+              <span className="shrink-0 font-mono text-[9.5px] tabular-nums text-muted-foreground">
+                {f.done}/{f.total}
+              </span>
+              <span className="min-w-0 truncate text-[10.5px] text-secondary-foreground">{f.label}</span>
+            </div>
+            <span
+              aria-label={`${f.label} — ${f.done} of ${f.total} done${f.attention > 0 ? `, ${f.attention} needing you` : ""}`}
+              className="mt-1 flex h-2 w-full overflow-hidden rounded-[3px] bg-secondary"
+            >
+              <span className="bg-success/75" style={{ flexGrow: Math.max(f.done, 0.001) }} />
+              <span className="bg-warning" style={{ flexGrow: Math.max(f.attention, 0.001) }} />
+              <span className="bg-primary/70" style={{ flexGrow: Math.max(f.running, 0.001) }} />
+              <span className="bg-transparent" style={{ flexGrow: Math.max(f.total - f.done - f.attention - f.running, 0.001) }} />
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function EvidenceBar({ row }: { row: DemoRow }) {
   if (row.shots.length === 0) return null;
   return (
@@ -551,6 +599,24 @@ function LogsTab({ row, liveCount, onAction }: { row: DemoRow; liveCount: number
  * Writes are shown but never editable: what a run put into UCPath is a record
  * of what happened, not a form.
  */
+/**
+ * What the PARENT will do with this run's answer. A delegated helper run seen
+ * from its own panel is context-free without this line: you can read what it
+ * looked up, but not why anybody wanted it (delegation §5-S7).
+ */
+function FeedsIntoLine({ row }: { row: DemoRow }) {
+  if (!row.feedsInto) return null;
+  const target = row.feedsInto.targetRunId ? DEMO_ROWS[row.feedsInto.targetRunId] : undefined;
+  return (
+    <div className="flex items-center gap-2 border-b border-log-teal/25 bg-log-teal/6 px-3 py-1.5 text-[11.5px]">
+      <ArrowRight aria-hidden className="size-3 shrink-0 text-log-teal" />
+      <span className="shrink-0 font-semibold text-log-teal">Result feeds</span>
+      <span className="min-w-0 truncate text-secondary-foreground">{row.feedsInto.label}</span>
+      {target && <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">{target.trace}</span>}
+    </div>
+  );
+}
+
 function DataTab({ row }: { row: DemoRow }) {
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [seededFrom, setSeededFrom] = useState<number | null>(null);
@@ -560,7 +626,12 @@ function DataTab({ row }: { row: DemoRow }) {
   }, [row.id]);
 
   if (row.data.length === 0) {
-    return <EmptyTab icon={Database} text="No data points recorded — this run has not read or written anything yet." />;
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <FeedsIntoLine row={row} />
+        <EmptyTab icon={Database} text="No data points recorded — this run has not read or written anything yet." />
+      </div>
+    );
   }
 
   const reads = row.data.filter((d) => d.dir === "read");
@@ -573,6 +644,7 @@ function DataTab({ row }: { row: DemoRow }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <FeedsIntoLine row={row} />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/40 px-3 py-2 text-[11px] text-muted-foreground">
         <span className="inline-flex items-center gap-1 text-log-cyan">
           <ArrowDownToLine aria-hidden className="size-3" />
@@ -749,6 +821,14 @@ function ReviewTab({ row }: { row: DemoRow }) {
   const rec = records[Math.min(idx, records.length - 1)];
   const approvable = records.filter((r) => r.state !== "blocked");
   const blocked = records.length - approvable.length;
+  /**
+   * A STANDALONE OCR run (S6) is a read-only report: approval IS delegation, so
+   * a run nobody delegated has nothing to approve. `reviewOf` is the served
+   * fact that says whether a parent is waiting on this decision — the read-only
+   * surface is derived from it, never from a workflow name.
+   */
+  const readOnly = !row.reviewOf;
+  const gaps = records.reduce((n, r) => n + r.checks.filter((c) => c.state !== "ok").length, 0);
   const nextFlagged = records.findIndex((r, i) => i > idx && r.state !== "ready");
   const mark = (set: ReadonlySet<string>, id: string) => new Set([...set, id]);
   const go = (n: number) => {
@@ -768,25 +848,37 @@ function ReviewTab({ row }: { row: DemoRow }) {
           <span className="bg-border" style={{ flexGrow: Math.max(records.length - reviewed.size, 0.001) }} />
         </span>
         <span className="text-[11px] text-muted-foreground">
-          {approved.size} approved · {blocked > 0 ? `${blocked} blocked` : "none blocked"}
+          {readOnly
+            ? `${gaps} completeness ${gaps === 1 ? "gap" : "gaps"} across ${records.length} people`
+            : `${approved.size} approved · ${blocked > 0 ? `${blocked} blocked` : "none blocked"}`}
         </span>
-        <button
-          type="button"
-          onClick={NOOP}
-          disabled={reviewed.size < records.length}
-          title={reviewed.size < records.length ? "Look at every person first" : undefined}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-success/50 bg-success/15 px-2.5 py-1 text-[11px] font-semibold text-success outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
-        >
-          <CheckCircle2 aria-hidden className="size-3" />
-          Approve {approvable.length} of {records.length}
-        </button>
+        {/* No approve control exists on a standalone run — it is not disabled,
+            it is absent, because the contract sends no approval gate for a run
+            with nothing downstream. */}
+        {readOnly ? (
+          <span className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+            <Eye aria-hidden className="size-3" />
+            Read-only report — nothing to approve
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={NOOP}
+            disabled={reviewed.size < records.length}
+            title={reviewed.size < records.length ? "Look at every person first" : undefined}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-success/50 bg-success/15 px-2.5 py-1 text-[11px] font-semibold text-success outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+          >
+            <CheckCircle2 aria-hidden className="size-3" />
+            Approve {approvable.length} of {records.length}
+          </button>
+        )}
       </div>
 
       {/* conveyor */}
       <div className="flex items-center gap-1.5 border-b border-border/60 px-2.5 py-1.5">
         <IconActionButton tone="muted" icon={<ChevronLeft aria-hidden className="size-3.5" />} label="Previous person" onClick={() => go(-1)} />
         <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
-          {idx + 1}/{records.length}
+          {idx + 1} of {records.length}
         </span>
         <IconActionButton tone="muted" icon={<ChevronRight aria-hidden className="size-3.5" />} label="Next person" onClick={() => go(1)} />
         <span className="ml-1 min-w-0 truncate text-[13px] font-semibold text-foreground">{rec.name}</span>
@@ -828,7 +920,7 @@ function ReviewTab({ row }: { row: DemoRow }) {
 
         <div className="flex flex-col p-3">
           <span className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-            Extracted from this page — editable here, and only here
+            {readOnly ? "Read from this page — nothing here is editable" : "Extracted from this page — editable here, and only here"}
           </span>
           {rec.fields.map((f) => {
             const key = `${rec.id}:${f.label}`;
@@ -886,6 +978,17 @@ function ReviewTab({ row }: { row: DemoRow }) {
                 <Icon aria-hidden className={cn("size-3 shrink-0", spec.cls)} />
                 <span className="w-32 shrink-0 text-muted-foreground">{c.label}</span>
                 <span className={cn("min-w-0 flex-1 truncate", c.state === "ok" ? "text-secondary-foreground" : spec.cls)}>{c.value}</span>
+                {/* A read-only report cannot be approved, so the only thing to
+                    DO about a gap is to look again. */}
+                {readOnly && c.state !== "ok" && (
+                  <button
+                    type="button"
+                    onClick={NOOP}
+                    className="shrink-0 rounded border border-border bg-card px-1.5 py-px text-[10px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    Re-check
+                  </button>
+                )}
               </div>
             );
           })}
@@ -919,8 +1022,24 @@ function ReviewTab({ row }: { row: DemoRow }) {
         </div>
       </div>
 
-      {/* per-person decision */}
+      {/* per-person decision — absent entirely on a read-only report */}
       <div className="flex items-center gap-1.5 border-t border-border/60 bg-secondary/20 px-3 py-2">
+        {readOnly ? (
+          <>
+            <button
+              type="button"
+              onClick={() => go(1)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <ArrowRight aria-hidden className="size-3" />
+              Next person
+            </button>
+            <span className="ml-auto text-[10.5px] text-muted-foreground">
+              Nothing is delegated to this run, so approval would release nothing — the report IS the outcome.
+            </span>
+          </>
+        ) : (
+          <>
         <button
           type="button"
           disabled={rec.state === "blocked"}
@@ -948,6 +1067,8 @@ function ReviewTab({ row }: { row: DemoRow }) {
         <span className="ml-auto text-[10.5px] text-muted-foreground">
           {rec.state === "blocked" ? "Blocked records are excluded from Approve." : "Approve releases only this person's work."}
         </span>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1241,7 +1362,7 @@ function ConveyorHeader({
           onClick={() => onSelect(siblings[(idx - 1 + total) % total])}
         />
         <span className="font-mono text-[10.5px] text-muted-foreground tabular-nums">
-          {idx + 1}/{total}
+          {idx + 1} of {total}
         </span>
         <IconActionButton
           tone="muted"
@@ -1255,9 +1376,11 @@ function ConveyorHeader({
           <button
             type="button"
             onClick={() => onSelect(nextAttention)}
+            title="Jump to the next member needing you — the n key does the same"
             className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-warning/45 bg-warning/10 px-2 py-0.5 text-[10.5px] font-semibold text-warning outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Next attention
+            <kbd className="rounded border border-warning/45 px-1 font-mono text-[9px]">n</kbd>
             <ArrowRight aria-hidden className="size-3" />
           </button>
         )}
@@ -1384,7 +1507,8 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
               ? `Records live on the OCR review row — open the OCR panel (${DEMO_ROWS[row.reviewRunId]?.records?.length ?? 0} people)`
               : row.reviewOf
                 ? `Delegated by ${DEMO_ROWS[row.reviewOf]?.title ?? "the packet"} — open the packet row`
-                : `Released by ${DEMO_ROWS[linkedTarget]?.title} — open it in the ${DEMO_ROWS[linkedTarget]?.wfLabel} panel`}
+                : // one level of back, no breadcrumb trail: `← OCR · <packet>`
+                  `← ${DEMO_ROWS[linkedTarget]?.wfLabel} · ${DEMO_ROWS[linkedTarget]?.title} — the run that asked for this one`}
           </span>
           <ArrowRight aria-hidden className="ml-auto size-3 shrink-0" />
         </button>
@@ -1395,12 +1519,12 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
       {linked && (
         <button
           type="button"
-          onClick={() => onOpenPanel(linked.panel, linked.firstId)}
+          onClick={() => onOpenPanel(linked.panel, linked.targetId)}
           className="flex items-center gap-2 border-b border-info/25 bg-info/6 px-3 py-1.5 text-left text-[11.5px] text-info outline-none hover:bg-info/10 focus-visible:ring-2 focus-visible:ring-ring"
         >
           <Users aria-hidden className="size-3.5 shrink-0" />
           <span className="min-w-0 truncate">
-            {linked.label} — each signer is its own run in the {linked.panel} panel, counted there and not here
+            {linked.label} — {linked.total === 1 ? "it runs" : "each runs"} in the {linked.panel} panel, counted there and not here
           </span>
           <ArrowRight aria-hidden className="ml-auto size-3 shrink-0" />
         </button>
@@ -1414,11 +1538,18 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
       </div>
 
 
+      {/* WHICH run is this: actor, priority, descriptor + app version, resolved
+          instance, dry-run, preset. A member inherits all of it from its group,
+          so the strip stays on the rows that own those facts. */}
+      {!isMember && <RunIdentityStrip row={row} />}
+      <RunSelector row={row} />
+
       {/* the gate is pinned above the tabs — visible from every tab, on every
           panel kind, instead of hiding inside a Review tab most rows lack */}
       {row.gate && panelKindOf(row) !== "review" && <GateBanner row={row} tick={tick} onAction={onAction} />}
 
       <Timeline row={row} tick={tick} />
+      <SharedPipelineStrip row={row} />
       <EvidenceBar row={row} />
 
       {/* tabs — derived from the panel kind, never a fixed five */}
