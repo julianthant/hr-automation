@@ -1,9 +1,13 @@
 # 10 — Guard & Test Architecture SSOT (`temp_src`)
 
-Status: **revised 2026-07-22 after the whole-plan/legacy-code review.** No `temp_src` guard
-implementation currently exists; this document now covers strict schemas, semantic UI/driver
-boundaries, subject binding, queue commands/delegation, evidence/scenarios, notifications, and
-authority-store recovery in addition to the existing rebuild safety promises.
+Status: **revised 2026-07-22 after the whole-plan/legacy-code review; amended 2026-07-26
+(Round 8).** No `temp_src` guard implementation currently exists; this document now covers strict
+schemas, semantic UI/driver boundaries, subject binding, queue commands/delegation,
+evidence/scenarios, notifications, and authority-store recovery in addition to the existing rebuild
+safety promises. **Round 8 adds §3.13** (one-projection counts, identity-gate-before-commit,
+archive invariants, frozen-legacy-tree) **and §3.14** (the ratified testing standard), and
+**deletes two guard families** — the continuous lift replay and the legacy wire-schema snapshot —
+which existed only to protect the coexistence layer D73 removed.
 
 Owns gap-audit (`08`) BLOCKER #2: ratchet port map, safety guards, descriptor projection coverage,
 guard inventory, TDD topology, and stub/live lanes.
@@ -353,6 +357,70 @@ read while still permitting replay-safe browser downloads.
   endpoint route schemas, secret/config registries, preflight checks, and legacy env/capability
   inventory in both directions. A missing ServiceNow/SharePoint/Old-Kronos endpoint or provider key,
   an unregistered `process.env` read, and a stale registry entry all fail with the exact owner.
+
+### 3.13 Round-8 guards (2026-07-26) — the decisions that need mechanical teeth
+
+Four ratified decisions are worthless as prose. Each gets a guard, and each guard is listed in the
+§5.1 registered set.
+
+- **`one-projection-counts.test.ts` (D81 — doc 03 §10.1).** The operator's standing complaint is
+  that legacy per-workflow badges "always error out"; the audit found ≥4 historical fixes for
+  count/badge divergence. Root cause is structural — several surfaces each free to derive their own
+  count. This guard asserts that **no count or aggregate reachable from a surface path originates
+  anywhere but the single run/queue projection payload**: no client-side `.filter().length` over
+  entries feeding a badge, no second aggregate endpoint, no "just for the badge" query. Backed by a
+  fixture whose seeded world contains hidden, archived, delegated, and rejected rows and asserts
+  Workflow Panel total == Status Bar sum == rendered Queue Row count **by construction**. Failure
+  mode it prevents: a future surface quietly re-deriving a number and re-opening a 4-fix bug class.
+
+- **`identity-gate-before-commit.test.ts` (D77 — doc 09 §14).** For every descriptor whose commit
+  contract consumes an operator-approved subject, walk the graph and assert the commit node is
+  reachable **only** through the identity-approval gate node — no branch bypasses it, no `startAt`
+  entry point lands past it, and no gate node sits *inside* a transaction node (D26 forbids a park
+  between prepare and commit). Also asserts the gate's result schema is the typed
+  `IdentityApprovalResult`, never a free-form `data` flag — the legacy shape that made a paused run
+  render as `done`. This is the static half of the wrong-person control; the runtime half is that a
+  commit whose `expected` subject has no backing approved gate result cannot fence.
+
+- **`archive-invariants.test.ts` (D80 — doc 03 §10.2).** Three assertions: (1) rendering an
+  archived run touches **zero** version-conditional code paths — the archived payload is
+  self-contained, so a fixture with an archived run from a prior descriptor version renders through
+  the same single path as a current run; (2) a version bump **refuses** while any prior-version run
+  is non-terminal, and the refusal lists them — the write-safety carve-out that stops an unresolved
+  possible-submit being buried; (3) archiving never touches the write ledger.
+
+- **`frozen-legacy-tree.test.ts` (D73 — charter).** Once `src` is frozen at 1a, no commit may add
+  or modify a file under `src/` (deletions during migration are allowed and expected). Cheap,
+  and it is what makes "no dual maintenance" true rather than aspirational. Ships with the freeze,
+  not before it.
+
+**Two guard families are DELETED, not ported (D73).** The `real-tracker-day zero-quarantine` lift
+replay and the legacy wire-schema snapshot guard (version bump + adapter + goldens in one commit)
+both existed to protect a live coexistence layer. A frozen tree emits no new shapes and there is no
+continuous lift. If the optional one-time historical import is ever built, it carries its own
+one-off fixture; it is not a standing gate. Removing them is an explicit decision recorded here,
+per D39 — not a silent shrink, and the guard-of-guards manifest is updated in the same commit.
+
+### 3.14 Testing standard (D85) — what replaces the e2e ritual
+
+The operator asked for a better standard than the `custom-hr-e2e-test` skill ritual. The ratified
+answer has four parts, and they are *kernel behavior*, not a skill:
+
+1. **The scenario corpus is the everyday lane.** Registered `ScenarioManifest`s (D53) execute in CI;
+   a bug fix links a regression scenario. This is the default way a workflow is tested.
+2. **Structural dry-run** — `cli test workflow <id> --dry-run` runs through the **real kernel**, not
+   a parallel stub harness, so what is tested is what ships.
+3. **A typed `TestTargetRegistry`** — test employees, fixture files, and authorized sacrificial
+   documents (e.g. Kuali Action List docs 4444–4453) with their usage rules recorded as data:
+   read-only vs write-allowed-if-restored, cleanup obligation, and owner. A live probe or controlled
+   commit names its target from this registry rather than from a comment in a session transcript.
+4. **Positive no-write proof.** A dry-run's safety claim is proven by an **empty per-run
+   write-intent ledger**, not by the absence of a screenshot or a log line. This replaces the old
+   heuristics with a fact the kernel already records: no intent row means no fence, means no click.
+
+Three habits from the old ritual are kept and promoted into kernel behavior: **"a workaround is a
+finding"** (a step that needed manual help is recorded, not smoothed over), **double-entry ground
+truth** (a UI assertion is paired with an independent source), and the **append-only issue ledger**.
 
 ### 3.12 D71 executable contract/type-budget suite
 

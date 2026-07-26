@@ -1,8 +1,11 @@
 # 02 — Workflow Model: Descriptor SSOT · Constant Input · Run-State Machine · Start-Anywhere Resume
 
-Status: **revised 2026-07-22 after the whole-plan/legacy-code review.** The abandoned Step-0 spike
-and skeleton were deleted. The expanded graph, typed delegation/control seams, and three-effect
-task API require a new real-scale type proof before code lands in `temp_src/`.
+Status: **revised 2026-07-22 after the whole-plan/legacy-code review; amended 2026-07-26 (Round 8).**
+The abandoned Step-0 spike and skeleton were deleted. The expanded graph, typed delegation/control
+seams, and three-effect task API require a new real-scale type proof before code lands in
+`temp_src/`. Round-8 amendments: §4 records the two graph-legality rules the identity-approval gate
+(doc 09 §14, D77) imposes, and the descriptor's per-run stamp now includes the **app version**
+alongside the workflow version + fingerprint (D80 archive-on-bump, owned by doc 03 §10.2).
 
 ## Ownership (D1)
 
@@ -812,6 +815,18 @@ Tasks stay run-to-completion with bounded duration (doc 01's retry/timeout polic
 OCR approval, oath-upload's child-signature watching, external signals — are **gate nodes** in the
 descriptor sequence, owned by this state machine. Doc 03's `gate.opened`/`gate.resolved` events
 are their wire form; this doc defines the semantics, doc 03 the encoding.
+
+> **The identity-approval gate is designed in doc 09 §14 (D77, 2026-07-26).** It is a gate node in
+> every respect this section defines — park, session release, typed result, resume — so nothing
+> here is special-cased for it. What doc 09 owns is *what that particular gate asks and what its
+> answer authorizes*: the decision packet, the ALWAYS-GATE policy, the staleness rule that re-opens
+> a gate when the approved candidate has changed, and the binding of its result to the commit's
+> expected subject. Two placement rules from that design constrain this graph and are restated
+> here because this doc owns graph legality: **(1)** a gate node may never sit *inside* a
+> `transaction` node — D26 forbids any park between `prepare` and `commit`, and a staged wizard
+> page cannot survive an operator wait; **(2)** for a descriptor whose commit consumes an
+> operator-approved subject, the commit must be graph-reachable **only** through that gate, which
+> doc 10's `identity-gate-before-separation-commit` guard asserts statically.
 
 ```
 queued → claimed → validating → running(node i) ──────────────→ terminal
