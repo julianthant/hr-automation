@@ -4,12 +4,16 @@ Status: **revised 2026-07-22 after the whole-plan/legacy-code review.** The span
 owns a closed control-command protocol, durable notifications, strict boundary schemas, and an
 explicit backup/restore contract for the non-rebuildable SQLite state. **Amended 2026-07-25:** §9
 carries the operator-ratified delegation and presentation decisions (row-model series D6–D20).
+**Amended 2026-07-26 (Round 8):** §5's live coexistence layer is superseded by pause-until-done
+(D73) and §10 adds the four surviving Round-8 obligations this doc owns — the one projection every
+count reads (D81), run versioning + archive-on-version-bump (D80), operator-assigned run display
+names (D83), and the slimmed notification model (D79b).
 
 ## Ownership (D1)
 
 | | Concept | Where |
 |---|---|---|
-| **This doc OWNS** | Span/event wire schema (§1, amended per D10), notes, storage layout, SQLite authority and recovery, enqueue/action/queue command semantics, durable notifications, local artifact outboxes/projectors, SSE wire shapes, the lift adapter + flip plan, the completion union, the ratified delegation/presentation decisions | §§1–5, §9 |
+| **This doc OWNS** | Span/event wire schema (§1, amended per D10), notes, storage layout, SQLite authority and recovery, enqueue/action/queue command semantics, durable notifications, local artifact outboxes/projectors, SSE wire shapes, the completion union, the ratified delegation/presentation decisions, **the ONE run/queue projection (D81)**, **run versioning + archive-on-bump (D80)**, **run display names (D83)**; the lift adapter survives only as an optional one-time import (§5) | §§1–5, §9–10 |
 | **Imports from doc 01** | Task contract + `defineTask`, task id grammar (`<system>/<verb-object>` slash ids, per D2), the closed `SystemId` union — real `src/systems/` dir names (`new-kronos`, `old-kronos`) plus the D4 service systems (`extraction`, `normalization`, `ocr`, `roster` — charter §11), error taxonomy | referenced, never redefined |
 | **Imports from doc 02** | Workflow descriptor shape + builder, RunEnvelope (`dryRun` home per D6), run-state machine incl. gates/parks (D5), checkpoint store schema, the readable span-path id grammar (`pl-104233-9f3e/searching#2`) | referenced, never redefined |
 | **Exports doc 02 adopts** | Verdict/detail semantics, completion program semantics, and wire projections; doc 02's descriptor now carries every consumed field | §3–4 |
@@ -859,7 +863,38 @@ model them as completion. i9 is §4.1's post-completion enqueue; verify is mid-r
 
 ---
 
-## 5. COEXISTENCE — the lift adapter and the flip plan
+## 5. COEXISTENCE — SUPERSEDED by pause-until-done (D73, 2026-07-26)
+
+> **Read this box before anything below it.** This entire section designed a *live* coexistence
+> layer for a world where old `src` and new `temp_src` ran side by side for the length of the
+> program. **That world no longer exists.** Under D73 (operator ratification 2026-07-24) automation
+> is paused for the rebuild, HR work is manual, and `src` is frozen from the day Phase 1 starts —
+> it emits nothing, enqueues nothing, and is never edited. Doc 07 §4 enumerates the deletions; the
+> ones this section owned are:
+>
+> - **§5.1/§5.2 lift adapter** — survives ONLY as an optional **one-time historical import** of
+>   existing `.tracker` data, run by hand if the operator wants old runs browsable. No version
+>   dispatch map, no per-version adapters, no zero-quarantine gate on every commit, no
+>   `LegacyEmitSchemaVersion` stamping in the frozen tree (a frozen tree emits no new shapes). If it
+>   is built at all it is a script that runs once and leaves no runtime surface; if it is never
+>   built, nothing breaks.
+> - **§5.3 source authority** — deleted. Per-run `(engine, cutoverGeneration)` stamping existed to
+>   keep native and legacy runs from claiming the same run. There is no mixed-engine period.
+> - **§5.4 scoped flip + golden-payload parity gate** — deleted. There is no running legacy
+>   dashboard to be byte-parity with. The four surfaces are validated by their own fixtures plus
+>   Phase 1's live person-lookup exit test (doc 07 §2), which is the better test anyway: parity
+>   with the legacy surface would have pinned the new dashboard to bugs the rebuild exists to
+>   remove — most pointedly the count divergence that D81's one-projection rule fixes.
+> - The **one-week legacy-SPA fallback** and its compatibility API — deleted. Nothing to fall back
+>   to.
+>
+> **What is kept from this section:** the *quarantine-never-throw* discipline (§5.2) and the
+> enumerated legacy terminal-contract mapping, because a one-time import still must not silently
+> mis-read an old row — it must quarantine it loudly. Everything about versioning, dual authority,
+> flip scoping, and parity is dead.
+>
+> The text below is retained as **design history** for whoever builds the optional one-time import.
+> Do not implement it as a live layer.
 
 ### 5.1 The seam: one direction, one place
 
@@ -1275,3 +1310,92 @@ Consequence: the rebuild demo's `sep-rosa` fixture, which labels a pre-submit ho
 with a "Resume & submit" action, is wrong and must be re-authored as a gate. Rationale: parked is the
 one status that means "we may have already filed something"; diluting it with holds we know the
 state of destroys the only signal that warrants a live probe.
+
+---
+
+## 10. Round-8 obligations this doc owns (2026-07-26)
+
+Four operator ratifications from 2026-07-24 land here. Each is stated as a contract, not a
+preference, because each has a guard.
+
+### 10.1 ONE projection owns every count (D81)
+
+**The recorded bug.** The operator reports that in the legacy dashboard the per-workflow badges
+"always error out" — matching the audit's bug class #7, count/badge divergence, with ≥4 separate
+fixes over the project's life. The root cause is structural, not arithmetic: badges, the status
+strip, and the queue list were each free to derive their own counts, so any two could disagree and
+each had to be fixed independently.
+
+**The contract.** There is exactly **one** server-side run/queue projection. **Workflow Panel
+badges, Status Bar pills, and Queue Panel rows are three renderings of that one payload.** A count
+is never computed a second time — not in React, not in a second endpoint, not in a "just for the
+badge" aggregate. If a surface needs a number the projection does not yet expose, the projection
+gains a field; it does not gain a sibling.
+
+Consequences that follow and must not be re-litigated per surface: **collapse rules, hidden rows,
+archived runs (§10.2), and delegated-member containment are applied once, inside the projection.**
+A member counted in a group is not also counted at top level because there is no second place that
+could count it.
+
+**Guard (doc 10).** `one-projection-counts` — any count/aggregate in a surface path that does not
+originate from the projection payload fails. Backed by a fixture asserting Workflow Panel total,
+Status Bar sum, and rendered Queue Row count are equal by construction for a seeded world that
+includes hidden, archived, delegated, and rejected rows. *(The `?view=rebuild-demo` replica already
+proves this shape: one `countRows()` feeds rail badges, Status Bar, and queue — divergence is
+structurally unrepresentable there.)*
+
+### 10.2 Versioning and archive-on-version-bump (D80)
+
+**No archive folders, no compat shims — git is the archive.** Descriptors carry a version + content
+fingerprint; a guard forces a bump on behavior change; **every run permanently stamps the workflow
+version and the app version it ran with, at enqueue.**
+
+**On a version bump, all runs of prior versions leave the dashboard.** Active surfaces, counts, and
+filters only ever contain current-version runs; prior runs move to a read-only **Archive** (a
+browsable view + on-disk store). A **dashboard/app update bumps the effective version of every
+workflow**, because old runs may not be interpretable against new dashboard state.
+
+The rule that makes this pay for itself: **an archived run is stored as self-contained data** — its
+final projected row, its receipt, and evidence pointers — so rendering it requires **zero
+old-version code**. No compat shims, no version fallbacks, exactly one rendering path in the
+dashboard forever. That is the whole point; an archive that needed old code to read would recreate
+the coupling the rebuild exists to remove.
+
+Four hard rules:
+
+1. **The write ledger is never archived.** What was filed in a real HR system stays forever,
+   independent of run archival. Archiving is a *display* lifecycle; the ledger is an *audit* one.
+2. **Relaunch from archive starts a fresh run on the current version** from the archived immutable
+   input. It is never a resume of the old run — resume across a fingerprint change is exactly what
+   D35 forbids.
+3. **A bump cannot archive a non-terminal run.** Queued/parked runs must be terminalized first
+   (cancelled, or for a parked write RESOLVED present/absent per §parked-intent resolution), and
+   the bump flow lists them. **An unresolved possible-submit is never buried in an archive** — this
+   is the write-safety carve-out and it is not negotiable for convenience.
+4. **Hide/Unhide still exists** for same-version runs (reversible presentation tombstone, D49).
+   Archive-on-bump is the automatic path; Hide is the manual one.
+
+The scope of a bump is declared by whoever makes the change — single-workflow, multi-workflow, or
+dashboard — and recorded in that update's change record (same store as fix records: what, why,
+version, commit).
+
+### 10.3 Operator-assigned run display names (D83)
+
+Any run can be renamed by the operator. The label rides the **row and the receipt**; the trace id is
+preserved underneath and remains the join key for spans, notes, and the ledger. A rename is a
+command arm (D67), is actor-attributed (D75), and never mutates identity — it is presentation over
+a stable id, exactly like the presentation-override layer (D16).
+
+### 10.4 Notification model (D79b + D86)
+
+**Slimmed from the five-state lifecycle** (unread/read/acknowledged/snoozed/resolved + per-attempt
+delivery records — that was multi-user incident tooling) **to read/unread + optional snooze.** The
+inbox is **actor-keyed from day one** (D75 seam) even though there is one actor today.
+
+Routing, ratified: **failed · gate-waiting · write-parked · repeating · storage** → **Ping**;
+**verified-done** → **Inbox only**. Pings are silent. Retention: notes 30d, spans 30d, **ledger
+forever**, artifacts + checkpoints until purge.
+
+Unchanged and load-bearing: durability. A notification is a durable record first and a desktop
+delivery second — **failed OS delivery still leaves an unread inbox item.** Desktop delivery may
+never be the only alert.
