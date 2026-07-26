@@ -1,0 +1,390 @@
+/* ==========================================================================
+   REBUILD DEMO — DESIGN TOKENS  (dev-only)
+   ==========================================================================
+   The single source of every color, size, radius, shadow, focus ring and
+   motion value used by the rebuild demo's primitive library (`demo-ui.tsx`).
+   Builder agents compose primitives; primitives read these tokens; nothing
+   else hardcodes a value. That is the whole contract.
+
+   PARITY, NOT REINVENTION. Every token below either aliases a token the real
+   dashboard already defines in `src/dashboard/index.css` (so the demo tracks
+   the product's theme automatically) or is a deliberate, documented refinement
+   of one. There is no second palette here — only names for what the product
+   already is, plus the handful of decisions the product never made explicit.
+
+   Naming: --ds-<group>-<role>[-<state>]
+     surface | border | fg | control | status | radius | text | lh | space
+     h (control heights) | elev | focus | dur | ease
+
+   Guard notes (tests/unit/architecture/frontend-tailwind-compliance.test.ts):
+   hand-rolled CSS animation is banned anywhere under src/dashboard — no
+   key-frame blocks, no shorthand animation property. Motion here is
+   transition-only, driven by the --ds-dur-* / --ds-ease-* tokens, which
+   collapse to 0ms under prefers-reduced-motion (bottom of this file).
+   ========================================================================== */
+
+:root {
+  /* ---------------------------------------------------------------------
+     SURFACE — the elevation ladder, darkest (page) to lightest (raised).
+     Depth in this product comes from surface + hairline border, never from
+     a big shadow. Shadows are reserved for things that FLOAT (overlays).
+     --------------------------------------------------------------------- */
+  --ds-surface-page: var(--background); /* app background, behind everything */
+  --ds-surface-1: var(--card); /* panels, cards, bars — the default plane */
+  --ds-surface-2: var(--muted); /* inset wells, table headers, code blocks */
+  --ds-surface-3: var(--accent); /* hover / pressed / selected fill */
+  --ds-surface-overlay: var(--popover); /* dialogs, drawers, menus, tooltips */
+  --ds-surface-scrim: color-mix(in srgb, hsl(0 0% 0%) 66%, transparent);
+  --ds-surface-selected: color-mix(in srgb, var(--primary) 10%, transparent);
+  --ds-surface-disabled: color-mix(in srgb, var(--muted) 60%, transparent);
+
+  /* ---------------------------------------------------------------------
+     BORDER — one hairline weight for structure; strength carries meaning.
+     --------------------------------------------------------------------- */
+  --ds-border-subtle: color-mix(in srgb, var(--border) 55%, transparent);
+  --ds-border: var(--border); /* the default 1px separator */
+  --ds-border-strong: var(--input); /* input outlines, resting controls */
+  --ds-border-loud: color-mix(in srgb, var(--foreground) 22%, transparent);
+  --ds-border-w: 1px; /* structure */
+  --ds-border-w-emphasis: 2px; /* selection, active tab underline */
+  --ds-border-w-rail: 3px; /* the left rail marker on nav/attention rows */
+
+  /* ---------------------------------------------------------------------
+     FOREGROUND — four steps of text emphasis. If you need a fifth, you are
+     saying too much in one place.
+     --------------------------------------------------------------------- */
+  --ds-fg: var(--foreground); /* primary text, values, names */
+  --ds-fg-secondary: var(--secondary-foreground); /* supporting text */
+  --ds-fg-muted: var(--muted-foreground); /* labels, meta, units */
+  --ds-fg-faint: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+  --ds-fg-inverse: var(--primary-foreground); /* on a solid accent fill */
+  --ds-fg-link: var(--info);
+
+  /* ---------------------------------------------------------------------
+     CONTROL — buttons, inputs, toggles. `accent` is the product's near-white
+     primary; `danger` is the only chromatic action color.
+     --------------------------------------------------------------------- */
+  --ds-control-bg: var(--secondary);
+  --ds-control-bg-hover: var(--accent);
+  --ds-control-bg-active: color-mix(in srgb, var(--accent) 70%, var(--background));
+  --ds-control-fg: var(--foreground);
+  --ds-control-border: var(--ds-border-strong);
+
+  --ds-accent: var(--primary); /* near-white — the product's "primary" */
+  --ds-accent-fg: var(--primary-foreground);
+  --ds-accent-hover: color-mix(in srgb, var(--primary) 88%, hsl(0 0% 100%));
+  --ds-accent-quiet: color-mix(in srgb, var(--primary) 12%, transparent);
+
+  --ds-danger: var(--destructive);
+  --ds-danger-fg: hsl(0 65% 8%); /* dark ink on the dark theme's bright red */
+  --ds-danger-quiet: color-mix(in srgb, var(--destructive) 12%, transparent);
+  --ds-danger-border: color-mix(in srgb, var(--destructive) 45%, transparent);
+
+  /* ---------------------------------------------------------------------
+     STATUS — the eight load-bearing queue statuses.
+
+     Color is never the only signal. Each status also owns a distinct ICON,
+     a distinct EMPHASIS TIER (solid / tinted / outline / ghost) and, for two
+     of them, a distinct SHAPE cue (dashed border, strikethrough label).
+     See ds/primitives-status.tsx for the icon + tier bindings, and DESIGN.md
+     for the full mapping table.
+
+     Loudness ladder, deliberately:
+       1 Waiting on you  solid amber  — the operator is the blocker
+       2 Failed          solid red    — the run is broken
+       3 Write parked    dashed violet— a write may or may not have landed
+       4 Done w/ warnings tinted amber— finished, needs eyes, not urgent
+       5 Running         tinted blue  — in motion (the only animated status)
+       6 Queued          outline slate— accepted, inert
+       7 Cancelled       ghost neutral— a deliberate act is not an alert
+       8 Verified done   ghost green  — the quietest thing on screen
+     --------------------------------------------------------------------- */
+
+  /* 1 — Waiting on you (LOUD: solid fill, dark ink) */
+  --ds-status-waiting-fg: var(--warning);
+  --ds-status-waiting-bg: color-mix(in srgb, var(--warning) 14%, transparent);
+  --ds-status-waiting-border: color-mix(in srgb, var(--warning) 55%, transparent);
+  --ds-status-waiting-solid-bg: var(--warning);
+  --ds-status-waiting-solid-fg: hsl(38 62% 8%);
+
+  /* 2 — Failed (LOUD: solid fill, dark ink) */
+  --ds-status-failed-fg: var(--destructive);
+  --ds-status-failed-bg: color-mix(in srgb, var(--destructive) 14%, transparent);
+  --ds-status-failed-border: color-mix(in srgb, var(--destructive) 55%, transparent);
+  --ds-status-failed-solid-bg: var(--destructive);
+  --ds-status-failed-solid-fg: var(--ds-danger-fg);
+
+  /* 3 — Write parked (tint + a DASHED border no other status uses) */
+  --ds-status-parked-fg: var(--log-violet);
+  --ds-status-parked-bg: color-mix(in srgb, var(--log-violet) 13%, transparent);
+  --ds-status-parked-border: color-mix(in srgb, var(--log-violet) 60%, transparent);
+
+  /* 4 — Done with warnings (amber icon, muted label — FYI, not a demand) */
+  --ds-status-done-warnings-fg: var(--warning);
+  --ds-status-done-warnings-bg: color-mix(in srgb, var(--warning) 9%, transparent);
+  --ds-status-done-warnings-border: color-mix(in srgb, var(--warning) 30%, transparent);
+
+  /* 5 — Running (the only status whose icon moves) */
+  --ds-status-running-fg: var(--info);
+  --ds-status-running-bg: color-mix(in srgb, var(--info) 13%, transparent);
+  --ds-status-running-border: color-mix(in srgb, var(--info) 40%, transparent);
+
+  /* 6 — Queued (outline only: no fill = nothing has happened yet) */
+  --ds-status-queued-fg: var(--log-slate);
+  --ds-status-queued-bg: transparent;
+  --ds-status-queued-border: color-mix(in srgb, var(--log-slate) 45%, transparent);
+
+  /* 7 — Cancelled (neutral + struck-through label; NOT amber, NOT red —
+         a deliberate stop is neither a warning nor a failure) */
+  --ds-status-cancelled-fg: var(--ds-fg-muted);
+  --ds-status-cancelled-bg: transparent;
+  --ds-status-cancelled-border: transparent;
+
+  /* 8 — Verified done (ghost: green icon, muted label, no chrome at all) */
+  --ds-status-verified-done-fg: var(--success);
+  --ds-status-verified-done-bg: transparent;
+  --ds-status-verified-done-border: transparent;
+
+  /* Neutral/informational accents reused by Banner, Chip and the log surfaces */
+  --ds-info-fg: var(--info);
+  --ds-info-bg: color-mix(in srgb, var(--info) 12%, transparent);
+  --ds-info-border: color-mix(in srgb, var(--info) 40%, transparent);
+  --ds-success-fg: var(--success);
+  --ds-success-bg: color-mix(in srgb, var(--success) 12%, transparent);
+  --ds-success-border: color-mix(in srgb, var(--success) 38%, transparent);
+
+  /* ---------------------------------------------------------------------
+     TYPE — a seven-step scale. The demo previously used eleven ad-hoc sizes
+     (9.5 / 10 / 10.5 / 11 / 11.5 / 12 / 12.5 / 13 …); half-pixel drift is
+     what makes twenty surfaces built by twenty agents look like twenty
+     products. These are the only sizes.
+     --------------------------------------------------------------------- */
+  --ds-font-sans: var(--font-sans);
+  --ds-font-mono: var(--font-mono);
+
+  --ds-text-micro: 10px; /* count badges, kbd, uppercase group labels */
+  --ds-lh-micro: 13px;
+  --ds-text-meta: 11px; /* timestamps, trace ids, footers, chips */
+  --ds-lh-meta: 15px;
+  --ds-text-body: 12px; /* the dense default — table cells, log lines */
+  --ds-lh-body: 16px;
+  --ds-text-ui: 13px; /* control labels, row titles, nav — the UI default */
+  --ds-lh-ui: 18px;
+  --ds-text-title: 14px; /* panel + card titles */
+  --ds-lh-title: 20px;
+  --ds-text-section: 16px; /* dialog titles, page section heads */
+  --ds-lh-section: 22px;
+  --ds-text-display: 20px; /* the one big number on a summary surface */
+  --ds-lh-display: 26px;
+
+  --ds-tracking-caps: 0.14em; /* uppercase micro labels only */
+  --ds-tracking-tight: -0.006em; /* section/display sizes only */
+
+  /* ---------------------------------------------------------------------
+     SPACE — an 8px rhythm with 2/4/6 available for dense interiors.
+     Gaps inside a control: hair/tight. Between controls: snug/base.
+     Between groups: cozy/loose. Between sections: section/page.
+     --------------------------------------------------------------------- */
+  --ds-space-hair: 2px;
+  --ds-space-tight: 4px;
+  --ds-space-snug: 6px;
+  --ds-space-base: 8px;
+  --ds-space-cozy: 12px;
+  --ds-space-loose: 16px;
+  --ds-space-section: 24px;
+  --ds-space-page: 32px;
+
+  /* ---------------------------------------------------------------------
+     SIZE — control + chrome heights. A dense operations tool lives or dies
+     on consistent row rhythm; these are the only heights.
+     --------------------------------------------------------------------- */
+  --ds-h-xs: 20px; /* inline chips, count badges */
+  --ds-h-sm: 24px; /* toolbar icon buttons, table row controls */
+  --ds-h-md: 28px; /* the default control height */
+  --ds-h-lg: 32px; /* primary dialog actions, search fields */
+  --ds-h-row: 32px; /* one queue/table row */
+  --ds-h-bar: 36px; /* status bar, panel toolbar */
+  --ds-h-topbar: 44px; /* the app top bar */
+  --ds-w-rail: 200px; /* the workflow rail */
+
+  /* ---------------------------------------------------------------------
+     RADIUS — derived from the product's --radius (8px) so the demo can
+     never drift from the shipped corner language.
+     --------------------------------------------------------------------- */
+  --ds-radius-xs: 3px;
+  --ds-radius-sm: calc(var(--radius) - 4px); /* 4px — chips, badges */
+  --ds-radius-md: calc(var(--radius) - 2px); /* 6px — buttons, inputs, rows */
+  --ds-radius-lg: var(--radius); /* 8px — cards, panels */
+  --ds-radius-xl: calc(var(--radius) + 4px); /* 12px — dialogs, drawers */
+  --ds-radius-pill: 9999px;
+
+  /* ---------------------------------------------------------------------
+     ELEVATION — three steps, and only floating things get them.
+     0 = flat (border only). Most of this UI is elevation 0.
+     --------------------------------------------------------------------- */
+  --ds-elev-1: 0 1px 2px hsl(0 0% 0% / 0.35);
+  --ds-elev-2:
+    0 4px 12px -2px hsl(0 0% 0% / 0.45), 0 1px 3px hsl(0 0% 0% / 0.32);
+  --ds-elev-3:
+    0 16px 40px -8px hsl(0 0% 0% / 0.62), 0 2px 8px -2px hsl(0 0% 0% / 0.45);
+
+  /* ---------------------------------------------------------------------
+     FOCUS — one ring, everywhere, always visible. A 2px outline (not a
+     box-shadow ring) so it survives forced-colors and follows the radius.
+     --------------------------------------------------------------------- */
+  /* Near-white, not the theme's mid-grey --ring: this is a keyboard-first
+     tool (j/k walks the queue), so the ring must be findable at a glance in a
+     list of eighty rows, and must clear WCAG 2.2's 3:1 focus-appearance floor
+     against every surface in the ladder. */
+  --ds-focus-ring: color-mix(in srgb, var(--foreground) 85%, transparent);
+  --ds-focus-ring-w: 2px;
+  --ds-focus-ring-offset: 1px;
+
+  /* ---------------------------------------------------------------------
+     MOTION — four durations, three easings. Motion here is functional only:
+     it explains where something came from or acknowledges a press. Nothing
+     in this product may move for delight.
+     --------------------------------------------------------------------- */
+  --ds-dur-1: 90ms; /* press feedback, hover tint */
+  --ds-dur-2: 140ms; /* the default — color/opacity changes */
+  --ds-dur-3: 200ms; /* popovers, tooltips, toasts entering */
+  --ds-dur-4: 260ms; /* drawers and dialogs entering */
+  --ds-ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* things arriving */
+  --ds-ease-in: cubic-bezier(0.4, 0, 1, 1); /* things leaving */
+  --ds-ease-standard: cubic-bezier(0.45, 0, 0.55, 1); /* things moving in place */
+}
+
+/* Light theme corrections. The demo shell is dark-only, but the primitives
+   are used inside the real (themeable) dashboard, so the two places where a
+   dark-theme ink choice would fail AA in light mode are flipped here. */
+:root:not(.dark) {
+  --ds-danger-fg: hsl(0 0% 100%); /* the light theme's red is dark */
+  --ds-status-failed-solid-fg: hsl(0 0% 100%);
+  --ds-elev-1: 0 1px 2px hsl(0 0% 0% / 0.08);
+  --ds-elev-2:
+    0 4px 12px -2px hsl(0 0% 0% / 0.1), 0 1px 3px hsl(0 0% 0% / 0.06);
+  --ds-elev-3:
+    0 16px 40px -8px hsl(0 0% 0% / 0.16), 0 2px 8px -2px hsl(0 0% 0% / 0.1);
+}
+
+/* ==========================================================================
+   HELPER CLASSES
+   ==========================================================================
+   Only for the handful of things Tailwind expresses awkwardly or ambiguously
+   (font-size + line-height pairs, box-shadow tokens, the focus ring). Colors,
+   spacing and layout stay in Tailwind utilities reading var(--ds-*).
+
+   These are unlayered, so they win over Tailwind utilities. That is on
+   purpose: `ds-text-body` must not be silently overridden by a stray
+   `text-[11.5px]`. To change a size, change the token.
+   ========================================================================== */
+
+.ds-text-micro {
+  font-size: var(--ds-text-micro);
+  line-height: var(--ds-lh-micro);
+}
+.ds-text-meta {
+  font-size: var(--ds-text-meta);
+  line-height: var(--ds-lh-meta);
+}
+.ds-text-body {
+  font-size: var(--ds-text-body);
+  line-height: var(--ds-lh-body);
+}
+.ds-text-ui {
+  font-size: var(--ds-text-ui);
+  line-height: var(--ds-lh-ui);
+}
+.ds-text-title {
+  font-size: var(--ds-text-title);
+  line-height: var(--ds-lh-title);
+  letter-spacing: var(--ds-tracking-tight);
+}
+.ds-text-section {
+  font-size: var(--ds-text-section);
+  line-height: var(--ds-lh-section);
+  letter-spacing: var(--ds-tracking-tight);
+}
+.ds-text-display {
+  font-size: var(--ds-text-display);
+  line-height: var(--ds-lh-display);
+  letter-spacing: var(--ds-tracking-tight);
+  font-variant-numeric: tabular-nums;
+}
+/* Uppercase micro label — group headers, table column heads, tile captions. */
+.ds-text-caps {
+  font-size: var(--ds-text-micro);
+  line-height: var(--ds-lh-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--ds-tracking-caps);
+  font-weight: 600;
+}
+
+/* Elevation */
+.ds-elev-1 {
+  box-shadow: var(--ds-elev-1);
+}
+.ds-elev-2 {
+  box-shadow: var(--ds-elev-2);
+}
+.ds-elev-3 {
+  box-shadow: var(--ds-elev-3);
+}
+
+/* The focus ring. Every interactive primitive carries `ds-focus`. */
+.ds-focus:focus-visible {
+  outline: var(--ds-focus-ring-w) solid var(--ds-focus-ring);
+  outline-offset: var(--ds-focus-ring-offset);
+}
+/* Containers that own focus for a child (Field, Tabs list, table row). */
+.ds-focus-within:focus-within {
+  outline: var(--ds-focus-ring-w) solid var(--ds-focus-ring);
+  outline-offset: var(--ds-focus-ring-offset);
+}
+
+/* Transitions. Token-driven so prefers-reduced-motion collapses them all. */
+.ds-motion {
+  transition-property: color, background-color, border-color, outline-color,
+    box-shadow, opacity;
+  transition-duration: var(--ds-dur-2);
+  transition-timing-function: var(--ds-ease-out);
+}
+.ds-motion-fast {
+  transition-property: color, background-color, border-color, box-shadow,
+    opacity, transform;
+  transition-duration: var(--ds-dur-1);
+  transition-timing-function: var(--ds-ease-out);
+}
+.ds-motion-enter {
+  transition-property: opacity, transform;
+  transition-duration: var(--ds-dur-3);
+  transition-timing-function: var(--ds-ease-out);
+}
+
+/* A dashed hairline — the shape cue that belongs to "Write parked" alone. */
+.ds-dashed {
+  border-style: dashed;
+}
+
+/* Numeric columns must not jitter as values tick. */
+.ds-nums {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--ds-font-mono);
+}
+
+/* ==========================================================================
+   REDUCED MOTION
+   ==========================================================================
+   One switch. Because every transition in the system reads a --ds-dur-*
+   token, zeroing the tokens removes all motion without touching a component.
+   (Tailwind's animate-* utilities are separately paired with
+   `motion-reduce:animate-none` at their call sites — the architecture guard
+   enforces that.) */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ds-dur-1: 0ms;
+    --ds-dur-2: 0ms;
+    --ds-dur-3: 0ms;
+    --ds-dur-4: 0ms;
+  }
+}
