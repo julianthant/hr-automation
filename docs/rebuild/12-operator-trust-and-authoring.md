@@ -1,11 +1,14 @@
 # 12 — Operator Trust, Semantic UI Vocabulary, Diagnostics, Knowledge & Workflow Authoring
 
-Status: **Phase 0 binding design — added 2026-07-22 after the whole-plan/legacy-code review.**
-This document owns the human-facing foundation that turns the typed executor into a system the
-single operator can understand, debug, extend, and trust. It is intentionally local-first: it does
-not add multi-user RBAC, remote administration, distributed coordination, or enterprise deployment
-ceremony. It does retain correctness controls, PII/secret redaction, local-only network defaults,
-durable recovery, and evidence because this tool reads and writes real HR records.
+Status: **Phase 0 binding design — added 2026-07-22 after the whole-plan/legacy-code review;
+amended 2026-07-26 (Round 8).** This document owns the human-facing foundation that turns the typed
+executor into a system the single operator can understand, debug, extend, and trust. It is
+**local-first with deliberate multi-user seams** (D75, §7): it does not add RBAC, user management,
+remote administration, distributed coordination, or enterprise deployment ceremony, but four seams
+that make a later multi-user migration configuration rather than a second rebuild are load-bearing
+from day one and may never be trimmed. It retains correctness controls, PII/secret redaction,
+local-only network defaults, durable recovery, and evidence because this tool reads and writes real
+HR records. **Round 8 also trims the DSL graph-authoring mode entirely (§5.4, D79a).**
 
 ## Ownership (D1)
 
@@ -536,17 +539,24 @@ schema, graph, guard, and scenario checks as source-authored descriptors. “Gen
 - impacted workflows/tasks/scenarios;
 - new descriptor version/fingerprint requirement.
 
-There are two apply levels. Presentation-only changes write the existing strict versioned override
-through temp+fsync+atomic-replace and can hot-apply. Graph/policy/composition changes never mutate a
-live descriptor in memory. Each workflow has exactly one authoring mode:
+> **DSL-authored mode is TRIMMED (D79a, operator 2026-07-24).** This section previously defined
+> two authoring modes and a whole second pipeline for the DSL one: exclusive per-workflow mode,
+> deterministic codegen into `descriptor.generated.ts`, an isolated-output-directory build,
+> restart-gated atomic apply, and exact-hash rollback. It is cut. Two reasons, both from the plan's
+> own text: §b question 12 expects everything real to stay source-authored, and the Phase-2 proof
+> would have needed a *synthetic* workflow because no real candidate was ever named — a pipeline
+> whose only user is its own test. **Every workflow is source-authored.** Reinstate the mode only
+> if a migration questionnaire names a concrete workflow that wants it; the paragraph below is
+> retained as the design to restore from.
 
-- **source-authored** (default for migrated complex workflows): the editor emits a reviewed patch
-  scaffold and cannot apply graph edits;
-- **DSL-authored** (explicit one-time conversion): a versioned strict
-  `workflow.definition.json` is the sole authored graph, and `descriptor.generated.ts` plus its
-  client projection are deterministic generated artifacts marked “do not hand-edit.”
+**What remains after the trim.** There are two apply levels. **Presentation-only** changes write the
+existing strict versioned override through temp+fsync+atomic-replace and can hot-apply.
+**Graph/policy/composition** changes never mutate a live descriptor in memory and, for a
+source-authored workflow (i.e. all of them), the editor emits a **reviewed patch scaffold** and
+cannot apply the edit itself. Anything the closed editable set cannot express produces a
+**code-change brief**, never partial config and never a second authority.
 
-The editor cannot keep both a handwritten graph and a DSL graph authoritative for one workflow.
+*(Retained design history for the trimmed DSL mode.)*
 A DSL draft runs codegen, typecheck, graph guards, the impacted scenario set, and a clean build in an
 isolated output directory. Apply atomically stores the prior DSL/version for rollback, writes the new
 DSL+generated artifacts, and requires a controlled server restart; it never loads arbitrary code or
@@ -607,7 +617,28 @@ notification, never the underlying run or failure.
 
 ---
 
-## 7. Local-only scope and retained safety floor
+## 7. Local-FIRST scope, the multi-user seams, and the retained safety floor
+
+**Amended 2026-07-23 (D75).** The operator intends to open this tool to other people later and
+wants that to be *configuration, not a second rebuild*. So the scope statement is no longer
+"local-only" but **local-first with four deliberate seams**. Everything below about what is *not*
+built is unchanged; what changes is that four cheap structural decisions are now load-bearing and
+**may never be trimmed as ceremony**, because retrofitting any of them later means touching every
+command, every run, and every stored record.
+
+| Seam | What it means today | Why it must exist now |
+|---|---|---|
+| **Actor attribution** | every command, run, approval, gate resolution, ledger entry, and fix record carries `requestedBy`/`actor`, constant `"local-operator"` | retrofitting an actor onto an existing immutable ledger and command history is impossible — the old rows have no honest answer |
+| **One identity checkpoint** | a single auth seam every request passes through, returning the constant local operator | one place to change later; without it, authorization logic scatters across routes |
+| **Credential-set-keyed sessions** | browser sessions/logins keyed by credential set, with exactly one set configured | a future user brings their own HR logins and their own Duo; pre-keying makes that config |
+| **Per-actor notification/read state** | the inbox is actor-keyed with one actor | read-state is per-person by nature; a global unread flag cannot be split later |
+
+This does **not** soften the safety floor and does not add scope: no RBAC, no permissions UI, no
+user management, no teams, no network deployment or TLS, no per-user dashboards, no remote sync.
+The dashboard still binds loopback. D79c follows directly from this: commands keep `version` +
+`actor` in the wire shape **everywhere**, while CAS enforcement stays only where a real race exists
+(cancel-tree, edit-vs-resume, gate resolution, write-recovery) — the seam is in the shape, not in
+the enforcement cost.
 
 Not built now: user accounts/RBAC, tenant separation, remote/cloud deployment, distributed
 consensus, external audit signing, high availability, public API compatibility, or enterprise
