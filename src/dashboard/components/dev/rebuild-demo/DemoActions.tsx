@@ -43,7 +43,14 @@ import type { DemoCommandResult } from "./demo-commands";
  * structurally unreachable rather than merely hidden.
  */
 
-export type DemoActionHandler = (row: DemoRow, action: ActionDescriptorWire) => void;
+/**
+ * Every control calls this. It RETURNS the command result so a surface that
+ * collected a typed body (a parked write's proof, a checkpoint patch) can react
+ * to the server's answer in place — keep the operator's input on a rejection,
+ * re-offer a patch on a conflict — while the same result still lands in the
+ * shared result feed. Navigation returns nothing.
+ */
+export type DemoActionHandler = (row: DemoRow, action: ActionDescriptorWire) => DemoCommandResult | void;
 
 const NOOP_ACTION: DemoActionHandler = () => {};
 
@@ -399,6 +406,19 @@ export function CommandResultFeed({
             {r.code && (
               <p className="mt-0.5 pl-6 font-mono text-[10px] text-destructive">
                 code {r.code} · {r.rowTitle} · {r.workflowLabel}
+              </p>
+            )}
+            {/* A conflict on something other than the row's version is NOT
+                cured by refreshing the row, so no refresh is offered here —
+                the Data tab re-offers the patch against the fresh values. */}
+            {r.cas && (
+              <p className="mt-0.5 pl-6 font-mono text-[10px] text-warning">
+                {r.cas.kind} {r.cas.expected} → server {r.cas.server} · your edits are held on the Data tab
+              </p>
+            )}
+            {r.settling && (
+              <p className="mt-0.5 pl-6 font-mono text-[10px] text-log-violet">
+                settling {r.settling.observations}/{r.settling.required} observations · next probe {r.settling.nextProbeAt.slice(11, 19)}
               </p>
             )}
             {r.state === "conflict" && r.serverVersion !== undefined && (
