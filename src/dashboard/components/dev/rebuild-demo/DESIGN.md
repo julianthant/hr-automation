@@ -188,7 +188,12 @@ This demo is asserted through the accessibility tree, so a missing label is a
 - Dialog and Drawer are Radix: focus enters on open, **returns to the trigger on
   close**, Escape dismisses, the rest of the page is hidden from assistive tech.
 - Toasts: `role="status"`, except `danger` which is `role="alert"` and **never
-  auto-dismisses** — a failed write is acknowledged by a human.
+  auto-dismisses** — a failed write is acknowledged by a human. **While a Dialog
+  or Drawer is open the toast viewport steps aside** (bottom-right → bottom-left,
+  away from the footer's action gutter) **and goes inert** (cards
+  `pointer-events: none`, their controls disabled), so a persistent toast can
+  never swallow a click meant for the decision the operator is making. It stays
+  fully visible and becomes live again when the modal closes.
 - Contrast is WCAG AA minimum, including text on a solid status fill (which is
   why the loud statuses use dark ink on a bright fill).
 - Colour is never the only differentiator, anywhere.
