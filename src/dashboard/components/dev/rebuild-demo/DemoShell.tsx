@@ -8,7 +8,9 @@ import {
   ChevronUp,
   CircleHelp,
   Eye,
+  Gauge,
   HelpCircle,
+  Hourglass,
   LayoutDashboard,
   Pause,
   Plus,
@@ -104,10 +106,18 @@ export function countRows(rows: DemoRow[]): Record<StatusBucket, number> {
 // Top Bar
 // ---------------------------------------------------------------------------
 
-/** the demo's three top-level views — the app, the specimen catalog, the kit */
-export type DemoShellView = "queue" | "catalog" | "kit";
+/**
+ * The demo's top-level views. The first three are the switcher in the Top Bar
+ * (the app, the specimen catalog, the kit); the rest are FULL-PAGE TAKEOVERS
+ * reached from the gear — Settings, and the three pages Settings launches into.
+ * A seven-entry segmented control in a 44px bar would be unreadable, and these
+ * four are not places the operator toggles between while triaging.
+ */
+export type DemoShellView = "queue" | "catalog" | "kit" | "settings" | "archive" | "explorer" | "report";
 
-const SHELL_VIEW_LABEL: Record<DemoShellView, string> = {
+const SWITCHER_VIEWS = ["queue", "catalog", "kit"] as const;
+
+const SHELL_VIEW_LABEL: Record<(typeof SWITCHER_VIEWS)[number], string> = {
   queue: "Dashboard",
   catalog: "Row & panel catalog",
   kit: "Design system",
@@ -143,7 +153,7 @@ export function DemoTopBar({
       </span>
 
       <div className="ml-2 inline-flex rounded-md border border-border bg-secondary/40 p-0.5">
-        {(["queue", "catalog", "kit"] as const).map((v) => (
+        {SWITCHER_VIEWS.map((v) => (
           <button
             key={v}
             type="button"
@@ -170,7 +180,19 @@ export function DemoTopBar({
         <button type="button" aria-label="Shortcuts" onClick={NOOP} className="rounded-md p-1.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
           <HelpCircle aria-hidden className="size-3.5" />
         </button>
-        <button type="button" aria-label="Settings" onClick={NOOP} className="rounded-md p-1.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+        {/* The gear opens the real Settings surface (provenance, System URLs,
+            budgets, doctor, storage health, version registry) and is the door
+            to the Archive / Explorer / Activity report takeovers. */}
+        <button
+          type="button"
+          aria-label="Settings"
+          aria-pressed={view === "settings"}
+          onClick={() => onView("settings")}
+          className={cn(
+            "rounded-md p-1.5 outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+            view === "settings" ? "bg-accent text-foreground" : "text-muted-foreground",
+          )}
+        >
           <Settings aria-hidden className="size-3.5" />
         </button>
       </span>
@@ -414,6 +436,31 @@ interface DemoBrowser {
   url: string;
 }
 
+/**
+ * One system's lease budget as this executor sees it (doc 05's BudgetSnapshot).
+ * `cap` is a property of the SYSTEM — UCPath invalidates the older session when
+ * a second one authenticates, so its cap of 1 is not a tuning choice.
+ */
+interface DemoBudgetSlot {
+  system: string;
+  inUse: number;
+  cap: number;
+}
+
+/**
+ * Why this executor is not progressing. This is the single most valuable thing
+ * the Session Panel can say: a card that shows a healthy browser and a spinning
+ * status while six items sit queued teaches the operator that the panel is
+ * decorative. Naming the lease AND its holder turns "nothing is happening" into
+ * "Separations has the one UCPath session, and it has had it for 18 minutes".
+ */
+interface DemoLeaseWait {
+  system: string;
+  sinceSec: number;
+  heldByWorkflow: string;
+  heldByTrace: string;
+}
+
 interface DemoSession {
   id: string;
   workflow: string;
@@ -429,6 +476,14 @@ interface DemoSession {
   /** micro pipeline — one dot per step of the item in flight */
   steps?: { label: string; state: "done" | "current" | "pending" }[];
   crashed?: boolean;
+  /** items this executor may hold in flight at once */
+  lanes?: { inUse: number; cap: number };
+  /** the system leases it holds, and what each system allows */
+  budgets?: DemoBudgetSlot[];
+  /** present when the executor is alive and NOT progressing */
+  waiting?: DemoLeaseWait;
+  /** a deliberate pause between tasks — a rate guard, not idleness */
+  sleepPerTaskSec?: number;
 }
 
 const DEMO_SESSIONS: DemoSession[] = [
@@ -449,6 +504,12 @@ const DEMO_SESSIONS: DemoSession[] = [
       { label: "UCPath transaction", state: "current" },
       { label: "Kuali finalization", state: "pending" },
     ],
+    lanes: { inUse: 1, cap: 1 },
+    budgets: [
+      { system: "ucpath", inUse: 1, cap: 1 },
+      { system: "kuali", inUse: 1, cap: 2 },
+      { system: "kronos", inUse: 1, cap: 2 },
+    ],
     browsers: [
       { id: "b1", label: "kuali", health: "healthy", url: "kuali.ucsd.edu/space/HR" },
       { id: "b2", label: "ucpath", health: "healthy", url: "ucpath.universityofcalifornia.edu" },
@@ -456,6 +517,9 @@ const DEMO_SESSIONS: DemoSession[] = [
     ],
   },
   {
+    // The card the whole upgrade exists for. Alive, healthy, "running", six
+    // items queued — and not moving, because Separations holds the one UCPath
+    // session. Without the waiting note this card is a lie told with a spinner.
     id: "s-i9",
     workflow: "I-9 Check",
     phase: "running",
@@ -469,6 +533,13 @@ const DEMO_SESSIONS: DemoSession[] = [
       { label: "Person lookup", state: "current" },
       { label: "Roster match", state: "pending" },
     ],
+    lanes: { inUse: 1, cap: 2 },
+    budgets: [
+      { system: "ucpath", inUse: 0, cap: 1 },
+      { system: "i9", inUse: 1, cap: 1 },
+    ],
+    waiting: { system: "ucpath", sinceSec: 264, heldByWorkflow: "Separations", heldByTrace: "se-140211-9f3a" },
+    sleepPerTaskSec: 12,
     browsers: [{ id: "b4", label: "ucpath", health: "unknown", url: "ucpath…/PersonSearch" }],
   },
   {
@@ -477,6 +548,8 @@ const DEMO_SESSIONS: DemoSession[] = [
     phase: "idle",
     subline: "idle — waiting for work",
     elapsedSec: 384,
+    lanes: { inUse: 0, cap: 3 },
+    budgets: [{ system: "i9", inUse: 0, cap: 1 }],
     browsers: [{ id: "b5", label: "i9", health: "healthy", url: "i9.ucsd.edu" }],
   },
   {
@@ -485,6 +558,11 @@ const DEMO_SESSIONS: DemoSession[] = [
     phase: "authenticating",
     subline: "Authenticating 1/2",
     elapsedSec: 41,
+    lanes: { inUse: 1, cap: 2 },
+    budgets: [
+      { system: "crm", inUse: 1, cap: 2 },
+      { system: "ucpath", inUse: 0, cap: 1 },
+    ],
     browsers: [
       { id: "b6", label: "crm", health: "unhealthy", url: "stuck on the SSO login page" },
       { id: "b7", label: "ucpath", health: "paused", url: "auto-recovery paused by you" },
@@ -615,6 +693,59 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
       </div>
       <span className={cn("mt-0.5 truncate text-[10.5px]", inFlight ? "font-mono text-muted-foreground" : "text-muted-foreground")}>{s.subline}</span>
 
+      {/* Capacity, before the browsers. "1/1 lanes · ucpath 1/1" is the answer
+          to "can this worker take another item", and it has to be readable
+          without opening anything. A slot at its cap is amber — that is the
+          number that explains a stalled queue. */}
+      {(s.lanes || s.budgets) && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          {s.lanes && (
+            <span
+              title={`${s.lanes.inUse} of ${s.lanes.cap} lanes in use — a lane is one item in flight`}
+              className={cn(
+                "inline-flex items-center gap-1 rounded border px-1.5 py-px text-[9.5px] leading-none",
+                s.lanes.inUse >= s.lanes.cap ? "border-warning/45 bg-warning/10 text-warning" : "border-border bg-secondary/40 text-muted-foreground",
+              )}
+            >
+              <Gauge aria-hidden className="size-2.5" />
+              <span className="font-mono tabular-nums">
+                {s.lanes.inUse}/{s.lanes.cap}
+              </span>
+              lanes
+            </span>
+          )}
+          {s.budgets?.map((b) => (
+            <span
+              key={b.system}
+              title={`${b.system}: ${b.inUse} of ${b.cap} concurrent sessions in use by this worker`}
+              className={cn(
+                "inline-flex items-center gap-1 rounded border px-1.5 py-px text-[9.5px] leading-none",
+                b.inUse >= b.cap ? "border-warning/45 bg-warning/10 text-warning" : "border-border bg-secondary/40 text-muted-foreground",
+              )}
+            >
+              {b.system}
+              <span className="font-mono tabular-nums">
+                {b.inUse}/{b.cap}
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* WHY nothing is progressing. Named lease, named holder, ticking age —
+          an executor that is alive, healthy and stuck must say so, or the panel
+          is decorative. */}
+      {s.waiting && (
+        <div className="mt-1.5 flex items-start gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2 py-1">
+          <Hourglass aria-hidden className="mt-px size-3 shrink-0 text-warning" />
+          <span className="min-w-0 text-[10px] leading-tight text-warning">
+            Waiting <span className="font-mono tabular-nums">{fmtElapsed(s.waiting.sinceSec + tick)}</span> for the{" "}
+            <span className="font-semibold">{s.waiting.system}</span> lease — held by {s.waiting.heldByWorkflow}{" "}
+            <span className="font-mono">{s.waiting.heldByTrace}</span>
+          </span>
+        </div>
+      )}
+
       <div className="mt-1.5 grid grid-cols-2 gap-1">
         {s.browsers.map((b) => (
           <BrowserTile key={b.id} b={b} />
@@ -644,7 +775,9 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
 
       <div className="mt-1.5 flex items-center gap-2 border-t border-border/60 pt-1.5 text-[10px] text-muted-foreground">
         <span className="font-mono tabular-nums">{s.elapsedSec > 0 ? fmtElapsed(s.elapsedSec + tick) : "—"}</span>
-        <span className="min-w-0 flex-1 truncate">{s.step ?? ""}</span>
+        <span className="min-w-0 flex-1 truncate" title={s.sleepPerTaskSec ? `Sleeps ${s.sleepPerTaskSec}s between tasks` : undefined}>
+          {s.sleepPerTaskSec ? `${s.step ?? ""} · ${s.sleepPerTaskSec}s/task sleep` : (s.step ?? "")}
+        </span>
         <button
           type="button"
           onClick={NOOP}
@@ -664,6 +797,11 @@ export function DemoSessionPanel({ tick }: { tick: number }) {
   const idle = DEMO_SESSIONS.filter((s) => s.phase === "idle" || s.phase === "keepalive").length;
   const failed = DEMO_SESSIONS.filter((s) => s.phase === "failed").length;
   const sickBrowsers = DEMO_SESSIONS.flatMap((s) => s.browsers).filter((b) => b.health !== "healthy").length;
+  // Capacity at a glance. `blocked` is the headline the operator actually needs:
+  // three cards can say "Running" while the queue does not move.
+  const lanesInUse = DEMO_SESSIONS.reduce((n, s) => n + (s.lanes?.inUse ?? 0), 0);
+  const lanesCap = DEMO_SESSIONS.reduce((n, s) => n + (s.lanes?.cap ?? 0), 0);
+  const blocked = DEMO_SESSIONS.filter((s) => s.waiting);
 
   return (
     <section aria-label="Session Panel" className="shrink-0 border-t border-border bg-card">
@@ -698,6 +836,25 @@ export function DemoSessionPanel({ tick }: { tick: number }) {
               </span>
             )}
           </span>
+          <span
+            title={`${lanesInUse} of ${lanesCap} lanes in use across every worker`}
+            className="inline-flex items-center gap-1 rounded border border-border bg-secondary/40 px-1.5 py-px text-[10px] text-muted-foreground"
+          >
+            <Gauge aria-hidden className="size-3" />
+            <span className="font-mono tabular-nums">
+              {lanesInUse}/{lanesCap}
+            </span>
+            lanes
+          </span>
+          {blocked.length > 0 && (
+            <span
+              title={blocked.map((s) => `${s.workflow} is waiting on the ${s.waiting?.system} lease`).join(" · ")}
+              className="inline-flex items-center gap-1 rounded border border-warning/40 bg-warning/10 px-1.5 py-px text-[10px] text-warning"
+            >
+              <Hourglass aria-hidden className="size-3" />
+              {blocked.length} waiting on a lease
+            </span>
+          )}
           {sickBrowsers > 0 && (
             <span className="inline-flex items-center gap-1 rounded border border-warning/40 bg-warning/10 px-1.5 py-px text-[10px] text-warning">
               <AlertTriangle aria-hidden className="size-3" />
