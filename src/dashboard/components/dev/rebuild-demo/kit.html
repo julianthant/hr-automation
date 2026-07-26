@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rebuild demo — design system</title>
+  </head>
+  <body>
+    <!--
+      DEV-ONLY specimen entry. Not part of `npm run build:dashboard` (that build
+      has a single input, index.html) — this page exists so the design system can
+      be rendered and screenshotted without mounting it into the demo's view
+      switch, whose files this pass may not modify.
+
+      Open it on the Vite dev server:
+        npx vite --config vite.dashboard.config.ts --port 3943
+        → http://localhost:3943/components/dev/rebuild-demo/kit.html
+    -->
+    <div id="ds-kit-root"></div>
+    <script type="module" src="./kit-entry.tsx"></script>
+  </body>
+</html>
