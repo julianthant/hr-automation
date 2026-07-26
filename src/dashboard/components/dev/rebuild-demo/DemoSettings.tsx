@@ -6,6 +6,7 @@ import {
   BadgeCheck,
   Boxes,
   Camera,
+  ChartNoAxesColumn,
   Cog,
   Database,
   FolderTree,
@@ -15,6 +16,7 @@ import {
   Monitor,
   ShieldAlert,
   Stethoscope,
+  Workflow,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -176,6 +178,8 @@ export type PeripheryView = "archive" | "explorer" | "report";
 
 const TAKEOVERS: { key: PeripheryView; label: string; icon: typeof Cog; blurb: string }[] = [
   { key: "archive", label: "Archive", icon: Archive, blurb: "Prior-version runs, read-only" },
+  { key: "explorer", label: "Explorer", icon: Workflow, blurb: "The workflow graph with a run on it" },
+  { key: "report", label: "Activity report", icon: ChartNoAxesColumn, blurb: "The supervisor-facing summary" },
 ];
 
 const SECTIONS: SectionSpec[] = [...EDITABLE_SECTIONS.slice(0, 2), SYSTEM_URL_SECTION, ...EDITABLE_SECTIONS.slice(2), ...REFERENCE_SECTIONS];

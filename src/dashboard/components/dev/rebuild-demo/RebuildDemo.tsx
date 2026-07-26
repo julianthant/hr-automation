@@ -20,6 +20,8 @@ import { DemoQueueToolbar, runBulkCommand, type BulkOutcome } from "./DemoBulkBa
    demo-{settings,archive,explorer,report}-wire.ts. */
 import { DemoSettingsPage, DemoStorageBanner } from "./DemoSettings";
 import { DemoArchivePage } from "./DemoArchive";
+import { DemoExplorerPage } from "./DemoExplorer";
+import { DemoActivityReportPage } from "./DemoActivityReport";
 import type { StorageMode } from "./demo-settings-wire";
 import {
   ALL_WORKFLOWS,
@@ -378,6 +380,10 @@ export function RebuildDemo() {
         />
       ) : shellView === "archive" ? (
         <DemoArchivePage onBack={() => setShellView("queue")} onOpenSettings={() => setShellView("settings")} />
+      ) : shellView === "explorer" ? (
+        <DemoExplorerPage onBack={() => setShellView("queue")} onOpenSettings={() => setShellView("settings")} />
+      ) : shellView === "report" ? (
+        <DemoActivityReportPage onBack={() => setShellView("queue")} onOpenSettings={() => setShellView("settings")} />
       ) : shellView === "kit" ? (
         /* every primitive in every state — the thing a builder skims BEFORE
            choosing a component, so no surface hand-rolls one that exists */
