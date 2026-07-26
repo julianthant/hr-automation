@@ -1,8 +1,17 @@
-# Reconciliation memo — binding cross-doc decisions (2026-07-17 through 2026-07-22)
+# Reconciliation memo — binding cross-doc decisions (2026-07-17 through 2026-07-26)
 
-Status: **binding revision 2026-07-22.** Earlier rounds remain as decision history; Round 7 below
-supersedes incompatible typing, UI-access, control, delegation, recovery, trust, knowledge, and
-workflow-editor claims.
+Status: **binding revision 2026-07-26 (Round 8).** Earlier rounds remain as decision history;
+Round 7 supersedes incompatible typing, UI-access, control, delegation, recovery, trust,
+knowledge, and workflow-editor claims, and Round 8 supersedes the migration/coexistence model.
+
+> **What this doc is, as of Round 8: a decision CHANGELOG, not a specification.** Its job is to
+> record *what was decided, when, and which doc owns it* — so a reader can reconstruct why a
+> contract has its current shape. It is **not** where you read the current contract. The owning
+> doc (D1 matrix below) is the only readable current truth, and every ratified decision must be
+> folded into that doc **in the same commit that records it** (charter standing rule, added
+> 2026-07-26). Round 8 entries are therefore deliberately one-liners with a pointer: the normative
+> text lives in the owner. Rounds 1–7 predate that rule and still carry normative prose; treat
+> the owning doc as authoritative wherever they differ.
 
 Three adversarial reviews (`reviews/01-review.md`, `reviews/02-review.md`, `reviews/03-review.md`)
 found that docs 01–03 describe divergent systems at their seams. This memo is the orchestrator's
@@ -10,9 +19,12 @@ binding resolution. **Every decision below overrides anything contradicting it i
 Amendment agents rewrite each doc to comply; a doc may reference another doc's owned contract but
 must never redefine it.
 
-> **Implementation rule:** D1–D25 are historical rationale, not copyable current API/DDL. Apply
-> D46–D72 first, then D26–D45; where they amend an older decision, the latest-round form is the only
-> implementable one. Current contract shapes live in owning docs 01–03 and 05–06/09–12.
+> **Implementation rule:** don't implement from this file. D1–D25 are historical rationale, not
+> copyable current API/DDL; D26–D72 amend each other in round order (later wins); D73–D86 are
+> pointers only. **Read the owning doc.** If an owning doc contradicts a decision here, the doc is
+> either correct (it was folded) or stale (it wasn't) — check the doc's amendment date against the
+> round date and fix the doc, never work from this memo. Current contract shapes live in owning
+> docs 01–03 and 05–06/09–12.
 
 ## D1 — Contract ownership matrix (one owner per concept, others reference)
 
@@ -551,3 +563,32 @@ implementation plan to what the tools proved and close the failures the experime
   page count, `authority_generation`, and integrity result from the backup itself—not from a racy
   pre/post read of the live DB—before hashing/fsync/rename and writing the manifest. File-copy and
   `VACUUM INTO` fallbacks are forbidden while WAL writers are active.
+
+## Reconciliation round 8 (2026-07-23 → 2026-07-26) — operator ratifications, folded
+
+Answers given by the operator in the 2026-07-23 and 2026-07-24 review sessions (recorded in
+`reviews/second-look-2026-07-22.md` §6.5/§6.6) plus the 2026-07-26 migration-order answer. They
+had sat in the review file while docs 00/07/09 still specified the world they replaced; this round
+records them and the same commit folds each into its owner. **One line each — read the owner.**
+
+| # | Decision | Owner (normative text) |
+|---|---|---|
+| **D73** | **PAUSE-UNTIL-DONE.** Automation is paused for the rebuild; HR work is manual; `src` is a frozen reference from Phase-1 day one. Go-live/test/delete are operator commands, not calendar machinery. Reverses the charter's "old system keeps working throughout". | charter §Non-negotiables; doc 07 §4 |
+| **D74** | **Phase 1 is a SPINE with a live exit test.** Cut to 1a–1f + the span/projection and queue-surface slices; person-lookup runs live as the exit. Trust tails, data services/capture/intake, and the explorer move behind that first live proof. | doc 07 §3 |
+| **D75** | **Local-FIRST with multi-user seams** (amends D56). Four seams are load-bearing and never trimmed: actor attribution everywhere, one auth seam, credential-set-keyed sessions, per-actor inbox. RBAC/user-management/networking stay out of scope. | charter §Non-negotiables; doc 12 §7 |
+| **D76** | **Build speed is the tie-breaker.** Between two correct, equally safe designs the sooner one wins; never overrides write-safety/identity/fail-loud. | charter §Non-negotiables; doc 07 §3.7 |
+| **D77** | **Identity-approval gate = ALWAYS-GATE.** Manual approval on every separation, both separation types, no auto-approve-on-match. Was undesigned and deferred to order 8; now designed in Phase 0. | doc 09 §14 (gate mechanism: doc 02 §4) |
+| **D78** | **Kuali `save-verify` RESOLVED — buildable** (live probe 2026-07-23, docs 4444/4453; save is UI-silent so reload read-back is mandatory). **OnBase `upload-verify` gated on the next real upload** — no probe target exists today. | doc 09 §13 |
+| **D79** | **Ceremony trims ratified:** DSL graph-authoring mode trimmed; notification lifecycle slimmed to read/unread+snooze (inbox actor-keyed); commands keep version+actor wire fields everywhere but enforce CAS only where races exist; capture crash-proofing slimmed; ledger hash-chain deferred until multi-user (ledger + actor attribution stay); lightweight task tier adopted. | docs 12 §5, 03 §2.4/§2.6, 06 §5.1, 01 §2 |
+| **D80** | **Versioning + archive-on-version-bump + version registry.** Version+fingerprint per descriptor, stamped per run with app version; a bump archives all prior-version runs as self-contained data (zero compat code); an app update bumps every workflow; ledger never archived; relaunch = fresh run; a bump cannot archive a non-terminal run. | charter §25; doc 03 |
+| **D81** | **One projection owns every count** — Workflow Panel badges, Status Bar, Queue Panel from one server-side projection; a second count path is a guard failure. | charter §26; doc 03; guard doc 10 |
+| **D82** | **Receipt acceptance test:** the operator can complete their double-check without opening UCPath (confirmation number + post-submit screenshot + identity observed at commit). | charter §27; docs 09/12 |
+| **D83** | **Operator-assigned run display names** — any run is renamable; the label rides the row and the receipt, trace id preserved underneath. | doc 03 |
+| **D84** | **Migration order optimizes TOTAL time-to-resume-all**, not per-workflow priority (operator 2026-07-26: every workflow costs real manual time, none dominates). Order is chosen for reuse leverage; onboarding/separations staying last is an explicit accepted trade. | doc 07 §3.3 |
+| **D85** | **Testing standard:** scenario corpus as the everyday lane + structural dry-run + a typed `TestTargetRegistry` (test employees/files/sacrificial docs with usage rules) + `cli test workflow <id> --dry-run` through the real kernel + **positive no-write proof from an empty per-run write-intent ledger** (replaces screenshot-absence heuristics). Keepers from the old e2e ritual: "a workaround is a finding", double-entry ground truth, issue ledger — as kernel behavior. | doc 10 §7 |
+| **D86** | **Notifications/retention/knowledge/demos:** failed·gate·parked·repeating·storage → Ping, verified-done → Inbox, pings silent; retention notes 30d / spans 30d / ledger forever / artifacts+checkpoints until purge; knowledge audits operator-triggered with a dated audit record; demos = activity report + live dry-run lane (synthetic demo mode removed). | docs 03/12 |
+
+**Two separate D-series exist — do not confuse them.** This memo's `D1–D86` are cross-doc
+reconciliation decisions. Doc 03 §9 carries a **row-model series** (`row-model D1–D20`: three row
+types, eight statuses, containment, delegation shapes) ratified 2026-07-24/25. Doc 03 states the
+distinction at its §9 header; always cite the row-model series with the `row-model` prefix.
