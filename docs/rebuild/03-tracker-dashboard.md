@@ -264,6 +264,69 @@ Derived statuses stop being per-workflow code where a universal mechanism exists
 
 ## 2. Storage and transport
 
+**The whole layer in one picture.** The load-bearing rule is the split between what is *authority*
+(SQLite — not rebuildable, never deleted casually) and what is *projection* (JSONL + the read
+model — regenerable). Every arrow below is one-directional; nothing reads back up.
+
+```mermaid
+flowchart LR
+  subgraph EX["executor / kernel"]
+    T["task &amp; run spans"]
+    N["action notes"]
+    W["write commit"]
+  end
+
+  subgraph AUTH["SQLite — AUTHORITY (D14/D51)<br/><i>not rebuildable from JSONL</i>"]
+    CL["claims · checkpoints"]
+    DEP["dependencies · manifests"]
+    CMD["commands (CAS, actor-stamped)"]
+    WI["write_intents (the fence)"]
+    OB["ledger + span OUTBOXES"]
+    LH["ledger heads (tail anchor)"]
+  end
+
+  subgraph PROJ["projections — REGENERABLE"]
+    SJ["spans/*.jsonl"]
+    NJ["notes/*.jsonl<br/><i>30d</i>"]
+    RM["THE run/queue projection<br/><b>(D81: the only count source)</b>"]
+  end
+
+  LED["ledger/*.jsonl<br/><b>NEVER pruned</b><br/><i>serialized projector, one writer</i>"]
+
+  subgraph UI["dashboard surfaces"]
+    WP["Workflow Panel badges"]
+    SB["Status Bar counts"]
+    QP["Queue Panel rows"]
+    LP["Log Panel"]
+    AR["Archive (D80)<br/><i>self-contained rows</i>"]
+  end
+
+  W ==>|"ONE atomic transaction (D32)"| AUTH
+  T --> OB
+  N --> NJ
+  OB -->|"serialized projector"| SJ
+  OB ==>|"serialized projector<br/>+ hash / tail anchor"| LED
+  LH -.->|verifies tail| LED
+  AUTH --> RM
+  SJ --> RM
+  RM --> WP & SB & QP
+  RM --> LP
+  RM -->|"on version bump"| AR
+
+  classDef auth stroke:#c0392b,stroke-width:2px,fill:#00000000;
+  classDef proj stroke:#7f8c8d,fill:#00000000;
+  classDef ledger stroke:#8e44ad,stroke-width:2px,fill:#00000000;
+  class CL,DEP,CMD,WI,OB,LH auth;
+  class SJ,NJ,RM proj;
+  class LED ledger;
+```
+
+Three things to read off it: a write reaches **authority in one atomic transaction** before any
+JSONL exists (so a crash between them is repairable, never a lost filing); the **ledger has exactly
+one writer** and an independent SQLite tail anchor, so concurrent chain forks and tail truncation
+are both detectable; and **every count in the UI descends from one node** (D81, §10.1) — there is
+no second path a badge could take.
+
 ### 2.1 On disk — JSONL-per-day stays, two streams
 
 ```

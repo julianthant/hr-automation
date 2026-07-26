@@ -73,30 +73,43 @@ The base/kernel is built along one critical path. Guard plumbing lands before th
 real `temp_src` leaf and every applicable type/lint/architecture arm activate in the same commit
 (charter: "same quality umbrella from day one").
 
+```mermaid
+flowchart TD
+  A["<b>1a</b> guard scaffold<br/><i>lands before the tree exists</i>"]
+  B["<b>1b</b> strict domain + canonical input<br/>+ clock / config / secrets / dependency registry"]
+  C["<b>1c</b> authority DB + backup / restore / doctor<br/>+ command &amp; write TYPE SHELL"]
+  D["<b>1d</b> semantic UI registry + typed drivers<br/>+ task / provider contracts, stores, sessions"]
+  E["<b>1e</b> typed workflow DAG<br/>+ results / delegation / completion / gates / scenarios"]
+  F["<b>1f</b> core registry (composition root)<br/>+ executor / checkpoints / commands / write sequencer"]
+  G["<b>1g-spine</b> spans + THE one projection"]
+  H["<b>1i-spine</b> the four parity surfaces"]
+  EXIT{{"<b>PHASE 1 EXIT</b><br/>person-lookup runs LIVE"}}
+
+  TX["<b>Phase 2</b> controlled transaction proof<br/>dry-run · subject mismatch · commit · crash · recovery"]
+  T1["<b>2g</b> evidence · failures · notifications · knowledge · ledger services"]
+  T2["<b>2h</b> data services · intake mapping · manifests · capture · Edit Data"]
+  T3["<b>2i</b> explorer · AI advisories · storage health · catalog UI"]
+  T4["<b>2j</b> soak · restore drill · capability inventory · doc gate"]
+  M(["<b>Phase 3+</b> per-workflow migration<br/>orders 0-9"])
+
+  A --> B --> C --> D --> E --> F
+  F --> G --> H --> EXIT
+  EXIT --> TX --> T1 --> T2 --> T3 --> T4 --> M
+
+  G -.->|"D81: every count reads<br/>this one projection"| H
+
+  classDef spine stroke:#2980b9,stroke-width:2px,fill:#00000000;
+  classDef tail stroke:#7f8c8d,stroke-dasharray:4 3,fill:#00000000;
+  classDef gate stroke:#27ae60,stroke-width:2px,fill:#00000000;
+  class A,B,C,D,E,F,G,H spine;
+  class T1,T2,T3,T4 tail;
+  class EXIT,TX gate;
 ```
-  guard scaffold
-        │
-        ▼
-  domain + canonical-input validation + clock/config/runtime-dependency snapshot
-        │
-        ▼
-  authority DB + backup/restore + command/write TYPE SHELL
-        │                    (owned now; no later forward reference)
-        ▼
-  semantic UI registry + typed drivers + task/provider contracts/stores/sessions
-        │
-        ▼
-  complete typed workflow DAG + results/delegation/completion/gates/scenarios
-        │
-        ├────────► core composition-root registry
-        │                         │
-        ▼                         ▼
-  spans/lift/projections ◄── executor/checkpoints/commands/write sequencer
-        │                         │
-        └────────────┬────────────┘
-                     ▼
-  evidence/failures/notifications/knowledge + dashboard/intake/explorer UI
-```
+
+**Blue = the spine** (Phase 1, D74): the minimum that can carry one workflow. **Green = the two
+proofs** that falsify the design against reality — a live read, then a controlled write. **Grey
+dashed = the tails**, deferred behind the first live proof so they are built against a proven base
+and a real consumer rather than against fixtures.
 
 **Critical path: guard → strict domain/config → authority/recovery → semantic driver/task store →
 workflow graph/delegation → registry/executor/commands/events → trust services/dashboard.**

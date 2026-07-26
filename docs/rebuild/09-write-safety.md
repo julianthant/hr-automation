@@ -314,6 +314,51 @@ reorder the real-write beats.
    read lease      transaction lease ──────────────────────────────────────────────────┘    DB + outboxes
 ```
 
+**The same sequence with its crash seams and fail-closed exits.** Every ✗ is a park or a refusal,
+never a fall-through; the only path to `done` runs the full spine. The seam that matters is between
+④ and ⑦: a crash anywhere in there leaves a durable `attempting` intent, which is exactly what
+recovery (§4) keys off.
+
+```mermaid
+flowchart TD
+  A["① resolve + live probe<br/><i>read lease</i>"]
+  A -->|"present (durable or live)"| AP["complete: already-present<br/>no click, no ledger row"]
+  A -->|"ambiguous · unknown · throw"| PARK(["PARKED needs-operator"])
+  A -->|"unseen / retryable key"| B
+
+  B["② prepare<br/><i>transaction lease acquired</i>"]
+  B -->|"failure / timeout"| REL["release poisoned page<br/>no external effect"]
+  B --> C
+
+  C["③ binding proof<br/>re-observe the staged page"]
+  C -->|"mismatch · unknown · missing · stale"| NOFENCE["ZERO fence, ZERO click<br/>structured binding failure"]
+  C --> D
+
+  D["④ fence<br/>CAS permanent key → attempting<br/><b>durable before the click</b>"]
+  D -->|"probe age elapsed · CAS lost"| DISCARD["discard staged page<br/>no click"]
+  D --> E
+
+  E["⑤ external commit<br/><i>MutationCapability bound to<br/>generation + proof digest</i>"] --> F
+  F["⑥ capture / verify proof<br/>parse through proofSchema"]
+  F -->|"absent · ambiguous · unknown · schema fail"| PARK
+  F --> G["⑦ atomic durable commit<br/>intent + checkpoint + ledger outbox<br/>+ span outbox + run state"]
+  G --> DONE(["done"])
+
+  D -.->|crash| REC
+  E -.->|crash| REC
+  F -.->|crash| REC
+  G -.->|"crash mid-transaction"| REC
+  REC["recovery: re-run probe<br/>(§4)"]
+  REC -->|"present + valid proof"| G
+  REC -->|"absent, but only after the<br/>propagation window + repeated<br/>consistent observations (D64/D69)"| RETRY["new intent generation<br/>eligible to retry"]
+  REC -->|"single / early absence<br/>· ambiguous · unknown"| PARK
+
+  classDef bad fill:#00000000,stroke:#c0392b,stroke-width:1px;
+  classDef good fill:#00000000,stroke:#27ae60,stroke-width:1px;
+  class PARK,NOFENCE,DISCARD,REL bad;
+  class DONE,AP good;
+```
+
 | Beat | What runs | What is DURABLE at end of beat | Fail-closed exit |
 |---|---|---|---|
 | **① Resolve + live probe** | From the already parsed stable commit input, derive the key and read the permanent `write_intents` row regardless of status/originating run. `committed` or `observed-present` ⇒ validate/reuse proof+typed output; `attempting` ⇒ recovery/owner check; `retryable` ⇒ eligible generation. Only an eligible unseen/retryable key may run the policy-controlled live probe, on a separate read lease. Record probe completion monotonic time. | one SQLite transaction records an unseen live `present` permanently as `observed-present`, checkpoints `TransactionOutcome{disposition:"already-present",proofSource:"live-probe"}`, advances run state, and enqueues its audit span—but **no write-ledger row** | invalid stored proof/output ⇒ corruption/park; attempting owner live ⇒ wait/fail loud; stale owner ⇒ recovery first; live `present` ⇒ typed no-click completion; ambiguous/unknown/throw parks |
