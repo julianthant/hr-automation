@@ -1,11 +1,19 @@
 # Rebuild Program Charter — `temp_src`
 
 Started 2026-07-17. Reset 2026-07-21 after external review. Expanded 2026-07-22 after the
-whole-plan/legacy-code review. Status: **Phase 0 — revised foundation design; no rebuild
+whole-plan/legacy-code review. **Amended 2026-07-26 to carry the operator ratifications of
+2026-07-23/24 (Round 8).** Status: **Phase 0 — revised foundation design; no rebuild
 implementation exists**.
 This is the single source of truth for the rebuild's vision and constraints. Every design doc in
 `docs/rebuild/` must conform to it. The operator reviews each accepted part in plain language before
 it becomes binding.
+
+**Standing rule — a decision is not ratified until it lands in its owning doc.** Operator answers
+recorded only in a review file or decision sheet are *proposals*. The commit that records an
+answer must also fold it into the owning doc (D1 matrix, `04-reconciliation.md`) and add one
+changelog line to doc 04. Review files and doc 04 are decision *history*; the owning doc is the
+only readable current truth. (Added 2026-07-26 after the 07-23/24 ratifications sat four days in
+`reviews/second-look-2026-07-22.md` while docs 00/07/09 still specified the world they replaced.)
 
 ## Why we're rebuilding (evidence from the 2026-07-17 structural survey)
 
@@ -122,8 +130,11 @@ it becomes binding.
      single early miss parks as unknown.
      UCPath is where the real incidents happened (a duplicate person; a wrong-person termination,
      `T002173685`). Permanent-key fencing closes double filing; the wrong-person class additionally
-     requires the designed identity-approval gate before separations. The plan never claims a probe
-     that can read the wrong person makes that class structurally impossible.
+     requires the identity-approval gate, **ratified 2026-07-24 as ALWAYS-GATE** — manual operator
+     approval on every separation, for both separation types (Kuali separations and I-9
+     separations), with no auto-approve-on-match mode. Its design is owned by doc 09 §14 and its
+     gate-node mechanism by doc 02. The plan never claims a probe that can read the wrong person
+     makes that class structurally impossible; the gate is what closes it.
    - **Kuali** — **SAVE-only, not a submit** (operator 2026-07-18): a write, but not an irreversible
      filing. No confirmation-number receipt needed; the automation must still verify the save
      completed, fail-closed.
@@ -186,11 +197,16 @@ it becomes binding.
     into structured active/superseded/retired knowledge. AI-assisted fixes record the failure,
     affected ids/files, regression scenario, verification, and commit; raw chat is never authority.
     Full design: doc 12.
-20. **The workflow editor starts as the real graph, then earns safe editing.** The Phase-1 base
-    includes a read-only descriptor/live-run explorer. After Phase 2 it may edit presentation and a
-    closed set of typed composition/policy fields through compile/validate/diff/version/apply;
-    arbitrary code, selectors, subject matchers, idempotency keys, and write proof remain code work.
-    Running runs never hot-change. Full design: doc 12.
+20. **The workflow editor starts as the real graph, then earns safe editing.** The base includes a
+    read-only descriptor/live-run explorer (deferred to the Phase-2 tails, not the spine). After
+    the transaction proof it may edit presentation and a closed set of typed composition/policy
+    fields through compile/validate/diff/version/apply; arbitrary code, selectors, subject
+    matchers, idempotency keys, and write proof remain code work. Running runs never hot-change.
+    **The DSL graph-authoring mode is TRIMMED (2026-07-24, Q5a)** — no second graph-authoring
+    pipeline, no codegen, no exclusive source-vs-DSL mode. Workflows are source-authored; the
+    editor does presentation + safe closed policy fields, and anything else generates a
+    code-change brief. Reinstate only if a migration questionnaire names a concrete DSL-authored
+    workflow. Full design: doc 12.
 21. **Irreplaceable local state has an operational recovery contract.** SQLite claims,
     checkpoints, dependencies, commands, intents, manifests, and outboxes are not reconstructible
     from JSONL. Startup integrity/migration/disk/WAL checks, rotating online backups, mandatory
@@ -213,6 +229,35 @@ it becomes binding.
     maintenance tool receives a port/replace/retire/proxy disposition plus a closing milestone.
     `src` cannot be deleted while any inventory entry is undecided or still proxied. Master owner:
     doc 07; guard owner: doc 10.
+25. **Versioning by fingerprint; archiving by version bump; git is the archive (2026-07-24).**
+    No archive folders. Descriptors carry a version + content fingerprint; guards force a bump on
+    behavior change; every run permanently stamps the workflow version *and* app version it ran
+    with at enqueue. **When a workflow's version bumps, all runs of prior versions leave the
+    dashboard** — active surfaces, counts, and filters only ever contain current-version runs — and
+    move to a read-only **Archive**. This is what buys the zero-compat-code invariant: the archive
+    stores each run's final projected row + receipt + evidence pointers as **self-contained data**,
+    so viewing an archived run needs no old-version code, no shims, no version fallbacks, exactly
+    one rendering path. A **dashboard (app) update bumps every workflow's effective version**, for
+    the same reason. The session making a change declares its scope (single-workflow /
+    multi-workflow / dashboard) and the bump follows that scope, recorded in the change record.
+    Three hard rules: the **write ledger is never archived** (what was filed in HR systems stays
+    forever, independent of run archival); **"relaunch from archive" starts a fresh run on the
+    current version** from the archived immutable input, never a resume; and a bump **cannot
+    archive a non-terminal run** — queued/parked runs must be terminalized first (cancelled, or for
+    a parked write RESOLVED present/absent) and the bump flow lists them, so an unresolved
+    possible-submit is never buried. Reversible Hide still exists for same-version runs.
+26. **One projection owns every count (2026-07-24 acceptance requirement).** In the legacy
+    dashboard the per-workflow badges "always error out" — the recorded bug class of count/badge
+    divergence (≥4 separate fixes). In the rebuild, Workflow Panel badges, Status Bar counts, and
+    Queue Panel rows are read from **one** server-side projection. A count may never be computed by
+    a second path, so it can never disagree or error independently. Projection owner: doc 03;
+    guard owner: doc 10.
+27. **The receipt must survive the operator's double-check (2026-07-24 acceptance test).** The
+    operator double-checks most real transactions today. The rebuilt row/receipt therefore carries
+    the exact proof they would otherwise go fetch: the transaction/confirmation number, the
+    post-submit confirmation screenshot, and the person identity observed at commit. **Acceptance:
+    the operator can complete their double-check without opening UCPath.** Owner: doc 09 (proof
+    content) + doc 12 (receipt surface).
 
 ## Non-negotiables
 
@@ -224,12 +269,24 @@ it becomes binding.
 - **Port knowledge, not stale lesson files.** Existing `LESSONS.md`/`CLAUDE.md` entries are evidence
   for migration. They are triaged into doc 12's structured active knowledge or incident history;
   superseded/incorrect/duplicate guidance does not move into the rebuilt prompt/search surface.
-- **Local-only is a scope reduction, not a correctness waiver.** No RBAC, multi-tenant service,
-  remote operator deployment, distributed consensus, or high-availability work is required. The
-  operator server stays localhost-only; doc 06's short-lived token-scoped mobile-capture ingress is
-  the sole explicit exception. Secret/SSN/HR-data redaction, reliable backups, strict validation,
-  and fail-closed write/identity behavior remain mandatory because the tool handles real employee
-  data and transactions.
+- **Local-FIRST with multi-user seams (amended 2026-07-23; supersedes "local-only").** The tool
+  stays single-operator today, but the operator intends to open it to others later and wants that
+  migration to be configuration, not a second rebuild. So four seams are load-bearing from day one
+  and may never be trimmed: (1) **actor attribution** (`requestedBy`/actor id) on every command,
+  run, approval, gate resolution, ledger entry, and fix record; (2) **one identity checkpoint** —
+  a single auth seam every request passes through, returning the constant "local operator" today;
+  (3) **credential-set-keyed sessions** — browser logins keyed by credential set, so a future user
+  brings their own HR logins and Duo; (4) **per-actor notification/read state**. Still explicitly
+  out of scope for Phase 1: RBAC/permissions UI, user management, teams, network deployment/TLS,
+  per-user dashboards, remote sync, HA, distributed consensus. The operator server binds loopback;
+  doc 06's short-lived token-scoped mobile-capture ingress is the sole exception. Secret/SSN/
+  HR-data redaction, reliable backups, strict validation, and fail-closed write/identity behavior
+  remain mandatory because the tool handles real employee data and transactions.
+- **Build speed is the top optimization target (2026-07-24).** Under pause-until-done (below),
+  every week of build is a week of manual HR work for the operator. Where two designs are both
+  correct and both safe, the one that ships sooner wins. This is the tie-breaker behind the
+  Phase-1 restructure and the ratified ceremony trims (doc 07 §2.1/§3.7). It never overrides a
+  write-safety, identity, or fail-loud requirement — those are what the program is for.
 - **Same quality umbrella from day one.** `temp_src` is inside the same tsconfig project, unit
   tests, and `npm run test:architecture` ratchets (extended to cover it). New rebuild source and
   tests have explicit non-vacuous zero-warning lint gates; known legacy test-lint debt is
@@ -238,9 +295,16 @@ it becomes binding.
 - **No implementation before the corrected dependency graph is accepted.** The abandoned Phase-1a
   skeleton and spike were removed on 2026-07-21. The next implementation starts from an empty
   `temp_src`; no type shell may forward-declare a contract owned by a later phase.
-- **Old system keeps working throughout.** Every dual-maintenance window is explicit and ends when
-  that system's final consumer migrates. Single-consumer systems should be short; shared UCPath/CRM
-  windows are honestly program-length. When a system is fully migrated, the old `src` copy is deleted.
+- **PAUSE-UNTIL-DONE — the old system is a frozen reference, not a running system (operator
+  ratification 2026-07-24; REVERSES the prior "old system keeps working throughout").** Automation
+  is paused for the duration of the rebuild; the operator does the HR work manually until the new
+  system is ready. `src` is frozen on the day Phase 1 starts: no feature work, no dual maintenance,
+  no legacy enqueues. **Go-live, testing, and old-copy deletion are operator commands, not calendar
+  machinery** — "I will let you know when to go live, when to test, when to delete." Whether
+  workflows resume one at a time as they land or all at once is a runtime choice the operator
+  makes; the plan builds no machinery for either. What this deletes is enumerated once, in doc 07
+  §4 (the lift adapter as live compatibility, the golden-payload parity gate, per-run engine+
+  generation authority, dual-maintenance windows, and the calendar stop-loss all go).
 
 ## One master plan (operator directive 2026-07-17)
 
@@ -256,17 +320,23 @@ The foundation's documentation is part of the foundation.
 
 - **Phase 0 (now):** foundation design docs in `docs/rebuild/`, each reviewed part-by-part with the
   operator in plain language (what the old version did → why it hurt → how the new design fixes it).
-- **Phase 1:** pre-tree guard plumbing, then the first domain leaf plus type/lint/guard activation in
-  one commit; after that: strict config/domain primitives → authority storage/recovery + command/
-  write-safety shells → semantic UI registry/drivers + task/store/session contracts → complete
-  workflow graph/results/delegation/scenarios → executor/checkpoints/control/write sequencer →
-  spans/projections/evidence/diagnostics/notifications/knowledge → data services, durable capture,
-  typed intake, optional advisory AI, and dashboard/read-only workflow explorer → full restore/
-  soak/capability-inventory/doc gate. The core registry is the composition root; lower
-  layers never import workflows.
-- **Phase 2:** two vertical proofs before volume migration: person-lookup end-to-end proves the read
-  path; a page-scoped transactional workflow/harness proves prepare-only dry-run, real commit
-  recovery, durable dedupe, and ledger projection. A read-only slice cannot prove write safety.
+- **Phase 1 — the SPINE, whose exit test is a live workflow (restructured 2026-07-23, operator
+  ACCEPTED).** The old sequence built ten base work items against synthetic fixtures before any
+  real workflow ran. It is now cut to the minimum that can carry one workflow end to end: pre-tree
+  guard plumbing → strict domain/clock/config/secrets → authority storage/recovery + command/
+  write-safety type shell → semantic UI registry/drivers + task/store/session contracts →
+  complete workflow graph/results/delegation/scenarios → core registry + executor/checkpoints/
+  command service/write sequencer, plus only the span/projection slice of the event layer and the
+  queue-surface slice of the dashboard. **Exit is not a fixture: person-lookup runs live on it.**
+  Rationale: a live workflow falsifies contracts a fixture cannot, and the stop-loss scenario "a
+  base contract flaw found after the base is done" is far cheaper to hit with six work items built
+  than ten. The core registry is the composition root; lower layers never import workflows.
+- **Phase 2 — the transaction proof, then the deferred base tails.** A page-scoped transactional
+  workflow/harness proves prepare-only dry-run, fresh subject binding, real commit recovery,
+  durable dedupe, and ledger projection — a read-only slice cannot prove write safety. Only then
+  are the tails built, now against a proven spine and a real consumer instead of synthetic
+  fixtures: the rest of the event/trust layer (evidence receipts, notifications, knowledge), the
+  data-service/intake/capture foundation, and the read-only workflow explorer.
 - **Phase 3+:** per-workflow migration, one at a time, slowly populating the task stores with what
   each workflow needs. Every workflow gets its own migration plan doc answering: which store tasks
   it reuses, which new tasks it needs, how each new task is designed as a reusable base + what the
@@ -278,9 +348,15 @@ The foundation's documentation is part of the foundation.
     dry-run boundary (which submit tasks to split), and any workflow-specific data/gate quirks. The
     operator explicitly wants these questions asked at migration time — "cover everything for each
     workflow as we migrate." This questionnaire is part of every workflow's migration plan doc.
-  - Cutover authority is stamped **per run** as `(engine, cutoverGeneration)` at enqueue time. A
-    legacy run may drain after the workflow accepts native runs without having its terminal updates
-    quarantined. A workflow-wide timestamp is not a source-authority rule.
+  - **Cutover is a go-live, not a drain (2026-07-24).** Under pause-until-done there is no legacy
+    run to reconcile with: `src` is frozen and enqueues nothing. A workflow becomes available when
+    the operator says go-live. The prior per-run `(engine, cutoverGeneration)` authority stamp,
+    the legacy drain set, and the mixed-engine period are **deleted** — see doc 07 §4.
+  - **Migration order optimizes TOTAL time to resume all automation** (operator 2026-07-26: every
+    workflow costs real manual time, none dominates). So the order is chosen for reuse leverage —
+    each migration must make the next cheaper — not for per-workflow priority. The consequence is
+    explicit and accepted: onboarding and separations migrate last, so they stay manual longest.
+    Doc 07 §3.3 states that trade and the operator may resume workflows individually as they land.
 
 ## Process
 
