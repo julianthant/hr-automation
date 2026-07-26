@@ -1,6 +1,7 @@
 # 06 — Data Intake (operator column mapping) & Edit Data over checkpoints
 
-Status: **revised 2026-07-22 after the whole-plan/legacy-code review.** Intake now produces a
+Status: **revised 2026-07-22 after the whole-plan/legacy-code review; amended 2026-07-26
+(Round 8, §5.1 — the mobile-capture durability trim, D79d).** Intake now produces a
 durable, replayable admission manifest; every data boundary is strict; scenario coverage and
 evidence make partial/excluded rows impossible to mistake for silently completed work.
 

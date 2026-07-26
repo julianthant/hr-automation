@@ -704,9 +704,10 @@ lifecycle — read/unread + snooze, actor-keyed inbox, not a five-state lifecycl
 race exists (cancel-tree, edit-vs-resume, gate resolution, write-recovery). Capture crash-proofing
 — durable sessions + one durable finalize outbox, not a restart-between-every-state matrix. Ledger
 hash-chain — deferred until multi-user is real; the never-pruned ledger, atomic outbox, single
-projector, and actor attribution all stay. Task authoring — a **lightweight tier** exists: a
-`workflow:` mini-store pure read needs schemas + example only; browser reads add freshness/
-provenance/subject; commits pay full fare. A **`scaffold new-task` / `scaffold new-workflow`
+projector, and actor attribution all stay. Task authoring — a **lightweight tier** exists
+(**doc 01 §2.7** owns the three tiers, and the tier is *derived* from effect + store kind, never
+self-declared): a `workflow:` mini-store pure read needs schemas + example only; browser reads add
+freshness/provenance/subject; commits pay full fare. A **`scaffold new-task` / `scaffold new-workflow`
 generator** is part of the base — the declaration toil is only acceptable if it is generated.
 
 ### 3.8 Live probe status (the design assumptions still unproven)

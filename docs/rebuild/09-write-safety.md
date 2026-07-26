@@ -1,6 +1,11 @@
 # 09 — Write-Safety: Fenced, Fail-Closed Real HR Mutations
 
-Status: **revised 2026-07-22 after the whole-plan/legacy-code review.** The write sequence includes
+Status: **revised 2026-07-22 after the whole-plan/legacy-code review; amended 2026-07-26
+(Round 8).** Round-8 amendments: **§13 OQ1 is RESOLVED** — the 2026-07-23 live probe proved Kuali
+`save-verify` is buildable and produced four binding constraints on it — **OQ2 (OnBase) is restated
+as blocked on a real upload target**, and **§14 designs the identity-approval gate** (D77
+ALWAYS-GATE), the control that guards the wrong-**person** class this doc's fence explicitly cannot.
+The write sequence includes
 a fresh expected↔observed binding proof on the staged page before the fence, and crash recovery now
 requires stabilized typed negative evidence before another generation may submit. The guarantee is
 stated at the boundary the UI targets can actually support; this doc does not claim unconditional
