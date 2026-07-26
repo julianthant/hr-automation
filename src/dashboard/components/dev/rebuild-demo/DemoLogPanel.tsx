@@ -56,6 +56,9 @@ import {
   useToasts,
 } from "./demo-ui";
 import { checkpointAge, checkpointFor, editPolicyFor, editPolicySummary, freshnessOf } from "./demo-flows-wire";
+import { EvidenceBar } from "./DemoEvidence";
+import { ReceiptView, runReceiptFor } from "./DemoReceipt";
+import { FailureRecordBlock, failureRecordFor } from "./DemoFailure";
 import { ParkResolveDialog, SettlingPanel, isParkResolution, type ParkResolveState } from "./DemoParkResolve";
 import type { DemoCommandResult, DemoCommandSettling } from "./demo-commands";
 import {
@@ -250,14 +253,26 @@ function GateCardView({ row, wide, onAction }: { row: DemoRow; wide?: boolean; o
   );
 }
 
-function FailureCardView({ row }: { row: DemoRow }) {
+/**
+ * The in-stream failure marker. It stays SHORT — the full `FailureRecord` is
+ * pinned above the tabs, where it is visible from every one of them, so this
+ * card's job is to mark the line the run died on and point at it.
+ */
+function FailureCardView({ row, onOpenFailure }: { row: DemoRow; onOpenFailure?: () => void }) {
   if (!row.failCard) return null;
   return (
     <div className="mx-3 my-1.5 ml-11 rounded-lg border border-destructive/40 bg-destructive/6 px-3 py-2 text-[12px]">
       <div className="mb-0.5 text-[11.5px] font-semibold text-destructive">{row.failCard.title}</div>
-      <div className="text-[11px] text-muted-foreground">
-        {row.failCard.meta} <span className="text-info">Screenshot at failure →</span>
-      </div>
+      <div className="text-[11px] text-muted-foreground">{row.failCard.meta}</div>
+      {onOpenFailure && (
+        <button
+          type="button"
+          onClick={onOpenFailure}
+          className="mt-1 rounded-md border border-destructive/45 px-2 py-0.5 text-[10.5px] font-semibold text-destructive outline-none hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          Open the full failure record
+        </button>
+      )}
     </div>
   );
 }
@@ -464,29 +479,6 @@ function SharedPipelineStrip({ row }: { row: DemoRow }) {
   );
 }
 
-function EvidenceBar({ row }: { row: DemoRow }) {
-  if (row.shots.length === 0) return null;
-  return (
-    <div className="flex gap-1.5 overflow-x-auto border-b border-border/60 px-3 py-1.5">
-      {row.shots.map((s) => (
-        <button
-          key={s.label}
-          type="button"
-          onClick={NOOP}
-          title={`Open screenshot — ${s.label}`}
-          className={cn(
-            "flex h-10 w-[4.75rem] shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border bg-secondary/40 outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            s.kind === "error" ? "border-destructive/45 hover:border-destructive" : "border-border hover:border-info/50",
-          )}
-        >
-          <Camera aria-hidden className={cn("size-3", s.kind === "error" ? "text-destructive" : "text-muted-foreground")} />
-          <span className="max-w-full truncate px-1 text-[8.5px] text-muted-foreground">{s.label}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /**
  * Gate banner — pinned above the tabs whenever the run is waiting on the
  * operator, so the decision is visible from EVERY tab instead of hiding behind
@@ -521,7 +513,17 @@ function GateBanner({ row, tick, onAction }: { row: DemoRow; tick: number; onAct
 // tab bodies
 // ---------------------------------------------------------------------------
 
-function LogsTab({ row, liveCount, onAction }: { row: DemoRow; liveCount: number; onAction: DemoActionHandler }) {
+function LogsTab({
+  row,
+  liveCount,
+  onAction,
+  onOpenFailure,
+}: {
+  row: DemoRow;
+  liveCount: number;
+  onAction: DemoActionHandler;
+  onOpenFailure?: () => void;
+}) {
   const [query, setQuery] = useState("");
   useEffect(() => setQuery(""), [row.id]);
   const lines = useMemo<DemoLine[]>(
@@ -569,7 +571,7 @@ function LogsTab({ row, liveCount, onAction }: { row: DemoRow; liveCount: number
                 </span>
               </div>
               {line.card === "gate" && <GateCardView row={row} onAction={onAction} />}
-              {line.card === "failure" && <FailureCardView row={row} />}
+              {line.card === "failure" && <FailureCardView row={row} onOpenFailure={onOpenFailure} />}
             </div>
           );
         })}
@@ -1454,7 +1456,57 @@ function PeopleTab({
   );
 }
 
+/**
+ * Receipt tab.
+ *
+ * When the row's `evidence.receiptId` resolves, this renders the FULL
+ * `RunEvidenceReceipt` — confirmation numbers, the read-back that proved each
+ * one, the identity observed at the commit, and the per-member confirmation
+ * list inline (D17). The acceptance test is that the operator can double-check
+ * the run without opening UCPath.
+ *
+ * When it does not resolve, the row's own short verdict stands — and every one
+ * of those is an honest "no receipt" state (pending, cancelled before any write,
+ * the write could not be verified). A pending run is not given a fabricated
+ * receipt to fill the tab.
+ */
 function ReceiptTab({ row }: { row: DemoRow }) {
+  const full = runReceiptFor(row);
+  const staged = row.data.filter((d) => d.staged || d.unconfirmed);
+  if (full) {
+    return (
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <ReceiptView receipt={full} row={row} />
+        {staged.length > 0 && <StagedBlock points={staged} />}
+      </div>
+    );
+  }
+  return <ShortReceipt row={row} />;
+}
+
+/** the values that are filled but not submitted, or submitted but never read back */
+function StagedBlock({ points }: { points: DemoDataPoint[] }) {
+  const unconfirmed = points.some((d) => d.unconfirmed);
+  return (
+    <div className="px-3 pb-3">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {unconfirmed ? "Unconfirmed — resolve present or absent" : "Staged — goes live when the run continues"}
+      </div>
+      <div className={cn("rounded-lg border px-3 py-1.5", unconfirmed ? "border-log-violet/35 bg-log-violet/6" : "border-border bg-secondary/20")}>
+        {points.map((d) => (
+          <div key={d.field} className="flex items-center gap-2 py-[3px] text-[12px]">
+            <ArrowUpFromLine aria-hidden className="size-3 text-log-teal" />
+            <span className="w-36 shrink-0 text-muted-foreground">{d.field}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">{d.value}</span>
+            <SystemChip system={d.system} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ShortReceipt({ row }: { row: DemoRow }) {
   const r = row.receipt;
   const toneCls =
     r.tone === "success"
@@ -1467,7 +1519,6 @@ function ReceiptTab({ row }: { row: DemoRow }) {
   const headCls =
     r.tone === "success" ? "text-success" : r.tone === "warning" ? "text-warning" : r.tone === "destructive" ? "text-destructive" : "text-secondary-foreground";
   const staged = row.data.filter((d) => d.staged || d.unconfirmed);
-  const stagedAreUnconfirmed = staged.some((d) => d.unconfirmed);
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="flex flex-col gap-3 px-3 py-3">
@@ -1521,29 +1572,8 @@ function ReceiptTab({ row }: { row: DemoRow }) {
           )}
           {r.note && <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{r.note}</p>}
         </div>
-        {staged.length > 0 && (
-          <div>
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {stagedAreUnconfirmed ? "Unconfirmed — resolve present or absent" : "Staged — goes live when the run continues"}
-            </div>
-            <div
-              className={cn(
-                "rounded-lg border px-3 py-1.5",
-                stagedAreUnconfirmed ? "border-log-violet/35 bg-log-violet/6" : "border-border bg-secondary/20",
-              )}
-            >
-              {staged.map((d) => (
-                <div key={d.field} className="flex items-center gap-2 py-[3px] text-[12px]">
-                  <ArrowUpFromLine aria-hidden className="size-3 text-log-teal" />
-                  <span className="w-36 shrink-0 text-muted-foreground">{d.field}</span>
-                  <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">{d.value}</span>
-                  <SystemChip system={d.system} />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
+      {staged.length > 0 && <StagedBlock points={staged} />}
     </div>
   );
 }
@@ -1689,14 +1719,26 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
    */
   const [parkPending, setParkPending] = useState<ParkResolveState | null>(null);
   const [settling, setSettling] = useState<DemoCommandSettling | null>(null);
+  /** the full FailureRecord is a lot of surface — it opens on demand */
+  const [failureOpen, setFailureOpen] = useState(false);
   useEffect(() => {
     setParkPending(null);
     setSettling(null);
+    setFailureOpen(false);
   }, [row.id]);
+
+  const failure = failureRecordFor(row);
 
   const handleAction: DemoActionHandler = (target, action) => {
     if (action.kind === "command" && isParkResolution(action)) {
       setParkPending({ row: target, action });
+      return;
+    }
+    // "Open failure" is navigation to THIS row's own record — it opens the
+    // pinned block rather than travelling anywhere, so the outcome bar's one
+    // action does the thing it says.
+    if (action.kind === "navigation" && action.key === "open-failure" && failure) {
+      setFailureOpen(true);
       return;
     }
     return onAction(target, action);
@@ -1801,6 +1843,13 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
           panel kind, instead of hiding inside a Review tab most rows lack */}
       {row.gate && panelKindOf(row) !== "review" && <GateBanner row={row} tick={tick} onAction={handleAction} />}
 
+      {/* the failure record is pinned in the same slot as the gate, for the same
+          reason: what broke, what is half-done and what is safe to retry must be
+          readable from every tab — not just from the one the logs are on */}
+      {failure && (
+        <FailureRecordBlock failure={failure} open={failureOpen} onOpen={setFailureOpen} onOpenRow={onSelect} />
+      )}
+
       <Timeline row={row} tick={tick} />
       <SharedPipelineStrip row={row} />
       <EvidenceBar row={row} />
@@ -1836,7 +1885,14 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
         </span>
       </div>
 
-      {effectiveTab === "logs" && <LogsTab row={row} liveCount={liveCount} onAction={handleAction} />}
+      {effectiveTab === "logs" && (
+        <LogsTab
+          row={row}
+          liveCount={liveCount}
+          onAction={handleAction}
+          onOpenFailure={failure ? () => setFailureOpen(true) : undefined}
+        />
+      )}
       {effectiveTab === "data" && <DataTab row={row} onAction={handleAction} tick={tick} />}
       {effectiveTab === "review" && <ReviewTab row={row} />}
       {effectiveTab === "people" && <PeopleTab row={row} onSelect={onSelect} onOpenPanel={onOpenPanel} checkedIds={checkedIds} />}

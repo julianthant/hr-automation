@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
@@ -30,6 +31,51 @@ import { IconButton } from "./primitives-core";
  * centre, a drawer slides in from its edge. All of it collapses to nothing
  * under `prefers-reduced-motion` (the --ds-dur-* tokens go to 0ms).
  */
+
+/* =========================================================================
+ * Modal presence
+ *
+ * A module-scoped registry of how many modal surfaces are currently mounted,
+ * so the toast viewport can get out of a dialog's way without the two surfaces
+ * having to know about each other (and without every app having to nest one
+ * provider inside the other in the right order).
+ *
+ * WHY IT EXISTS: the viewport is `fixed bottom-right` at the toast layer, which
+ * put it directly on top of a dialog's footer at 1280×720 — and a `danger`
+ * toast never auto-dismisses, so it sat there swallowing clicks aimed at the
+ * dialog's primary button. See `ToastViewport` for what we do about it.
+ * ====================================================================== */
+
+let openModalCount = 0;
+const modalListeners = new Set<() => void>();
+
+function subscribeModals(onChange: () => void): () => void {
+  modalListeners.add(onChange);
+  return () => {
+    modalListeners.delete(onChange);
+  };
+}
+
+/** Called by every modal surface; they only mount while open. */
+function useRegisterModal(): void {
+  useEffect(() => {
+    openModalCount += 1;
+    modalListeners.forEach((listener) => listener());
+    return () => {
+      openModalCount -= 1;
+      modalListeners.forEach((listener) => listener());
+    };
+  }, []);
+}
+
+/** Is any Dialog or Drawer open right now? */
+function useModalOpen(): boolean {
+  return useSyncExternalStore(
+    subscribeModals,
+    () => openModalCount > 0,
+    () => false,
+  );
+}
 
 /** True one frame after mount — lets a freshly-portalled surface transition in. */
 function useEntered(): boolean {
@@ -135,6 +181,7 @@ function DialogSurface({
   children: ReactNode;
 }) {
   const entered = useEntered();
+  useRegisterModal();
   return (
     <>
       <Scrim layer={dsLayer.modal} entered={entered} />
@@ -260,6 +307,7 @@ function DrawerSurface({
   children: ReactNode;
 }) {
   const entered = useEntered();
+  useRegisterModal();
   const isRight = side === "right";
   return (
     <>
@@ -447,26 +495,61 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * The toast viewport.
+ *
+ * **While a modal is open it steps aside and goes inert.** Two changes, both
+ * only while a Dialog or Drawer is mounted:
+ *
+ *  1. It re-anchors from the bottom-RIGHT to the bottom-LEFT. A dialog's actions
+ *     are always right-aligned with the primary last (DESIGN.md, "one primary
+ *     and at most one danger action per surface"), so the left gutter is the one
+ *     region a decision never occupies.
+ *  2. Every card becomes non-interactive and its controls render disabled, so a
+ *     toast can never intercept a click meant for the surface underneath it —
+ *     whatever the dialog's size or the viewport's height.
+ *
+ * Nothing is hidden and nothing is dismissed: the text stays fully legible above
+ * the scrim, and the cards become live again the instant the modal closes. A
+ * `danger` toast still never auto-dismisses, so it is still there to be
+ * acknowledged afterwards.
+ *
+ * The bug this fixes: at 1280×720 a persistent `danger` toast sat exactly on top
+ * of a dialog's footer and swallowed every click on its primary button, with no
+ * visible reason — the operator could see the button, press it, and have nothing
+ * happen.
+ */
 function ToastViewport({ toasts, onDismiss }: { toasts: DsToast[]; onDismiss: (id: string) => void }) {
+  const modalOpen = useModalOpen();
   if (toasts.length === 0) return null;
   return (
     <div
       role="region"
       aria-label="Notifications"
+      data-ds-toast-viewport={modalOpen ? "aside" : "default"}
       className={cn(
-        "pointer-events-none fixed bottom-[var(--ds-space-loose)] right-[var(--ds-space-loose)]",
+        "pointer-events-none fixed bottom-[var(--ds-space-loose)]",
+        modalOpen ? "left-[var(--ds-space-loose)]" : "right-[var(--ds-space-loose)]",
         "flex w-[360px] max-w-[calc(100vw-var(--ds-space-section))] flex-col gap-[var(--ds-space-base)]",
         dsLayer.toast,
       )}
     >
       {toasts.map((item) => (
-        <ToastCard key={item.id} toast={item} onDismiss={onDismiss} />
+        <ToastCard key={item.id} toast={item} onDismiss={onDismiss} inert={modalOpen} />
       ))}
     </div>
   );
 }
 
-function ToastCard({ toast, onDismiss }: { toast: DsToast; onDismiss: (id: string) => void }) {
+function ToastCard({
+  toast,
+  onDismiss,
+  inert,
+}: {
+  toast: DsToast;
+  onDismiss: (id: string) => void;
+  inert: boolean;
+}) {
   const entered = useEntered();
   const spec = TOAST_TONE[toast.tone];
   const Icon = spec.icon;
@@ -474,7 +557,8 @@ function ToastCard({ toast, onDismiss }: { toast: DsToast; onDismiss: (id: strin
     <div
       role={toast.tone === "danger" ? "alert" : "status"}
       className={cn(
-        "pointer-events-auto flex items-start gap-[var(--ds-space-base)] border border-l-[length:var(--ds-border-w-rail)] p-[var(--ds-space-cozy)]",
+        inert ? "pointer-events-none" : "pointer-events-auto",
+        "flex items-start gap-[var(--ds-space-base)] border border-l-[length:var(--ds-border-w-rail)] p-[var(--ds-space-cozy)]",
         "border-[color:var(--ds-border-strong)] bg-[var(--ds-surface-overlay)]",
         spec.tint,
         dsRadius.md,
@@ -492,6 +576,7 @@ function ToastCard({ toast, onDismiss }: { toast: DsToast; onDismiss: (id: strin
         {toast.action && (
           <button
             type="button"
+            disabled={inert}
             onClick={() => {
               toast.action?.onAction();
               onDismiss(toast.id);
@@ -500,6 +585,7 @@ function ToastCard({ toast, onDismiss }: { toast: DsToast; onDismiss: (id: strin
               "mt-[var(--ds-space-tight)] w-fit cursor-pointer underline underline-offset-2",
               dsText.meta,
               "text-[color:var(--ds-fg)]",
+              "disabled:cursor-default disabled:opacity-45",
               dsFocus,
             )}
           >
@@ -510,6 +596,8 @@ function ToastCard({ toast, onDismiss }: { toast: DsToast; onDismiss: (id: strin
       <IconButton
         label="Dismiss"
         size="sm"
+        disabled={inert}
+        title={inert ? "Dismiss — available once the dialog is closed" : "Dismiss"}
         icon={<X aria-hidden className={dsIcon.md} />}
         onClick={() => onDismiss(toast.id)}
       />
