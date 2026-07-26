@@ -344,7 +344,7 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
       label: "Delete",
       intent: "destructive",
       icon: "delete",
-      placement: ["footer", "menu"],
+      placement: ["footer"],
       expectedVersion: v,
       confirm: HIDE_CONFIRM(`“${ctx.title}” never became a run — no task exists for it.`),
     });
@@ -400,7 +400,7 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
     label: "Delete",
     intent: "destructive",
     icon: "delete",
-    placement: ["footer", "menu"],
+    placement: ["footer"],
     expectedVersion: v,
     confirm: HIDE_CONFIRM(
       isGroup
