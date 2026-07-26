@@ -18,10 +18,12 @@ import {
   GitBranch,
   History,
   Loader2,
+  Lock,
   Pause,
   Play,
   Receipt,
   RotateCcw,
+  Save,
   ScrollText,
   Search,
   ShieldCheck,
@@ -35,7 +37,25 @@ import { IconActionButton } from "@/components/shared/IconActionButton";
 import { StatusBadge, type ProposedStatus } from "./demo-status";
 import { panelKindOf, panelKindSpec, rowVariantSpec } from "./demo-catalog";
 import { BannerActions, OutcomeActionButton, ParkResolutions, type DemoActionHandler } from "./DemoActions";
-import { fmtClock, tabsFor as tabsForKind, type DemoTab } from "./demo-wire";
+import { actionsAt, fmtClock, tabsFor as tabsForKind, type ActionDescriptorWire, type DemoTab } from "./demo-wire";
+import {
+  Banner,
+  Button,
+  Chip,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  Field,
+  Textarea,
+  Well,
+  dsFocus,
+  dsText,
+  useToasts,
+} from "./demo-ui";
+import { checkpointAge, checkpointFor, editPolicyFor, editPolicySummary, freshnessOf } from "./demo-flows-wire";
+import { ParkResolveDialog, SettlingPanel, isParkResolution, type ParkResolveState } from "./DemoParkResolve";
+import type { DemoCommandResult, DemoCommandSettling } from "./demo-commands";
 import {
   DEMO_ROWS,
   effectiveStatus,
@@ -47,6 +67,7 @@ import {
   memberAttentionIds,
   orderedMemberIds,
   SYSTEM_ACCENT,
+  type DemoDataPoint,
   type DemoLine,
   type DemoRecord,
   type DemoRecordCheck,
@@ -539,25 +560,47 @@ function LogsTab({ row, liveCount, onAction }: { row: DemoRow; liveCount: number
 }
 
 /**
- * Data tab — ONE surface, not two modes.
+ * Data tab — ONE surface, not two modes (D19c).
  *
  * Every value the run touched, in order, grouped by step, with where it came
- * from and when. The values the run READ are editable in place: change one and
- * the footer offers to start a fresh run from these values. So the audit view
- * and the "the extraction was wrong, fix it and go" path are the same screen —
- * you never have to switch modes to see what you are about to change, and you
- * never retype a whole input into the Run modal to correct one field.
+ * from and when. Reads are editable IN PLACE; writes are shown and never
+ * editable, because what a run put into UCPath is a record of what happened,
+ * not a form. Three things make it real rather than decorative:
  *
- * Writes are shown but never editable: what a run put into UCPath is a record
- * of what happened, not a form.
+ *  1. **Edit-unlock rules by run state.** `editPolicyFor` is the one place a
+ *     field's editability is decided, and the REASON is always shown — a greyed
+ *     box with no explanation is how an operator learns to distrust a screen.
+ *  2. **CAS on the checkpoint generation.** A save carries the generation the
+ *     surface was captured at. If the checkpoint moved, the save is REFUSED and
+ *     the operator's patch is kept and re-offered field by field against the
+ *     fresh values. A patch is never silently dropped and never merged blind.
+ *  3. **Freshness.** Reusing values older than the consuming node accepts
+ *     requires an explicit, audited override — or a re-read.
  */
-function DataTab({ row }: { row: DemoRow }) {
+function DataTab({ row, onAction, tick }: { row: DemoRow; onAction: DemoActionHandler; tick: number }) {
+  const { toast } = useToasts();
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [seededFrom, setSeededFrom] = useState<number | null>(null);
+  const [conflict, setConflict] = useState<DemoCommandResult | null>(null);
+  const [baseGeneration, setBaseGeneration] = useState<number | null>(null);
+  const [freshnessPending, setFreshnessPending] = useState<ActionDescriptorWire | null>(null);
+  const [overrideReason, setOverrideReason] = useState("");
+
   useEffect(() => {
     setEdits({});
     setSeededFrom(null);
+    setConflict(null);
+    setBaseGeneration(null);
+    setFreshnessPending(null);
+    setOverrideReason("");
   }, [row.id]);
+
+  const cp = checkpointFor(row);
+  const held = baseGeneration ?? cp.heldGeneration;
+  const fresh = freshnessOf(cp, tick);
+  const dataActions = actionsAt(row.actions, "data");
+  const saveAction = dataActions.find((a) => a.command === "edit-checkpoint");
+  const rerunAction = dataActions.find((a) => a.command === "rerun-with-existing-data");
 
   if (row.data.length === 0) {
     return <EmptyTab icon={Database} text="No data points recorded — this run has not read or written anything yet." />;
@@ -568,8 +611,41 @@ function DataTab({ row }: { row: DemoRow }) {
   const staged = writes.filter((d) => d.staged).length;
   const unconfirmed = writes.filter((d) => d.unconfirmed).length;
   const steps = [...new Set(row.data.map((d) => d.step))];
-  const changed = reads.filter((d) => edits[d.field] !== undefined && edits[d.field] !== d.value);
-  const live = effectiveStatus(row) === "running" || effectiveStatus(row) === "queued";
+
+  /** what the server holds for a field at the generation this surface is on */
+  const baseValue = (point: DemoDataPoint) =>
+    held >= cp.serverGeneration ? (cp.freshValues[point.field] ?? point.value) : point.value;
+
+  const changed = reads.filter((d) => edits[d.field] !== undefined && edits[d.field] !== baseValue(d));
+  const locked = reads.every((d) => !editPolicyFor(row, d).editable);
+  const lockReason = locked ? editPolicyFor(row, reads[0]) : null;
+
+  const submitSave = (generation: number) => {
+    if (!saveAction) return;
+    const payload: Record<string, string> = { expectedGeneration: String(generation) };
+    for (const d of changed) payload[d.field] = edits[d.field];
+    const result = onAction(row, { ...saveAction, payload });
+    if (!result) return;
+    if (result.state === "conflict") {
+      setConflict(result);
+      toast({
+        tone: "warning",
+        title: "Not saved — the checkpoint moved",
+        description: `Your ${changed.length} edit${changed.length === 1 ? "" : "s"} are still here and are being re-offered against the values the server now holds. Nothing was overwritten.`,
+      });
+      return;
+    }
+    setConflict(null);
+    toast({ tone: "success", title: result.headline, description: result.detail });
+  };
+
+  const submitRerun = (payload: Record<string, string>) => {
+    if (!rerunAction) return;
+    const result = onAction(row, { ...rerunAction, payload });
+    setFreshnessPending(null);
+    setOverrideReason("");
+    if (result?.state === "applied") toast({ tone: "info", title: result.headline, description: result.detail });
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -593,10 +669,79 @@ function DataTab({ row }: { row: DemoRow }) {
             )}
           </span>
         )}
-        <span className="ml-auto">
-          {live ? "Values appear as the run reads them." : "Read values are editable — change one to launch a new run from it."}
+        <span
+          title={`Captured ${checkpointAge(cp, tick)} ago · the ${cp.consumingNode} node accepts reads up to ${cp.maxAgeMin}m old`}
+          className="inline-flex items-center gap-1 font-mono text-[10px]"
+        >
+          checkpoint gen {held}
+          {fresh.stale && <span className="rounded border border-warning/40 px-1 font-semibold text-warning">{fresh.ageMin}m old</span>}
         </span>
+        <span className="ml-auto">{editPolicySummary(row)}</span>
       </div>
+
+      {/* Why the surface is locked, in one sentence, before the operator
+          discovers it by clicking a field that does not respond. */}
+      {locked && lockReason && !lockReason.editable && (
+        <div className="px-3 pt-2">
+          <Banner tone="info" title="These values cannot be edited right now" icon={<Lock aria-hidden className="size-4" />}>
+            {lockReason.reason}
+          </Banner>
+        </div>
+      )}
+
+      {/* The CAS refusal. The patch is HELD — the operator decides field by
+          field against the fresh values, and nothing is merged for them. */}
+      {conflict && (
+        <div className="px-3 pt-2">
+          <Banner tone="danger" title={conflict.headline} icon={<TriangleAlert aria-hidden className="size-4" />}>
+            <span className="block">{conflict.detail}</span>
+            {cp.movedBecause && (
+              <span className={cn(dsText.meta, "mt-[var(--ds-space-tight)] block text-[color:var(--ds-fg-muted)]")}>
+                The checkpoint moved because {cp.movedBecause}.
+              </span>
+            )}
+            <span className="mt-[var(--ds-space-base)] flex flex-col gap-[var(--ds-space-tight)]">
+              {changed.map((d) => (
+                <span key={d.field} className={cn(dsText.meta, "flex flex-wrap items-center gap-[var(--ds-space-tight)]")}>
+                  <span className="w-32 shrink-0 text-[color:var(--ds-fg-muted)]">{d.field}</span>
+                  <Chip label="yours">{edits[d.field]}</Chip>
+                  <Chip label="server now">{cp.freshValues[d.field] ?? d.value}</Chip>
+                  <button
+                    type="button"
+                    onClick={() => setEdits((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => k !== d.field)))}
+                    className={cn(dsText.meta, "underline underline-offset-2 text-[color:var(--ds-fg-secondary)]", dsFocus)}
+                  >
+                    take the server&apos;s
+                  </button>
+                </span>
+              ))}
+            </span>
+            <span className="mt-[var(--ds-space-base)] flex flex-wrap gap-[var(--ds-space-base)]">
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => {
+                  setBaseGeneration(cp.serverGeneration);
+                  submitSave(cp.serverGeneration);
+                }}
+              >
+                {`Keep my edits and save against generation ${cp.serverGeneration}`}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  setEdits({});
+                  setBaseGeneration(cp.serverGeneration);
+                  setConflict(null);
+                }}
+              >
+                Discard my edits and load the fresh checkpoint
+              </Button>
+            </span>
+          </Banner>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-3">
         {steps.map((step) => (
@@ -608,9 +753,11 @@ function DataTab({ row }: { row: DemoRow }) {
             {row.data
               .filter((d) => d.step === step)
               .map((d, i) => {
-                const editable = d.dir === "read" && !live;
-                const value = edits[d.field] ?? d.value;
-                const dirty = value !== d.value;
+                const policy = editPolicyFor(row, d);
+                const base = baseValue(d);
+                const value = edits[d.field] ?? base;
+                const dirty = value !== base;
+                const movedByServer = held >= cp.serverGeneration && cp.freshValues[d.field] !== undefined;
                 return (
                   <div key={`${d.field}-${i}`} className="flex items-center gap-2.5 px-3 py-[5px] text-[12px] hover:bg-accent/30">
                     {d.dir === "read" ? (
@@ -622,9 +769,9 @@ function DataTab({ row }: { row: DemoRow }) {
                       {d.field}
                       {dirty && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warning" />}
                     </span>
-                    {editable ? (
+                    {policy.editable ? (
                       <input
-                        aria-label={`${d.field} — edit to launch a new run from this value`}
+                        aria-label={`${d.field} — edit this read value`}
                         value={value}
                         onChange={(e) => setEdits((prev) => ({ ...prev, [d.field]: e.target.value }))}
                         className={cn(
@@ -633,7 +780,21 @@ function DataTab({ row }: { row: DemoRow }) {
                         )}
                       />
                     ) : (
-                      <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">{d.value}</span>
+                      <span className="flex min-w-0 flex-1 items-center gap-1.5" title={policy.reason}>
+                        <Lock aria-hidden className="size-3 shrink-0 text-muted-foreground/70" />
+                        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">{base}</span>
+                        {/* the one-word WHY; the sentence is in the row title and
+                            in the surface banner, never only in a tooltip */}
+                        <span className="shrink-0 rounded border border-border px-1 text-[9.5px] text-muted-foreground">{policy.tag}</span>
+                      </span>
+                    )}
+                    {movedByServer && (
+                      <span
+                        title={`This value changed on the server: ${d.value} → ${cp.freshValues[d.field]}`}
+                        className="shrink-0 rounded border border-info/45 px-1 text-[9.5px] font-semibold text-info"
+                      >
+                        refreshed
+                      </span>
                     )}
                     {d.staged && <span className="shrink-0 rounded border border-warning/40 px-1 text-[9.5px] font-semibold text-warning">staged</span>}
                     {d.unconfirmed && (
@@ -648,13 +809,16 @@ function DataTab({ row }: { row: DemoRow }) {
         ))}
       </div>
 
-      {!live && reads.length > 0 && (
+      {/* The footer's controls are DESCRIPTORS (`actions[]` at the `data`
+          placement) — a row whose checkpoint may not be saved is simply not
+          sent a Save, so there is nothing here to disable. */}
+      {dataActions.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-t border-border/60 bg-secondary/20 px-3 py-2">
           <button
             type="button"
             onClick={() => {
               setSeededFrom(Math.max(row.run - 1, 1));
-              setEdits(Object.fromEntries(reads.slice(0, 2).map((f) => [f.field, f.value])));
+              setEdits(Object.fromEntries(reads.filter((f) => editPolicyFor(row, f).editable).slice(0, 2).map((f) => [f.field, baseValue(f)])));
             }}
             className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
@@ -680,16 +844,76 @@ function DataTab({ row }: { row: DemoRow }) {
             <RotateCcw aria-hidden className="size-3" />
             Reset
           </button>
-          <button
-            type="button"
-            onClick={NOOP}
-            className="inline-flex items-center gap-1.5 rounded-md border border-primary/50 bg-primary/15 px-2.5 py-1 text-[11px] font-semibold text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Play aria-hidden className="size-3" />
-            {changed.length > 0 ? "Start run with these values" : "Start a run from this data"}
-          </button>
+          {saveAction && (
+            <button
+              type="button"
+              disabled={changed.length === 0}
+              title={saveAction.detail}
+              onClick={() => submitSave(held)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+            >
+              <Save aria-hidden className="size-3" />
+              {saveAction.label}
+            </button>
+          )}
+          {rerunAction && (
+            <button
+              type="button"
+              title={rerunAction.detail}
+              onClick={() => (fresh.stale ? setFreshnessPending(rerunAction) : submitRerun({ freshness: "within-limit" }))}
+              className="inline-flex items-center gap-1.5 rounded-md border border-primary/50 bg-primary/15 px-2.5 py-1 text-[11px] font-semibold text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Play aria-hidden className="size-3" />
+              {changed.length > 0 ? "Start run with these values" : rerunAction.label}
+            </button>
+          )}
         </div>
       )}
+
+      {/* Freshness. Reusing a stale read is allowed — but only deliberately,
+          with a reason that goes into the run's evidence. */}
+      <Dialog open={Boolean(freshnessPending)} onOpenChange={(open) => !open && setFreshnessPending(null)}>
+        <DialogContent
+          size="md"
+          title="These values are older than the next write accepts"
+          description={`Captured ${checkpointAge(cp, tick)} ago. The ${cp.consumingNode} node accepts reads up to ${cp.maxAgeMin} minutes old, so reusing them is a decision, not a default.`}
+        >
+          <DialogBody className="flex flex-col gap-[var(--ds-space-cozy)]">
+            <Well className="flex flex-wrap items-center gap-[var(--ds-space-snug)]">
+              <Chip label="captured">{fmtClock(cp.capturedAt)}</Chip>
+              <Chip label="age" tone="warning">{`${fresh.ageMin}m`}</Chip>
+              <Chip label="limit">{`${fresh.maxAgeMin}m`}</Chip>
+              <Chip label="consumed by">{fresh.consumingNode}</Chip>
+            </Well>
+            <Field
+              label="Why reuse them?"
+              description="Recorded on the new run's receipt beside every reused value, so a replay is never mistaken for a fresh observation."
+            >
+              <Textarea
+                rows={2}
+                value={overrideReason}
+                onChange={(e) => setOverrideReason(e.target.value)}
+                placeholder="Kuali is read-only until 5 PM; these values were confirmed against the paper form this morning."
+              />
+            </Field>
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setFreshnessPending(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="dangerGhost"
+              disabled={overrideReason.trim().length < 8}
+              onClick={() => submitRerun({ freshness: "override", reason: overrideReason.trim() })}
+            >
+              Override — reuse these values
+            </Button>
+            <Button variant="primary" onClick={() => submitRerun({ freshness: "re-read" })}>
+              Re-read live instead
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1334,6 +1558,27 @@ const OUTCOME_TONE: Record<DemoRow["outcome"]["tone"], { bar: string; dot: strin
 };
 
 export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedIds, onToggleChecked, onAction, tick, liveCount }: DemoLogPanelProps) {
+  /**
+   * The two Write-parked resolutions are the only commands that need a FORM
+   * before they can be submitted — a proof to parse, or an evidence note and an
+   * observation count to check against the fence. They are intercepted here and
+   * routed to the resolution dialog; everything else goes straight through.
+   */
+  const [parkPending, setParkPending] = useState<ParkResolveState | null>(null);
+  const [settling, setSettling] = useState<DemoCommandSettling | null>(null);
+  useEffect(() => {
+    setParkPending(null);
+    setSettling(null);
+  }, [row.id]);
+
+  const handleAction: DemoActionHandler = (target, action) => {
+    if (action.kind === "command" && isParkResolution(action)) {
+      setParkPending({ row: target, action });
+      return;
+    }
+    return onAction(target, action);
+  };
+
   const available = tabsFor(row);
   const fallback = defaultTabFor(row);
   const effectiveTab = tab && available.includes(tab) ? tab : fallback;
@@ -1410,13 +1655,21 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
       <div className={cn("flex items-center gap-2 border-b px-3 py-1.5", tone.bar)}>
         <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
         <span className="min-w-0 truncate text-[11.5px]">{row.outcome.text}</span>
-        <OutcomeActionButton row={row} onAction={onAction} className="ml-auto" />
+        <OutcomeActionButton row={row} onAction={handleAction} className="ml-auto" />
       </div>
 
+      {/* Requeue-while-settling: an absence observation was accepted, the row
+          went back into work to earn the second one, and it is neither finished
+          nor failed until they agree. */}
+      {settling && (
+        <div className="border-b border-border/60 px-3 py-2">
+          <SettlingPanel settling={settling} tick={tick} />
+        </div>
+      )}
 
       {/* the gate is pinned above the tabs — visible from every tab, on every
           panel kind, instead of hiding inside a Review tab most rows lack */}
-      {row.gate && panelKindOf(row) !== "review" && <GateBanner row={row} tick={tick} onAction={onAction} />}
+      {row.gate && panelKindOf(row) !== "review" && <GateBanner row={row} tick={tick} onAction={handleAction} />}
 
       <Timeline row={row} tick={tick} />
       <EvidenceBar row={row} />
@@ -1452,8 +1705,8 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
         </span>
       </div>
 
-      {effectiveTab === "logs" && <LogsTab row={row} liveCount={liveCount} onAction={onAction} />}
-      {effectiveTab === "data" && <DataTab row={row} />}
+      {effectiveTab === "logs" && <LogsTab row={row} liveCount={liveCount} onAction={handleAction} />}
+      {effectiveTab === "data" && <DataTab row={row} onAction={handleAction} tick={tick} />}
       {effectiveTab === "review" && <ReviewTab row={row} />}
       {effectiveTab === "people" && <PeopleTab row={row} onSelect={onSelect} onOpenPanel={onOpenPanel} checkedIds={checkedIds} />}
       {effectiveTab === "receipt" && <ReceiptTab row={row} />}
@@ -1503,6 +1756,15 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
           </span>
         </div>
       )}
+
+      {/* The two typed exits from Write parked. There is no third. */}
+      <ParkResolveDialog
+        pending={parkPending}
+        onClose={() => setParkPending(null)}
+        onAction={onAction}
+        onSettling={setSettling}
+        tick={tick}
+      />
     </section>
   );
 }
