@@ -23,6 +23,7 @@ from duplicate unattended attempts and reported **done only when we are sure it 
 | Typed, intent-generation-locked operator resolution for parked writes (confirmed present/absent; no generic Done/Retry) |
 | **Double-submit prevention** — idempotency key derivation + the per-workflow probe-policy knob (§b) |
 | The **immutable receipt/transaction ledger** — schema, location, never-pruned guarantee, hash-chain, what one entry records |
+| The **identity-approval gate** (§14) — the operator-confirmed subject selection that guards the wrong-**person** class, its resolver payload, staleness rule, and composition with the subject proof. *(Gate NODE mechanics — park/resume, subscriptions, command arm — are doc 02/03's; this doc owns what this particular gate asks and what its answer authorizes.)* |
 
 | This doc **references** (owner) |
 |---|
@@ -847,13 +848,32 @@ proves every business choice.
 
 ## 13. Open questions for the operator / orchestrator
 
-1. **Kuali `save-verify` reliability.** Can a positive read-back prove a Kuali save landed (re-read
-   the saved fields / a "saved" state), given error detection was removed as false-positive-prone —
-   or is Kuali's completion inherently "networkidle + operator spot-check," i.e. an allowlisted
-   over-park? (Deepest Kuali residual, §11.)
-2. **OnBase positive read-back vs always-park.** Is a live-verifiable "document filed" read achievable
-   in OnBase, or does it take the `unverifiableByPage` allowlist → always-park for manual confirm
-   (aligned with "operator tracks completion manually")?
+1. ~~**Kuali `save-verify` reliability**~~ — **RESOLVED 2026-07-23 by live probe (D78): BUILDABLE.**
+   Run under operator authorization on Action List docs 4444/4453 (RRSS Separation Request Forms,
+   new/unworked). Doc 4453 **read-only**: every separations-relevant field (name, EID, last day
+   worked, separation date, termination type, timekeeper, status) read deterministically by
+   **role + exact label** from the accessibility tree, byte-identical across reload. Doc 4444
+   **write round-trip**: the timekeeper field (the benign field the legacy flow fills on drafts)
+   written `PROBE-DELETE-ME` → Save → reload → value persisted; cleared → Save → reload → empty;
+   full-form normalized diff before/after clean, doc restored byte-identically, no workflow buttons
+   touched. Evidence: `.screenshots/kuali-probe/` (6 PNGs + 5 a11y dumps).
+   **Four design constraints this produced — they are requirements on the `save-verify` arm, not
+   trivia:** (a) **save success is UI-silent** — no toast, no banner — so a **reload read-back is
+   mandatory** and "clicked without error" may never count as proof (this independently confirms
+   the 2026-04-10 lesson that killed Kuali error detection as false-positive-prone); (b) date
+   values render as **child text nodes**, so the reader must descend, not read the labelled node's
+   own text; (c) **DOM refs change on every reload**, so the verifier anchors on role + exact label
+   (literal `*` included) and never on a captured ref; (d) a full fill→save→reload→verify cycle
+   costs **~8–10s/doc**, which is the budget the transaction node must carry. The doc URL is a
+   stable reload-safe deep link but carries an opaque `actionId` — capture it at open.
+2. **OnBase positive read-back vs always-park — BLOCKED, not deferred (D78).** The question is
+   unchanged (is a live-verifiable "document filed" read achievable, or does OnBase take the
+   `unverifiableByPage` allowlist → always-park for manual confirm, aligned with "operator tracks
+   completion manually"?), but it cannot be answered without a target: **no uploadable probe
+   document exists today**, so the probe is gated on the next real document upload (operator,
+   2026-07-24). Consequence to be explicit about before order 7: if OnBase lands on always-park,
+   its automation degrades to "the operator manually confirms every upload," which changes the
+   daily workload rather than the safety story. Owner: this doc; gate: doc 07 §3.8.
 3. ~~Ledger tamper-evidence altitude~~ — **resolved 2026-07-21:** local hash chain + independent
    SQLite tail anchor is diagnostic tamper-evidence, not a security boundary. Coordinated local
    DB+file rewriting is out of scope. External signing/anchoring is added only if a later compliance
@@ -866,3 +886,142 @@ proves every business choice.
    sweep — the real duplicate guard today) be a first-class write-safety pre-step on every UCPath
    create path, or only on separations? It mutates (deletes rows), so it needs its own fence/ledger
    treatment — confirm the modeling.
+
+---
+
+## 14. The identity-approval gate — the wrong-PERSON control
+
+Status: **designed 2026-07-26 (D77).** Policy ratified by the operator 2026-07-24: **ALWAYS-GATE**
+— manual approval on every separation, for both separation types the operator distinguishes
+(**Kuali separations** and **I-9 separations**), with **no auto-approve-on-match mode**.
+
+### 14.1 Why this section exists at all
+
+Everything else in this doc guards the *double-file* class. It cannot guard the *wrong-person*
+class, and §0 says so: incident `T002173685` was a **wrong-data** error — a name-search override
+date-matched a different career employee and filed a real termination against him. A permanent-key
+fence would have fenced that write perfectly and filed it anyway, because the key was derived from
+the wrong person. The probe would have found no prior termination for that person, correctly, and
+authorized the click.
+
+Until this pass the program's design effort was inverted: ~60KB specified the fence that admittedly
+cannot prevent the incident, while the control that *can* was one line in doc 07 saying it "has no
+design yet," deferred to migration order 8 — the very last workflow. The operator's ALWAYS-GATE
+ratification made the policy cheap to design, so it is designed here, in Phase 0.
+
+**Two layers, two different questions — both required, neither substitutes for the other:**
+
+| Layer | Question it answers | Failure it catches | Owner |
+|---|---|---|---|
+| **Identity-approval gate** (this section) | *Is this the right person to act on?* | wrong business selection — a name match that resolved a different real employee | operator decision |
+| **Fresh subject binding** (§ binding proof) | *Is the page I am about to click on showing that person?* | correct selection, stale/switched page state | machine observation |
+
+A run must pass both. The gate produces an **approved subject**; the binding proof asserts the
+staged page equals that approved subject at the instant of the fence. Neither is inferable from the
+other, and the gate's answer is what the binding proof's `expected` side is bound to.
+
+### 14.2 What ports, and what deliberately changes
+
+The legacy implementation is live-verified and ports nearly whole (`src/domain/identity-approval.ts`
++ `src/control/ops/eid-approval.ts` + the dashboard `EidApprovalBanner`): the two-candidate
+side-by-side presentation, the per-candidate "Use this EID", the manual 8-digit entry, dismiss, and
+the re-queue-with-approved-EID resume are all proven operator UX and stay.
+
+**One thing changes, deliberately: the trigger.** The legacy gate is **mismatch-only** — it fires
+only when `classifyNameSimilarity` returns the `different` tier, and `same`/`similar` proceed
+silently. ALWAYS-GATE fires on **every** separation regardless of match quality. That is a policy
+widening, not a port, and it must be recorded as such because it changes the operator's daily load
+and introduces a new failure mode (§14.6).
+
+Three legacy mechanics do **not** port, because the rebuild has real gate nodes:
+
+- the row ending `done` with `data.eidApproval="pending"` (a browser-release artifact that made a
+  paused run look completed — doc 03 already lifts this shape as a gate, not a completion);
+- `data`-bag string state (`Record<string,string>`) — replaced by a typed gate result (D46/D67);
+- the re-queue-as-a-new-run resume — replaced by a real park/resume on one run, so the approval and
+  the write live in one trace with one identity.
+
+### 14.3 Where the gate sits in the graph
+
+```
+  read: resolve candidates ─► GATE identity-approval ─► transaction[ prepare ─► bind ─► fence ─► commit ─► proof ]
+        (UCPath search +            (operator)               ▲
+         roster/input record)                                └─ expected subject := gate result
+```
+
+**Before the transaction node, never inside it.** Two reasons, both structural: a gate is a long
+wait and D26 forbids any park, checkpoint, or interruption between `prepare` and `commit`; and a
+staged wizard page cannot survive an operator lunch break. So the run parks *before* acquiring the
+transaction lease, releases its browser sessions (D5), and on resume reacquires and stages fresh.
+
+### 14.4 The resolver — what the operator is actually asked
+
+The gate's result schema is strict and typed (doc 02 owns gate-result plumbing; this is the payload
+this gate declares):
+
+```ts
+IdentityApprovalResult = z.discriminatedUnion("decision", [
+  { decision: "approved",  eid: Eid, chosenFrom: "proposed" | "original" | "manual",
+    approvedBy: ActorId, approvedAt: Instant, evidenceDigest: Digest },
+  { decision: "rejected",  reason: z.string().min(1), rejectedBy: ActorId, rejectedAt: Instant },
+])
+```
+
+The gate opens carrying a **decision packet** — everything needed to decide *without leaving the
+dashboard*, which is the same acceptance standard as the receipt (D82):
+
+- **the input record** as submitted: name, EID if supplied, department, last day worked, source
+  (typed / roster row + file digest / OCR record + page);
+- **each candidate** UCPath resolved: EID, legal name, department, payroll title, job/appointment
+  status, and — decisively for `T002173685` — **whether more than one candidate matched**;
+- **why the system proposes this one**: match source, similarity tier, confidence, and the fields
+  that agreed vs disagreed;
+- **disconfirming evidence first** (§14.6): the fields where input and candidate *differ*, rendered
+  before the fields that agree.
+
+Actions: **approve this candidate** · **enter an EID manually** (8-digit, re-validated against a
+live read before it can be approved — a typed EID is an assertion, not evidence) · **reject** with
+a reason. `rejected` terminalizes the run `cancelled` with the reason on the receipt; it never
+falls through to a write.
+
+**Nothing else can resolve it.** Not a retry, not a bump, not a cascade from a parent, not AI
+(charter §23 / D60 — AI may not resolve a gate), and not a generic "Done" action (D44's rule for
+parked writes applies identically here). The command arm is the typed gate-resolution arm (D67).
+
+### 14.5 Staleness — an approval is an observation, not a permanent fact
+
+An approval made against candidate data read at `t` asserts nothing about the world at `t + 3 days`.
+So the gate result carries `approvedAt` and the **`evidenceDigest` of the exact candidate packet
+shown**, and the transaction node declares a freshness limit on both (D8/D34 — this is field
+provenance, not a special case). On resume the kernel re-reads the candidate and:
+
+- **identical digest, within limit** → proceed to prepare with `expected := approved subject`;
+- **within limit but the candidate changed** (new job status, new department, now-ambiguous) →
+  **re-open the gate** with the diff highlighted — an approval never survives the disappearance of
+  what it approved;
+- **outside the limit** → re-open the gate. `Infinity` is illegal here (D8 forbids it for identity
+  facts) and there is no field-scoped override arm: identity is on the never-overridable list.
+
+### 14.6 Adversarial self-review — how this control rots
+
+| # | How it fails | Guard |
+|---|---|---|
+| 1 | **Rubber-stamping — the dominant risk of ALWAYS-GATE.** A gate that fires on every run, and is almost always obviously correct, trains the operator to click approve without reading. The legacy mismatch-only gate was *rare*, so it carried signal; an always-gate carries none by default and could end up strictly worse than the old behaviour | The packet leads with **disconfirming evidence** (differing fields first), and the approve control is **not uniform**: a single unambiguous high-similarity candidate is a one-click approve, while **any** ambiguity — 2+ candidates, a `different` similarity tier, an EID conflict, a manual EID — requires an explicit distinct action (choose-a-candidate, or type the EID). The shape of the decision changes with its risk, so a risky one cannot be dispatched by muscle memory |
+| 2 | **The gate is bypassed by a resume/retry path** | Gate resolution is a typed run-state transition owned by doc 02, not a `data` flag. A resumed run whose gate result is missing/expired/digest-mismatched re-opens the gate; a commit whose `expected` subject has no backing approved gate result **cannot fence** — the binding proof has nothing to bind to. Guard: `identity-gate-before-separation-commit` asserts every separation descriptor's commit is graph-reachable only through the gate node |
+| 3 | **Approval drifts from the thing approved** | `evidenceDigest` + `approvedAt` + the re-read on resume (§14.5) |
+| 4 | **The approved person and the staged page diverge** | not this gate's job — §binding proof re-observes at the fence. The two-layer split is the guard |
+| 5 | **Gate result becomes free-form control state** | D67: the span event carries a validated resolution key + payload hash; the payload itself lives in SQLite/checkpoint under this schema |
+| 6 | **Who approved is lost** | `approvedBy: ActorId` is a D75 multi-user seam — required from day one, never trimmed, and carried onto the receipt (D82) so the double-check shows the human in the loop |
+
+**Honest residual.** This gate makes a wrong-person termination require a *human* to approve the
+wrong person while looking at the disconfirming evidence. It does not make the class impossible —
+no local control can, because the operator is the authority on which person is correct. What it
+does eliminate is the class of wrong-person write that happened *with no human ever seeing the
+candidate*, which is exactly what `T002173685` was.
+
+### 14.7 Open question deliberately left to migration
+
+The gate is designed here; two values belong to the separations §b questionnaire: the **freshness
+limit** on the approval (how long may an approval sit before re-gating — hours, not days), and
+whether **I-9 separations** show a different candidate packet than Kuali separations (the operator
+distinguishes the two types; the resolver schema is shared either way).
