@@ -14,6 +14,7 @@
  */
 
 import { DEMO_ROWS, DENSITY_RUNGS, ROLLUP_PRECEDENCE, type Containment, type DemoRow } from "./demo-data";
+import { panelKindOf as panelKind, type PanelKind as PanelKindKey } from "./demo-wire";
 import { PROPOSED_STATUS } from "./demo-status";
 
 // ---------------------------------------------------------------------------
@@ -30,7 +31,10 @@ export type RowVariant =
   | "person-member"
   | "rejected-member";
 
-export type PanelKind = "run" | "review" | "group" | "member";
+// The panel kind is part of the CONTRACT — it is what `detailSurfaces` is
+// derived from — so it lives in `demo-wire` and is re-exported here rather than
+// defined a second time.
+export { panelKindOf, type PanelKind } from "./demo-wire";
 
 export function rowVariantOf(row: DemoRow): RowVariant {
   if (row.rowType === "member") return row.containment === "rejected" ? "rejected-member" : "person-member";
@@ -39,13 +43,6 @@ export function rowVariantOf(row: DemoRow): RowVariant {
   if (row.subjectKind === "file") return "document-run";
   if (row.subjectKind === "catalog") return "catalog-run";
   return "person-run";
-}
-
-export function panelKindOf(row: DemoRow): PanelKind {
-  if (row.rowType === "member") return "member";
-  if (row.rowType === "group") return "group";
-  if (row.records) return "review";
-  return "run";
 }
 
 export interface WorkflowUse {
@@ -240,7 +237,7 @@ export const ROW_VARIANTS: RowVariantSpec[] = [
 // ---------------------------------------------------------------------------
 
 export interface PanelKindSpec {
-  key: PanelKind;
+  key: PanelKindKey;
   name: string;
   forRows: string;
   tabs: string[];
@@ -384,7 +381,7 @@ export function rowVariantSpec(row: DemoRow): RowVariantSpec {
 }
 
 export function panelKindSpec(row: DemoRow): PanelKindSpec {
-  const key = panelKindOf(row);
+  const key = panelKind(row);
   return PANEL_KINDS.find((p) => p.key === key) ?? PANEL_KINDS[0];
 }
 

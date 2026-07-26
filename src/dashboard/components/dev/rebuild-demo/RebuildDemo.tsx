@@ -3,6 +3,9 @@ import { Keyboard } from "lucide-react";
 import { DemoLogPanel, tabsFor, type DemoTab } from "./DemoLogPanel";
 import { computeVisibleIds, DemoQueue, type DemoFilter, type DemoQueueState, type DemoView } from "./DemoQueue";
 import { DemoCatalogView } from "./DemoCatalogView";
+import { CommandResultFeed, ConfirmCommandDialog, type PendingCommand } from "./DemoActions";
+import { submitDemoCommand, type DemoCommandResult } from "./demo-commands";
+import type { ActionDescriptorWire } from "./demo-wire";
 import {
   ALL_WORKFLOWS,
   countRows,
@@ -16,6 +19,7 @@ import {
 import {
   ATTENTION_STATUSES,
   DEMO_ROWS,
+  type DemoRow,
   densityRung,
   effectiveStatus,
   groupNeedsExpanding,
@@ -60,6 +64,14 @@ export function RebuildDemo() {
   );
   const [tick, setTick] = useState(0);
 
+  // ---- command state -----------------------------------------------------
+  // Results are kept, never collapsed: a conflict and a rejection are outcomes
+  // the operator has to SEE, and a partial vector may never read as "Done".
+  const [results, setResults] = useState<DemoCommandResult[]>([]);
+  const [pending, setPending] = useState<PendingCommand | null>(null);
+  // rows the operator force-refreshed after a conflict — the new CAS token
+  const [refreshedVersions, setRefreshedVersions] = useState<ReadonlyMap<string, number>>(() => new Map());
+
   // live heartbeat — elapsed timers + the running row's scripted stream
   useEffect(() => {
     const id = window.setInterval(() => setTick((t) => t + 1), 1000);
@@ -71,6 +83,43 @@ export function RebuildDemo() {
     setSelectedId(id);
     setTab(null); // state-driven default re-applies per row
   }, []);
+
+  const dispatchCommand = useCallback(
+    (row: DemoRow, action: ActionDescriptorWire) => {
+      const result = submitDemoCommand(row, action, { knownVersion: refreshedVersions.get(row.id) ?? action.expectedVersion, tick });
+      setResults((prev) => [result, ...prev].slice(0, 4));
+    },
+    [refreshedVersions, tick],
+  );
+
+  /**
+   * The ONE entry point for every control in the demo. Navigation moves the
+   * view; a command with server-authored confirm copy asks first; everything
+   * else goes straight to the mock service. Note what is NOT here: no status
+   * check, no per-button special case. The descriptor decides.
+   */
+  const runAction = useCallback(
+    (row: DemoRow, action: ActionDescriptorWire) => {
+      if (action.kind === "navigation") {
+        if (action.navigate?.kind === "drill") setView({ kind: "drill", groupId: row.id });
+        else if (action.navigate?.kind === "panel" && action.navigate.workflow && action.navigate.runId) {
+          setActiveWorkflow(action.navigate.workflow);
+          setFilter("all");
+          setView({ kind: "queue" });
+          select(action.navigate.runId);
+        } else select(row.id);
+        return;
+      }
+      // D16 keeps group cancel exempt from confirmation by construction: the
+      // cancel-tree descriptor carries no `confirm`, so it lands here directly.
+      if (action.confirm) {
+        setPending({ row, action });
+        return;
+      }
+      dispatchCommand(row, action);
+    },
+    [dispatchCommand, select],
+  );
 
   // ONE scoped row set. The rail badge, the Status Bar and the queue are all
   // computed from this, through `countRows`.
@@ -96,6 +145,7 @@ export function RebuildDemo() {
   const handlers = useMemo(
     () => ({
       onSelect: select,
+      onAction: runAction,
       onFilter: setFilter,
       onDrillIn: (groupId: string) => setView({ kind: "drill", groupId }),
       onBack: () => setView({ kind: "queue" }),
@@ -108,7 +158,7 @@ export function RebuildDemo() {
           return next;
         }),
     }),
-    [select, openPanel],
+    [select, openPanel, runAction],
   );
 
   const toggleChecked = useCallback((id: string) => {
@@ -240,6 +290,18 @@ export function RebuildDemo() {
 
             <DemoStatusBar counts={counts} active={filter} onSelect={setFilter} />
 
+            {/* applied · conflict · rejected — all three, side by side, never
+                collapsed into a single "Done" */}
+            <CommandResultFeed
+              results={results}
+              onDismiss={(id) => setResults((prev) => prev.filter((r) => r.id !== id))}
+              onRefreshRow={(rowId, serverVersion) => {
+                setRefreshedVersions((prev) => new Map(prev).set(rowId, serverVersion));
+                setResults((prev) => prev.filter((r) => r.rowId !== rowId));
+                select(rowId);
+              }}
+            />
+
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 min-[1180px]:grid-cols-[470px_minmax(0,1fr)]">
               <DemoQueue rows={scopedRows} state={state} handlers={handlers} />
               <DemoLogPanel
@@ -250,6 +312,7 @@ export function RebuildDemo() {
                 onOpenPanel={openPanel}
                 checkedIds={checkedIds}
                 onToggleChecked={toggleChecked}
+                onAction={runAction}
                 tick={tick}
                 liveCount={liveCount}
               />
@@ -259,6 +322,17 @@ export function RebuildDemo() {
       )}
 
       <DemoSessionPanel tick={tick} />
+
+      {/* Destructive commands ask first — with the SERVER's own description of
+          the blast radius. Group cancel is deliberately not in this flow. */}
+      <ConfirmCommandDialog
+        pending={pending}
+        onCancel={() => setPending(null)}
+        onConfirm={(p) => {
+          setPending(null);
+          dispatchCommand(p.row, p.action);
+        }}
+      />
     </div>
   );
 }

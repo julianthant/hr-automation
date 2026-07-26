@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DEMO_ROWS, effectiveStatus, fmtElapsed, type DemoRow } from "./demo-data";
+import { DEMO_DAY, DEMO_WORKFLOW_LIST, fmtDayLabel, type DemoWorkflowCategory } from "./demo-wire";
 import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
 
 /**
@@ -155,7 +156,9 @@ export function DemoTopBar({
         </button>
         <button type="button" onClick={NOOP} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring">
           <Calendar aria-hidden className="size-3 text-muted-foreground" />
-          Sat, Jul 25
+          {/* the SAME day the rows carry — the top bar and the queue cannot
+              disagree about what "today" is, because there is one date */}
+          {fmtDayLabel(`${DEMO_DAY}T12:00:00`)}
         </button>
         <button type="button" aria-label="Next day" onClick={NOOP} className="rounded-md p-1 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
           <ChevronRight aria-hidden className="size-3.5" />
@@ -186,37 +189,26 @@ export function DemoTopBar({
 // Workflow Panel (left rail)
 // ---------------------------------------------------------------------------
 
-const RAIL_GROUPS: { label: string; entries: { label: string; note?: string }[] }[] = [
-  {
-    label: "People",
-    entries: [
-      { label: "Separations" },
-      { label: "Onboarding" },
-      { label: "Person Lookup" },
-      {
-        label: "Person Match",
-        // Deliberately kept at zero. It has no callers today, but it is a real
-        // workflow that can be run on its own, and an entry that disappears
-        // when idle teaches the operator that the rail is not the whole system.
-        note: "No runs today. Kept visible on purpose — a workflow that vanishes when idle is a workflow you stop trusting the rail about.",
-      },
-      { label: "Work-Study" },
-      { label: "Kronos Pay Rule" },
-    ],
-  },
-  {
-    label: "Documents",
-    entries: [
-      { label: "OCR" },
-      { label: "Oath Signature" },
-      { label: "Oath Upload" },
-      { label: "Emergency Contact" },
-      { label: "OnBase" },
-      { label: "I-9 Check" },
-    ],
-  },
-  { label: "Data", entries: [{ label: "CRM Doc Download" }, { label: "Kronos Reports" }] },
-];
+/**
+ * Per-entry copy the registry cannot carry. The rail ITSELF is not a hand list:
+ * it is the workflow registry (`/api/workflow-definitions` in production)
+ * grouped by each descriptor's own category, so a workflow the backend serves
+ * can never be missing from the rail.
+ */
+const RAIL_NOTES: Partial<Record<string, string>> = {
+  // Deliberately kept at zero. It has no callers today, but it is a real
+  // workflow that can be run on its own, and an entry that disappears when idle
+  // teaches the operator that the rail is not the whole system.
+  "Person Match":
+    "No runs today. Kept visible on purpose — a workflow that vanishes when idle is a workflow you stop trusting the rail about.",
+};
+
+const RAIL_GROUPS: { label: DemoWorkflowCategory; entries: { label: string; note?: string }[] }[] = (
+  ["People", "Documents", "Data"] as DemoWorkflowCategory[]
+).map((category) => ({
+  label: category,
+  entries: DEMO_WORKFLOW_LIST.filter((w) => w.category === category).map((w) => ({ label: w.label, note: RAIL_NOTES[w.label] })),
+}));
 
 export function DemoWorkflowPanel({ active, onActive }: { active: string; onActive: (label: string) => void }) {
   // Same counting path as the Status Bar and the queue. Not a second tally.

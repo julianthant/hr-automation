@@ -34,6 +34,8 @@ import { DemoStatusBar, countRows, topLevelRows } from "./rebuild-demo/DemoShell
 import { CONTAINMENT_KINDS, PANEL_KINDS, ROLLUP_STEPS, ROW_VARIANTS } from "./rebuild-demo/demo-catalog";
 import { PROPOSED_STATUS, StatusBadge, type ProposedStatus } from "./rebuild-demo/demo-status";
 import { DEMO_ROWS, groupCounts } from "./rebuild-demo/demo-data";
+import { CommandResultFeed } from "./rebuild-demo/DemoActions";
+import { submitDemoCommand, type DemoCommandResult } from "./rebuild-demo/demo-commands";
 
 /**
  * DEV-ONLY — `?view=ui-gallery`.
@@ -61,8 +63,14 @@ const STATIC_STATE: DemoQueueState = {
   tick: 0,
 };
 
+/**
+ * The gallery shows specimens, not a working app: controls render (from each
+ * row's own `actions[]`, so the button set is the real one) but do nothing.
+ * `?view=rebuild-demo` is where commands actually run.
+ */
 const STATIC_HANDLERS: DemoQueueHandlers = {
   onSelect: NOOP,
+  onAction: NOOP,
   onFilter: NOOP,
   onDrillIn: NOOP,
   onBack: NOOP,
@@ -312,6 +320,7 @@ function LogPanelsTab() {
                 tab={null}
                 onTab={NOOP}
                 onSelect={NOOP}
+                onAction={NOOP}
                 onOpenPanel={NOOP}
                 checkedIds={new Set()}
                 onToggleChecked={NOOP}
@@ -1057,9 +1066,84 @@ function ControlsTab() {
           <StatusBadge status="waiting" age="10m" />
         </Chip>
       </div>
+
+      <Section
+        title="Commands — what a row OFFERS, and what the server answers"
+        sub="Controls are not decided by the component. Each row arrives with an actions[] set and the UI renders that; a command the surface did not send has no button. Submitting one returns exactly one of three states, and all three have to be visible."
+      />
+      <div className="col-span-full">
+        <Specimen
+          name="ActionDescriptorWire"
+          kind="served per row"
+          what="Every control on a row, as the backend sends it: a stable key, a command or a navigation, an intent, the placements it renders at, the CAS expectedVersion it carries, and — for anything destructive — the confirmation copy. The server writes that copy because only the server knows the blast radius."
+          where="deriveActions() in demo-wire.ts — one policy, run once at projection"
+        >
+          <ActionDescriptorTable rowId="oath-summer" />
+        </Specimen>
+      </div>
+      <div className="col-span-full">
+        <Specimen
+          name="Command results"
+          kind="applied · conflict · rejected"
+          what="A UI that only ever shows success teaches the operator that clicking works. Conflict means the surface they acted on was stale and NOTHING happened — the cure is a forced refresh, not a second click. Rejected means the command is not legal in this row's state, with a typed code. Both are reachable by click in ?view=rebuild-demo."
+          where="submitDemoCommand() — these cards are the real service's real output"
+        >
+          <CommandResultFeed results={SAMPLE_RESULTS} onDismiss={NOOP} onRefreshRow={NOOP} />
+        </Specimen>
+      </div>
     </div>
   );
 }
+
+/** the descriptors one real row actually ships, laid out as the wire sends them */
+function ActionDescriptorTable({ rowId }: { rowId: string }) {
+  const row = DEMO_ROWS[rowId];
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[620px] text-left text-[11px]">
+        <thead className="text-[9.5px] uppercase tracking-wider text-muted-foreground">
+          <tr>
+            <th className="py-1 pr-3 font-semibold">key</th>
+            <th className="py-1 pr-3 font-semibold">kind / command</th>
+            <th className="py-1 pr-3 font-semibold">placement</th>
+            <th className="py-1 pr-3 font-semibold">expectedVersion</th>
+            <th className="py-1 font-semibold">confirm</th>
+          </tr>
+        </thead>
+        <tbody className="font-mono text-muted-foreground">
+          {row.actions.map((a) => (
+            <tr key={a.key} className="border-t border-border/50">
+              <td className="py-1 pr-3 text-foreground">{a.key}</td>
+              <td className="py-1 pr-3">{a.kind === "command" ? a.command : "navigation"}</td>
+              <td className="py-1 pr-3">{a.placement.join(" · ")}</td>
+              <td className="py-1 pr-3 tabular-nums">{a.expectedVersion ?? "—"}</td>
+              <td className="py-1">{a.confirm ? a.confirm.confirmLabel : "fires immediately"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Produced by the REAL command service against REAL rows, so the copy in the
+ * catalog cannot drift from the copy the operator sees.
+ *  - applied  — deleting a finished onboarding run
+ *  - conflict — bumping ws-priya, whose surface was projected at v3 (server v5)
+ *  - rejected — retrying the oath-batch packet, whose signers are already signed
+ */
+const SAMPLE_RESULTS: DemoCommandResult[] = [
+  ["onb-jordan", "hide"],
+  ["ws-priya", "bump"],
+  ["oath-batch", "retry"],
+]
+  .map(([rowId, key]) => {
+    const row = DEMO_ROWS[rowId];
+    const action = row.actions.find((a) => a.key === key);
+    return action ? submitDemoCommand(row, action) : null;
+  })
+  .filter((r): r is DemoCommandResult => r !== null);
 
 // ===========================================================================
 // Shell
