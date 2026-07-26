@@ -4,6 +4,12 @@ import { DemoLogPanel, tabsFor, type DemoTab } from "./DemoLogPanel";
 import { computeVisibleIds, DemoQueue, type DemoFilter, type DemoQueueState, type DemoView } from "./DemoQueue";
 import { DemoCatalogView } from "./DemoCatalogView";
 import { CommandResultFeed, ConfirmCommandDialog, type PendingCommand } from "./DemoActions";
+/* ── feature/runstart ──────────────────────────────────────────────────────
+   Tier 3a: the run-START surfaces (Run Modal · Input Run Panel · spreadsheet
+   intake). Self-contained — everything it needs lives in DemoRunStart*.tsx,
+   demo-runstart-wire.ts and demo-data-intake.ts.
+   ──────────────────────────────────────────────────────────────────────── */
+import { DemoRunStartBar } from "./DemoRunStart";
 import { submitDemoCommand, type DemoCommandResult } from "./demo-commands";
 import type { ActionDescriptorWire } from "./demo-wire";
 import {
@@ -289,6 +295,10 @@ export function RebuildDemo() {
             </div>
 
             <DemoStatusBar counts={counts} active={filter} onSelect={setFilter} />
+
+            {/* ── feature/runstart: the run-START half of the product ── */}
+            <DemoRunStartBar />
+            {/* ── end feature/runstart ── */}
 
             {/* applied · conflict · rejected — all three, side by side, never
                 collapsed into a single "Done" */}
