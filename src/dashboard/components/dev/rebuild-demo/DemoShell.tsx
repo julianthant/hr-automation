@@ -2,13 +2,9 @@ import { useMemo, useState, type ComponentType, type SVGProps } from "react";
 import {
   Activity,
   AlertTriangle,
-  Bell,
-  Calendar,
   Camera,
   CheckCircle2,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   ChevronUp,
   CircleHelp,
   Eye,
@@ -17,13 +13,14 @@ import {
   Pause,
   Plus,
   RotateCw,
-  Search,
   Settings,
   ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { DEMO_ROWS, effectiveStatus, fmtElapsed, type DemoRow } from "./demo-data";
-import { DEMO_DAY, DEMO_WORKFLOW_LIST, fmtDayLabel, type DemoWorkflowCategory } from "./demo-wire";
+import { effectiveStatus, fmtElapsed, type DemoRow } from "./demo-data";
+import { DEMO_WORKFLOW_LIST, type DemoWorkflowCategory } from "./demo-wire";
+import { DEMO_DAY, topLevelRowsForDay } from "./demo-days";
+import { DemoDateNav, DemoNotificationBell, DemoSearchControl, type DemoNavigateTo } from "./DemoTopBarSurfaces";
 import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
 
 /**
@@ -60,9 +57,14 @@ export type StatusBucket = "all" | "needsYou" | ProposedStatus;
 
 export const ALL_WORKFLOWS = "All";
 
-/** every top-level row (members belong to their group, never to the counts) */
-export function topLevelRows(): DemoRow[] {
-  return Object.values(DEMO_ROWS).filter((r) => r.rowType !== "member");
+/**
+ * Every top-level row ON A DAY (members belong to their group, never to the
+ * counts). The day is a parameter rather than a constant because the queue is
+ * day-partitioned: moving the date must move the corpus every surface counts,
+ * or the badges and the rows start disagreeing again.
+ */
+export function topLevelRows(day: string = DEMO_DAY): DemoRow[] {
+  return topLevelRowsForDay(day);
 }
 
 export function rowsForWorkflow(rows: DemoRow[], workflow: string): DemoRow[] {
@@ -105,11 +107,19 @@ export function countRows(rows: DemoRow[]): Record<StatusBucket, number> {
 export function DemoTopBar({
   view,
   onView,
-  attention,
+  day,
+  onDay,
+  onNavigate,
+  tick,
 }: {
   view: "queue" | "catalog";
   onView: (v: "queue" | "catalog") => void;
-  attention: number;
+  /** the day partition the whole app is reading */
+  day: string;
+  onDay: (day: string) => void;
+  /** jump to a row from search or a notification link — panel + row + its day */
+  onNavigate: DemoNavigateTo;
+  tick: number;
 }) {
   return (
     <header className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-card px-3">
@@ -140,40 +150,14 @@ export function DemoTopBar({
         ))}
       </div>
 
-      <label className="ml-auto flex h-7 min-w-0 max-w-[220px] flex-1 items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2">
-        <Search aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-        <span className="sr-only">Search runs</span>
-        <input
-          placeholder="Search people, files, trace ids…"
-          className="min-w-0 flex-1 bg-transparent text-[11.5px] text-foreground outline-none placeholder:text-muted-foreground"
-        />
-        <kbd className="shrink-0 rounded border border-border bg-card px-1 font-mono text-[9px] text-muted-foreground">/</kbd>
-      </label>
+      {/* Search, the date navigator and the bell are real surfaces — see
+          `DemoTopBarSurfaces`. The date here IS the day the queue reads. */}
+      <DemoSearchControl onNavigate={onNavigate} />
+
+      <DemoDateNav day={day} onDay={onDay} />
 
       <span className="flex shrink-0 items-center gap-0.5">
-        <button type="button" aria-label="Previous day" onClick={NOOP} className="rounded-md p-1 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-          <ChevronLeft aria-hidden className="size-3.5" />
-        </button>
-        <button type="button" onClick={NOOP} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring">
-          <Calendar aria-hidden className="size-3 text-muted-foreground" />
-          {/* the SAME day the rows carry — the top bar and the queue cannot
-              disagree about what "today" is, because there is one date */}
-          {fmtDayLabel(`${DEMO_DAY}T12:00:00`)}
-        </button>
-        <button type="button" aria-label="Next day" onClick={NOOP} className="rounded-md p-1 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-          <ChevronRight aria-hidden className="size-3.5" />
-        </button>
-      </span>
-
-      <span className="flex shrink-0 items-center gap-0.5">
-        <button type="button" aria-label={`Notifications — ${attention} need you`} onClick={NOOP} className="relative rounded-md p-1.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-          <Bell aria-hidden className="size-3.5" />
-          {attention > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex size-3.5 items-center justify-center rounded-full bg-warning text-[8.5px] font-bold text-background">
-              {attention}
-            </span>
-          )}
-        </button>
+        <DemoNotificationBell onNavigate={onNavigate} tick={tick} />
         <button type="button" aria-label="Shortcuts" onClick={NOOP} className="rounded-md p-1.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
           <HelpCircle aria-hidden className="size-3.5" />
         </button>
@@ -210,10 +194,19 @@ const RAIL_GROUPS: { label: DemoWorkflowCategory; entries: { label: string; note
   entries: DEMO_WORKFLOW_LIST.filter((w) => w.category === category).map((w) => ({ label: w.label, note: RAIL_NOTES[w.label] })),
 }));
 
-export function DemoWorkflowPanel({ active, onActive }: { active: string; onActive: (label: string) => void }) {
-  // Same counting path as the Status Bar and the queue. Not a second tally.
+export function DemoWorkflowPanel({
+  active,
+  onActive,
+  rows,
+}: {
+  active: string;
+  onActive: (label: string) => void;
+  /** the day's corpus — the SAME array the Status Bar and the queue read */
+  rows: DemoRow[];
+}) {
+  // Same counting path as the Status Bar and the queue, over the same rows.
+  // Not a second tally, and not a second corpus.
   const counts = useMemo(() => {
-    const rows = topLevelRows();
     const map = new Map<string, { total: number; queued: number }>();
     for (const g of RAIL_GROUPS) {
       for (const e of g.entries) {
@@ -222,8 +215,8 @@ export function DemoWorkflowPanel({ active, onActive }: { active: string; onActi
       }
     }
     return map;
-  }, []);
-  const allCount = useMemo(() => countRows(topLevelRows()).all, []);
+  }, [rows]);
+  const allCount = useMemo(() => countRows(rows).all, [rows]);
 
   return (
     <nav aria-label="Workflow Panel" className="flex w-[200px] shrink-0 flex-col overflow-y-auto bg-card py-3">
