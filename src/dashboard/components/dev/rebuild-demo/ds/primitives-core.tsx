@@ -210,7 +210,7 @@ export const IconButton = forwardRef<HTMLButtonElement, DsIconButtonProps>(
 
 const badgeVariants = cva(
   cn(
-    "inline-flex shrink-0 items-center border",
+    "inline-flex w-fit shrink-0 items-center border",
     dsRadius.sm,
     dsText.micro,
     "h-[var(--ds-h-xs)] px-[var(--ds-space-snug)] gap-[var(--ds-space-tight)] font-medium",
@@ -334,7 +334,7 @@ export function Chip({
     </>
   );
   const shell = cn(
-    "inline-flex max-w-full items-center border",
+    "inline-flex w-fit max-w-full items-center border",
     dsRadius.sm,
     dsText.meta,
     "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",

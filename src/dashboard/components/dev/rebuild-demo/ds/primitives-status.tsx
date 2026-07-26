@@ -240,7 +240,7 @@ export function StatusPill({
     <span
       title={spec.meaning}
       className={cn(
-        "inline-flex shrink-0 items-center border",
+        "inline-flex w-fit shrink-0 items-center border",
         dsRadius.sm,
         dsText.meta,
         PILL_SIZE[size],
