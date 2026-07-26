@@ -232,7 +232,11 @@
      FOCUS — one ring, everywhere, always visible. A 2px outline (not a
      box-shadow ring) so it survives forced-colors and follows the radius.
      --------------------------------------------------------------------- */
-  --ds-focus-ring: var(--ring);
+  /* Near-white, not the theme's mid-grey --ring: this is a keyboard-first
+     tool (j/k walks the queue), so the ring must be findable at a glance in a
+     list of eighty rows, and must clear WCAG 2.2's 3:1 focus-appearance floor
+     against every surface in the ladder. */
+  --ds-focus-ring: color-mix(in srgb, var(--foreground) 85%, transparent);
   --ds-focus-ring-w: 2px;
   --ds-focus-ring-offset: 1px;
 
