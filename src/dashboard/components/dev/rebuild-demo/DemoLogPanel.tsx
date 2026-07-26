@@ -36,6 +36,7 @@ import { IconActionButton } from "@/components/shared/IconActionButton";
 import { StatusBadge, type ProposedStatus } from "./demo-status";
 import { panelKindOf, panelKindSpec, rowVariantSpec } from "./demo-catalog";
 import { BannerActions, OutcomeActionButton, ParkResolutions, type DemoActionHandler } from "./DemoActions";
+import { RunIdentityStrip, RunSelector } from "./DemoRunIdentity";
 import { fmtClock, tabsFor as tabsForKind, type DemoTab } from "./demo-wire";
 import {
   DEMO_ROWS,
@@ -1536,6 +1537,12 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
         <OutcomeActionButton row={row} onAction={onAction} className="ml-auto" />
       </div>
 
+
+      {/* WHICH run is this: actor, priority, descriptor + app version, resolved
+          instance, dry-run, preset. A member inherits all of it from its group,
+          so the strip stays on the rows that own those facts. */}
+      {!isMember && <RunIdentityStrip row={row} />}
+      <RunSelector row={row} />
 
       {/* the gate is pinned above the tabs — visible from every tab, on every
           panel kind, instead of hiding inside a Review tab most rows lack */}

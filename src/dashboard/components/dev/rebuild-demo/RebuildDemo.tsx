@@ -4,6 +4,7 @@ import { DemoLogPanel, tabsFor, type DemoTab } from "./DemoLogPanel";
 import { computeVisibleIds, DemoQueue, type DemoFilter, type DemoQueueState, type DemoView } from "./DemoQueue";
 import { DemoCatalogView } from "./DemoCatalogView";
 import { CommandResultFeed, ConfirmCommandDialog, type PendingCommand } from "./DemoActions";
+import { RenameRunDialog, type PendingRename } from "./DemoRunIdentity";
 import { submitDemoCommand, type DemoCommandResult } from "./demo-commands";
 import type { ActionDescriptorWire } from "./demo-wire";
 import {
@@ -64,6 +65,28 @@ export function RebuildDemo() {
   );
   const [tick, setTick] = useState(0);
 
+  /**
+   * Operator-given names. The demo's mock server would persist `displayName`
+   * on the row; here the projection is a module constant, so the rename is
+   * applied as an OVERLAY at read time — which is also why the overlay patches
+   * the rename descriptor's own label. The client still renders only what the
+   * (mock) server sent; this function IS that server.
+   */
+  const [renames, setRenames] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [pendingRename, setPendingRename] = useState<PendingRename | null>(null);
+  const withIdentity = useCallback(
+    (r: DemoRow): DemoRow => {
+      const named = renames.get(r.id);
+      if (!named) return r;
+      return {
+        ...r,
+        displayName: named,
+        actions: r.actions.map((a) => (a.command === "rename" ? { ...a, label: "Rename run…" } : a)),
+      };
+    },
+    [renames],
+  );
+
   // ---- command state -----------------------------------------------------
   // Results are kept, never collapsed: a conflict and a rejection are outcomes
   // the operator has to SEE, and a partial vector may never read as "Done".
@@ -110,6 +133,12 @@ export function RebuildDemo() {
         } else select(row.id);
         return;
       }
+      // Rename is the one command that asks for a VALUE rather than a
+      // confirmation, so it opens its own dialog before it is submitted.
+      if (action.command === "rename") {
+        setPendingRename({ row, action });
+        return;
+      }
       // D16 keeps group cancel exempt from confirmation by construction: the
       // cancel-tree descriptor carries no `confirm`, so it lands here directly.
       if (action.confirm) {
@@ -123,7 +152,10 @@ export function RebuildDemo() {
 
   // ONE scoped row set. The rail badge, the Status Bar and the queue are all
   // computed from this, through `countRows`.
-  const scopedRows = useMemo(() => rowsForWorkflow(topLevelRows(), activeWorkflow), [activeWorkflow]);
+  const scopedRows = useMemo(
+    () => rowsForWorkflow(topLevelRows(), activeWorkflow).map(withIdentity),
+    [activeWorkflow, withIdentity],
+  );
   const counts = useMemo(() => countRows(scopedRows), [scopedRows]);
 
   const state: DemoQueueState = useMemo(
@@ -238,7 +270,7 @@ export function RebuildDemo() {
     el?.scrollIntoView({ block: "nearest" });
   }, [selectedId]);
 
-  const row = DEMO_ROWS[selectedId] ?? DEMO_ROWS["sep-maria"];
+  const row = withIdentity(DEMO_ROWS[selectedId] ?? DEMO_ROWS["sep-maria"]);
   const allCounts = useMemo(() => countRows(topLevelRows()), []);
 
   const openExample = useCallback(
@@ -331,6 +363,20 @@ export function RebuildDemo() {
         onConfirm={(p) => {
           setPending(null);
           dispatchCommand(p.row, p.action);
+        }}
+      />
+
+      {/* Rename asks for a value, then goes through the SAME command service as
+          everything else — so a stale view renaming a row still comes back a
+          conflict, exactly like a retry would. */}
+      <RenameRunDialog
+        pending={pendingRename}
+        onCancel={() => setPendingRename(null)}
+        onConfirm={(p, name) => {
+          setPendingRename(null);
+          setRenames((prev) => new Map(prev).set(p.row.id, name));
+          dispatchCommand({ ...p.row, displayName: name }, p.action);
+          select(p.row.id);
         }}
       />
     </div>
