@@ -838,6 +838,47 @@ queued → claimed → validating → running(node i) ────────�
   └─ requeue (bump / reassign / recovery)          crash-mid-write → recovery probe → done|retry|PARK (§5.6)
 ```
 
+The same machine as a state diagram — parks are first-class states, not sentinel statuses:
+
+```mermaid
+stateDiagram-v2
+  [*] --> queued
+  queued --> claimed : worker claims
+  claimed --> validating
+  validating --> failed : entry validation fails<br/>(before any browser)
+  validating --> running
+
+  running --> parked_gate : gate node reached
+  parked_gate --> running : gate resolved<br/>(typed result, D67)
+  parked_gate --> cancelled : operator cancels
+
+  running --> parked_write : crash mid-write<br/>or unprovable outcome
+  parked_write --> running : proof attached / confirmed-absent<br/>(generation-locked, D44)
+  parked_write --> done : confirmed-present proof<br/>parses + atomic commit
+
+  running --> done
+  running --> failed
+  running --> cancelled
+  running --> discarded
+  running --> interrupted
+  interrupted --> queued : requeue<br/>(bump / reassign / recovery)
+
+  done --> [*]
+  failed --> [*]
+  cancelled --> [*]
+  discarded --> [*]
+
+  note right of parked_gate
+    Holds NO browser session,
+    no page, no worker.
+    Parking for days is free.
+  end note
+  note right of parked_write
+    No generic Done/Retry.
+    Only typed resolutions.
+  end note
+```
+
 **Park semantics.** Reaching a gate node, the engine:
 
 1. commits a checkpoint barrier (all completed step outputs durable — §5.7 ordering invariant);
