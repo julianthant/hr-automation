@@ -512,8 +512,12 @@ export function rollupStatus(memberStatuses: ProposedStatus[], rejected: number,
  * This is the seam that makes the demo honest: if a component wants something
  * that cannot be computed here from served facts, the contract is missing a
  * field and we find out now instead of in production.
+ *
+ * Exported so the prior-day corpus (`demo-days.ts`) projects through the SAME
+ * function: a row from Wednesday and a row from today are the same shape,
+ * derived the same way, or date navigation would be showing a second model.
  */
-function projectRow(spec: DemoRowSpec, rawById: Map<string, DemoRowSpec>): DemoRow {
+export function projectRow(spec: DemoRowSpec, rawById: Map<string, DemoRowSpec>): DemoRow {
   const workflow = DEMO_WORKFLOWS[spec.workflowId];
   const version = spec.version ?? 1;
   const projectedVersion = spec.projectedVersion ?? version;

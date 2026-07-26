@@ -29,6 +29,7 @@ import { StatusCounts } from "@/components/queue-panel/StatusCounts";
 import { PROPOSED_STATUS, StatusBadge, statusText, type ProposedStatus } from "./demo-status";
 import { FooterActions, OutcomeActionButton, RowActionMenu, type DemoActionHandler } from "./DemoActions";
 import { rowInBucket, type StatusBucket } from "./DemoShell";
+import { DEMO_DAY, dayLabel } from "./demo-days";
 import {
   ATTENTION_STATUSES,
   bandsFor,
@@ -907,14 +908,18 @@ export function DemoQueue({
   state,
   handlers,
   workflowLabel,
+  day = DEMO_DAY,
 }: {
   rows: DemoRow[];
   state: DemoQueueState;
   handlers: DemoQueueHandlers;
   /** the Workflow Panel entry this queue is scoped to — the empty state says so */
   workflowLabel: string;
+  /** the day partition these rows came from — the header never invents its own */
+  day?: string;
 }) {
   const inView = rows.filter((r) => rowInBucket(r, state.filter));
+  const isToday = day === DEMO_DAY;
   const bands = bandsFor(inView);
   const finished = bands.find((b) => b.key === "finished")?.rows ?? [];
   const digest = {
@@ -935,7 +940,7 @@ export function DemoQueue({
   return (
     <section aria-label="Queue" className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2 text-[12px] text-muted-foreground">
-        <span className="text-[13px] font-semibold text-foreground">Queue</span>· Jul 25
+        <span className="text-[13px] font-semibold text-foreground">Queue</span>· {dayLabel(day)}
         <span className="ml-auto font-mono text-[10px]">{inView.length} runs</span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto pb-3">
@@ -970,7 +975,8 @@ export function DemoQueue({
                   band.key === "attention" ? "text-warning" : "text-muted-foreground",
                 )}
               >
-                {band.label}
+                {/* "Finished today" is only true on today's partition */}
+                {band.key === "finished" && !isToday ? "Finished" : band.label}
                 <span
                   className={cn(
                     "rounded-full border px-1.5 font-mono text-[10px] tabular-nums",
@@ -983,7 +989,7 @@ export function DemoQueue({
               </div>
               {band.key === "finished" && state.filter === "all" && (
                 <div className="mx-3 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-dashed border-border px-3 py-1.5 text-[11px] text-muted-foreground">
-                  <span className="font-semibold text-secondary-foreground">Today:</span>
+                  <span className="font-semibold text-secondary-foreground">{isToday ? "Today:" : `${dayLabel(day)}:`}</span>
                   <span>
                     <span className="font-semibold text-success">{digest.done}</span> verified
                   </span>
