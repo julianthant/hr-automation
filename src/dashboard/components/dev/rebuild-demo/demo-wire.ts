@@ -222,10 +222,16 @@ export type DemoCommandKey =
   | "resolve-gate"
   | "resolve-write-present"
   | "resolve-write-absent"
+  | "edit-checkpoint"
+  | "rerun-with-existing-data"
   | "rerun-with-different-input";
 
-/** where a descriptor renders. One descriptor can appear in more than one place. */
-export type ActionPlacement = "footer" | "banner" | "outcome" | "menu";
+/**
+ * Where a descriptor renders. One descriptor can appear in more than one place.
+ * `data` is the merged Data surface's own footer (D19c) — the same descriptor
+ * protocol as every other control, so the Save button is not a special case.
+ */
+export type ActionPlacement = "footer" | "banner" | "outcome" | "menu" | "data";
 
 export type ActionIntent = "primary" | "neutral" | "destructive" | "violet" | "success" | "info" | "warning";
 
@@ -263,6 +269,14 @@ export interface ActionDescriptorWire {
   confirm?: ActionConfirmWire;
   /** the typed resolution this gate option records (`resolve-gate` only) */
   resolution?: string;
+  /**
+   * The typed body of a command that carries one — a parked write's proof or
+   * evidence note, a checkpoint patch. The surface COLLECTS it (in a form the
+   * server's schema describes) and the command service PARSES it, so a bad
+   * proof comes back `rejected` from the same protocol as everything else
+   * rather than being validated only in the browser.
+   */
+  payload?: Record<string, string>;
   /** navigation kind only */
   navigate?: { kind: "self" | "panel" | "drill"; workflow?: string; runId?: string };
 }
@@ -440,6 +454,38 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
     case "doneWarnings":
       out.push(retry, hide);
       break;
+  }
+
+  // 3b. The merged Data surface's own controls (D19c). They are descriptors
+  //     like everything else, which is what keeps "Save" out of the client's
+  //     hands: a row whose checkpoint may not be edited simply is not sent one.
+  const reads = spec.data.filter((d) => d.dir === "read").length;
+  const live = ctx.status === "running" || ctx.status === "queued";
+  if (reads > 0 && !live) {
+    if (ctx.status !== "parked") {
+      out.push({
+        key: "save-checkpoint",
+        kind: "command",
+        command: "edit-checkpoint",
+        label: "Save corrections",
+        detail: "Writes your corrected values back to this run's checkpoint. Carries the generation your view was captured at.",
+        intent: "primary",
+        icon: "resolve",
+        placement: ["data"],
+        expectedVersion: v,
+      });
+    }
+    out.push({
+      key: "rerun-existing",
+      kind: "command",
+      command: "rerun-with-existing-data",
+      label: "Start a run from this data",
+      detail: "Enqueues a fresh run on the current workflow version using these values.",
+      intent: "neutral",
+      icon: "retry",
+      placement: ["data"],
+      expectedVersion: v,
+    });
   }
 
   // 4. The one thing to DO about this row — rendered in the queue subline and

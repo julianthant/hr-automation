@@ -25,9 +25,12 @@ import {
   rowsForWorkflow,
   topLevelRows,
 } from "./DemoShell";
+// Row lookups go through the ALL-DAYS map: a row selected from a prior day must
+// open exactly like a row from today.
+import { ALL_DEMO_ROWS as DEMO_ROWS, DEMO_DAY } from "./demo-days";
+import { ToastProvider } from "./demo-ui";
 import {
   ATTENTION_STATUSES,
-  DEMO_ROWS,
   type DemoRow,
   type DemoSortKey,
   densityRung,
@@ -55,6 +58,8 @@ export function RebuildDemo() {
   const [selectedId, setSelectedId] = useState("oath-summer");
   const [shellView, setShellView] = useState<DemoShellView>("queue");
   const [activeWorkflow, setActiveWorkflow] = useState(ALL_WORKFLOWS);
+  // the day partition every surface reads — the top bar's date IS this value
+  const [day, setDay] = useState(DEMO_DAY);
   const [view, setView] = useState<DemoView>({ kind: "queue" });
   const [filter, setFilter] = useState<DemoFilter>("all");
   // Groups default collapsed, but a group auto-expands when a member is stuck
@@ -123,9 +128,10 @@ export function RebuildDemo() {
   }, []);
 
   const dispatchCommand = useCallback(
-    (row: DemoRow, action: ActionDescriptorWire) => {
+    (row: DemoRow, action: ActionDescriptorWire): DemoCommandResult => {
       const result = submitDemoCommand(row, action, { knownVersion: refreshedVersions.get(row.id) ?? action.expectedVersion, tick });
       setResults((prev) => [result, ...prev].slice(0, 4));
+      return result;
     },
     [refreshedVersions, tick],
   );
@@ -137,7 +143,7 @@ export function RebuildDemo() {
    * check, no per-button special case. The descriptor decides.
    */
   const runAction = useCallback(
-    (row: DemoRow, action: ActionDescriptorWire) => {
+    (row: DemoRow, action: ActionDescriptorWire): DemoCommandResult | void => {
       if (action.kind === "navigation") {
         if (action.navigate?.kind === "drill") setView({ kind: "drill", groupId: row.id });
         else if (action.navigate?.kind === "panel" && action.navigate.workflow && action.navigate.runId) {
@@ -160,17 +166,17 @@ export function RebuildDemo() {
         setPending({ row, action });
         return;
       }
-      dispatchCommand(row, action);
+      return dispatchCommand(row, action);
     },
     [dispatchCommand, select],
   );
 
-  // ONE scoped row set. The rail badge, the Status Bar and the queue are all
-  // computed from this, through `countRows`.
-  const scopedRows = useMemo(
-    () => rowsForWorkflow(topLevelRows(), activeWorkflow).map(withIdentity),
-    [activeWorkflow, withIdentity],
-  );
+  // ONE scoped row set, for ONE day. The rail badge, the Status Bar and the
+  // queue are all computed from this, through `countRows` — so changing the
+  // date moves every count with the rows, never one without the other.
+  // Operator renames ride along as a read-time overlay.
+  const dayRows = useMemo(() => topLevelRows(day).map(withIdentity), [day, withIdentity]);
+  const scopedRows = useMemo(() => rowsForWorkflow(dayRows, activeWorkflow), [dayRows, activeWorkflow]);
   const counts = useMemo(() => countRows(scopedRows), [scopedRows]);
 
   const state: DemoQueueState = useMemo(
@@ -196,6 +202,32 @@ export function RebuildDemo() {
       select(id);
     },
     [select],
+  );
+
+  /**
+   * A link from search or a notification. It carries the row's DAY as well as
+   * its panel, because a row from Wednesday cannot be selected while the app is
+   * looking at Friday — the date has to move with the selection or the operator
+   * lands on an empty queue.
+   */
+  const navigateTo = useCallback(
+    (workflow: string, id: string, rowDay: string) => {
+      setDay(rowDay);
+      setShellView("queue");
+      openPanel(workflow, id);
+    },
+    [openPanel],
+  );
+
+  /** moving the date re-anchors the selection inside the new day's corpus */
+  const changeDay = useCallback(
+    (next: string) => {
+      setDay(next);
+      setView({ kind: "queue" });
+      const rows = topLevelRows(next);
+      if (!rows.some((r) => r.id === selectedId) && rows.length > 0) select(rows[0].id);
+    },
+    [select, selectedId],
   );
 
   const handlers = useMemo(
@@ -302,7 +334,6 @@ export function RebuildDemo() {
   }, [selectedId]);
 
   const row = withIdentity(DEMO_ROWS[selectedId] ?? DEMO_ROWS["sep-maria"]);
-  const allCounts = useMemo(() => countRows(topLevelRows()), []);
 
   const openExample = useCallback(
     (id: string) => {
@@ -310,14 +341,16 @@ export function RebuildDemo() {
       setActiveWorkflow(ALL_WORKFLOWS);
       setFilter("all");
       setView({ kind: "queue" });
+      setDay(DEMO_ROWS[id]?.enqueuedAt.slice(0, 10) ?? DEMO_DAY);
       select(id);
     },
     [select],
   );
 
   return (
+    <ToastProvider>
     <div className="flex h-screen flex-col bg-background text-foreground">
-      <DemoTopBar view={shellView} onView={setShellView} attention={allCounts.needsYou} />
+      <DemoTopBar view={shellView} onView={setShellView} day={day} onDay={changeDay} onNavigate={navigateTo} tick={tick} />
 
       {shellView === "kit" ? (
         /* every primitive in every state — the thing a builder skims BEFORE
@@ -329,7 +362,7 @@ export function RebuildDemo() {
         <DemoCatalogView onOpenExample={openExample} />
       ) : (
         <div className="flex min-h-0 flex-1">
-          <DemoWorkflowPanel active={activeWorkflow} onActive={changeWorkflow} />
+          <DemoWorkflowPanel active={activeWorkflow} onActive={changeWorkflow} rows={dayRows} />
 
           <main className="flex min-h-0 flex-1 flex-col">
             <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1">
@@ -404,7 +437,9 @@ export function RebuildDemo() {
                 state={state}
                 handlers={handlers}
                 workflowLabel={activeWorkflow === ALL_WORKFLOWS ? "" : activeWorkflow}
+                day={day}
               />
+
               <DemoLogPanel
                 row={row}
                 tab={tab}
@@ -449,5 +484,6 @@ export function RebuildDemo() {
         }}
       />
     </div>
+    </ToastProvider>
   );
 }
