@@ -88,6 +88,10 @@ const STATEMENT_CATCH_ALLOWLIST: Record<string, { count: number; reason: string 
     count: 11,
     reason: "Browser-health probes (isClosed/evaluate-liveness/screenshot/scroll-plan) — every one is inline-commented 'best-effort' and a thrown probe already means the browser/page is in a degraded state the caller treats as unhealthy.",
   },
+  "src/dashboard/components/dev/rebuild-demo/DemoContextRail.tsx": {
+    count: 1,
+    reason: "Dev-only demo, cosmetic UI preference (context rail open/closed) read from localStorage — a blocked store IS the documented 'no stored preference' state, whose defined value is open. No HR data, no transaction. Mirrors the same catch in DemoShell.tsx's readStoredPanelMode.",
+  },
   "src/dashboard/components/hooks/usePostAction.ts": {
     count: 1,
     reason: "Deliberate fail-loud shape: body defaults to undefined so the immediately-following `bodyOk = body && ok === true` check treats a malformed response as failure, never success (see inline 'Fail loud' comment).",

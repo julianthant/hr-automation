@@ -66,7 +66,7 @@ export function RunIdentityStrip({ row }: { row: DemoRow }) {
   useEffect(() => setPresetOpen(false), [row.id]);
 
   return (
-    <div className="flex flex-col gap-[var(--ds-space-tight)] border-b border-[color:var(--ds-border-subtle)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]">
+    <div className="flex flex-col gap-[var(--ds-space-tight)]">
       <div className="flex flex-wrap items-center gap-[var(--ds-space-tight)]">
         {row.displayName && (
           <Chip
@@ -189,8 +189,8 @@ export function RunSelector({ row }: { row: DemoRow }) {
   const duration = attemptDuration(attempt);
 
   return (
-    <div className="border-b border-[color:var(--ds-border-subtle)] bg-[var(--ds-surface-2)]">
-      <div className="flex flex-wrap items-center gap-[var(--ds-space-snug)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]">
+    <div className="flex flex-col overflow-hidden rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border-subtle)] bg-[var(--ds-surface-2)]">
+      <div className="flex flex-wrap items-center gap-[var(--ds-space-snug)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]">
         <History aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
         <SectionLabel className="shrink-0">Attempts</SectionLabel>
         <IconButton
@@ -230,7 +230,7 @@ export function RunSelector({ row }: { row: DemoRow }) {
       </div>
 
       {current && lineage.diff.length > 0 && (
-        <div className="flex flex-col gap-[var(--ds-space-tight)] border-t border-[color:var(--ds-border-subtle)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]">
+        <div className="flex flex-col gap-[var(--ds-space-tight)] border-t border-[color:var(--ds-border-subtle)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]">
           <SectionLabel>What changed since attempt #{attempts[attempts.length - 2].n}</SectionLabel>
           {lineage.diff.map((d) => {
             const tone = DIFF_TONE[d.kind];
