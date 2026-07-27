@@ -698,19 +698,25 @@ export function editPolicyFor(row: DemoRow, point: DemoDataPoint): DemoEditLock 
 }
 
 /**
- * The one-line note under the ledger.
+ * WHY the ledger cannot be typed into right now — or an empty string when it
+ * can be, which is most of the time.
  *
- * It used to be the ONLY thing telling an operator a read value could be typed
- * into, which is why they could not find the editing: a sentence is not an
- * affordance. The fields carry that now, so the open case says only the thing
- * a field's shape cannot — that a write is locked by contract rather than by
- * this run's state, and will never unlock.
+ * The default case used to return *"Writes are shown here, never edited — they
+ * are a record of what happened."* That is a rule of the product, true of every
+ * run in it, printed under every ledger: it taught nobody anything they could
+ * not read off the rows (a locked value draws with a lock and no box) and it
+ * put a sentence of prose on a 348px surface that is short of room. It lives in
+ * the section's ⓘ now.
+ *
+ * What survives is only what a field's SHAPE cannot say: that this run's own
+ * state is what is holding the values, and therefore that the lock will lift.
+ * An empty string means there is nothing to say, and the caller renders nothing.
  */
 export function editPolicySummary(row: DemoRow): string {
   const status = effectiveStatus(row);
   if (status === "running" || status === "queued") return "Locked while the run owns the checkpoint";
   if (status === "parked") return "Locked until the parked write is resolved";
   if (row.records) return "Edits happen on the Review tab, beside the page";
-  return "Writes are shown here, never edited — they are a record of what happened.";
+  return "";
 }
 

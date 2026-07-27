@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Database,
   History,
+  Info,
   Lock,
   Maximize2,
   Minimize2,
@@ -21,8 +22,10 @@ import { cn } from "@/lib/utils";
 import {
   Badge,
   Banner,
+  BulletList,
   Button,
   Chip,
+  ChipRow,
   Dialog,
   DialogBody,
   DialogContent,
@@ -31,6 +34,9 @@ import {
   IconButton,
   LockedValue,
   MetaLine,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Refusal,
   SectionLabel,
   Separator,
@@ -587,6 +593,35 @@ function DataSection({
     <section aria-label="Data" className="flex shrink-0 flex-col gap-[var(--ds-space-snug)]">
       <div className="flex items-center gap-[var(--ds-space-snug)]">
         <SectionLabel className="min-w-0 truncate">Data</SectionLabel>
+        {/* THE ⓘ IS WHERE THE EXPLAINING GOES NOW.
+            Three sentences used to be printed on this surface at all times:
+            the writes-are-never-edited rule, the freshness limit, and a
+            paragraph describing what each of the two save buttons does. All
+            three are true of every run in the product and none of them is a
+            fact about the run on screen — so they are here, one press away,
+            and the surface is back to being a ledger. */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <IconButton
+              size="xs"
+              label="About this ledger"
+              icon={<Info aria-hidden className={dsIcon.sm} />}
+              className="text-[color:var(--ds-fg-faint)] hover:text-[color:var(--ds-fg)] data-[state=open]:text-[color:var(--ds-fg)]"
+            />
+          </PopoverTrigger>
+          <PopoverContent title="Data" side="bottom" align="start" width="lg">
+            <BulletList
+              items={[
+                "Reads are correctable in place. Writes are shown and never edited — they are the record of what happened.",
+                `Values were captured ${checkpointAge(cp, tick)} ago. The ${cp.consumingNode} node accepts reads up to ${cp.maxAgeMin} minutes old; reusing older ones takes a reason that goes on the receipt.`,
+                continues
+                  ? "Saving continues THIS run from where it stopped — same run id, same receipt."
+                  : "Saving records a correction on this run. Nothing runs.",
+                "Starting a new run leaves this one exactly as it is, with its own trace and its own receipt.",
+              ]}
+            />
+          </PopoverContent>
+        </Popover>
         {/* The expand affordance, not a modal: 348px is tight for typing a date
             into, so the surface takes the room it needs and gives it back. */}
         <IconButton
@@ -745,21 +780,21 @@ function DataSection({
             ))}
           </div>
 
-          {/* The explanatory sentence is no longer the primary signal that a
-              value can be edited — the FIELDS say that now, at rest, without a
-              hover. It survives only for the case the controls cannot carry:
-              when everything is locked, the locked shape says "not now" but
-              only the sentence says why. When editing is open, the note is a
-              single clause and the reason lives on each locked row's badge. */}
-          <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
-            {locked && lockReason && !lockReason.editable ? lockReason.reason : editPolicySummary(row)}
-          </p>
+          {/* The only sentence left on this surface, and it is emitted only
+              when there IS one: a value the operator cannot correct RIGHT NOW
+              because of this run's own state. That is a fact about this run,
+              not a rule of the product — the rules moved into the ⓘ above. */}
+          {(() => {
+            const note = locked && lockReason && !lockReason.editable ? lockReason.reason : editPolicySummary(row);
+            return note ? <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>{note}</p> : null;
+          })()}
 
-          {/* The checkpoint's PROVENANCE — where these values came from and how
-              long they stay usable. This is where `gen 4` went when the summary
-              chip row was deleted: out of a four-character abbreviation and
-              into the provenance line the design system already has a shape
-              for, with the whole sentence it was compressing.
+          {/* The checkpoint's PROVENANCE — which generation these values are and
+              how old they are. Two facts about THIS run, and nothing else: the
+              trailing `· <node> accepts reads up to 60m old` clause was the
+              freshness RULE, which is the same on every run and is now in the ⓘ.
+              A stale checkpoint is different and stays — that is a hazard about
+              this run, not an explanation of the product.
 
               It sits OUTSIDE the save block on purpose. A run with no save arm
               — a live one, a parked one — still has a checkpoint and still has
@@ -768,11 +803,9 @@ function DataSection({
               the operator is most likely to be squinting at. */}
           <MetaLine
             items={[
-              `checkpoint gen ${held}`,
+              `gen ${held}`,
               `captured ${checkpointAge(cp, tick)} ago`,
-              fresh.stale
-                ? `older than the ${fresh.maxAgeMin}m the ${cp.consumingNode} node accepts — reusing them takes an override`
-                : `${cp.consumingNode} accepts reads up to ${cp.maxAgeMin}m old`,
+              fresh.stale ? `older than the ${fresh.maxAgeMin}m limit — reusing them takes an override` : null,
             ]}
           />
 
@@ -782,76 +815,70 @@ function DataSection({
               row is sent neither. */}
           {(saveAction || rerunAction) && (
             <div className="flex flex-col gap-[var(--ds-space-snug)] border-t border-[color:var(--ds-border-subtle)] pt-[var(--ds-space-snug)]">
-              {/* WHAT THIS SAYS, and why it is worded like this.
-                  The old line read "Unchanged — either outcome would use
-                  exactly these values · a correction or a separate run". Every
-                  clause of that is true and none of it is readable: it names
-                  neither outcome, "either outcome" makes the operator work out
-                  what the two buttons beside it do, and the second half is two
-                  noun phrases with no verb between them. It reads as a riddle
-                  because it was written to be short rather than to be clear.
-                  Replaced with the two plain facts it was hedging around — the
-                  state of the edits, then what each button does to THIS run —
-                  and each half of the second sentence is emitted only when the
-                  button it describes was actually sent, so the copy can never
-                  promise an outcome the surface is not offering. */}
+              {/*
+                ONE ACTION ROW, in the house order: quiet meta on the left, then
+                the dismissive verb, then the affirmative one last.
+
+                It used to be four `Button`s on a bare `flex-wrap`, which at
+                348px put three on one line and stranded the fourth — the
+                widest, most consequential of them — alone underneath, flush
+                left, reading as a button that had fallen off the row. That is
+                not a wrap, it is an accident.
+
+                So the row is TWO CLUSTERS: data-in and reset on the left,
+                the two commit arms on the right. If the width runs out the
+                CLUSTERS break, not the buttons — the quiet pair takes line one
+                and the commit pair stays right-aligned on line two, both with
+                deliberate edges. Nothing lands where it landed by chance.
+              */}
               <p className={cn(dsText.meta, "text-[color:var(--ds-fg-secondary)]")}>
                 {changed.length > 0
                   ? `${changed.length} value${changed.length === 1 ? "" : "s"} changed, not saved yet.`
                   : seededFrom !== null
-                    ? `Loaded the values from run #${seededFrom}. They match what this run already holds, so nothing is changed yet.`
-                    : "Nothing is changed yet."}{" "}
-                <span className="text-[color:var(--ds-fg-muted)]">
-                  {[
-                    saveAction &&
-                      (continues
-                        ? "Save continues this run from where it stopped, with these values."
-                        : "Save records these values on this run as a correction — nothing runs."),
-                    rerunAction &&
-                      (saveAction
-                        ? "Starting a new run instead leaves this one exactly as it is."
-                        : "Starting a new run leaves this one exactly as it is and runs again with these values."),
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                </span>
+                    ? `Loaded the values from run #${seededFrom} — they match what this run holds.`
+                    : "Nothing is changed yet."}
               </p>
-              <div className="flex flex-wrap items-center gap-[var(--ds-space-tight)]">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  icon={<History aria-hidden className={dsIcon.sm} />}
-                  onClick={() => {
-                    setSeededFrom(Math.max(row.run - 1, 1));
-                    setEdits(
-                      Object.fromEntries(
-                        reads
-                          .filter((f) => editPolicyFor(row, f).editable)
-                          .slice(0, 2)
-                          .map((f) => [f.field, baseValue(f)]),
-                      ),
-                    );
-                  }}
-                >
-                  Load a prior run
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  icon={<RotateCcw aria-hidden className={dsIcon.sm} />}
-                  disabled={changed.length === 0 && seededFrom === null}
-                  onClick={() => {
-                    setEdits({});
-                    setSeededFrom(null);
-                  }}
-                >
-                  Reset
-                </Button>
-                <span aria-hidden className="flex-1" />
-                {/* Exactly one of these two carries `primary`, and the SERVER
-                    picks which: on a run with work left to release, continuing
-                    it is the affirmative action; on one with nothing left,
-                    starting a new run is. */}
+              <div className="flex flex-wrap items-center justify-end gap-[var(--ds-space-snug)]">
+                <span className="mr-auto flex shrink-0 items-center gap-[var(--ds-space-tight)]">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={<History aria-hidden className={dsIcon.sm} />}
+                    onClick={() => {
+                      setSeededFrom(Math.max(row.run - 1, 1));
+                      setEdits(
+                        Object.fromEntries(
+                          reads
+                            .filter((f) => editPolicyFor(row, f).editable)
+                            .slice(0, 2)
+                            .map((f) => [f.field, baseValue(f)]),
+                        ),
+                      );
+                    }}
+                  >
+                    Prior run
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={<RotateCcw aria-hidden className={dsIcon.sm} />}
+                    disabled={changed.length === 0 && seededFrom === null}
+                    onClick={() => {
+                      setEdits({});
+                      setSeededFrom(null);
+                    }}
+                  >
+                    Reset
+                  </Button>
+                </span>
+                {/* The commit pair is ONE cluster, so the row breaks between
+                    the two GROUPS and never between these two — a dismissive
+                    verb alone on a line above the affirmative one reads as two
+                    unrelated rows. Exactly one of them carries `primary`, and
+                    the SERVER picks which: on a run with work left to release,
+                    continuing it is the affirmative action; on one with nothing
+                    left, starting a new run is. */}
+                <span className="flex shrink-0 items-center gap-[var(--ds-space-snug)]">
                 {saveAction && (
                   <Button
                     size="sm"
@@ -875,6 +902,7 @@ function DataSection({
                     {rerunAction.label}
                   </Button>
                 )}
+                </span>
               </div>
             </div>
           )}
@@ -892,11 +920,13 @@ function DataSection({
           description={`Captured ${checkpointAge(cp, tick)} ago. The ${cp.consumingNode} node accepts reads up to ${cp.maxAgeMin} minutes old, so reusing them is a decision, not a default.`}
         >
           <DialogBody className="flex flex-col gap-[var(--ds-space-cozy)]">
-            <Well className="flex flex-wrap items-center gap-[var(--ds-space-snug)]">
+            <Well>
+              <ChipRow>
               <Chip label="captured">{fmtClock(cp.capturedAt)}</Chip>
               <Chip label="age" tone="warning">{`${fresh.ageMin}m`}</Chip>
               <Chip label="limit">{`${fresh.maxAgeMin}m`}</Chip>
               <Chip label="consumed by">{fresh.consumingNode}</Chip>
+              </ChipRow>
             </Well>
             <Field
               label="Why reuse them?"
