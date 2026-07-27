@@ -457,6 +457,16 @@ function FailureCardView({ row }: { row: DemoRow }) {
  * That is legibility over literalism, not fabrication: nothing here implies a
  * length it does not state in words. A step with no recorded time prints no
  * time, and a step not yet reached stays dashed and empty.
+ *
+ * **A WAIT IS A STATE OF A STEP, NOT A STEP OF ITS OWN.** The gate used to take
+ * a whole extra segment at the end of the track while the step it was waiting
+ * ON kept a solid bar of its own — so `Your review` occupied two of six slots
+ * and read as two separate things, one of them apparently finished. Now the
+ * step the operator is being waited on RENDERS the wait: its own bar goes
+ * hatched amber and prints the true wait age beneath it, and the trailing
+ * segment is gone. A step that is merely running keeps its solid bar, so
+ * "working" and "waiting on you" are told apart by the bar's FILL rather than
+ * by a slot count, and the timeline gets a sixth of its width back.
  */
 const STEP_TONE: Record<DemoStep["state"], { bar: string; text: string; dot: string }> = {
   done: { bar: "bg-success/55", text: "text-success", dot: "bg-success" },
@@ -473,10 +483,18 @@ function Timeline({ row, tick }: { row: DemoRow; tick: number }) {
 
   const active = steps.reduce((a, s) => a + (s.durationSec ?? 0), 0);
   // The wait is as long as the wait REALLY is: now minus the instant the gate
-  // opened. It is no longer a width — it is the number printed under the
-  // hatched segment, which is the only place it was ever unambiguous.
+  // opened. It is not a width — it is the number printed under the hatched
+  // bar, which is the only place it was ever unambiguous.
   const gateSec = gateWaitSec(row, tick) ?? 0;
-  const total = steps.length + (row.gate ? 1 : 0);
+  // WHICH step is being waited on. A gated run's own steps carry it (`waiting`),
+  // so the gate has a bar to sit on; the index is what stops a run with two
+  // waiting steps painting the age twice.
+  const waitingIndex = row.gate ? steps.findIndex((s) => s.state === "waiting") : -1;
+  // A gate whose run records no waiting step still has to be drawn — it is not
+  // permitted to vanish because the shape did not line up. It keeps the old
+  // trailing segment, which is the same true fact in the only slot left.
+  const orphanGate = Boolean(row.gate) && waitingIndex === -1;
+  const total = steps.length + (orphanGate ? 1 : 0);
 
   return (
     <div className="px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]">
@@ -484,6 +502,10 @@ function Timeline({ row, tick }: { row: DemoRow; tick: number }) {
         {steps.map((s, i) => {
           const tone = STEP_TONE[s.state];
           const timed = s.durationSec !== undefined;
+          // THIS is the segment the operator is being waited on. Its bar is
+          // hatched rather than solid and the number under it is the wait, not
+          // a duration the step never recorded.
+          const isWait = i === waitingIndex;
           // The hover card is 240px wide in a segment that may be 60px wide, so
           // it anchors to whichever edge keeps it on screen.
           const anchorRight = total > 2 && i >= total - 2;
@@ -491,14 +513,25 @@ function Timeline({ row, tick }: { row: DemoRow; tick: number }) {
             <div key={s.label} className="group relative min-w-0 flex-1 basis-0">
               {/* label rail — truncates hard; the hover card carries the detail */}
               <div className="flex min-w-0 items-center gap-1">
-                <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot, s.state === "current" && "animate-pulse motion-reduce:animate-none")} />
+                <span
+                  aria-hidden
+                  className={cn(
+                    "size-1.5 shrink-0 rounded-full",
+                    tone.dot,
+                    (s.state === "current" || isWait) && "animate-pulse motion-reduce:animate-none",
+                  )}
+                />
                 <span className={cn("min-w-0 truncate text-[10.5px]", s.state === "pending" ? "text-muted-foreground" : tone.text)}>{s.label}</span>
               </div>
               {/* the track segment — one step, one slot, every time */}
               <button
                 type="button"
                 onClick={NOOP}
-                aria-label={`${s.label} — ${s.state}${timed ? `, ${fmtElapsed(s.durationSec ?? 0)}` : ""}`}
+                aria-label={
+                  isWait
+                    ? `${s.label} — waiting on you, ${fmtElapsed(gateSec)}`
+                    : `${s.label} — ${s.state}${timed ? `, ${fmtElapsed(s.durationSec ?? 0)}` : ""}`
+                }
                 className={cn(
                   // A hover tint, and deliberately NO press dip: this segment is
                   // a disclosure trigger, not a command. Without the tint nobody
@@ -507,17 +540,28 @@ function Timeline({ row, tick }: { row: DemoRow; tick: number }) {
                   "mt-1 block h-2 w-full rounded-[3px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   dsMotion.fast,
                   "hover:brightness-125",
-                  tone.bar,
-                  !timed && s.state !== "pending" && "opacity-70",
+                  // HATCHED = the run is stopped ON this step, waiting for you.
+                  // SOLID = it is doing the work itself. Same slot either way.
+                  isWait
+                    ? "bg-[repeating-linear-gradient(45deg,var(--color-warning)_0_4px,transparent_4px_8px)] opacity-70"
+                    : tone.bar,
+                  !isWait && !timed && s.state !== "pending" && "opacity-70",
                   s.state === "pending" && "border border-dashed border-border bg-transparent",
                 )}
               />
               <div className="mt-0.5 flex min-w-0 items-baseline gap-1">
-                <span className="truncate font-mono text-[9.5px] tabular-nums text-muted-foreground">{timed ? fmtElapsed(s.durationSec ?? 0) : ""}</span>
+                <span
+                  className={cn(
+                    "truncate font-mono text-[9.5px] tabular-nums",
+                    isWait ? "text-warning" : "text-muted-foreground",
+                  )}
+                >
+                  {isWait ? gateAge(row, tick) : timed ? fmtElapsed(s.durationSec ?? 0) : ""}
+                </span>
                 {s.attempts && s.attempts > 1 && <span className="shrink-0 font-mono text-[9px] font-bold text-warning">×{s.attempts}</span>}
               </div>
 
-              {(s.keyLines || timed) && (
+              {(s.keyLines || timed || isWait) && (
                 <span
                   className={cn(
                     "absolute top-full z-50 mt-1 hidden w-60 rounded-lg border border-border bg-popover p-2.5 text-left shadow-lg group-hover:block group-focus-within:block",
@@ -529,11 +573,18 @@ function Timeline({ row, tick }: { row: DemoRow; tick: number }) {
                     <span className="text-muted-foreground">Status</span>
                     <span className={cn("font-mono", tone.text)}>{s.state}</span>
                   </span>
-                  {timed && (
+                  {isWait ? (
                     <span className="flex items-center justify-between text-[10.5px]">
-                      <span className="text-muted-foreground">Took</span>
-                      <span className="font-mono text-secondary-foreground">{fmtElapsed(s.durationSec ?? 0)}</span>
+                      <span className="text-muted-foreground">Waiting</span>
+                      <span className="font-mono text-warning">{fmtElapsed(gateSec)}</span>
                     </span>
+                  ) : (
+                    timed && (
+                      <span className="flex items-center justify-between text-[10.5px]">
+                        <span className="text-muted-foreground">Took</span>
+                        <span className="font-mono text-secondary-foreground">{fmtElapsed(s.durationSec ?? 0)}</span>
+                      </span>
+                    )
                   )}
                   {s.system && (
                     <span className="flex items-center justify-between text-[10.5px]">
@@ -561,9 +612,12 @@ function Timeline({ row, tick }: { row: DemoRow; tick: number }) {
           );
         })}
 
-        {/* the wait is part of the run's time, so it is part of the timeline —
-            one segment like any other, with the TRUE age printed under it */}
-        {row.gate && (
+        {/* THE ORPHAN CASE, and only that. A run that is gated but records no
+            `waiting` step has no bar for the wait to ride, and a wait that
+            silently disappears because the shape did not line up is the one
+            thing this timeline may not do — so it keeps the segment it used to
+            always have. On every fixture the demo holds, this does not render. */}
+        {orphanGate && (
           <div className="group relative min-w-0 flex-1 basis-0">
             <div className="flex min-w-0 items-center gap-1">
               <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warning animate-pulse motion-reduce:animate-none" />
@@ -1146,20 +1200,29 @@ function ReviewTab({
           TWO rungs, and the split moves between them. The fields column has a
           hard floor: a label, a value, a provenance chip and a confidence
           number have to sit on one line or the value starts truncating, which
-          is ~290px, which puts the centre column's floor at 464px. The page is
-          a picture and scales to whatever is left. So from 464px they go side
-          by side with the page at the smaller share,
-          and at 680px — where both can be comfortable — the page takes the
-          share back. Stacking is the last resort, not the 1280px default it
-          became: an extraction the operator has to scroll to reach is the exact
-          complaint this surface exists to answer. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-y-auto @min-[29rem]:grid-cols-[minmax(0,0.62fr)_minmax(0,1fr)] @min-[42.5rem]:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)]">
+          is ~290px, which puts the centre column's floor at 464px.
+
+          THE PAGE'S SHARE WENT UP (0.62 → 0.8, 0.85 → 1.0). It used to be a
+          box of whatever height was left over, so its width could be anything;
+          now it holds the real document ratio, which means its width IS its
+          legibility — a 176px-wide letter page is 228px tall and unreadable at
+          any of it. At the wide rung the two columns are equal, which puts a
+          ~330 × 427 page beside the fields it was read from.
+
+          Stacking is the last resort, not the 1280px default it became: an
+          extraction the operator has to scroll to reach is the exact complaint
+          this surface exists to answer. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-y-auto @min-[29rem]:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)] @min-[42.5rem]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="flex flex-col gap-1.5 border-b border-border/60 p-3 @min-[29rem]:border-b-0 @min-[29rem]:border-r">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{rec.pageNote}</span>
-          <div className="flex min-h-[13rem] flex-1 flex-col items-center justify-center gap-1.5 rounded-md border border-border bg-secondary/30">
+          {/* THE SHAPE OF THE REAL DOCUMENT. US Letter, 612 × 792 pt, held as a
+              ratio so it is correct at every width — the placeholder used to be
+              a hand-picked min-height that produced a ~0.48 letterbox, i.e. a
+              picture of a page shape that does not exist. `max-h-full` keeps a
+              tall page inside the pane when the pane is the constraint. */}
+          <div className="flex w-full max-h-full min-h-0 flex-col items-center justify-center gap-1.5 self-center rounded-md border border-border bg-secondary/30 aspect-[var(--ds-aspect-page)]">
             <FileText aria-hidden className="size-6 text-muted-foreground/60" />
             <span className="text-[11px] text-muted-foreground">Page {rec.page} — source image</span>
-            <span className="text-[10px] text-muted-foreground/70">click to open full size</span>
           </div>
         </div>
 
