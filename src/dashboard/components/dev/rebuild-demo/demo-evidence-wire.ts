@@ -1301,6 +1301,119 @@ export const CAPTURE_KIND_LABEL: Record<DemoCaptureKind, string> = {
   form: "Forms",
 };
 
+// ---------------------------------------------------------------------------
+// Identity-candidate captures — fetch by id, like every other record here
+// ---------------------------------------------------------------------------
+
+/**
+ * The capture of ONE candidate as it appeared in the source system at the
+ * moment the run stopped to ask.
+ *
+ * An identity gate that shows two names and no pictures is asking the operator
+ * to choose between two strings. These are what makes that a choice between two
+ * PEOPLE: the search result, the person page, the document the name was typed
+ * off. They are captured at identity-resolution time — the page is gone by the
+ * time anybody reads the gate — and retained with the run for as long as the
+ * run's evidence is retained.
+ *
+ * Keyed by `captureId` and fetched by id, exactly like `receiptFor` and
+ * `failureFor`: a candidate whose id resolves to nothing has NO capture and the
+ * surface says so. It never borrows a neighbour's.
+ */
+const CANDIDATE_CAPTURES: Record<string, DemoCapture> = {
+  "cap-ident-sep-maria-input": {
+    id: "cap-ident-sep-maria-input",
+    label: "Kuali doc 4-VMPHRW — the name as filed",
+    kind: "form",
+    failure: false,
+    step: "Identity check",
+    system: "kuali",
+    capturedAt: at("14:03:31"),
+    ref: "sha256:c07f…12ab",
+    screen: "kuali.separation.document",
+    pageState: "loaded",
+    urlRedacted: "https://kuali.ucsd.edu/space/•••/doc/4-VMPHRW",
+    size: VIEWPORT,
+    note: "The separation document as it was read. The employee block gives a name and no EID — which is the whole reason this gate exists.",
+  },
+  "cap-ident-sep-maria-match": {
+    id: "cap-ident-sep-maria-match",
+    label: "UCPath person search — 1 active match",
+    kind: "step",
+    failure: false,
+    step: "Identity check",
+    system: "ucpath",
+    capturedAt: at("14:03:33"),
+    ref: "sha256:4d21…9e08",
+    screen: "ucpath.person.search.results",
+    pageState: "results-1",
+    urlRedacted: "https://ucpath.universityofcalifornia.edu/•••/person_search",
+    size: VIEWPORT,
+    note: "The result row the match came from: M. Lopez-Garcia · 10583942 · Dept 000371 · Blank Ast 3, HR status Active.",
+  },
+  "cap-ident-sep-l-2-match": {
+    id: "cap-ident-sep-l-2-match",
+    label: "UCPath person search — I. R. Garcia",
+    kind: "step",
+    failure: false,
+    step: "Identity check",
+    system: "ucpath",
+    capturedAt: at("13:53:18"),
+    ref: "sha256:7b93…20cd",
+    screen: "ucpath.person.search.results",
+    pageState: "results-1",
+    size: VIEWPORT,
+    note: "One active match, with a middle initial the typed name does not carry. Dept 000482 · Lab Ast 2.",
+  },
+  "cap-ident-ic-m11-a": {
+    id: "cap-ident-ic-m11-a",
+    label: "Candidate A — UCPath person page",
+    kind: "step",
+    failure: false,
+    step: "Person match",
+    system: "ucpath",
+    capturedAt: at("13:56:12"),
+    ref: "sha256:aa10…7714",
+    screen: "ucpath.person.summary",
+    pageState: "loaded",
+    size: VIEWPORT,
+    note: "10531548 · Dept 000371 · hired 03/12/2024. The hire date on this page is the one that matches the form.",
+  },
+  "cap-ident-ic-m11-b": {
+    id: "cap-ident-ic-m11-b",
+    label: "Candidate B — UCPath person page",
+    kind: "step",
+    failure: false,
+    step: "Person match",
+    system: "ucpath",
+    capturedAt: at("13:56:14"),
+    ref: "sha256:bb42…03f1",
+    screen: "ucpath.person.summary",
+    pageState: "loaded",
+    size: VIEWPORT,
+    note: "10577940 · Dept 000512 · hired 09/02/2019. Same printed name, different person.",
+  },
+  "cap-ident-ic-m11-c": {
+    id: "cap-ident-ic-m11-c",
+    label: "Candidate C — UCPath person page",
+    kind: "step",
+    failure: false,
+    step: "Person match",
+    system: "ucpath",
+    capturedAt: at("13:56:16"),
+    ref: "sha256:cc85…c920",
+    screen: "ucpath.person.summary",
+    pageState: "loaded",
+    size: VIEWPORT,
+    note: "10604771 · Dept 000371 · hired 08/19/2025, HR status Active. Shares the department with candidate A, which is why the department alone cannot decide this.",
+  },
+};
+
+/** the identity-candidate capture behind a `captureId`, or nothing */
+export function candidateCaptureFor(captureId: string | undefined): DemoCapture | undefined {
+  return captureId ? CANDIDATE_CAPTURES[captureId] : undefined;
+}
+
 // ===========================================================================
 // 6. Export — the three exports the operator actually asked for
 // ===========================================================================

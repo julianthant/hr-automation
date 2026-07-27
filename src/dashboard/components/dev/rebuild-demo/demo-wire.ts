@@ -232,6 +232,14 @@ export type DemoCommandKey =
   | "resolve-write-present"
   | "resolve-write-absent"
   | "edit-checkpoint"
+  /**
+   * Save the corrected checkpoint AND release the SAME run to carry on from the
+   * step it stopped at — same runId, same lineage, same receipt. Distinct from
+   * `rerun-with-existing-data`, which mints a NEW run: those are the two
+   * outcomes the merged Data surface has to keep apart, because one continues a
+   * history and the other starts one.
+   */
+  | "continue-with-data"
   | "rerun-with-existing-data"
   | "rerun-with-different-input";
 
@@ -290,6 +298,32 @@ export interface ActionDescriptorWire {
   navigate?: { kind: "self" | "panel" | "drill"; workflow?: string; runId?: string };
 }
 
+/**
+ * One person a gate is asking the operator to choose between.
+ *
+ * `captureId` is the load-bearing addition: an identity gate that shows two
+ * names and no pictures is asking the operator to pick between two strings.
+ * The backend captures the candidate AS IT APPEARED in the source system at
+ * resolution time and retains it with the run, so the choice is made against
+ * evidence. A candidate with no capture renders as a candidate with no
+ * capture — it never borrows another one, and it says so.
+ *
+ * The list is a LIST. Two is the common case, not the contract: a name search
+ * can return three or five, and a surface that hard-codes a two-way choice
+ * would have to silently drop the rest.
+ */
+export interface GateCandidateSpec {
+  heading: string;
+  name: string;
+  sub: string;
+  /** the identifier picking this candidate would bind the run to */
+  eid?: string;
+  /** what made this candidate a candidate — never "the system said so" */
+  matchedOn?: string;
+  /** the retained capture of this candidate in the source system */
+  captureId?: string;
+}
+
 /** a gate's typed answers, authored beside the copy that explains them */
 export interface GateOptionSpec {
   key: string;
@@ -304,6 +338,84 @@ export interface GateOptionSpec {
 
 export function actionsAt(actions: ActionDescriptorWire[], placement: ActionPlacement): ActionDescriptorWire[] {
   return actions.filter((a) => a.placement.includes(placement));
+}
+
+// ---------------------------------------------------------------------------
+// Operator corrections to an extracted record (D8 / D19c, review surface)
+// ---------------------------------------------------------------------------
+
+/** where an extracted value came from. `operator` is a value a HUMAN typed. */
+export type RecordFieldSource = "paper" | "roster" | "ucpath" | "operator";
+
+/**
+ * One value the operator changed on a review surface, as the approve command
+ * carries it.
+ *
+ * Two fields here exist to stop the same lie. A machine read a name off a scan
+ * at 0.97 confidence; the operator then re-typed it. The new value is NOT a
+ * 0.97 paper read — it is an operator correction with no model confidence at
+ * all, and the number that belonged to the old value must not follow the new
+ * one. So `from` and `priorConfidence` keep the machine read verbatim, the
+ * corrected field's source becomes `operator`, and its confidence is dropped
+ * rather than inherited.
+ *
+ * A correction is EVIDENCE: it rides the approval into the run's receipt beside
+ * the value it replaced, attributed and timestamped, so a later reader can tell
+ * what the document said from what a person decided it said.
+ */
+export interface RecordCorrectionWire {
+  recordId: string;
+  field: string;
+  /** the machine-read value, kept exactly as it was read */
+  from: string;
+  /** what the operator typed */
+  to: string;
+  priorSource: RecordFieldSource;
+  /** the model confidence of the value being REPLACED — never of the new one */
+  priorConfidence?: number;
+  correctedBy: string;
+  correctedAt: string;
+}
+
+export interface RecordFieldReading {
+  label: string;
+  value: string;
+  source: RecordFieldSource;
+  confidence?: number;
+}
+
+/**
+ * Turn a record's fields plus the operator's edit map into the corrections the
+ * approve command carries. Pure, and the ONE place a correction is minted, so
+ * the count shown on the approve bar and the list written to the receipt can
+ * never be two different derivations.
+ *
+ * `edits` is keyed `<recordId>:<field label>` — the same key the surface types
+ * into — and an edit equal to the read value is not a correction.
+ */
+export function buildRecordCorrections(
+  recordId: string,
+  fields: RecordFieldReading[],
+  edits: Record<string, string>,
+  correctedAt: string,
+  correctedBy: string = DEMO_OPERATOR,
+): RecordCorrectionWire[] {
+  const out: RecordCorrectionWire[] = [];
+  for (const f of fields) {
+    const typed = edits[`${recordId}:${f.label}`];
+    if (typed === undefined || typed === f.value) continue;
+    out.push({
+      recordId,
+      field: f.label,
+      from: f.value,
+      to: typed,
+      priorSource: f.source,
+      priorConfidence: f.confidence,
+      correctedBy,
+      correctedAt,
+    });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -468,29 +580,57 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
   // 3b. The merged Data surface's own controls (D19c). They are descriptors
   //     like everything else, which is what keeps "Save" out of the client's
   //     hands: a row whose checkpoint may not be edited simply is not sent one.
+  //
+  //     The surface offers exactly TWO outcomes and never blurs them:
+  //       · this run carries on with these values  (same runId, same receipt)
+  //       · a NEW run starts from these values     (its own trace, its own receipt)
+  //     Which "save" arm appears depends on whether there is anything left to
+  //     continue — a finished run has a checkpoint to correct but no work to
+  //     release, so it is sent `edit-checkpoint`, not `continue-with-data`.
+  //
+  //     PARKED IS SENT NOTHING. A parked write's outcome is unknown, so
+  //     starting a run from its data is how a person gets terminated twice
+  //     (D20). The two typed park resolutions are its only exits, and they are
+  //     already on the gate.
   const reads = spec.data.filter((d) => d.dir === "read").length;
   const live = ctx.status === "running" || ctx.status === "queued";
-  if (reads > 0 && !live) {
-    if (ctx.status !== "parked") {
-      out.push({
-        key: "save-checkpoint",
-        kind: "command",
-        command: "edit-checkpoint",
-        label: "Save corrections",
-        detail: "Writes your corrected values back to this run's checkpoint. Carries the generation your view was captured at.",
-        intent: "primary",
-        icon: "resolve",
-        placement: ["data"],
-        expectedVersion: v,
-      });
-    }
+  const resumable = ctx.status === "failed" || ctx.status === "cancelled";
+  if (reads > 0 && !live && ctx.status !== "parked") {
+    out.push(
+      resumable
+        ? {
+            key: "continue-with-data",
+            kind: "command",
+            command: "continue-with-data",
+            label: "Continue this run with these values",
+            detail:
+              "Saves your corrections to this run's checkpoint and releases the SAME run to carry on from the step it stopped at. It keeps its run id, its attempt history and its receipt.",
+            intent: "primary",
+            icon: "resolve",
+            placement: ["data"],
+            expectedVersion: v,
+          }
+        : {
+            key: "save-checkpoint",
+            kind: "command",
+            command: "edit-checkpoint",
+            label: "Save corrections",
+            detail:
+              "Writes your corrected values back to this run's checkpoint. Carries the generation your view was captured at. It does not release any work — nothing on this run is waiting on a value.",
+            intent: "neutral",
+            icon: "resolve",
+            placement: ["data"],
+            expectedVersion: v,
+          },
+    );
     out.push({
       key: "rerun-existing",
       kind: "command",
       command: "rerun-with-existing-data",
-      label: "Start a run from this data",
-      detail: "Enqueues a fresh run on the current workflow version using these values.",
-      intent: "neutral",
+      label: "Start a new run with these values",
+      detail:
+        "Enqueues a FRESH run on the current workflow version using these values. This row keeps its own history; the two are separate runs with separate receipts.",
+      intent: resumable ? "neutral" : "primary",
       icon: "retry",
       placement: ["data"],
       expectedVersion: v,

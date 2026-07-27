@@ -155,6 +155,10 @@ const APPLIED_COPY: Record<DemoCommandKey, (row: DemoRow) => { headline: string;
     headline: "Checkpoint saved",
     detail: `Your corrections are written to ${label(row)}'s checkpoint at a new generation, each field stamped provenance "operator" with your name and the time. The original observed values are kept beside them — a correction never overwrites what was read.`,
   }),
+  "continue-with-data": (row) => ({
+    headline: "Saved — this run is continuing",
+    detail: `Your corrections were written to ${label(row)}'s checkpoint at a new generation and the SAME run was released from the step it stopped at. It keeps its run id, its attempt history and its receipt — no second run was created, so nothing it already did will happen twice.`,
+  }),
   "rerun-with-existing-data": (row) => ({
     headline: "New run from this data",
     detail: `A fresh ${row.workflow.label} run was enqueued on the current workflow version from these values. Reused values are marked as reused in its receipt — a replay is never labelled as newly observed.`,
@@ -318,7 +322,10 @@ export function submitDemoCommand(row: DemoRow, action: ActionDescriptorWire, ct
     if (refusal) return { ...base, state: "rejected", ...refusal };
   }
 
-  if (command === "edit-checkpoint") {
+  // Both save arms carry a checkpoint patch, so both are fenced by the same
+  // generation CAS. Continuing a run on a checkpoint that moved underneath the
+  // operator is the worse of the two — it releases work on values nobody read.
+  if (command === "edit-checkpoint" || command === "continue-with-data") {
     const conflict = checkpointConflict(row, payload ?? {});
     if (conflict) {
       return {
