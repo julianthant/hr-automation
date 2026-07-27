@@ -21,6 +21,7 @@ import {
   dsFocus,
   dsIcon,
   dsMotion,
+  dsRadius,
   dsText,
 } from "./demo-ui";
 import { fmtClock } from "./demo-wire";
@@ -107,21 +108,49 @@ function BundleDialog({ failure, onClose }: { failure: DemoFailureRecord; onClos
 }
 
 /**
- * The failure record, pinned above the tabs so it is visible from every one of
- * them. Collapsed it answers the only question that cannot wait — **what is
- * half-done** — and expanded it carries the classification, the progress ledger,
- * what is safe to retry, the mirrored child error (D13) and the bundle.
+ * THE FAILURE RECORD, in the stream, at the line the run died on.
+ *
+ * It used to be a block pinned above the tabs, and it had grown into six bands:
+ * the outcome line, a bold restatement of the failure, a code chip, a permanence
+ * chip, a disclosure, and the write-state summary — all of it sitting on top of
+ * the log stream the operator opened the panel to read. The operator's
+ * instruction was the same one that killed the gate banner in wave 6: *"one line
+ * summary should do. the main context should be in the log body."*
+ *
+ * So the panel top keeps ONE line — the outcome bar's sentence and its action —
+ * and the record lives here, hanging off the error line that produced it, where
+ * the lines above it are the evidence for it.
+ *
+ * What is NOT behind the disclosure, ever:
+ *
+ *  - **the write state.** On a failed run this is the most important sentence on
+ *    screen: it is the difference between a safe retry and a duplicate
+ *    termination. It gets its own labelled block, unconditionally.
+ *  - **the mirrored child error** (D13) — this row never says "unknown error"
+ *    about a failure somebody else already explained.
+ *  - **what is safe to retry**, including the BLOCKED options with their
+ *    reasons, because "why can I not just retry this" is a question a hidden
+ *    button never answers.
+ *
+ * Behind it: the diagnostic record — the progress ledger, the classification,
+ * the cause chain and the bundle. Those answer "why", which matters, but not
+ * before the operator knows what is half-done and what is safe to do next; and
+ * always-expanding a 400px diagnostic dump into a log stream buries the lines
+ * after it.
  */
-export function FailureRecordBlock({
+export function InlineFailureRecord({
   failure,
   open,
   onOpen,
   onOpenRow,
+  anchorRef,
 }: {
   failure: DemoFailureRecord;
   open: boolean;
   onOpen: (open: boolean) => void;
   onOpenRow: (rowId: string) => void;
+  /** so the outcome bar's `Open failure` can travel here from any tab */
+  anchorRef?: (node: HTMLElement | null) => void;
 }) {
   const [bundle, setBundle] = useState(false);
   const writeTone =
@@ -132,7 +161,21 @@ export function FailureRecordBlock({
         : "text-[color:var(--ds-status-waiting-fg)]";
 
   return (
-    <div className="border-b border-[color:var(--ds-danger-border)] bg-[var(--ds-danger-quiet)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]">
+    <div
+      ref={anchorRef}
+      tabIndex={-1}
+      data-demo-failure-record=""
+      aria-label={`Failure record — ${failure.summary}`}
+      className={cn(
+        // same geometry as the inline decision: indented to the log stream's
+        // hanging indent, a rail in its own tone, and loud where it sits
+        "mx-[var(--ds-space-cozy)] my-[var(--ds-space-base)] ml-5 border p-[var(--ds-space-cozy)]",
+        dsRadius.lg,
+        dsFocus,
+        "border-[length:var(--ds-border-w-rail)]",
+        "border-[color:var(--ds-danger-border)] bg-[var(--ds-danger-quiet)]",
+      )}
+    >
       <div className="flex flex-wrap items-center gap-[var(--ds-space-snug)]">
         <TriangleAlert aria-hidden className={cn(dsIcon.md, "shrink-0 text-[color:var(--ds-danger)]")} />
         <span className={cn(dsText.ui, "font-semibold text-[color:var(--ds-danger)]")}>{failure.summary}</span>
@@ -142,57 +185,104 @@ export function FailureRecordBlock({
         <Chip label="" tone={failure.transient ? "warning" : "neutral"}>
           {failure.transient ? "transient — a later attempt may differ" : "permanent — the same input will fail again"}
         </Chip>
+      </div>
+
+      {/* THE SENTENCE. It is given its own labelled block rather than a line of
+          body copy because it answers the only question that decides what the
+          operator may safely do next, and a run that wrote half a termination
+          reads exactly like one that wrote none until this is read. */}
+      <div
+        className={cn(
+          "mt-[var(--ds-space-base)] ml-5 border p-[var(--ds-space-base)]",
+          dsRadius.md,
+          "border-[color:var(--ds-border)] bg-[var(--ds-surface-1)]",
+        )}
+      >
+        <SectionLabel>What this run left behind</SectionLabel>
+        <p className={cn("mt-[var(--ds-space-hair)] leading-relaxed", dsText.body, writeTone)}>
+          {failure.writeState.text}
+        </p>
+      </div>
+
+      <div className="mt-[var(--ds-space-base)] flex flex-col gap-[var(--ds-space-cozy)] pl-5">
+        {failure.mirrored && (
+          <Banner
+            tone="danger"
+            title={`Mirrored from the delegated ${failure.mirrored.childWorkflow} run — this run did not fail on its own`}
+            action={
+              <Button
+                variant="secondary"
+                icon={<Link2 aria-hidden className={dsIcon.md} />}
+                onClick={() => onOpenRow(failure.mirrored!.childRowId)}
+              >
+                Open the child run
+              </Button>
+            }
+          >
+            <span className="block">{failure.mirrored.verbatim}</span>
+            <span className="mt-[var(--ds-space-tight)] block">
+              <MetaLine items={[`child ${failure.mirrored.childTrace}`]} />
+              <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+                {" "}
+                — quoted verbatim, so this row never says “unknown error” about a failure someone else already
+                explained (D13)
+              </span>
+            </span>
+          </Banner>
+        )}
+
+        <section className="flex flex-col gap-[var(--ds-space-snug)]">
+          <SectionLabel>What is safe to retry</SectionLabel>
+          <div className="flex flex-col gap-[var(--ds-space-snug)]">
+            {failure.remediation.map((r) => {
+              const safety = SAFETY_COPY[r.safety];
+              const Icon = r.safety === "safe" ? Check : r.safety === "blocked" ? CircleSlash : CircleAlert;
+              return (
+                <div key={r.key} className="flex items-start gap-[var(--ds-space-base)]">
+                  <Icon
+                    aria-hidden
+                    className={cn(
+                      dsIcon.md,
+                      "mt-px shrink-0",
+                      safety.tone === "success"
+                        ? "text-[color:var(--ds-success-fg)]"
+                        : safety.tone === "danger"
+                          ? "text-[color:var(--ds-danger)]"
+                          : "text-[color:var(--ds-status-waiting-fg)]",
+                    )}
+                  />
+                  <div className="flex min-w-0 flex-1 flex-col gap-[var(--ds-space-hair)]">
+                    <span className={cn(dsText.body, "font-medium text-[color:var(--ds-fg)]")}>
+                      {r.label} — <span className={dsText.nums}>{safety.word}</span>
+                    </span>
+                    <span className={cn(dsText.meta, "text-[color:var(--ds-fg-secondary)]")}>{r.detail}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
         <button
           type="button"
           aria-expanded={open}
           onClick={() => onOpen(!open)}
           data-demo-failure-toggle=""
           className={cn(
-            "ml-auto inline-flex shrink-0 items-center gap-[var(--ds-space-tight)] border px-[var(--ds-space-base)]",
+            "inline-flex w-fit shrink-0 items-center gap-[var(--ds-space-tight)] border px-[var(--ds-space-base)]",
             "h-[var(--ds-h-sm)] rounded-[var(--ds-radius-md)] border-[color:var(--ds-danger-border)]",
             dsText.meta,
             dsFocus,
             "font-semibold text-[color:var(--ds-danger)]",
           )}
         >
-          {open ? "Hide the full record" : "Open the full failure record"}
+          {open ? "Hide the diagnostic record" : "Show the diagnostic record"}
           <ChevronDown aria-hidden className={cn(dsIcon.sm, dsMotion.fast, open && "rotate-180")} />
         </button>
       </div>
 
-      {/* the one line that cannot wait for an expand */}
-      <p className={cn("mt-[var(--ds-space-tight)] pl-[var(--ds-space-loose)]", dsText.body, writeTone)}>
-        {failure.writeState.text}
-      </p>
-
       {open && (
-        <div className="mt-[var(--ds-space-base)] flex flex-col gap-[var(--ds-space-cozy)] pl-[var(--ds-space-loose)]">
-          {failure.mirrored && (
-            <Banner
-              tone="danger"
-              title={`Mirrored from the delegated ${failure.mirrored.childWorkflow} run — this run did not fail on its own`}
-              action={
-                <Button
-                  variant="secondary"
-                  icon={<Link2 aria-hidden className={dsIcon.md} />}
-                  onClick={() => onOpenRow(failure.mirrored!.childRowId)}
-                >
-                  Open the child run
-                </Button>
-              }
-            >
-              <span className="block">{failure.mirrored.verbatim}</span>
-              <span className="mt-[var(--ds-space-tight)] block">
-                <MetaLine items={[`child ${failure.mirrored.childTrace}`]} />
-                <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
-                  {" "}
-                  — quoted verbatim, so this row never says “unknown error” about a failure someone else already
-                  explained (D13)
-                </span>
-              </span>
-            </Banner>
-          )}
-
+        <div className="mt-[var(--ds-space-cozy)] flex flex-col gap-[var(--ds-space-cozy)] pl-5">
           <section className="flex flex-col gap-[var(--ds-space-snug)]">
             <SectionLabel>What had already happened when it failed</SectionLabel>
             <div className="overflow-x-auto rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)]">
@@ -216,38 +306,6 @@ export function FailureRecordBlock({
                   ))}
                 </TBody>
               </Table>
-            </div>
-          </section>
-
-          <section className="flex flex-col gap-[var(--ds-space-snug)]">
-            <SectionLabel>What is safe to retry</SectionLabel>
-            <div className="flex flex-col gap-[var(--ds-space-snug)]">
-              {failure.remediation.map((r) => {
-                const safety = SAFETY_COPY[r.safety];
-                const Icon = r.safety === "safe" ? Check : r.safety === "blocked" ? CircleSlash : CircleAlert;
-                return (
-                  <div key={r.key} className="flex items-start gap-[var(--ds-space-base)]">
-                    <Icon
-                      aria-hidden
-                      className={cn(
-                        dsIcon.md,
-                        "mt-px shrink-0",
-                        safety.tone === "success"
-                          ? "text-[color:var(--ds-success-fg)]"
-                          : safety.tone === "danger"
-                            ? "text-[color:var(--ds-danger)]"
-                            : "text-[color:var(--ds-status-waiting-fg)]",
-                      )}
-                    />
-                    <div className="flex min-w-0 flex-1 flex-col gap-[var(--ds-space-hair)]">
-                      <span className={cn(dsText.body, "font-medium text-[color:var(--ds-fg)]")}>
-                        {r.label} — <span className={dsText.nums}>{safety.word}</span>
-                      </span>
-                      <span className={cn(dsText.meta, "text-[color:var(--ds-fg-secondary)]")}>{r.detail}</span>
-                    </div>
-                  </div>
-                );
-              })}
             </div>
           </section>
 
