@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 import { QueueRowCard } from "@/components/queue-panel/QueueRowCard";
 import { StatusCounts } from "@/components/queue-panel/StatusCounts";
 import { PROPOSED_STATUS, StatusBadge, statusText, type ProposedStatus } from "./demo-status";
-import { Button, dsBorder, dsFocus, dsIcon, dsMotion, dsRadius, dsSize, dsText } from "./demo-ui";
+import { Button, IconButton, Kbd, dsBorder, dsFocus, dsIcon, dsMotion, dsRadius, dsSize, dsSurface, dsText } from "./demo-ui";
 import { FooterActions, OutcomeActionButton, RowActionMenu, type DemoActionHandler } from "./DemoActions";
 import { rowInBucket, type StatusBucket } from "./DemoShell";
 import { DEMO_DAY, dayLabel } from "./demo-days";
@@ -921,6 +921,17 @@ function GroupMemberList({
 // Drill-in triage table
 // ---------------------------------------------------------------------------
 
+/** the drill-in header's three summary chips — one shape, two loudness levels */
+const drillChip = (warn: boolean): string =>
+  cn(
+    "inline-flex shrink-0 items-center border",
+    "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-base)]",
+    dsText.meta,
+    warn
+      ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] font-medium text-[color:var(--ds-status-waiting-fg)]"
+      : cn(dsBorder.base, "bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)]"),
+  );
+
 function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQueueState; handlers: DemoQueueHandlers }) {
   const group = DEMO_ROWS[groupId];
   const ids = orderedMemberIds(groupId);
@@ -928,37 +939,55 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
   const attentionN = counts.failed + counts.waiting + counts.warnings + counts.parked;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-border/60 px-3 py-2">
-        <button
-          type="button"
+      <div
+        className={cn(
+          "flex shrink-0 flex-wrap items-center border-b",
+          dsBorder.subtle,
+          "gap-[var(--ds-space-snug)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
+        )}
+      >
+        <IconButton
+          size="sm"
+          label="Back to queue"
           onClick={handlers.onBack}
-          aria-label="Back to queue"
-          className="mr-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <ArrowLeft aria-hidden className="size-3.5" />
-        </button>
-        <span className="mr-2 truncate text-[13px] font-semibold text-foreground">{group.title}</span>
+          icon={<ArrowLeft aria-hidden className={dsIcon.md} />}
+        />
+        <span className={cn(dsText.title, "mr-[var(--ds-space-tight)] truncate font-semibold text-[color:var(--ds-fg)]")}>
+          {group.title}
+        </span>
         {/* This is the LAST RUNG of the density ladder, not a route: the same
             group, the same members, opened to the size the set actually needs.
             One back, no breadcrumb — there is only one parent to return to. */}
         <span
           title={`Density ladder — ${DENSITY_RUNGS.find((r) => r.key === densityRung(ids.length))?.range}. The drill-in is a rung, not a separate page.`}
-          className="rounded-full border border-border bg-secondary/40 px-2.5 py-0.5 text-[10.5px] text-muted-foreground"
+          className={cn(drillChip(false), dsRadius.pill)}
         >
           {DENSITY_RUNGS.find((r) => r.key === densityRung(ids.length))?.range} · opened in place
         </span>
-        <span className="rounded-full border border-warning/50 bg-warning/12 px-2.5 py-0.5 text-[10.5px] font-medium text-warning">
-          Attention <span className="font-mono tabular-nums">{attentionN}</span>
+        <span className={cn(drillChip(true), dsRadius.pill)}>
+          Attention <span className={dsText.nums}>{attentionN}</span>
         </span>
-        <span className="rounded-full border border-border bg-card px-2.5 py-0.5 text-[10.5px] font-medium text-muted-foreground">
-          All <span className="font-mono tabular-nums">{ids.length}</span>
+        <span className={cn(drillChip(false), dsRadius.pill)}>
+          All <span className={dsText.nums}>{ids.length}</span>
         </span>
         <span className="relative ml-auto">
-          <Search aria-hidden className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+          <Search
+            aria-hidden
+            className={cn(dsIcon.sm, "pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[color:var(--ds-fg-muted)]")}
+          />
           <input
             aria-label="Search members"
             placeholder="name / EID…"
-            className="w-32 rounded-md border border-border bg-secondary/40 py-0.5 pl-6 pr-2 text-[11px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={cn(
+              "w-32 border pl-6 pr-[var(--ds-space-base)]",
+              "h-[var(--ds-h-sm)]",
+              dsRadius.md,
+              dsText.meta,
+              dsFocus,
+              dsMotion.fast,
+              dsBorder.strong,
+              "bg-[var(--ds-surface-2)] text-[color:var(--ds-fg)] placeholder:text-[color:var(--ds-fg-faint)]",
+            )}
           />
         </span>
       </div>
@@ -978,45 +1007,69 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
               data-demo-row-id={id}
               onClick={() => handlers.onSelect(id)}
               className={cn(
-                "grid w-full grid-cols-[16px_minmax(110px,1.2fr)_74px_minmax(100px,1fr)_44px] items-center gap-x-2.5 px-3 py-[5px] text-left text-[12px] outline-none",
-                "hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                isSel && "bg-info/8 shadow-[inset_2px_0_0_var(--info)]",
+                "grid w-full cursor-pointer grid-cols-[16px_minmax(110px,1.2fr)_74px_minmax(100px,1fr)_44px] items-center text-left",
+                "h-[var(--ds-h-row)] gap-x-[var(--ds-space-cozy)] px-[var(--ds-space-cozy)]",
+                dsText.body,
+                dsFocus,
+                dsMotion.fast,
+                "hover:bg-[var(--ds-surface-3)]",
+                isSel && "bg-[var(--ds-surface-selected)] shadow-[inset_2px_0_0_var(--ds-accent)]",
               )}
             >
-              <Icon aria-hidden className={cn("size-3.5", rejected ? "text-muted-foreground" : spec.cls)} />
-              <span className="flex min-w-0 items-center gap-1.5">
-                <span className={cn("truncate font-medium text-foreground", rejected && "italic font-normal text-muted-foreground")}>{m.title}</span>
-                {state.checkedIds.has(id) && <CheckCircle2 aria-hidden className="size-3 shrink-0 text-success" />}
+              <Icon aria-hidden className={cn(dsIcon.md, rejected ? "text-[color:var(--ds-fg-muted)]" : spec.cls)} />
+              <span className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
+                <span
+                  className={cn(
+                    "truncate font-medium text-[color:var(--ds-fg)]",
+                    rejected && "italic font-normal text-[color:var(--ds-fg-muted)]",
+                  )}
+                >
+                  {m.title}
+                </span>
+                {state.checkedIds.has(id) && (
+                  <CheckCircle2 aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-success-fg)]")} />
+                )}
               </span>
-              <span className="font-mono text-[10.5px] text-muted-foreground tabular-nums">{m.eid ?? "—"}</span>
+              <span className={cn(dsText.meta, dsText.nums, "text-[color:var(--ds-fg-muted)]")}>{m.eid ?? "—"}</span>
               <span
                 className={cn(
-                  "truncate font-mono text-[10.5px]",
-                  m.status === "failed" && !rejected && "text-destructive",
-                  (m.status === "waiting" || m.status === "doneWarnings") && "text-warning",
-                  (m.status === "verifiedDone" || m.status === "running" || rejected) && "text-muted-foreground",
-                  m.status === "queued" && "text-muted-foreground/70",
+                  dsText.meta,
+                  dsText.nums,
+                  "truncate",
+                  m.status === "failed" && !rejected && "text-[color:var(--ds-status-failed-fg)]",
+                  (m.status === "waiting" || m.status === "doneWarnings") && "text-[color:var(--ds-status-waiting-fg)]",
+                  (m.status === "verifiedDone" || m.status === "running" || rejected) && "text-[color:var(--ds-fg-muted)]",
+                  m.status === "queued" && "text-[color:var(--ds-fg-faint)]",
                 )}
               >
                 {m.memberFact}
               </span>
-              <span className="text-right font-mono text-[10.5px] text-muted-foreground tabular-nums">{m.duration ?? "—"}</span>
+              <span className={cn(dsText.meta, dsText.nums, "text-right text-[color:var(--ds-fg-muted)]")}>{m.duration ?? "—"}</span>
             </button>
           );
         })}
       </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 bg-secondary/20 px-3 py-1.5 font-mono text-[10px] text-muted-foreground">
-        <span>
-          <kbd className="rounded border border-border bg-card px-1">j</kbd>/<kbd className="rounded border border-border bg-card px-1">k</kbd> move
+      <div
+        className={cn(
+          "flex shrink-0 flex-wrap items-center border-t bg-[var(--ds-surface-2)]",
+          dsBorder.subtle,
+          dsText.meta,
+          "gap-x-[var(--ds-space-cozy)] gap-y-[var(--ds-space-tight)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
+          "text-[color:var(--ds-fg-muted)]",
+        )}
+      >
+        <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+          <Kbd>j</Kbd>
+          <Kbd>k</Kbd> move
         </span>
-        <span>
-          <kbd className="rounded border border-border bg-card px-1">n</kbd> next attention
+        <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+          <Kbd>n</Kbd> next attention
         </span>
-        <span>
-          <kbd className="rounded border border-border bg-card px-1">c</kbd> mark checked
+        <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+          <Kbd>c</Kbd> mark checked
         </span>
-        <span>
-          <kbd className="rounded border border-border bg-card px-1">Esc</kbd> back
+        <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+          <Kbd>Esc</Kbd> back
         </span>
         <span className="ml-auto">sorted attention-first</span>
       </div>
@@ -1056,14 +1109,14 @@ export function DemoQueue({
 
   if (state.view.kind === "drill") {
     return (
-      <section aria-label="Group triage" className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
+      <section aria-label="Group triage" className={cn("flex min-h-0 flex-col overflow-hidden border", dsRadius.lg, dsBorder.base, dsSurface.card)}>
         <DrillIn groupId={state.view.groupId} state={state} handlers={handlers} />
       </section>
     );
   }
 
   return (
-    <section aria-label="Queue" className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
+    <section aria-label="Queue" className={cn("flex min-h-0 flex-col overflow-hidden border", dsRadius.lg, dsBorder.base, dsSurface.card)}>
       <div
         className={cn(
           "flex shrink-0 items-center border-b",
