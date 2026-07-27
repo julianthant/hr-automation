@@ -130,6 +130,7 @@ export type DemoWorkflowId =
   | "onboarding"
   | "person-lookup"
   | "person-match"
+  | "i9-lookup"
   | "work-study"
   | "kronos-pay-rule"
   | "ocr"
@@ -139,45 +140,244 @@ export type DemoWorkflowId =
   | "onbase"
   | "i9-check"
   | "crm-doc-download"
-  | "kronos-reports";
+  | "sharepoint-download"
+  | "old-kronos-reports";
 
-export type DemoWorkflowCategory = "People" | "Documents" | "Data";
+/**
+ * A workflow's rail group.
+ *
+ * **Deliberately an open string, not a union.** The category is a field on the
+ * workflow's own descriptor (`defineWorkflow({ category })` — `src/core/kernel/types.ts`),
+ * so declaring a new one is a one-line edit in a workflow and must not require
+ * a frontend type to be widened first. A closed union here is how the demo
+ * ended up inventing three categories of its own and re-binning every workflow
+ * into them.
+ */
+export type DemoWorkflowCategory = string;
+
+/**
+ * The rail's display ORDER, and the only hardcoded thing about grouping. It
+ * mirrors production's `PREFERRED_CATEGORY_ORDER`
+ * (`src/dashboard/components/navigation/WorkflowRail.tsx`): a category not
+ * listed here is appended in first-seen order, and `Other` is always last.
+ */
+export const DEMO_CATEGORY_ORDER: readonly string[] = [
+  "Onboarding",
+  "OnBase",
+  "Separations",
+  "Work Study",
+  "Payroll",
+  "Timekeeping",
+  "Search",
+  "Utils",
+];
+
+/** where a workflow that declares no category lands — always the last group */
+export const DEMO_CATEGORY_OTHER = "Other";
+
+/**
+ * One answer a workflow's MEMBER rows are allowed to give to "what did you
+ * find?" — which is a different question from "did you run?".
+ *
+ * Status and outcome are orthogonal and must never be conflated: a member can
+ * be `Verified done` with the outcome `Not found`, because looking and finding
+ * nothing is a successful run with a negative answer. The demo used to cram
+ * both axes plus the evidence ("S1 + S2 · retain 3y", "no UCPath match") into
+ * one free-text detail string, which truncated to `S1 + S2 · ret…` in a column
+ * that sized itself to whatever the longest member happened to say.
+ *
+ * The vocabulary is DECLARED PER WORKFLOW (`DemoWorkflowRef.memberOutcomes`),
+ * never inferred from the workflow id — a surface that branches on
+ * `workflow === "i9-check"` is a surface that cannot serve the next workflow
+ * that needs outcomes.
+ */
+export interface MemberOutcomeSpec {
+  /** stable key — what the member row carries on the wire */
+  key: string;
+  /** the operator's word for it, one or two words so a column can hold it */
+  label: string;
+  /**
+   * How loud it is, on the SAME four channels everything else uses. An outcome
+   * is not a status, so it never renders as a `StatusPill` — the tone only
+   * picks which text token the word is drawn in, and the word itself is always
+   * the differentiator.
+   */
+  tone: "danger" | "warn" | "neutral" | "quiet";
+  /** one sentence: what this outcome means, verbatim, for the hover + a11y */
+  meaning: string;
+}
 
 export interface DemoWorkflowRef {
   id: DemoWorkflowId;
   /** the 2-char `defineWorkflow` code — the first component of every trace id */
   code: string;
   label: string;
+  /** the workflow's OWN category — the rail groups by this and nothing else */
   category: DemoWorkflowCategory;
   /** descriptor version currently serving runs — the archive key's other half */
   version: number;
   /** the systems this workflow drives; `resolvedInstance` is served per system */
   systems: SystemKey[];
+  /**
+   * The outcome vocabulary this workflow's member rows answer with. Absent =
+   * this workflow's members carry no outcome, and their detail column falls
+   * back to the free-text fact they already send.
+   */
+  memberOutcomes?: MemberOutcomeSpec[];
 }
+
+/**
+ * I-9 Check's member outcomes. Derived from what the fan-out can actually
+ * conclude about one person, in the operator's words rather than the system's:
+ * a UCPath match, no UCPath match, several people who could be them, a person
+ * whose packet is missing a section, and a page that was never searchable at
+ * all.
+ *
+ * `Found` is deliberately the QUIETEST of the five. It is the expected answer
+ * on 40-odd of 50 rows, and an outcome column that shouts the ordinary case is
+ * a column the eye stops reading.
+ */
+const I9_MEMBER_OUTCOMES: MemberOutcomeSpec[] = [
+  {
+    key: "found",
+    label: "Found",
+    tone: "quiet",
+    meaning: "Matched one active UCPath person, and both I-9 sections were located in the packet.",
+  },
+  {
+    key: "not-found",
+    label: "Not found",
+    tone: "danger",
+    meaning: "UCPath returned no person for this name or EID. The roster row is left unmatched.",
+  },
+  {
+    key: "unsure",
+    label: "Unsure",
+    tone: "warn",
+    meaning: "More than one active UCPath person matches this name — the run is stopped until you pick one.",
+  },
+  {
+    key: "incomplete",
+    label: "Incomplete",
+    tone: "warn",
+    meaning: "The person was found, but a section of their I-9 is missing from the packet and has been flagged.",
+  },
+  {
+    key: "not-searchable",
+    label: "Not searchable",
+    tone: "quiet",
+    meaning: "The page carries no name to search on, so no check was ever possible for it.",
+  },
+];
 
 /**
  * The client projection of `/api/workflow-definitions`. The Workflow Panel rail,
  * the row's workflow chip and the per-row `workflowVersion` all read THIS —
  * there is no second hand-written workflow list anywhere in the demo.
  */
+/**
+ * The client projection of `/api/workflow-definitions`.
+ *
+ * Every `category` here is the one the production descriptor declares — the
+ * demo does not have a category scheme of its own, because the rail is the
+ * registry's view of itself and inventing a second taxonomy is how a workflow
+ * comes to sit in a different group in the demo than in the product.
+ */
 export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
-  separations: { id: "separations", code: "se", label: "Separations", category: "People", version: 7, systems: ["kuali", "ucpath", "kronos"] },
-  onboarding: { id: "onboarding", code: "on", label: "Onboarding", category: "People", version: 11, systems: ["crm", "ucpath", "i9", "kuali"] },
-  "person-lookup": { id: "person-lookup", code: "pl", label: "Person Lookup", category: "People", version: 4, systems: ["ucpath", "crm"] },
-  "person-match": { id: "person-match", code: "pm", label: "Person Match", category: "People", version: 2, systems: ["ucpath"] },
-  "work-study": { id: "work-study", code: "ws", label: "Work-Study", category: "People", version: 5, systems: ["ucpath"] },
-  "kronos-pay-rule": { id: "kronos-pay-rule", code: "kp", label: "Kronos Pay Rule", category: "People", version: 3, systems: ["kronos"] },
-  ocr: { id: "ocr", code: "oc", label: "OCR", category: "Documents", version: 9, systems: ["i9"] },
-  "oath-signature": { id: "oath-signature", code: "os", label: "Oath Signature", category: "Documents", version: 6, systems: ["ucpath"] },
-  "oath-upload": { id: "oath-upload", code: "ou", label: "Oath Upload", category: "Documents", version: 6, systems: ["ucpath", "servicenow"] },
-  "emergency-contact": { id: "emergency-contact", code: "ec", label: "Emergency Contact", category: "Documents", version: 4, systems: ["ucpath"] },
-  onbase: { id: "onbase", code: "ob", label: "OnBase", category: "Documents", version: 5, systems: ["onbase", "ucpath"] },
-  "i9-check": { id: "i9-check", code: "ic", label: "I-9 Check", category: "Documents", version: 2, systems: ["ucpath", "i9"] },
-  "crm-doc-download": { id: "crm-doc-download", code: "cd", label: "CRM Doc Download", category: "Data", version: 3, systems: ["crm"] },
-  "kronos-reports": { id: "kronos-reports", code: "kr", label: "Kronos Reports", category: "Data", version: 4, systems: ["kronos"] },
+  separations: { id: "separations", code: "se", label: "Separations", category: "Separations", version: 7, systems: ["kuali", "ucpath", "kronos"] },
+  onboarding: { id: "onboarding", code: "on", label: "Onboarding", category: "Onboarding", version: 11, systems: ["crm", "ucpath", "i9", "kuali"] },
+  "person-lookup": { id: "person-lookup", code: "pl", label: "Person Lookup", category: "Search", version: 4, systems: ["ucpath", "crm"] },
+  "person-match": { id: "person-match", code: "pm", label: "Person Match", category: "Search", version: 2, systems: ["ucpath"] },
+  "i9-lookup": { id: "i9-lookup", code: "i9", label: "I-9 Lookup", category: "Search", version: 3, systems: ["i9"] },
+  "work-study": { id: "work-study", code: "ws", label: "Work-Study", category: "Work Study", version: 5, systems: ["ucpath"] },
+  "kronos-pay-rule": { id: "kronos-pay-rule", code: "kp", label: "Kronos Pay Rule", category: "Payroll", version: 3, systems: ["kronos"] },
+  ocr: { id: "ocr", code: "oc", label: "OCR", category: "Utils", version: 9, systems: ["i9"] },
+  "oath-signature": { id: "oath-signature", code: "os", label: "Oath Signature", category: "Onboarding", version: 6, systems: ["ucpath"] },
+  "oath-upload": { id: "oath-upload", code: "ou", label: "Oath Upload", category: "Onboarding", version: 6, systems: ["ucpath", "servicenow"] },
+  "emergency-contact": { id: "emergency-contact", code: "ec", label: "Emergency Contact", category: "Onboarding", version: 4, systems: ["ucpath"] },
+  onbase: { id: "onbase", code: "ob", label: "OnBase", category: "OnBase", version: 5, systems: ["onbase", "ucpath"] },
+  "i9-check": {
+    id: "i9-check",
+    code: "ic",
+    label: "I-9 Check",
+    category: "Separations",
+    version: 2,
+    systems: ["ucpath", "i9"],
+    memberOutcomes: I9_MEMBER_OUTCOMES,
+  },
+  "crm-doc-download": { id: "crm-doc-download", code: "cd", label: "CRM Doc Download", category: "Utils", version: 3, systems: ["crm"] },
+  "sharepoint-download": { id: "sharepoint-download", code: "sp", label: "SharePoint Download", category: "Utils", version: 2, systems: ["crm"] },
+  "old-kronos-reports": { id: "old-kronos-reports", code: "kr", label: "Old Kronos Reports", category: "Timekeeping", version: 4, systems: ["kronos"] },
 };
 
 export const DEMO_WORKFLOW_LIST: DemoWorkflowRef[] = Object.values(DEMO_WORKFLOWS);
+
+/** one rail group: a category heading and the workflows the registry binned under it */
+export interface WorkflowCategoryGroup {
+  label: string;
+  workflows: DemoWorkflowRef[];
+}
+
+/**
+ * Group the registry by each descriptor's OWN category, in the display order
+ * above. This is the mock server's rail projection, and it mirrors production's
+ * `computeDisplayGroups` exactly:
+ *
+ *  - a workflow bins by `category`; one that declares none bins into `Other`;
+ *  - listed categories come first in `order`, then any newly-seen category in
+ *    first-seen order, and `Other` is always last;
+ *  - **a category with no workflows is dropped**, so an order entry for a group
+ *    nothing is registered under (production's `Timekeeping` in a dashboard
+ *    process that never imported Old Kronos Reports) costs nothing and needs no
+ *    edit when it is registered later.
+ */
+export function buildWorkflowCategoryGroups(
+  workflows: readonly DemoWorkflowRef[] = DEMO_WORKFLOW_LIST,
+  order: readonly string[] = DEMO_CATEGORY_ORDER,
+): WorkflowCategoryGroup[] {
+  const byCategory = new Map<string, DemoWorkflowRef[]>();
+  const seenOrder: string[] = [];
+  for (const w of workflows) {
+    const category = w.category || DEMO_CATEGORY_OTHER;
+    let bin = byCategory.get(category);
+    if (!bin) {
+      bin = [];
+      byCategory.set(category, bin);
+      seenOrder.push(category);
+    }
+    bin.push(w);
+  }
+
+  const ordered: string[] = [];
+  for (const category of order) if (byCategory.has(category)) ordered.push(category);
+  for (const category of seenOrder) {
+    if (category === DEMO_CATEGORY_OTHER) continue;
+    if (order.includes(category)) continue;
+    ordered.push(category);
+  }
+  if (byCategory.has(DEMO_CATEGORY_OTHER)) ordered.push(DEMO_CATEGORY_OTHER);
+
+  return ordered.map((label) => ({ label, workflows: byCategory.get(label) ?? [] }));
+}
+
+/**
+ * Resolve a member row's outcome KEY against the vocabulary its workflow
+ * declares — and FAIL LOUD when it does not resolve.
+ *
+ * A key the workflow never declared is a contract break, not a display quirk:
+ * silently dropping it would leave a member row that says nothing about what it
+ * found while every neighbouring row does, which reads as "still working".
+ */
+export function resolveMemberOutcome(workflow: DemoWorkflowRef, key: string): MemberOutcomeSpec {
+  const found = workflow.memberOutcomes?.find((o) => o.key === key);
+  if (!found) {
+    throw new Error(
+      `demo wire: ${workflow.label} (${workflow.id}) declares no member outcome "${key}" — ` +
+        `its vocabulary is [${(workflow.memberOutcomes ?? []).map((o) => o.key).join(", ") || "none"}]`,
+    );
+  }
+  return found;
+}
 
 // ---------------------------------------------------------------------------
 // Detail routing — capability-driven tabs
