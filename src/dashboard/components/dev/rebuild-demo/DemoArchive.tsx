@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -8,12 +9,14 @@ import {
   BadgeCheck,
   Camera,
   Download,
+  ChevronDown,
+  ChevronRight,
   FileClock,
   FlaskConical,
   ImageOff,
+  Info,
   Lock,
   RotateCw,
-  ShieldAlert,
   TriangleAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -33,6 +36,7 @@ import {
   DialogFooter,
   EmptyState,
   Field,
+  IconButton,
   MetaLine,
   PageHeader,
   Panel,
@@ -40,6 +44,9 @@ import {
   PanelFooter,
   PanelHeader,
   PanelToolbar,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   SearchInput,
   SectionLabel,
   Select,
@@ -62,7 +69,6 @@ import {
   useToasts,
 } from "./demo-ui";
 import {
-  ARCHIVE_RETENTION_NOTE,
   ARCHIVE_SORT_LABEL,
   BUMP_KIND_LABEL,
   BUMP_SCOPE_LABEL,
@@ -70,6 +76,7 @@ import {
   DEMO_CHANGE_RECORDS,
   EMPTY_ARCHIVE_QUERY,
   allTopLevelRows,
+  archiveQueryIsFiltered,
   archivedCapture,
   archivedRunExportName,
   archivedRunTouchedTest,
@@ -78,15 +85,19 @@ import {
   deriveRelaunchPlan,
   deriveVersionRegistry,
   exportArchivedRunJson,
+  flattenArchiveTable,
+  groupArchiveByBump,
   queryArchive,
   relaunchFromArchive,
   type ArchiveQuery,
+  type ArchiveSortDir,
   type ArchiveSortKey,
+  type ArchiveTableItem,
   type ArchivedEvidenceWire,
   type ArchivedRunWire,
   type RelaunchResult,
 } from "./demo-archive-wire";
-import { CaptureLightbox, downloadDemoFile } from "./DemoEvidence";
+import { captureAspect, CaptureLightbox, downloadDemoFile } from "./DemoEvidence";
 import { DEMO_WORKFLOWS, fmtClock, workflowVersionTag } from "./demo-wire";
 import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
 import { DemoVersionBumpDialog, type BumpTarget } from "./DemoVersionBump";
@@ -168,18 +179,42 @@ export function DemoArchivePage({
     if (selected && selected.runId !== selectedId) setSelectedId(selected.runId);
   }, [selected, selectedId]);
 
-  const byBump = useMemo(() => {
-    const map = new Map<string, ArchivedRunWire[]>();
-    for (const run of visible) map.set(run.bumpId, [...(map.get(run.bumpId) ?? []), run]);
-    return [...map.entries()];
-  }, [visible]);
+  // Sections are the BUMPS that swept these runs, derived after the sort so the
+  // two controls stay independent, and collapsible so a sweep of 400 costs one
+  // row until you ask for it.
+  const sections = useMemo(() => groupArchiveByBump(visible), [visible]);
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  const items = useMemo(() => flattenArchiveTable(sections, collapsed), [sections, collapsed]);
 
   const setQueryPart = useCallback(<K extends keyof ArchiveQuery>(key: K, value: ArchiveQuery[K]) => {
     setQuery((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  const filtered =
-    query.text.trim() !== "" || query.workflowId !== "all" || query.status !== "all" || query.instance !== "all";
+  /**
+   * Pressing a column head sorts by it; pressing the ACTIVE one flips the
+   * direction. Every column opens on the direction that puts its most useful
+   * end first — newest, longest and loudest-status at the top; names and ids
+   * from A.
+   */
+  const toggleSort = useCallback((key: ArchiveSortKey) => {
+    setQuery((prev) => {
+      if (prev.sort === key) return { ...prev, dir: prev.dir === "asc" ? "desc" : "asc" };
+      const opensDescending: ArchiveSortKey[] = ["when", "duration"];
+      const dir: ArchiveSortDir = opensDescending.includes(key) ? "desc" : "asc";
+      return { ...prev, sort: key, dir };
+    });
+  }, []);
+
+  const toggleSection = useCallback((bumpId: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(bumpId)) next.delete(bumpId);
+      else next.add(bumpId);
+      return next;
+    });
+  }, []);
+
+  const filtered = archiveQueryIsFiltered(query);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -221,33 +256,56 @@ export function DemoArchivePage({
       {view === "versions" ? (
         <VersionsView onBump={setBump} />
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-[var(--ds-space-base)] p-[var(--ds-space-cozy)] min-[1100px]:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
-          {/* ---- the list, searchable, grouped by the bump that swept it ---- */}
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-[var(--ds-space-base)] p-[var(--ds-space-cozy)] min-[1180px]:grid-cols-[minmax(0,1fr)_minmax(0,440px)]">
+          {/* ---- the table ---- */}
           <Panel className="min-h-0">
             <PanelHeader
               title="Archived runs"
-              subtitle="Prior-version runs — gone from the queue, the counts and every filter."
-              meta={`${visible.length} of ${DEMO_ARCHIVE.length}`}
+              meta={`${visible.length.toLocaleString()} of ${DEMO_ARCHIVE.length.toLocaleString()}`}
+              actions={
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <IconButton
+                      size="sm"
+                      label="Retention"
+                      icon={<Info aria-hidden className={dsIcon.md} />}
+                      className="text-[color:var(--ds-fg-faint)] hover:text-[color:var(--ds-fg)] data-[state=open]:text-[color:var(--ds-fg)]"
+                    />
+                  </PopoverTrigger>
+                  {/* The retention policy used to be a paragraph on the panel's
+                      footer, under a list it is true of on every run and every
+                      day. It is a rule of the product, so it lives here. */}
+                  <PopoverContent title="Retention" width="lg" align="end">
+                    <BulletList
+                      items={[
+                        "An archived row is kept indefinitely — it is the audit copy.",
+                        "Its evidence images are kept 90 days from the run's end and then purged; a purged pointer still names what it was of.",
+                        "The write ledger is never archived and never pruned, which is why a run here still lists what it filed.",
+                      ]}
+                    />
+                  </PopoverContent>
+                </Popover>
+              }
             />
-            <PanelToolbar label="Find an archived run" className="flex-wrap py-[var(--ds-space-tight)]">
-              {/* The single most plausible reason to open an archive is "did we
-                  ever file something for this person?", and the only affordance
-                  used to be a workflow chip row. */}
+
+            {/* ONE toolbar row. Four dropdowns stacked 2×2 ate the top third of
+                the panel on a page whose entire job is showing rows. It scrolls
+                sideways rather than wrapping, because a fixed-height bar that
+                wraps silently clips its second line. */}
+            <PanelToolbar label="Find an archived run" className="gap-[var(--ds-space-snug)] overflow-x-auto">
               <SearchInput
                 aria-label="Search archived runs by name, EID, trace id or confirmation number"
-                placeholder="Name, EID, trace id, confirmation…"
+                placeholder="Name, EID, trace, confirmation…"
                 value={query.text}
                 onChange={(event) => setQueryPart("text", event.target.value)}
                 onClear={() => setQueryPart("text", "")}
-                className="min-w-[220px] flex-1"
+                className="min-w-[200px] flex-1"
               />
-            </PanelToolbar>
-            <PanelToolbar label="Filter and sort archived runs" className="flex-wrap gap-[var(--ds-space-snug)] py-[var(--ds-space-tight)]">
               <Select
                 aria-label="Workflow"
                 value={query.workflowId}
                 onChange={(event) => setQueryPart("workflowId", event.target.value)}
-                className="w-auto"
+                className="w-auto shrink-0"
               >
                 <option value="all">Every workflow</option>
                 {workflows.map(([id, label]) => (
@@ -260,7 +318,7 @@ export function DemoArchivePage({
                 aria-label="Final status"
                 value={query.status}
                 onChange={(event) => setQueryPart("status", event.target.value as ProposedStatus | "all")}
-                className="w-auto"
+                className="w-auto shrink-0"
               >
                 <option value="all">Any outcome</option>
                 {statuses.map((status) => (
@@ -273,101 +331,32 @@ export function DemoArchivePage({
                 aria-label="Instance"
                 value={query.instance}
                 onChange={(event) => setQueryPart("instance", event.target.value as ArchiveQuery["instance"])}
-                className="w-auto"
+                className="w-auto shrink-0"
               >
                 <option value="all">Any instance</option>
                 <option value="prod">Production only</option>
                 <option value="test">Touched a test instance</option>
               </Select>
-              <Select
-                aria-label="Sort"
-                value={query.sort}
-                onChange={(event) => setQueryPart("sort", event.target.value as ArchiveSortKey)}
-                className="ml-auto w-auto"
-              >
-                {(Object.keys(ARCHIVE_SORT_LABEL) as ArchiveSortKey[]).map((key) => (
-                  <option key={key} value={key}>
-                    {ARCHIVE_SORT_LABEL[key]}
-                  </option>
-                ))}
-              </Select>
-            </PanelToolbar>
-            <PanelBody>
-              {byBump.length === 0 ? (
-                <EmptyState
-                  icon={<Archive aria-hidden className={dsIcon.lg} />}
-                  title={filtered ? "Nothing in the archive matches" : "The archive is empty"}
-                  description={
-                    filtered
-                      ? "Every archived run was excluded by the search or one of the filters. Clearing them shows all of them again."
-                      : "A run reaches the archive only when its workflow's MAJOR version bumps. Nothing has bumped yet."
-                  }
-                  action={
-                    filtered ? (
-                      <Button size="sm" variant="secondary" onClick={() => setQuery(EMPTY_ARCHIVE_QUERY)}>
-                        Clear the search and filters
-                      </Button>
-                    ) : undefined
-                  }
-                />
-              ) : (
-                byBump.map(([bumpId, runs]) => (
-                  <div key={bumpId} className="border-b border-[color:var(--ds-border-subtle)] last:border-b-0">
-                    <BumpGroupHeader bumpId={bumpId} count={runs.length} />
-                    <ul>
-                      {runs.map((run) => {
-                        const active = selected?.runId === run.runId;
-                        return (
-                          <li key={run.runId}>
-                            <button
-                              type="button"
-                              aria-current={active ? "true" : undefined}
-                              onClick={() => {
-                                setSelectedId(run.runId);
-                              }}
-                              className={cn(
-                                "flex w-full min-w-0 items-center gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)] text-left",
-                                dsFocus,
-                                dsMotion.base,
-                                active ? "bg-[var(--ds-surface-selected)]" : "hover:bg-[var(--ds-surface-3)]",
-                              )}
-                            >
-                              <StatusPill status={run.finalStatus} size="sm" hideIcon />
-                              <span className="flex min-w-0 flex-1 flex-col">
-                                <span className={cn(dsText.ui, "truncate text-[color:var(--ds-fg)]")}>
-                                  {run.displayName ?? run.title}
-                                </span>
-                                <span className={cn(dsText.micro, dsText.nums, "truncate text-[color:var(--ds-fg-muted)]")}>
-                                  {run.traceId} · {run.workflowLabel} {archivedVersionTag(run)}
-                                </span>
-                              </span>
-                              {run.dryRun && (
-                                <FlaskConical
-                                  aria-label="dry run"
-                                  className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-info-fg)]")}
-                                />
-                              )}
-                              {archivedRunTouchedTest(run) && (
-                                <TriangleAlert
-                                  aria-label="touched a test instance"
-                                  className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-status-waiting-fg)]")}
-                                />
-                              )}
-                              <span className={cn(dsText.micro, dsText.nums, "shrink-0 text-[color:var(--ds-fg-faint)]")}>
-                                {run.durationLabel}
-                              </span>
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                ))
+              {filtered && (
+                <Button size="sm" variant="ghost" className="shrink-0" onClick={() => setQuery(EMPTY_ARCHIVE_QUERY)}>
+                  Clear
+                </Button>
               )}
-            </PanelBody>
-            <PanelFooter>
-              <span className={cn(dsText.meta, "max-w-[104ch] text-[color:var(--ds-fg-muted)]")}>{ARCHIVE_RETENTION_NOTE}</span>
-            </PanelFooter>
+            </PanelToolbar>
+
+            <ArchiveTable
+              items={items}
+              sections={sections}
+              sort={query.sort}
+              dir={query.dir}
+              onSort={toggleSort}
+              collapsed={collapsed}
+              onToggleSection={toggleSection}
+              selectedId={selected?.runId}
+              onSelect={setSelectedId}
+              filtered={filtered}
+              onClearFilters={() => setQuery(EMPTY_ARCHIVE_QUERY)}
+            />
           </Panel>
 
           {/* ---- the self-contained snapshot ---- */}
@@ -406,54 +395,324 @@ export function DemoArchivePage({
   );
 }
 
+// ---------------------------------------------------------------------------
+// The table
+// ---------------------------------------------------------------------------
+
 /**
- * The group header. When no change record matches the `bumpId` it used to
- * degrade to the raw id in the slot a version pair belongs — the one case where
- * the archive silently lost the reason it exists. Now the gap is NAMED.
+ * THE ARCHIVE AS A TABLE, and it has to hold at eight rows and at eight hundred.
+ *
+ * What was here: a list of cards with a status pill of varying width in front of
+ * every name, so no two names started at the same x; four filter dropdowns
+ * stacked 2×2 eating the top third; bump banners interleaved into one flat
+ * scroll; and a retention paragraph pinned under it all. At eight rows that is
+ * merely untidy. At eight hundred it is unusable, and the corpus now holds eight
+ * hundred.
+ *
+ * **VIRTUALISED, NOT PAGINATED**, and the reason is what the operator does here.
+ * They arrive with a question — *did we ever file something for this person?* —
+ * and the narrowing tool for that is the search and the three filters, which are
+ * already on the bar. Pagination is a SECOND narrowing mechanism stacked on top
+ * of those: it splits a result set that has already been narrowed, forces a
+ * decision ("is it on page 4?") that no fact on screen can answer, and breaks
+ * the one motion a dense console is for — running your eye down a column until
+ * something stops it. It would also have to interact with the bump sections,
+ * because a page boundary landing inside a sweep either repeats its header or
+ * orphans its rows. A window keeps one continuous list, keeps the section
+ * headers where they belong, and costs the same at 800 rows as at 80.
+ *
+ * The three mechanics that make it work:
+ *
+ *  - **`table-fixed` + a `<colgroup>`.** An `auto` table measures the rows it
+ *    currently has mounted, so a windowed body re-computes its column widths on
+ *    every scroll and the whole grid shivers. Fixed widths also mean the status,
+ *    trace and duration columns land on the same x on every row — which is the
+ *    complaint that started this.
+ *  - **Spacer rows, not transforms.** The window is bracketed by two `<tr>`s
+ *    with a computed height, so the table stays a real table: native semantics,
+ *    a sticky `<thead>`, and no absolutely-positioned rows to fight.
+ *  - **Sections in the same flat list.** A header is an item like a run is, so
+ *    collapsing a sweep of 400 costs one item and the virtualiser never builds
+ *    the rows.
  */
-function BumpGroupHeader({ bumpId, count }: { bumpId: string; count: number }) {
-  const record = changeRecordFor(bumpId);
+const ARCHIVE_ROW_PX = 32;
+const ARCHIVE_SECTION_PX = 52;
+
+function ArchiveTable({
+  items,
+  sections,
+  sort,
+  dir,
+  onSort,
+  collapsed,
+  onToggleSection,
+  selectedId,
+  onSelect,
+  filtered,
+  onClearFilters,
+}: {
+  items: ArchiveTableItem[];
+  sections: { bumpId: string; runs: ArchivedRunWire[] }[];
+  sort: ArchiveSortKey;
+  dir: ArchiveSortDir;
+  onSort: (key: ArchiveSortKey) => void;
+  collapsed: ReadonlySet<string>;
+  onToggleSection: (bumpId: string) => void;
+  selectedId?: string;
+  onSelect: (runId: string) => void;
+  filtered: boolean;
+  onClearFilters: () => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: (index) => (items[index].kind === "section" ? ARCHIVE_SECTION_PX : ARCHIVE_ROW_PX),
+    overscan: 12,
+  });
+
+  const windowed = virtualizer.getVirtualItems();
+  const before = windowed.length > 0 ? windowed[0].start : 0;
+  const after = windowed.length > 0 ? virtualizer.getTotalSize() - windowed[windowed.length - 1].end : 0;
+
+  // The head's LABEL and its sort key come from the same map, so a column
+  // cannot come to be headed one thing and sort by another.
+  const head = (key: ArchiveSortKey) => ({
+    sort: sort === key ? (dir === "asc" ? ("ascending" as const) : ("descending" as const)) : ("none" as const),
+    onSort: () => onSort(key),
+    children: ARCHIVE_SORT_LABEL[key],
+  });
+
+  if (items.length === 0) {
+    return (
+      <PanelBody>
+        <EmptyState
+          icon={<Archive aria-hidden className={dsIcon.lg} />}
+          title={filtered ? "Nothing in the archive matches" : "The archive is empty"}
+          description={
+            filtered
+              ? "Every archived run was excluded by the search or one of the filters. Clearing them shows all of them again."
+              : "A run reaches the archive only when its workflow's MAJOR version bumps. Nothing has bumped yet."
+          }
+          action={
+            filtered ? (
+              <Button size="sm" variant="secondary" onClick={onClearFilters}>
+                Clear the search and filters
+              </Button>
+            ) : undefined
+          }
+        />
+      </PanelBody>
+    );
+  }
+
   return (
-    <div className="flex min-w-0 flex-col gap-[var(--ds-space-hair)] bg-[var(--ds-surface-2)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]">
-      <span className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
-        <FileClock aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
-        {record ? (
-          <>
-            <span className={cn(dsText.meta, dsText.nums, "text-[color:var(--ds-fg)]")}>
-              {record.fromVersion} → {record.toVersion}
-            </span>
-            <Badge tone={record.kind === "major" ? "warning" : "neutral"} title={BUMP_KIND_LABEL[record.kind]}>
-              {record.kind}
-            </Badge>
-            <Badge tone={record.scope === "dashboard" ? "warning" : "info"}>{BUMP_SCOPE_LABEL[record.scope]}</Badge>
-            <span className={cn(dsText.micro, "ml-auto shrink-0 text-[color:var(--ds-fg-muted)]")}>{record.at}</span>
-          </>
-        ) : (
-          <>
-            <span className={cn(dsText.meta, "text-[color:var(--ds-danger)]")}>Change record missing</span>
-            <Badge tone="danger">
-              <ShieldAlert aria-hidden className={dsIcon.sm} />
-              no reason on record
-            </Badge>
-            <CountBadge value={count} className="ml-auto" />
-          </>
-        )}
-      </span>
-      {record ? (
-        <span className={cn(dsText.micro, "truncate text-[color:var(--ds-fg-muted)]")} title={record.why}>
-          {record.what}
-        </span>
-      ) : (
-        <span className={cn(dsText.micro, "text-[color:var(--ds-fg-muted)]")}>
-          Swept by <span className={dsText.nums}>{bumpId}</span>, which the change-record store does not hold. The runs are
-          intact; what is missing is why they were archived.
-        </span>
-      )}
+    <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
+      <Table label="Archived runs" layout="fixed" className="min-w-[720px]">
+        {/* The measured column widths. Every one of these except the name is a
+            value of known shape — a status word, a trace id, a version tag, a
+            clock, a duration — so they are fixed and the name takes the slack.
+            That is what puts every name on the same x. */}
+        <colgroup>
+          <col className="w-[124px]" />
+          <col />
+          <col className="w-[132px]" />
+          <col className="w-[168px]" />
+          <col className="w-[104px]" />
+          <col className="w-[76px]" />
+        </colgroup>
+        <THead>
+          <TR>
+            <TH {...head("status")} />
+            <TH {...head("name")} />
+            <TH {...head("trace")} />
+            <TH {...head("workflow")} />
+            <TH {...head("when")} />
+            <TH align="right" {...head("duration")} />
+          </TR>
+        </THead>
+        <TBody>
+          {before > 0 && (
+            <tr aria-hidden style={{ height: before }}>
+              <td colSpan={6} />
+            </tr>
+          )}
+          {windowed.map((virtual) => {
+            const item = items[virtual.index];
+            if (item.kind === "section") {
+              const section = sections.find((s) => s.bumpId === item.bumpId);
+              return (
+                <BumpSectionRow
+                  key={`section-${item.bumpId}`}
+                  bumpId={item.bumpId}
+                  count={item.count}
+                  collapsed={collapsed.has(item.bumpId)}
+                  onToggle={() => onToggleSection(item.bumpId)}
+                  hidden={section === undefined}
+                />
+              );
+            }
+            return (
+              <ArchiveRow
+                key={item.run.runId}
+                run={item.run}
+                selected={item.run.runId === selectedId}
+                onSelect={() => onSelect(item.run.runId)}
+              />
+            );
+          })}
+          {after > 0 && (
+            <tr aria-hidden style={{ height: after }}>
+              <td colSpan={6} />
+            </tr>
+          )}
+        </TBody>
+      </Table>
     </div>
   );
 }
 
+/**
+ * One run, one row of six aligned cells.
+ *
+ * The whole `<tr>` is the click target and carries `aria-selected`; the name
+ * cell holds the only real button, so a screen reader gets one command per row
+ * rather than six. Dry-run and test-instance flags ride the name cell as icons
+ * with their own labels — they are hazards, so they may not be columns that
+ * scroll off, and they may not be hidden either.
+ */
+function ArchiveRow({ run, selected, onSelect }: { run: ArchivedRunWire; selected: boolean; onSelect: () => void }) {
+  return (
+    <TR interactive selected={selected} onClick={onSelect} className="cursor-pointer">
+      <TD className="truncate">
+        <StatusPill status={run.finalStatus} size="sm" hideIcon />
+      </TD>
+      <TD className="min-w-0">
+        <span className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelect();
+            }}
+            className={cn("min-w-0 flex-1 truncate text-left text-[color:var(--ds-fg)]", dsFocus)}
+          >
+            {run.displayName ?? run.title}
+          </button>
+          {run.dryRun && (
+            <FlaskConical aria-label="dry run" className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-info-fg)]")} />
+          )}
+          {archivedRunTouchedTest(run) && (
+            <TriangleAlert
+              aria-label="touched a test instance"
+              className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-status-waiting-fg)]")}
+            />
+          )}
+        </span>
+      </TD>
+      <TD numeric className="truncate text-[color:var(--ds-fg-muted)]">
+        {run.traceId}
+      </TD>
+      <TD className="truncate">
+        <span className="flex min-w-0 items-baseline gap-[var(--ds-space-snug)]">
+          <span className="min-w-0 truncate">{run.workflowLabel}</span>
+          <span className={cn(dsText.micro, dsText.nums, "shrink-0 text-[color:var(--ds-fg-muted)]")}>
+            {archivedVersionTag(run)}
+          </span>
+        </span>
+      </TD>
+      <TD numeric className="truncate text-[color:var(--ds-fg-muted)]">
+        {run.endedAt}
+      </TD>
+      <TD align="right" numeric className="text-[color:var(--ds-fg-faint)]">
+        {run.durationLabel}
+      </TD>
+    </TR>
+  );
+}
+
+/**
+ * A BUMP, as a collapsible section head spanning the row.
+ *
+ * It used to be a banner interleaved into a flat scroll — which is fine at two
+ * sweeps and is a wall at twenty. Collapsing is where the operator's own
+ * question gets answered: an archive is organised by the sweeps that made it,
+ * and "not this one" is the fastest way through it.
+ *
+ * When no change record matches the `bumpId` the gap is NAMED. This is the one
+ * case where the archive loses the reason it exists, and it used to degrade to
+ * a raw id in the slot a version pair belongs.
+ */
+function BumpSectionRow({
+  bumpId,
+  count,
+  collapsed,
+  onToggle,
+  hidden,
+}: {
+  bumpId: string;
+  count: number;
+  collapsed: boolean;
+  onToggle: () => void;
+  hidden: boolean;
+}) {
+  const record = changeRecordFor(bumpId);
+  if (hidden) return null;
+  return (
+    <tr>
+      <td colSpan={6} className="border-b border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] p-0">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+          className={cn(
+            "flex w-full min-w-0 cursor-pointer flex-col gap-[var(--ds-space-hair)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)] text-left",
+            dsFocus,
+            dsMotion.fast,
+            "hover:bg-[var(--ds-surface-3)]",
+          )}
+        >
+          <span className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
+            {collapsed ? (
+              <ChevronRight aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+            ) : (
+              <ChevronDown aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+            )}
+            <FileClock aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+            {record ? (
+              <>
+                <span className={cn(dsText.meta, dsText.nums, "shrink-0 text-[color:var(--ds-fg)]")}>
+                  {record.fromVersion} → {record.toVersion}
+                </span>
+                <Badge tone={record.kind === "major" ? "warning" : "neutral"} title={BUMP_KIND_LABEL[record.kind]}>
+                  {record.kind}
+                </Badge>
+                <Badge tone={record.scope === "dashboard" ? "warning" : "info"}>{BUMP_SCOPE_LABEL[record.scope]}</Badge>
+                <span className={cn(dsText.micro, "min-w-0 flex-1 truncate text-[color:var(--ds-fg-muted)]")} title={record.why}>
+                  {record.what}
+                </span>
+                <span className={cn(dsText.micro, "shrink-0 text-[color:var(--ds-fg-muted)]")}>{record.at}</span>
+              </>
+            ) : (
+              <>
+                <span className={cn(dsText.meta, "shrink-0 text-[color:var(--ds-danger)]")}>Change record missing</span>
+                <span className={cn(dsText.micro, "min-w-0 flex-1 truncate text-[color:var(--ds-fg-muted)]")}>
+                  Swept by <span className={dsText.nums}>{bumpId}</span>, which the change-record store does not hold. The runs
+                  are intact; what is missing is why they were archived.
+                </span>
+              </>
+            )}
+            <CountBadge value={count} className="shrink-0" />
+          </span>
+        </button>
+      </td>
+    </tr>
+  );
+}
+
 // ---------------------------------------------------------------------------
+// The detail
+// ---------------------------------------------------------------------------// ---------------------------------------------------------------------------
 // The detail
 // ---------------------------------------------------------------------------
 
@@ -958,6 +1217,20 @@ function EvidenceTile({ item, onOpen }: { item: ArchivedEvidenceWire; onOpen: ()
   return (
     <Card>
       <CardBody className="flex min-w-0 flex-wrap items-center gap-[var(--ds-space-base)]">
+        {/* The pointer's own SHAPE, at the shared thumbnail height — a portrait
+            document page and a landscape browser viewport read as different
+            things before either is opened, which is the one true thing a
+            byte-less placeholder can offer. */}
+        <span
+          aria-hidden
+          style={{ aspectRatio: captureAspect(archivedCapture(item)) }}
+          className={cn(
+            "flex h-[var(--ds-h-evidence-thumb)] shrink-0 items-center justify-center border bg-[var(--ds-surface-1)] rounded-[var(--ds-radius-sm)]",
+            purged ? "border-dashed border-[color:var(--ds-border-strong)]" : "border-[color:var(--ds-border-subtle)]",
+          )}
+        >
+          <Camera className={cn(dsIcon.md, "text-[color:var(--ds-fg-muted)]")} />
+        </span>
         <Badge tone={item.kind === "error" ? "danger" : item.kind === "confirmation" ? "success" : "neutral"}>{item.kind}</Badge>
         <span className="flex min-w-0 flex-1 flex-col">
           <span className={cn(dsText.ui, "truncate text-[color:var(--ds-fg)]")}>{item.label}</span>

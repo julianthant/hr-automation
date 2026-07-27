@@ -27,17 +27,32 @@ import { dsFocus, dsIcon, dsLayer, dsMotion, dsRadius, dsText } from "./tokens";
  */
 export function Table({
   label,
+  layout = "auto",
   className,
   children,
 }: {
   label: string;
+  /**
+   * `fixed` sizes the columns from the first row (or a `<colgroup>`) and never
+   * re-measures. Reach for it whenever the BODY IS WINDOWED: an `auto` table
+   * measures whatever rows are currently mounted, so a virtualised list
+   * re-computes its columns on every scroll and the whole grid shivers. It is
+   * also what lets a section header span the row without dragging the columns
+   * around with it.
+   */
+  layout?: "auto" | "fixed";
   className?: string;
   children: ReactNode;
 }) {
   return (
     <table
       aria-label={label}
-      className={cn("w-full border-separate border-spacing-0 text-left", dsText.body, className)}
+      className={cn(
+        "w-full border-separate border-spacing-0 text-left",
+        layout === "fixed" && "table-fixed",
+        dsText.body,
+        className,
+      )}
     >
       {children}
     </table>
