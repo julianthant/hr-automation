@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -29,10 +29,13 @@ import {
   DialogFooter,
   Field,
   IconButton,
+  LockedValue,
   MetaLine,
+  Refusal,
   SectionLabel,
   Separator,
   Textarea,
+  ValueField,
   Well,
   dsFocus,
   dsIcon,
@@ -44,7 +47,9 @@ import { EvidenceSection, SystemChip } from "./DemoEvidence";
 import { RunIdentityStrip, RunSelector } from "./DemoRunIdentity";
 import { actionsAt, fmtClock, type ActionDescriptorWire } from "./demo-wire";
 import {
+  appliedCorrectionsFor,
   checkpointAge,
+  checkpointBaseValue,
   checkpointFor,
   editPolicyFor,
   editPolicySummary,
@@ -52,7 +57,7 @@ import {
   type DemoEditLock,
 } from "./demo-flows-wire";
 import type { DemoActionHandler } from "./DemoActions";
-import type { DemoCommandResult } from "./demo-commands";
+import { hasRefusalCode, type DemoCommandResult } from "./demo-commands";
 import { DEMO_ROWS, linkedGroupSummary, type DemoDataPoint, type DemoRow } from "./demo-data";
 
 /**
@@ -101,9 +106,12 @@ import { DEMO_ROWS, linkedGroupSummary, type DemoDataPoint, type DemoRow } from 
  * set existed to end. 348px is tight for editing, so the surface WIDENS itself
  * (`--ds-w-context-rail-wide`) instead of hiding in a modal.
  *
- * The ledger's row is deliberately the shape the old Data TAB had — direction
- * icon, quiet label, value in tabular mono, badges, system, clock — narrowed
- * rather than redrawn, because the operator recognises that row.
+ * The ledger's row STACKS in three levels — step, then sub-step, then the value
+ * on its own full-width line below it (2026-07-27, operator: "have the step,
+ * have the sub step and below that put the data extracted. not the substep and
+ * data in one line"). Label and value used to share a line inside 348px and
+ * both truncated; splitting them gives the value the whole column and the label
+ * room for its whole name. See `LedgerRow`.
  */
 
 // ---------------------------------------------------------------------------
@@ -206,18 +214,91 @@ function FeedsIntoLine({ row }: { row: DemoRow }) {
 }
 
 /**
- * ONE value the run touched — the row from the old Data TAB, narrowed.
+ * The direction of ONE value, said twice: an arrow AND a colour.
  *
- * Same shape and same reading order as the tab had, because that is the row the
- * operator knows: DIRECTION as an icon, the field label quiet, the value in
- * tabular mono and doing the work, then what is true about it (refreshed /
- * staged / unconfirmed / why it is locked), then which system and when.
+ * The colour is the point of this component. Direction was previously carried
+ * by the arrow glyph alone, in `--ds-fg-muted`, at 12px — which meant a ledger
+ * of eight reads and one write looked like nine of the same thing, and the one
+ * line that changed the world was the hardest to find. `--ds-read-*` /
+ * `--ds-write-*` are a two-tone axis (see `ds/tokens.css`), and the rail is what
+ * makes the axis SCANNABLE: a column of blue with one purple entry answers
+ * "what did this run change?" without reading a word.
  *
- * The narrowing is honest rather than decorative. The rail is ~316px of usable
- * width, so the clock folds away below a container width and comes back the
- * moment the surface is expanded — a timestamp is the least load-bearing thing
- * on the line, and dropping it beats truncating the value. Nothing else is
- * removed; the label gives up width first, the value last.
+ * The arrow stays. Colour is never the only differentiator, and it is the arrow
+ * that survives a forced-colors mode or a colour-blind operator.
+ */
+function DirectionMark({ dir }: { dir: DemoDataPoint["dir"] }) {
+  const read = dir === "read";
+  const Icon = read ? ArrowDownToLine : ArrowUpFromLine;
+  return (
+    <span className="flex shrink-0 gap-[var(--ds-space-tight)] self-stretch">
+      {/* The rail spans BOTH lines of the stacked row, which is the whole
+          reason it is a rail and not a dot: it is what binds a sub-step label
+          to the value printed underneath it, so an eight-row ledger still reads
+          as eight things and not sixteen. */}
+      <span
+        aria-hidden
+        className={cn(
+          "w-[var(--ds-border-w-emphasis)] shrink-0 self-stretch rounded-[var(--ds-radius-pill)]",
+          read ? "bg-[var(--ds-read-mark)]" : "bg-[var(--ds-write-mark)]",
+        )}
+      />
+      {/* The arrow sits on the LABEL line, not centred across the pair — a
+          glyph floating in the gutter between two lines belongs to neither. */}
+      <Icon
+        aria-hidden
+        className={cn(
+          dsIcon.sm,
+          "mt-[var(--ds-space-hair)] shrink-0",
+          read ? "text-[color:var(--ds-read-fg)]" : "text-[color:var(--ds-write-fg)]",
+        )}
+      />
+      <span className="sr-only">{read ? "read" : "write"}</span>
+    </span>
+  );
+}
+
+/**
+ * ONE value the run touched, in THREE vertical levels: step → sub-step → value.
+ *
+ *     OCR extraction              ← the step, once, as the group heading
+ *     ▌↓ People found        I9   ← the sub-step: this field's label, quiet
+ *     ▌  [ 6 (8 pages)        ✎ ] ← the value, on its own line, full width
+ *
+ * WHY IT STACKS (2026-07-27, operator: "have the step, have the sub step and
+ * below that put the data extracted. not the substep and data in one line").
+ * The label and the value used to share one line inside a 348px rail, so they
+ * competed for the same pixels and the value lost: the operator's own screen
+ * showed `Roster rows matc…` beside `5 approvab…` — both halves of the line
+ * clipped, and a clipped VALUE is the one thing on the row that cannot be
+ * recovered from anywhere else on the surface. Splitting them gives the value
+ * the whole column and gives the label the room to say its whole name.
+ *
+ * This is ONE shape at every width. There is deliberately no "side by side
+ * again when there is room" rung: a layout that re-flows into a different
+ * reading order as the rail widens is two layouts to learn, and the operator
+ * asked for one.
+ *
+ * WHAT SITS WHERE, and why that is not arbitrary. The label line is short and
+ * PREDICTABLE, so it carries every fixed-width fact — what is true about the
+ * value (changed / corrected / refreshed / staged / unconfirmed / why it is
+ * locked), which system it came from, and when. The value line is UNBOUNDED, so
+ * it carries nothing but the value. Furniture goes on the line that can afford
+ * it. The hazard badges did not get quieter by moving: `staged` sits on the
+ * exact row whose write is staged, which is nearer the hazard than the summary
+ * chip that used to count them ever was.
+ *
+ * WHY THE EDITABLE ONE LOOKS LIKE A FIELD (operator: "how can i edit the
+ * data"). A read value was ALREADY a real `<input>` at rest — styled
+ * `border-transparent` on no background, so it looked exactly like the static
+ * text beside it and the operator never found it. The capability existed and
+ * the affordance did not, and a sentence at the bottom of the section saying
+ * "read values are editable" is not an affordance. It now reads as a field
+ * without being hovered: control-border outline, inset surface, and a pencil —
+ * a control you have to discover by sweeping the pointer over the page is a
+ * control that does not exist. A locked value is FLAT TEXT with its lock and no
+ * box at all, so editable and locked are told apart by SHAPE, not by a badge
+ * and not by colour.
  */
 function LedgerRow({
   point,
@@ -226,6 +307,7 @@ function LedgerRow({
   policy,
   dirty,
   refreshed,
+  corrected,
   onEdit,
 }: {
   point: DemoDataPoint;
@@ -235,74 +317,109 @@ function LedgerRow({
   policy: DemoEditLock;
   dirty: boolean;
   refreshed?: string;
+  /** the observed reading this field's applied correction replaced */
+  corrected?: string;
   onEdit: (next: string) => void;
 }) {
-  const Icon = point.dir === "read" ? ArrowDownToLine : ArrowUpFromLine;
+  // A real `htmlFor` pairing, which the one-line row could not have had: the
+  // label sat beside the input rather than above it, so it was written as an
+  // `aria-label` and the visible text was associated with nothing. Stacked, the
+  // label IS the field's label — which also makes it a click target that focuses
+  // the input, one more thing saying "this line takes typing".
+  const fieldId = useId();
+  const labelClass = cn(dsText.meta, "min-w-0 flex-1 truncate text-[color:var(--ds-fg-muted)]");
   return (
-    <div className="flex items-center gap-[var(--ds-space-tight)] py-[var(--ds-space-hair)]">
-      <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
-      <span
-        title={point.field}
-        className={cn(dsText.meta, "w-24 shrink-0 truncate text-[color:var(--ds-fg-muted)]", "@min-[26rem]:w-36")}
-      >
-        {point.field}
-      </span>
-      {dirty && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--ds-status-waiting-mark)]" />}
-      {policy.editable ? (
-        <input
-          aria-label={`${point.field} — edit this read value`}
-          value={value}
-          onChange={(e) => onEdit(e.target.value)}
-          className={cn(
-            "min-w-0 flex-1 border bg-transparent px-[var(--ds-space-tight)]",
-            "h-[var(--ds-h-sm)] rounded-[var(--ds-radius-md)]",
-            dsText.body,
-            dsText.nums,
-            dsFocus,
-            dsMotion.fast,
-            "text-[color:var(--ds-fg)]",
-            dirty
-              ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]"
-              : "border-transparent hover:border-[color:var(--ds-border)] focus:border-[color:var(--ds-border)]",
+    <div className="flex gap-[var(--ds-space-tight)] py-[var(--ds-space-tight)]">
+      <DirectionMark dir={point.dir} />
+      <div className="flex min-w-0 flex-1 flex-col gap-[var(--ds-space-hair)]">
+        {/* LEVEL 2 — the sub-step. It gives up width to the badges, never the
+            other way round, because a truncated label still has its full text
+            one hover away and a truncated badge would be unreadable. */}
+        <div className="flex items-center gap-[var(--ds-space-tight)]">
+          {policy.editable ? (
+            <label htmlFor={fieldId} title={point.field} className={cn(labelClass, "cursor-text")}>
+              {point.field}
+            </label>
+          ) : (
+            <span title={point.field} className={labelClass}>
+              {point.field}
+            </span>
           )}
-        />
-      ) : (
-        <span className="flex min-w-0 flex-1 items-center gap-[var(--ds-space-tight)]" title={policy.reason}>
-          <Lock aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-faint)]")} />
-          <span title={base} className={cn(dsText.body, dsText.nums, "min-w-0 flex-1 truncate text-[color:var(--ds-fg)]")}>
-            {base}
+          {/* A WORD, not just the amber fill on the field below it — the fill
+              is the fast signal and the word is the one that survives a
+              colour-blind operator or a forced-colors mode. */}
+          {dirty && (
+            <Badge tone="warning" className="shrink-0" title="You changed this value. It is not saved yet.">
+              changed
+            </Badge>
+          )}
+          {corrected !== undefined && (
+            <Badge
+              tone="info"
+              className="shrink-0"
+              title={`You corrected this value. The run observed “${corrected}”, which is kept beside your correction on the receipt.`}
+            >
+              corrected
+            </Badge>
+          )}
+          {refreshed !== undefined && (
+            <Badge
+              tone="info"
+              className="shrink-0"
+              title={`This value changed on the server: ${point.value} → ${refreshed}`}
+            >
+              refreshed
+            </Badge>
+          )}
+          {point.staged && (
+            <Badge
+              tone="warning"
+              className="shrink-0"
+              title="Filled but not submitted — it goes live when the run continues"
+            >
+              staged
+            </Badge>
+          )}
+          {point.unconfirmed && (
+            <Badge
+              tone="warning"
+              className="shrink-0"
+              title="Sent, but never read back — the outcome is unknown until you resolve the park"
+            >
+              unconfirmed
+            </Badge>
+          )}
+          {/* The one-word WHY this value has no box. The lock icon on the line
+              below says THAT it is locked; only this says which rule locked it. */}
+          {!policy.editable && (
+            <Badge className="shrink-0" title={policy.reason}>
+              {policy.tag}
+            </Badge>
+          )}
+          <SystemChip system={point.system} className="mr-0 shrink-0" />
+          {/* A timestamp is the least load-bearing thing here, so it is the
+              first thing to fold away in the narrow rail and the first to come
+              back when the surface is widened to edit in. It reads `-muted`
+              rather than `-faint` because it is real information: `-faint` is
+              the disabled/placeholder step and this is neither. */}
+          <span
+            className={cn(dsText.micro, dsText.nums, "hidden shrink-0 text-[color:var(--ds-fg-muted)] @min-[26rem]:inline")}
+          >
+            {point.ts}
           </span>
-          {/* The one-word WHY. It folds away in the narrow rail — the lock
-              icon, the direction arrow and the surface's own summary line all
-              still say it, and the sentence is on the row's title — because at
-              316px a two-badge row was truncating the VALUE, which is the one
-              thing on the line that cannot be recovered from anywhere else. */}
-          <Badge className="hidden shrink-0 @min-[26rem]:inline-flex">{policy.tag}</Badge>
-        </span>
-      )}
-      {refreshed !== undefined && (
-        <Badge tone="info" className="shrink-0" title={`This value changed on the server: ${point.value} → ${refreshed}`}>
-          refreshed
-        </Badge>
-      )}
-      {point.staged && (
-        <Badge tone="warning" className="shrink-0">
-          staged
-        </Badge>
-      )}
-      {point.unconfirmed && (
-        <Badge
-          tone="warning"
-          className="shrink-0"
-          title="Sent, but never read back — the outcome is unknown until you resolve the park"
-        >
-          unconfirmed
-        </Badge>
-      )}
-      <SystemChip system={point.system} className="mr-0 shrink-0" />
-      <span className={cn(dsText.micro, dsText.nums, "hidden shrink-0 text-[color:var(--ds-fg-faint)] @min-[26rem]:inline")}>
-        {point.ts}
-      </span>
+        </div>
+
+        {/* LEVEL 3 — the value, with the whole column to itself.
+            `ValueField` / `LockedValue` are the SHARED pair (`ds/primitives-
+            form.tsx`); the OCR review's extracted fields draw the same two, so
+            "a box takes typing, flat text with a lock does not" is one lesson
+            the operator learns once. */}
+        {policy.editable ? (
+          <ValueField id={fieldId} title={value} value={value} dirty={dirty} onChange={onEdit} className="w-full" />
+        ) : (
+          <LockedValue value={base} reason={policy.reason} className="w-full" />
+        )}
+      </div>
     </div>
   );
 }
@@ -346,6 +463,7 @@ function DataSection({
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [seededFrom, setSeededFrom] = useState<number | null>(null);
   const [conflict, setConflict] = useState<DemoCommandResult | null>(null);
+  const [refusal, setRefusal] = useState<DemoCommandResult | null>(null);
   const [baseGeneration, setBaseGeneration] = useState<number | null>(null);
   const [freshnessPending, setFreshnessPending] = useState<ActionDescriptorWire | null>(null);
   const [overrideReason, setOverrideReason] = useState("");
@@ -354,6 +472,7 @@ function DataSection({
     setEdits({});
     setSeededFrom(null);
     setConflict(null);
+    setRefusal(null);
     setBaseGeneration(null);
     setFreshnessPending(null);
     setOverrideReason("");
@@ -374,15 +493,17 @@ function DataSection({
   const continues = saveAction?.command === "continue-with-data";
 
   const reads = row.data.filter((d) => d.dir === "read");
-  const writes = row.data.filter((d) => d.dir === "write");
-  const staged = writes.filter((d) => d.staged).length;
-  const unconfirmed = writes.filter((d) => d.unconfirmed).length;
   const steps = [...new Set(row.data.map((d) => d.step))];
 
-  const baseValue = (point: DemoDataPoint) =>
-    held >= cp.serverGeneration ? (cp.freshValues[point.field] ?? point.value) : point.value;
+  const applied = appliedCorrectionsFor(row.runId);
+  const baseValue = (point: DemoDataPoint) => checkpointBaseValue(cp, point, held);
   const refreshedValue = (point: DemoDataPoint) =>
-    held >= cp.serverGeneration ? cp.freshValues[point.field] : undefined;
+    cp.correctedValues[point.field] === undefined && held >= cp.serverGeneration
+      ? cp.freshValues[point.field]
+      : undefined;
+  /** the observed reading an applied correction replaced — never overwritten */
+  const correctedFrom = (point: DemoDataPoint) =>
+    cp.correctedValues[point.field] === undefined ? undefined : (applied?.observed[point.field] ?? point.value);
 
   const changed = reads.filter((d) => edits[d.field] !== undefined && edits[d.field] !== baseValue(d));
   // Why the values cannot be touched, in one sentence, so a locked ledger never
@@ -390,10 +511,32 @@ function DataSection({
   const locked = reads.length > 0 && reads.every((d) => !editPolicyFor(row, d).editable);
   const lockReason = locked ? editPolicyFor(row, reads[0]) : null;
 
+  /**
+   * The save, and the three answers it can come back with.
+   *
+   * The bug this replaces was the sharpest kind this product forbids: the old
+   * version built a payload, called the command service, and then showed
+   * "Checkpoint saved" for EVERY non-conflict result — including a `rejected`
+   * one — while never clearing `edits` and never touching the world. So the
+   * field stayed amber and dirty forever underneath a success toast, and a
+   * refusal was rendered as a success. Success styling on something that did
+   * not happen is the exact failure DESIGN.md rule 3 exists to prevent.
+   *
+   *  · APPLIED  — the correction is in the checkpoint, the row's base value IS
+   *               the new value, and the surface ADOPTS the generation the
+   *               server minted. Only then are the edits cleared, because the
+   *               thing they represented has landed.
+   *  · CONFLICT — the checkpoint moved. The patch is HELD and re-offered field
+   *               by field against the fresh values (unchanged behaviour).
+   *  · REJECTED — the server refused. The patch is HELD and the reason is shown
+   *               with its code, because a refusal you cannot quote is one you
+   *               cannot get help with.
+   */
   const submitSave = (generation: number) => {
     if (!saveAction) return;
     const payload: Record<string, string> = { expectedGeneration: String(generation) };
     for (const d of changed) payload[d.field] = edits[d.field];
+    const saved = changed.length;
     const result = onAction(row, { ...saveAction, payload });
     if (!result) return;
     if (result.state === "conflict") {
@@ -401,11 +544,27 @@ function DataSection({
       toast({
         tone: "warning",
         title: "Not saved — the checkpoint moved",
-        description: `Your ${changed.length} edit${changed.length === 1 ? "" : "s"} are still here and are being re-offered against the values the server now holds. Nothing was overwritten.`,
+        description: `Your ${saved} edit${saved === 1 ? "" : "s"} are still here and are being re-offered against the values the server now holds. Nothing was overwritten.`,
       });
       return;
     }
+    if (result.state === "rejected") {
+      setRefusal(result);
+      toast({
+        tone: "danger",
+        title: result.headline,
+        description: `Your ${saved} edit${saved === 1 ? "" : "s"} are still here. Nothing was written to the checkpoint.`,
+      });
+      return;
+    }
+    // Applied. Adopt the server's generation, drop the patch — the values on
+    // screen now come from the checkpoint, so holding the edits would leave
+    // every corrected field dirty against itself.
     setConflict(null);
+    setRefusal(null);
+    setSeededFrom(null);
+    setEdits({});
+    if (result.checkpoint) setBaseGeneration(result.checkpoint.generation);
     toast({ tone: "success", title: result.headline, description: result.detail });
   };
 
@@ -414,7 +573,14 @@ function DataSection({
     const result = onAction(row, { ...rerunAction, payload });
     setFreshnessPending(null);
     setOverrideReason("");
-    if (result?.state === "applied") toast({ tone: "info", title: result.headline, description: result.detail });
+    if (!result) return;
+    if (result.state === "applied") {
+      toast({ tone: "info", title: result.headline, description: result.detail });
+      return;
+    }
+    // A refused or conflicted new run is not a silent no-op. It used to be.
+    setRefusal(result.state === "rejected" ? result : null);
+    toast({ tone: result.state === "rejected" ? "danger" : "warning", title: result.headline, description: result.detail });
   };
 
   return (
@@ -446,36 +612,44 @@ function DataSection({
         </p>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-[var(--ds-space-tight)]">
-            <Chip label="read">{String(reads.length)}</Chip>
-            {writes.length > 0 && <Chip label="written">{String(writes.length)}</Chip>}
-            {staged > 0 && (
-              <Chip tone="warning" label="staged">
-                {String(staged)}
-              </Chip>
-            )}
-            {unconfirmed > 0 && (
-              <Chip
-                tone="warning"
-                label="unconfirmed"
-                title="Sent, but never read back — the outcome is unknown until you resolve the park"
-              >
-                {String(unconfirmed)}
-              </Chip>
-            )}
-            <Chip
-              label="gen"
-              tone={fresh.stale ? "warning" : "neutral"}
-              title={`Captured ${checkpointAge(cp, tick)} ago · the ${cp.consumingNode} node accepts reads up to ${cp.maxAgeMin}m old`}
-            >
-              {fresh.stale ? `${held} · ${fresh.ageMin}m old` : String(held)}
-            </Chip>
-          </div>
+          {/* THE SUMMARY CHIP ROW IS GONE — deliberately, and nothing replaced
+              it (2026-07-27, operator: "remove these tags in data").
+
+              It read `read 2 · written 1 · staged 1 · gen 4` directly above a
+              ledger that shows all four of those things. `read` and `written`
+              counted rows the eye can count. `gen` is provenance, so it moved
+              to the section's provenance line below with its full explanation
+              rather than a four-character abbreviation. And `staged` — the one
+              genuine hazard in the set — now lives on the ROW whose write is
+              staged, which is where the hazard actually is; a badge on the
+              offending line beats a number above the list, because the number
+              tells you a staged write exists and the badge tells you WHICH.
+              `unconfirmed` went the same way for the same reason.
+
+              Do not reintroduce a count here. A ledger that restates itself in
+              a header is the clutter the operator asked us to remove. */}
 
           {locked && lockReason && !lockReason.editable && (
             <Banner tone="info" title="These values cannot be edited right now" icon={<Lock aria-hidden className={dsIcon.md} />}>
               {lockReason.reason}
             </Banner>
+          )}
+
+          {/* A refused save. The patch is still on screen above it — this says
+              WHY it is still there, in the server's own words and with its code. */}
+          {refusal && (
+            <Refusal
+              title={refusal.headline}
+              code={hasRefusalCode(refusal) ? refusal.code : "unknown — the server refused without one"}
+              outcome="nothing was written to the checkpoint"
+              action={
+                <Button size="sm" variant="secondary" onClick={() => setRefusal(null)}>
+                  Dismiss
+                </Button>
+              }
+            >
+              {refusal.detail}
+            </Refusal>
           )}
 
           {/* The CAS refusal. The patch is HELD — the operator decides field by
@@ -531,14 +705,21 @@ function DataSection({
           )}
 
           {/* The ledger, grouped by STEP — the run's own order, so a value is
-              read next to the thing that read it. */}
-          <div className="flex flex-col gap-[var(--ds-space-base)]">
+              read next to the thing that read it.
+              LEVEL 1 of the three. Now that each value is two lines tall, the
+              step heading has to survive being further from its last row than
+              it used to be, so it is drawn as a genuine group header (caps +
+              a rule) rather than a bolder version of the sub-step label
+              beneath it. Same size, different CASE and different colour: three
+              levels the eye separates without measuring them. The gap between
+              groups is `cozy` and the gap under the heading is nothing —
+              more space above a heading than below it is what makes the
+              heading belong to the rows that follow it. */}
+          <div className="flex flex-col gap-[var(--ds-space-cozy)]">
             {steps.map((step) => (
               <div key={step} className="flex flex-col">
                 <div className="flex items-center gap-[var(--ds-space-snug)]">
-                  <span className={cn(dsText.meta, "min-w-0 truncate font-semibold text-[color:var(--ds-fg-secondary)]")}>
-                    {step}
-                  </span>
+                  <span className={cn(dsText.caps, "min-w-0 truncate text-[color:var(--ds-fg-secondary)]")}>{step}</span>
                   <span aria-hidden className="h-px flex-1 bg-[var(--ds-border-subtle)]" />
                 </div>
                 {row.data
@@ -555,6 +736,7 @@ function DataSection({
                         policy={editPolicyFor(row, d)}
                         dirty={value !== base}
                         refreshed={refreshedValue(d)}
+                        corrected={correctedFrom(d)}
                         onEdit={(next) => setEdits((prev) => ({ ...prev, [d.field]: next }))}
                       />
                     );
@@ -563,9 +745,36 @@ function DataSection({
             ))}
           </div>
 
+          {/* The explanatory sentence is no longer the primary signal that a
+              value can be edited — the FIELDS say that now, at rest, without a
+              hover. It survives only for the case the controls cannot carry:
+              when everything is locked, the locked shape says "not now" but
+              only the sentence says why. When editing is open, the note is a
+              single clause and the reason lives on each locked row's badge. */}
           <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
             {locked && lockReason && !lockReason.editable ? lockReason.reason : editPolicySummary(row)}
           </p>
+
+          {/* The checkpoint's PROVENANCE — where these values came from and how
+              long they stay usable. This is where `gen 4` went when the summary
+              chip row was deleted: out of a four-character abbreviation and
+              into the provenance line the design system already has a shape
+              for, with the whole sentence it was compressing.
+
+              It sits OUTSIDE the save block on purpose. A run with no save arm
+              — a live one, a parked one — still has a checkpoint and still has
+              to answer "how old is this?"; scoping the line to the buttons
+              would make the generation vanish on exactly the rows whose data
+              the operator is most likely to be squinting at. */}
+          <MetaLine
+            items={[
+              `checkpoint gen ${held}`,
+              `captured ${checkpointAge(cp, tick)} ago`,
+              fresh.stale
+                ? `older than the ${fresh.maxAgeMin}m the ${cp.consumingNode} node accepts — reusing them takes an override`
+                : `${cp.consumingNode} accepts reads up to ${cp.maxAgeMin}m old`,
+            ]}
+          />
 
           {/* The two outcomes. They are DESCRIPTORS (`actions[]` at the `data`
               placement) — a row whose checkpoint may not be saved is simply not
@@ -573,16 +782,40 @@ function DataSection({
               row is sent neither. */}
           {(saveAction || rerunAction) && (
             <div className="flex flex-col gap-[var(--ds-space-snug)] border-t border-[color:var(--ds-border-subtle)] pt-[var(--ds-space-snug)]">
-              <MetaLine
-                items={[
-                  seededFrom !== null && changed.length === 0
-                    ? `Loaded run #${seededFrom} — edit anything above`
-                    : changed.length === 0
-                      ? "Unchanged — either outcome would use exactly these values"
-                      : `${changed.length} value${changed.length === 1 ? "" : "s"} changed`,
-                  continues ? "this run resumes · or start a separate one" : "a correction · or a separate run",
-                ]}
-              />
+              {/* WHAT THIS SAYS, and why it is worded like this.
+                  The old line read "Unchanged — either outcome would use
+                  exactly these values · a correction or a separate run". Every
+                  clause of that is true and none of it is readable: it names
+                  neither outcome, "either outcome" makes the operator work out
+                  what the two buttons beside it do, and the second half is two
+                  noun phrases with no verb between them. It reads as a riddle
+                  because it was written to be short rather than to be clear.
+                  Replaced with the two plain facts it was hedging around — the
+                  state of the edits, then what each button does to THIS run —
+                  and each half of the second sentence is emitted only when the
+                  button it describes was actually sent, so the copy can never
+                  promise an outcome the surface is not offering. */}
+              <p className={cn(dsText.meta, "text-[color:var(--ds-fg-secondary)]")}>
+                {changed.length > 0
+                  ? `${changed.length} value${changed.length === 1 ? "" : "s"} changed, not saved yet.`
+                  : seededFrom !== null
+                    ? `Loaded the values from run #${seededFrom}. They match what this run already holds, so nothing is changed yet.`
+                    : "Nothing is changed yet."}{" "}
+                <span className="text-[color:var(--ds-fg-muted)]">
+                  {[
+                    saveAction &&
+                      (continues
+                        ? "Save continues this run from where it stopped, with these values."
+                        : "Save records these values on this run as a correction — nothing runs."),
+                    rerunAction &&
+                      (saveAction
+                        ? "Starting a new run instead leaves this one exactly as it is."
+                        : "Starting a new run leaves this one exactly as it is and runs again with these values."),
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                </span>
+              </p>
               <div className="flex flex-wrap items-center gap-[var(--ds-space-tight)]">
                 <Button
                   size="sm"
