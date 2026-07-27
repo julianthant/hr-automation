@@ -207,6 +207,354 @@ export interface MemberOutcomeSpec {
   meaning: string;
 }
 
+// ---------------------------------------------------------------------------
+// Start capability — how a workflow is STARTED, served on its own descriptor
+// ---------------------------------------------------------------------------
+
+/**
+ * **The Run Modal renders what a workflow DECLARES, never what a component
+ * knows about it.**
+ *
+ * Production splits run-starting across two surfaces by *how* you start — a
+ * file-upload `RunModal` and a typed `InputRunPanel` — which is an
+ * implementation detail leaking into the UI: `oath-signature` lives in both, so
+ * its typed box has to open the *other* modal when you press Run on an empty
+ * line. One modal that splits by *what you are running* has no such seam: you
+ * pick a workflow, it declares what it accepts, and you get its inputs, its
+ * sub-selections and its settings.
+ *
+ * That only holds if the capability is SERVED. This mirrors what the rail
+ * already does with `category` (a hardcoded frontend union became the
+ * descriptor's own field): a workflow registered tomorrow gets a correct modal
+ * with no frontend edit, and a workflow that declares no `start` is not offered
+ * at all rather than offered and broken.
+ */
+
+/** a value a typed box accepts. More than one means PER-TOKEN discrimination. */
+export type StartValueKind = "eid" | "name" | "email" | "docId";
+
+export const START_VALUE_NOUN: Record<StartValueKind, { one: string; many: string }> = {
+  eid: { one: "EID", many: "EIDs" },
+  name: { one: "name", many: "names" },
+  email: { one: "campus email", many: "campus emails" },
+  docId: { one: "Kuali doc ID", many: "Kuali doc IDs" },
+};
+
+/**
+ * How a list of typed values is separated. It is a SERVED fact because it is a
+ * property of the values, not a house style: a person-lookup list holds
+ * `Battistessa, Johnnie`, so its separator cannot be a comma.
+ */
+export type StartSeparator = "comma" | "semicolon";
+
+export const START_SEPARATOR: Record<StartSeparator, { char: string; label: string }> = {
+  comma: { char: ",", label: "comma-separated" },
+  semicolon: { char: ";", label: "semicolon-separated" },
+};
+
+export type StartFileKind = "pdf" | "spreadsheet";
+
+/**
+ * What a start CREATES — ratified decision D6 expressed as a served field
+ * rather than a UI branch.
+ *
+ *  - `packet-group`  one Group Row (the packet) + a DELEGATED OCR Review Run
+ *                    (`linked`, keeps its own row in the OCR panel per D4).
+ *                    Members exist only after approval.
+ *  - `single-run`    ONE Run Row that does the filing itself. Its children are
+ *                    `linked` runs in ANOTHER panel — never members, never
+ *                    nested, never delisted from their own panel (D6).
+ *  - `review-only`   a standalone OCR Review Run. Approval ≡ delegation, so a
+ *                    standalone run has no approve target and no fan-out.
+ */
+export type CoordinatorShape = "packet-group" | "single-run" | "review-only";
+
+/** typed values, one box, validated per line */
+export interface TypedStartMethod {
+  kind: "typed";
+  label: string;
+  /** every value kind this ONE box accepts, discriminated per token */
+  accepts: StartValueKind[];
+  separator: StartSeparator;
+  placeholder: string;
+  /** how the server describes its own parser — the client never invents one */
+  parserLabel: string;
+  note: string;
+  /**
+   * Fixture shortcuts for the demo, and labelled as such. These are VALUES,
+   * not run modes: the real "skip these steps" control is a `preset` choice
+   * below, and letting these two look alike is how the demo came to show a
+   * preset control that presets nothing.
+   */
+  examples?: { key: string; label: string; values: string[]; note: string }[];
+}
+
+/** one or more files picked from disk */
+export interface UploadStartMethod {
+  kind: "upload";
+  label: string;
+  accepts: StartFileKind[];
+  /** more than one file may be picked at once */
+  multiFile: boolean;
+  /**
+   * N files become ONE document rather than N independent runs. Only OnBase
+   * does this, and it is the difference between three runs and one three-page
+   * import — so it is served, never inferred from the workflow id.
+   */
+  merge: boolean;
+  documentNoun: string;
+  coordinator: CoordinatorShape;
+  /** `single-run` only — the panel its `linked` children live in */
+  linkedPanel?: DemoWorkflowId;
+  /** `single-run` only — what those linked children are called */
+  linkedNoun?: string;
+  note: string;
+}
+
+/** pages photographed on a phone instead of picked off disk */
+export interface CaptureStartMethod {
+  kind: "capture";
+  label: string;
+  documentNoun: string;
+  coordinator: CoordinatorShape;
+  note: string;
+}
+
+/**
+ * A spreadsheet, which is a different KIND of start and not another file type.
+ * A sheet means nothing until it has a header row, an operator-built column
+ * mapping and a per-cell accept-or-reject on every row — so this method hands
+ * off to the intake pipeline rather than pretending to derive a plan from a
+ * grid nobody has bound yet.
+ */
+export interface SpreadsheetStartMethod {
+  kind: "spreadsheet";
+  label: string;
+  note: string;
+}
+
+/** a start with no subject at all — it is the whole instruction */
+export interface BareStartMethod {
+  kind: "bare";
+  label: string;
+  note: string;
+}
+
+export type StartMethodWire =
+  | TypedStartMethod
+  | UploadStartMethod
+  | CaptureStartMethod
+  | SpreadsheetStartMethod
+  | BareStartMethod;
+
+export type StartMethodKind = StartMethodWire["kind"];
+
+export interface StartChoiceOptionWire {
+  value: string;
+  label: string;
+  note?: string;
+  /**
+   * The option exists in the target system but is not wired end to end. It is
+   * offered DISABLED with the reason on it — hiding it would make the operator
+   * think the product had never heard of a document type they can see in
+   * OnBase.
+   */
+  unavailable?: string;
+}
+
+/**
+ * One sub-selection a start offers. Every one of them renders through the same
+ * control, so a workflow that declares five reads like a workflow that declares
+ * one, and a workflow that declares none shows no empty scaffolding.
+ */
+export interface StartChoiceWire {
+  key: string;
+  label: string;
+  /** one line under the control: what this decides */
+  note?: string;
+  options: StartChoiceOptionWire[];
+  defaultValue: string;
+  /**
+   * The target FIXES this. Rendered as a locked value with the reason, never as
+   * a one-option select — "you may not change this" is a different shape from
+   * "you may", and the pair is told apart by shape (wave 8).
+   */
+  locked?: boolean;
+  lockedReason?: string;
+  /** only offered while another choice holds one of these values */
+  visibleWhen?: { choice: string; equals: string[] };
+  /** only offered for these start methods (absent = every method) */
+  methods?: StartMethodKind[];
+}
+
+/**
+ * A binary run flag. Method-scoped for the same reason a choice is:
+ * `oath-signature` offers a dry run on its uploaded packet and not on a typed
+ * EID, because only the packet path has an irreversible write to suppress.
+ */
+export interface StartFlagWire {
+  key: "dryRun" | "duplicateCheck";
+  label: string;
+  note: string;
+  /** absent = offered on every method */
+  methods?: StartMethodKind[];
+}
+
+export interface StartCapabilityWire {
+  /** the peer methods this workflow can be started by, in offer order */
+  methods: StartMethodWire[];
+  /** the sub-selections, in the order the modal renders them */
+  choices: StartChoiceWire[];
+  /** the run flags this start offers */
+  flags: StartFlagWire[];
+  /** the one line saying what starting this workflow does */
+  note: string;
+}
+
+function dryRunFlag(methods?: StartMethodKind[]): StartFlagWire {
+  return {
+    key: "dryRun",
+    label: "Dry run",
+    note: "Reads everything for real and writes nothing, anywhere. The row carries a dry-run chip for its whole life, so it can never be mistaken for a filing.",
+    methods,
+  };
+}
+
+const DUPLICATE_CHECK_FLAG: StartFlagWire = {
+  key: "duplicateCheck",
+  label: "Check for a duplicate first",
+  note: "Refuses the start if this document has already been filed for this person, instead of filing it twice.",
+};
+
+// --- the served corpora a choice's options are drawn from -------------------
+
+export interface RosterFileWire {
+  path: string;
+  sizeLabel: string;
+  modifiedLabel: string;
+}
+
+/**
+ * What the roster folder holds right now. Served, because "which rosters exist"
+ * is a fact about the machine and not about the workflow — every roster-backed
+ * start reads the same listing.
+ */
+export const DEMO_ROSTER_FILES: RosterFileWire[] = [
+  { path: "UCSD_Roster_2026-07-25.xlsx", sizeLabel: "1.2 MB", modifiedLabel: "Jul 25, 6:02 AM" },
+  { path: "UCSD_Roster_2026-07-18.xlsx", sizeLabel: "1.2 MB", modifiedLabel: "Jul 18, 6:01 AM" },
+  { path: "RRSS_OT_Elections_2026-07-01.csv", sizeLabel: "34 KB", modifiedLabel: "Jul 1, 9:40 AM" },
+];
+
+/** the sentinel that tracks whatever is newest rather than pinning one file */
+export const ROSTER_LATEST = "latest";
+
+/** every OCR form spec, and what approving one releases */
+const OCR_FORM_TYPE_OPTIONS: StartChoiceOptionWire[] = [
+  { value: "oath", label: "Oath signature", note: "Approving signs each oath in UCPath and files one ServiceNow ticket for the document." },
+  { value: "emergency-contact", label: "Emergency contact", note: "Approving fills each person's emergency contact in UCPath." },
+  { value: "onbase-emergency-contact", label: "OnBase Emergency Contact", note: "Approving files each page under its person's record in OnBase." },
+  { value: "verify", label: "Verify (mixed)", note: "A read-only completeness report. There is no approve step, so nothing is released." },
+  { value: "i9", label: "I-9 (UCPath check)", note: "No approve gate: the review completes itself and fans out one UCPath check per person." },
+];
+
+/** the OnBase Import Document type list, exactly as the dropdown reads it */
+const ONBASE_DOC_TYPE_OPTIONS: StartChoiceOptionWire[] = [
+  { value: "X_HR_Emergency Contact", label: "Emergency Contact", note: "Personnel Records — the one type wired end to end today." },
+  ...[
+    ["X_HR_Benefits", "Benefits", "Payroll Records"],
+    ["X_HR_Taxes", "Taxes", "Payroll Records"],
+    ["X_HR_Awards and Honors", "Awards and Honors", "Personnel Records"],
+    ["X_HR_Certifications and Licenses", "Certifications and Licenses", "Personnel Records"],
+    ["X_HR_Disciplinary", "Disciplinary", "Personnel Records"],
+    ["X_HR_Education", "Education", "Personnel Records"],
+    ["X_HR_Employee Relations", "Employee Relations", "Personnel Records"],
+    ["X_HR_General Correspondence", "General Correspondence", "Personnel Records"],
+    ["X_HR_Hiring", "Hiring", "Personnel Records"],
+    ["X_HR_Job Description", "Job Description", "Personnel Records"],
+    ["X_HR_Labor Relations", "Labor Relations", "Personnel Records"],
+    ["X_HR_Leaves", "Leaves", "Personnel Records"],
+    ["X_HR_Miscellaneous", "Miscellaneous", "Personnel Records"],
+    ["X_HR_Performance Evaluations", "Performance Evaluations", "Personnel Records"],
+    ["X_HR_Personnel Document", "Personnel Document", "Personnel Records"],
+    ["X_HR_Salary", "Salary", "Personnel Records"],
+    ["X_HR_Separation", "Separation", "Personnel Records"],
+    ["X_HR_Service Credit", "Service Credit", "Personnel Records"],
+    ["X_HR_Staff Volunteers", "Staff Volunteers", "Personnel Records"],
+    ["X_HR_Telecommuting", "Telecommuting", "Personnel Records"],
+    ["X_HR_Timekeeping", "Timekeeping", "Personnel Records"],
+    ["X_HR_Training", "Training", "Personnel Records"],
+    ["X_HR_Work Schedule", "Work Schedule", "Personnel Records"],
+  ].map(([value, label, group]) => ({
+    value,
+    label,
+    note: group,
+    unavailable: "no OCR form spec and no import mapping yet — it is in OnBase, it is not wired here",
+  })),
+];
+
+/** Automation workers. `auto` lets the daemon pool decide. */
+function workerChoice(visibleWhen?: StartChoiceWire["visibleWhen"], methods?: StartMethodKind[]): StartChoiceWire {
+  return {
+    key: "workers",
+    label: "Automation workers",
+    note: "How many browsers work this start in parallel. Every worker needs its own authenticated session.",
+    defaultValue: "auto",
+    visibleWhen,
+    methods,
+    options: [
+      { value: "auto", label: "Auto", note: "as many as the daemon pool already has warm" },
+      ...["1", "2", "4", "6", "8"].map((n) => ({ value: n, label: n })),
+    ],
+  };
+}
+
+/** The roster pair: where the roster comes from, then which file. */
+function rosterChoices(scope: { visibleWhen?: StartChoiceWire["visibleWhen"]; methods?: StartMethodKind[] } = {}): StartChoiceWire[] {
+  const { visibleWhen, methods } = scope;
+  return [
+    {
+      key: "rosterSource",
+      label: "Roster",
+      note: "The roster is how a name read off paper becomes an EID without a lookup per person.",
+      defaultValue: "existing",
+      visibleWhen,
+      methods,
+      options: [
+        { value: "existing", label: "Use a roster already on disk" },
+        { value: "wait", label: "Wait for the queued SharePoint download", note: "a download is already queued — this start waits for it instead of starting a second one" },
+        { value: "download", label: "Download a fresh roster from SharePoint", note: "delegates a SharePoint Download run and waits for it to land" },
+        { value: "none", label: "No roster", note: "every record resolves by person lookup instead: slower, and a name that resolves to nobody stays unresolved" },
+      ],
+    },
+    {
+      key: "rosterFile",
+      label: "Roster file",
+      note: "Tracking the latest re-reads whichever file is newest at run time; pinning one runs against exactly that file.",
+      defaultValue: ROSTER_LATEST,
+      visibleWhen: { choice: "rosterSource", equals: ["existing"] },
+      methods,
+      options: [
+        { value: ROSTER_LATEST, label: `Track the latest · ${DEMO_ROSTER_FILES[0].path}` },
+        ...DEMO_ROSTER_FILES.map((r) => ({ value: r.path, label: r.path, note: `${r.sizeLabel} · modified ${r.modifiedLabel}` })),
+      ],
+    },
+  ];
+}
+
+function lockedFormType(value: string, reason: string): StartChoiceWire {
+  const option = OCR_FORM_TYPE_OPTIONS.find((o) => o.value === value);
+  if (!option) throw new Error(`demo wire: no OCR form spec "${value}"`);
+  return {
+    key: "formType",
+    label: "Form type",
+    locked: true,
+    lockedReason: reason,
+    defaultValue: value,
+    options: [option],
+    note: option.note,
+  };
+}
+
 export interface DemoWorkflowRef {
   id: DemoWorkflowId;
   /** the 2-char `defineWorkflow` code — the first component of every trace id */
@@ -224,6 +572,14 @@ export interface DemoWorkflowRef {
    * back to the free-text fact they already send.
    */
   memberOutcomes?: MemberOutcomeSpec[];
+  /** how an operator starts this workflow. Absent = it is not startable. */
+  start?: StartCapabilityWire;
+  /**
+   * Why it is not startable, when it is not. A workflow that simply vanishes
+   * from the picker teaches the operator the list is arbitrary; one that says
+   * "delegated only, and here is why" teaches them the shape of the product.
+   */
+  notStartable?: string;
 }
 
 /**
@@ -284,18 +640,376 @@ const I9_MEMBER_OUTCOMES: MemberOutcomeSpec[] = [
  * comes to sit in a different group in the demo than in the product.
  */
 export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
-  separations: { id: "separations", code: "se", label: "Separations", category: "Separations", version: 7, systems: ["kuali", "ucpath", "kronos"] },
-  onboarding: { id: "onboarding", code: "on", label: "Onboarding", category: "Onboarding", version: 11, systems: ["crm", "ucpath", "i9", "kuali"] },
-  "person-lookup": { id: "person-lookup", code: "pl", label: "Person Lookup", category: "Search", version: 4, systems: ["ucpath", "crm"] },
-  "person-match": { id: "person-match", code: "pm", label: "Person Match", category: "Search", version: 2, systems: ["ucpath"] },
-  "i9-lookup": { id: "i9-lookup", code: "i9", label: "I-9 Lookup", category: "Search", version: 3, systems: ["i9"] },
-  "work-study": { id: "work-study", code: "ws", label: "Work-Study", category: "Work Study", version: 5, systems: ["ucpath"] },
-  "kronos-pay-rule": { id: "kronos-pay-rule", code: "kp", label: "Kronos Pay Rule", category: "Payroll", version: 3, systems: ["kronos"] },
-  ocr: { id: "ocr", code: "oc", label: "OCR", category: "Utils", version: 9, systems: ["i9"] },
-  "oath-signature": { id: "oath-signature", code: "os", label: "Oath Signature", category: "Onboarding", version: 6, systems: ["ucpath"] },
-  "oath-upload": { id: "oath-upload", code: "ou", label: "Oath Upload", category: "Onboarding", version: 6, systems: ["ucpath", "servicenow"] },
-  "emergency-contact": { id: "emergency-contact", code: "ec", label: "Emergency Contact", category: "Onboarding", version: 4, systems: ["ucpath"] },
-  onbase: { id: "onbase", code: "ob", label: "OnBase", category: "OnBase", version: 5, systems: ["onbase", "ucpath"] },
+  separations: {
+    id: "separations",
+    code: "se",
+    label: "Separations",
+    category: "Separations",
+    version: 7,
+    systems: ["kuali", "ucpath", "kronos"],
+    start: {
+      note: "Files one separation per Kuali document — the UCPath transaction, the Kuali finalization and the Kronos pay-rule change.",
+      methods: [
+        {
+          kind: "typed",
+          label: "Kuali doc IDs",
+          accepts: ["docId"],
+          separator: "comma",
+          placeholder: "3930, 3929",
+          parserLabel: "Kuali document IDs, comma-separated — 3 to 6 digits each",
+          note: "One run per document. The person's name is unknown until Kuali is read, so the row is titled with the doc ID until then.",
+          examples: [
+            { key: "two", label: "Two separations", values: ["3930", "3928"], note: "two typed doc IDs under one Group Row" },
+            { key: "bad", label: "With a bad doc ID", values: ["3930", "39-30", "3928"], note: "entry validation refuses the line before anything is enqueued" },
+            { key: "active", label: "One already running", values: ["3930", "3929"], note: "3929 already has an active Separations run — the server rejects it" },
+          ],
+        },
+      ],
+      choices: [
+        {
+          key: "preset",
+          label: "Run mode",
+          note: "A preset skips steps. It never changes what the remaining steps do.",
+          defaultValue: "full",
+          options: [
+            { value: "full", label: "Full run", note: "every step: Kuali finalization, the UCPath transaction and the Kronos pay rule" },
+            { value: "transactions-only", label: "Transactions only", note: "skips the Kuali finalization and the Kronos pay-rule step — files the UCPath transaction and stops" },
+          ],
+        },
+        workerChoice(),
+      ],
+      flags: [dryRunFlag()],
+    },
+  },
+  onboarding: {
+    id: "onboarding",
+    code: "on",
+    label: "Onboarding",
+    category: "Onboarding",
+    version: 11,
+    systems: ["crm", "ucpath", "i9", "kuali"],
+    start: {
+      note: "Walks one new hire from their CRM record through the UCPath hire, the I-9 and the Kuali onboarding document.",
+      methods: [
+        {
+          kind: "typed",
+          label: "Campus emails",
+          accepts: ["email"],
+          separator: "comma",
+          placeholder: "mdelgado@ucsd.edu, riglesias@ucsd.edu",
+          parserLabel: "Campus email addresses, comma-separated — the CRM record is found by email",
+          note: "The hire's name comes from CRM, so the row is titled with the address until CRM resolves it.",
+          examples: [
+            { key: "two", label: "Two hires", values: ["mdelgado@ucsd.edu", "riglesias@ucsd.edu"], note: "titles stay as typed until CRM resolves them" },
+            { key: "bad", label: "With a bad address", values: ["mdelgado@ucsd.edu", "riglesias@ucsd"], note: "a malformed address is refused per line" },
+          ],
+        },
+      ],
+      choices: [workerChoice()],
+      flags: [dryRunFlag()],
+    },
+  },
+  "person-lookup": {
+    id: "person-lookup",
+    code: "pl",
+    label: "Person Lookup",
+    category: "Search",
+    version: 4,
+    systems: ["ucpath", "crm"],
+    start: {
+      note: "Looks one person up in UCPath and CRM and reports what it found. It writes nothing, anywhere.",
+      methods: [
+        {
+          kind: "typed",
+          label: "EIDs or names",
+          accepts: ["eid", "name"],
+          separator: "semicolon",
+          placeholder: "10084412; Battistessa, Johnnie",
+          parserLabel: "EIDs or names, SEMICOLON-separated — a name holds a comma, so a comma cannot separate the list",
+          note: "Each value is read on its own: all digits is an EID, anything else is a name.",
+          examples: [
+            { key: "mixed", label: "An EID and a name", values: ["10084412", "Battistessa, Johnnie"], note: "the same box takes both — nothing had to be typed twice" },
+            { key: "two", label: "Two lookups", values: ["10084412", "10091755"], note: "a two-member group" },
+          ],
+        },
+      ],
+      choices: [workerChoice()],
+      flags: [],
+    },
+  },
+  "person-match": {
+    id: "person-match",
+    code: "pm",
+    label: "Person Match",
+    category: "Search",
+    version: 2,
+    systems: ["ucpath"],
+    notStartable:
+      "Delegated only — and nothing has delegated to it since 2026-07-16. Inventing a start path for code nothing calls would be worse than leaving it absent.",
+  },
+  "i9-lookup": {
+    id: "i9-lookup",
+    code: "i9",
+    label: "I-9 Lookup",
+    category: "Search",
+    version: 3,
+    systems: ["i9"],
+    notStartable: "Delegated only — an I-9 lookup is enrichment inside its parent's run, and on its own it would answer a question nobody asked.",
+  },
+  "work-study": {
+    id: "work-study",
+    code: "ws",
+    label: "Work-Study",
+    category: "Work Study",
+    version: 5,
+    systems: ["ucpath"],
+    start: {
+      note: "Files one work-study transaction in UCPath for a person, effective on the date the run carries.",
+      methods: [
+        {
+          kind: "typed",
+          label: "EIDs",
+          accepts: ["eid"],
+          separator: "comma",
+          placeholder: "10601188, 10084412",
+          parserLabel: "UCPath EIDs, comma-separated — 8 digits each",
+          note: "One run per person.",
+          examples: [
+            { key: "one", label: "A single person", values: ["10084412"], note: "one value mints a Run Row, not a group" },
+            { key: "active", label: "One already running", values: ["10601188"], note: "10601188 is queued in this panel right now — the server rejects a second one" },
+          ],
+        },
+        {
+          kind: "spreadsheet",
+          label: "Import a spreadsheet",
+          note: "The award export becomes N runs — but only after a header row, a column mapping and a per-cell accept-or-reject on every row.",
+        },
+      ],
+      // Scoped to the typed method on purpose: once the start is handed to the
+      // intake, the intake owns every setting the runs are enqueued with, and a
+      // worker count answered here would be answered again there.
+      choices: [workerChoice(undefined, ["typed"])],
+      flags: [dryRunFlag(["typed"])],
+    },
+  },
+  "kronos-pay-rule": {
+    id: "kronos-pay-rule",
+    code: "kp",
+    label: "Kronos Pay Rule",
+    category: "Payroll",
+    version: 3,
+    systems: ["kronos"],
+    start: {
+      note: "Reads a person's union and current pay rule, decides the correct one, and updates it in Kronos.",
+      methods: [
+        {
+          kind: "typed",
+          label: "EIDs",
+          accepts: ["eid"],
+          separator: "comma",
+          placeholder: "10312007, 10084412",
+          parserLabel: "UCPath EIDs, comma-separated — 8 digits each",
+          note: "One run per person.",
+          examples: [{ key: "three", label: "Three pay rules", values: ["10312007", "10084412", "10091755"], note: "a three-member group" }],
+        },
+      ],
+      choices: [workerChoice()],
+      flags: [],
+    },
+  },
+  ocr: {
+    id: "ocr",
+    code: "oc",
+    label: "OCR",
+    category: "Utils",
+    version: 9,
+    systems: ["i9"],
+    start: {
+      note: "Reads a document and stops at a review. Started here it is STANDALONE: nothing delegated it, so approving would release no work and there is no approve step.",
+      methods: [
+        {
+          kind: "upload",
+          label: "Upload a PDF",
+          accepts: ["pdf"],
+          multiFile: true,
+          merge: false,
+          documentNoun: "document",
+          coordinator: "review-only",
+          note: "Each file becomes its own review — a standalone review has no target workflow and no fan-out.",
+        },
+      ],
+      choices: [
+        {
+          key: "formType",
+          label: "Form type",
+          note: "Which spec reads the pages. A standalone run still declares one, because the spec is what decides which fields exist.",
+          defaultValue: "verify",
+          options: OCR_FORM_TYPE_OPTIONS,
+        },
+        ...rosterChoices(),
+        workerChoice(),
+      ],
+      flags: [],
+    },
+  },
+  "oath-signature": {
+    id: "oath-signature",
+    code: "os",
+    label: "Oath Signature",
+    category: "Onboarding",
+    version: 6,
+    systems: ["ucpath"],
+    start: {
+      note: "Signs each person's oath in UCPath. No ServiceNow ticket — signing only.",
+      methods: [
+        {
+          kind: "typed",
+          label: "EIDs",
+          accepts: ["eid"],
+          separator: "comma",
+          placeholder: "10084412, 10091755",
+          parserLabel: "UCPath EIDs, comma-separated — 8 digits each",
+          note: "Signs the oath for a person you already have an EID for. No document is read.",
+          examples: [{ key: "two", label: "Two signers", values: ["10084412", "10091755"], note: "a two-member group" }],
+        },
+        {
+          kind: "upload",
+          label: "Upload a packet",
+          accepts: ["pdf"],
+          multiFile: true,
+          merge: false,
+          documentNoun: "oath packet",
+          coordinator: "packet-group",
+          note: "Reads every signer off the packet, then signs each oath in UCPath after you approve the review.",
+        },
+        {
+          kind: "capture",
+          label: "Photograph the pages",
+          documentNoun: "oath packet",
+          coordinator: "packet-group",
+          note: "Photograph the packet on a phone. The pages arrive as they are taken and become the same packet an upload would.",
+        },
+      ],
+      choices: [
+        { ...lockedFormType("oath", "The target is Oath Signature, so the spec that reads the pages is fixed to Oath."), methods: ["upload", "capture"] },
+        ...rosterChoices({ methods: ["upload", "capture"] }),
+        workerChoice(),
+      ],
+      flags: [dryRunFlag(["upload", "capture"])],
+    },
+  },
+  "oath-upload": {
+    id: "oath-upload",
+    code: "ou",
+    label: "Oath Upload",
+    category: "Onboarding",
+    version: 6,
+    systems: ["ucpath", "servicenow"],
+    start: {
+      note: "One row for the signed document: OCR prep → your approval → wait for the signers → file the ServiceNow ticket.",
+      methods: [
+        {
+          kind: "upload",
+          label: "Upload the signed document",
+          accepts: ["pdf"],
+          multiFile: true,
+          merge: false,
+          documentNoun: "signed oath document",
+          coordinator: "single-run",
+          linkedPanel: "oath-signature",
+          linkedNoun: "signers",
+          note: "ONE Run Row walks the whole document. Its signers are linked runs in the Oath Signature panel, never members of this row.",
+        },
+      ],
+      choices: [
+        {
+          key: "mode",
+          label: "What to do with it",
+          note: "The two modes do genuinely different things, which is why one of them hides the roster and the workers.",
+          defaultValue: "full",
+          options: [
+            { value: "full", label: "Full run", note: "read the document, wait for your approval, sign every signer, then file the ticket" },
+            { value: "upload-only", label: "Upload only", note: "file one ServiceNow ticket with the PDF attached. Nothing is read, nothing is signed — so there is nothing to roster against and nothing to parallelize" },
+          ],
+        },
+        lockedFormType("oath", "Oath Upload files an oath, so the spec that reads the pages is fixed to Oath."),
+        ...rosterChoices({ visibleWhen: { choice: "mode", equals: ["full"] } }),
+        workerChoice({ choice: "mode", equals: ["full"] }),
+      ],
+      flags: [dryRunFlag(), DUPLICATE_CHECK_FLAG],
+    },
+  },
+  "emergency-contact": {
+    id: "emergency-contact",
+    code: "ec",
+    label: "Emergency Contact",
+    category: "Onboarding",
+    version: 4,
+    systems: ["ucpath"],
+    start: {
+      note: "Reads each employee's emergency contact off the form, then fills it in UCPath.",
+      methods: [
+        {
+          kind: "upload",
+          label: "Upload forms",
+          accepts: ["pdf"],
+          multiFile: true,
+          merge: false,
+          documentNoun: "contact form packet",
+          coordinator: "packet-group",
+          note: "Each file becomes its own packet — several files are several independent runs, never one merged document.",
+        },
+        {
+          kind: "capture",
+          label: "Photograph the forms",
+          documentNoun: "contact form packet",
+          coordinator: "packet-group",
+          note: "Photograph the forms on a phone. The pages arrive as they are taken and become the same packet an upload would.",
+        },
+      ],
+      choices: [
+        lockedFormType("emergency-contact", "The target is Emergency Contact, so the spec that reads the pages is fixed to it."),
+        ...rosterChoices(),
+        workerChoice(),
+      ],
+      flags: [dryRunFlag()],
+    },
+  },
+  onbase: {
+    id: "onbase",
+    code: "ob",
+    label: "OnBase",
+    category: "OnBase",
+    version: 5,
+    systems: ["onbase", "ucpath"],
+    start: {
+      note: "Reads each person off the pages, then files the document under their record in OnBase.",
+      methods: [
+        {
+          kind: "upload",
+          label: "Upload pages",
+          accepts: ["pdf"],
+          multiFile: true,
+          merge: true,
+          documentNoun: "document",
+          coordinator: "packet-group",
+          note: "Several files MERGE into one document — OnBase imports a single file, so three PDFs become one three-page import rather than three runs.",
+        },
+      ],
+      choices: [
+        {
+          key: "onbaseDocType",
+          label: "Document type",
+          note: "The exact type from OnBase's Import Document screen. It decides the keyword set the import fills.",
+          defaultValue: "X_HR_Emergency Contact",
+          options: ONBASE_DOC_TYPE_OPTIONS,
+        },
+        ...rosterChoices(),
+        workerChoice(),
+      ],
+      flags: [dryRunFlag()],
+    },
+  },
   "i9-check": {
     id: "i9-check",
     code: "ic",
@@ -304,10 +1018,92 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
     version: 2,
     systems: ["ucpath", "i9"],
     memberOutcomes: I9_MEMBER_OUTCOMES,
+    start: {
+      note: "Reads each person off the scan, searches UCPath for them, and appends the retention tracker. The review completes itself — there is nothing to approve.",
+      methods: [
+        {
+          kind: "upload",
+          label: "Upload the scan",
+          accepts: ["pdf"],
+          multiFile: true,
+          merge: false,
+          documentNoun: "I-9 roster scan",
+          coordinator: "packet-group",
+          note: "One member per person on the scan, created when the review completes rather than when you approve it.",
+        },
+      ],
+      // No roster and no dry run, and the absence is the honest answer rather
+      // than an oversight: an I-9 check reads UCPath and appends a tracker, so
+      // there is no roster to match against and no write for a rehearsal to
+      // suppress.
+      choices: [
+        lockedFormType("i9", "The target is I-9 Check, so the spec that reads the pages is fixed to I-9."),
+        workerChoice(),
+      ],
+      flags: [],
+    },
   },
-  "crm-doc-download": { id: "crm-doc-download", code: "cd", label: "CRM Doc Download", category: "Utils", version: 3, systems: ["crm"] },
-  "sharepoint-download": { id: "sharepoint-download", code: "sp", label: "SharePoint Download", category: "Utils", version: 2, systems: ["crm"] },
-  "old-kronos-reports": { id: "old-kronos-reports", code: "kr", label: "Old Kronos Reports", category: "Timekeeping", version: 4, systems: ["kronos"] },
+  "crm-doc-download": {
+    id: "crm-doc-download",
+    code: "cd",
+    label: "CRM Doc Download",
+    category: "Utils",
+    version: 3,
+    systems: ["crm"],
+    start: {
+      note: "Finds a person's onboarding record in CRM and downloads the documents attached to it.",
+      methods: [
+        {
+          kind: "typed",
+          label: "EIDs or emails",
+          accepts: ["eid", "email"],
+          separator: "comma",
+          placeholder: "10084412, samuel.ortiz@ucsd.edu",
+          parserLabel: "EIDs or campus emails, comma-separated — each value is read on its own",
+          note: "The same box takes both: all digits is an EID, anything with an @ is an email.",
+          examples: [
+            { key: "mixed", label: "An EID and an email", values: ["10084412", "samuel.ortiz@ucsd.edu"], note: "per-token discrimination — nothing had to be typed twice" },
+          ],
+        },
+      ],
+      choices: [workerChoice()],
+      flags: [],
+    },
+  },
+  "sharepoint-download": {
+    id: "sharepoint-download",
+    code: "sp",
+    label: "SharePoint Download",
+    category: "Utils",
+    version: 2,
+    systems: ["crm"],
+    start: {
+      note: "Downloads the current roster export from SharePoint into the roster folder. Every roster-backed start reads whatever this leaves behind.",
+      methods: [
+        {
+          kind: "bare",
+          label: "Run it",
+          note: "There is nothing to type and nothing to pick — the run IS the instruction. It takes one row and leaves one file.",
+        },
+      ],
+      // Deliberately empty. A download has no roster to pick, no form spec, no
+      // document type and nothing to parallelize, so the modal shows no
+      // sub-selections at all rather than an empty section pretending there
+      // was a decision to make.
+      choices: [],
+      flags: [],
+    },
+  },
+  "old-kronos-reports": {
+    id: "old-kronos-reports",
+    code: "kr",
+    label: "Old Kronos Reports",
+    category: "Timekeeping",
+    version: 4,
+    systems: ["kronos"],
+    notStartable:
+      "Not exposed through the dashboard: its runtime state — the tracker mutex, the reports directory, the date range — has to be initialised by a runner before a batch can launch.",
+  },
 };
 
 export const DEMO_WORKFLOW_LIST: DemoWorkflowRef[] = Object.values(DEMO_WORKFLOWS);
@@ -358,6 +1154,119 @@ export function buildWorkflowCategoryGroups(
   if (byCategory.has(DEMO_CATEGORY_OTHER)) ordered.push(DEMO_CATEGORY_OTHER);
 
   return ordered.map((label) => ({ label, workflows: byCategory.get(label) ?? [] }));
+}
+
+// ---------------------------------------------------------------------------
+// Start-capability resolution — the whole of what the Run Modal branches on
+// ---------------------------------------------------------------------------
+
+/** every workflow an operator may start, in registry order */
+export function startableWorkflows(workflows: readonly DemoWorkflowRef[] = DEMO_WORKFLOW_LIST): DemoWorkflowRef[] {
+  return workflows.filter((w) => w.start !== undefined);
+}
+
+/** every workflow that is NOT startable, each carrying its own reason */
+export function unstartableWorkflows(
+  workflows: readonly DemoWorkflowRef[] = DEMO_WORKFLOW_LIST,
+): { workflow: DemoWorkflowRef; reason: string }[] {
+  return workflows
+    .filter((w) => w.start === undefined)
+    .map((w) => ({
+      workflow: w,
+      // A workflow with no start and no reason is a registry defect, not a
+      // display case: say so rather than render a blank line.
+      reason: w.notStartable ?? "No start path is declared, and no reason was served for that.",
+    }));
+}
+
+/** the picker's groups — the SAME category projection the rail uses, startable only */
+export function startWorkflowGroups(workflows: readonly DemoWorkflowRef[] = DEMO_WORKFLOW_LIST): WorkflowCategoryGroup[] {
+  return buildWorkflowCategoryGroups(startableWorkflows(workflows));
+}
+
+/**
+ * The start capability, or a loud failure. Every caller here already knows the
+ * workflow is startable (the picker only offers startable ones), so reaching
+ * this with an unstartable id is a routing bug, and a `?? {}` would draw an
+ * empty modal instead of naming it.
+ */
+export function requireStartCapability(workflow: DemoWorkflowRef): StartCapabilityWire {
+  if (!workflow.start) {
+    throw new Error(`demo wire: ${workflow.label} (${workflow.id}) declares no start capability — it is not startable`);
+  }
+  return workflow.start;
+}
+
+/** the method matching a kind, or a loud failure — a kind is never guessed */
+export function requireStartMethod(capability: StartCapabilityWire, kind: StartMethodKind): StartMethodWire {
+  const found = capability.methods.find((m) => m.kind === kind);
+  if (!found) {
+    throw new Error(`demo wire: this start declares no "${kind}" method — it offers [${capability.methods.map((m) => m.kind).join(", ")}]`);
+  }
+  return found;
+}
+
+/** every choice's declared default — the value set a fresh modal opens on */
+export function defaultChoiceValues(capability: StartCapabilityWire): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const choice of capability.choices) out[choice.key] = choice.defaultValue;
+  return out;
+}
+
+/**
+ * The sub-selections this method + this value set actually offers.
+ *
+ * Both filters are load-bearing and neither is a UI preference: `methods`
+ * expresses that a typed EID has no roster to match against, and `visibleWhen`
+ * expresses that Oath Upload's upload-only mode reads nothing (so there is
+ * nothing to roster and nothing to parallelize). A hidden choice is not a
+ * disabled one — it is a decision this start does not have.
+ */
+export function visibleChoices(
+  capability: StartCapabilityWire,
+  method: StartMethodKind,
+  values: Record<string, string>,
+): StartChoiceWire[] {
+  const shown: StartChoiceWire[] = [];
+  for (const choice of capability.choices) {
+    if (choice.methods && !choice.methods.includes(method)) continue;
+    if (choice.visibleWhen) {
+      const gate = capability.choices.find((c) => c.key === choice.visibleWhen?.choice);
+      // A gate that names a choice this start does not declare is a contract
+      // break, not a reason to show the dependent choice anyway.
+      if (!gate) throw new Error(`demo wire: choice "${choice.key}" is gated on "${choice.visibleWhen.choice}", which this start does not declare`);
+      const gateShown = shown.some((c) => c.key === gate.key);
+      const gateValue = values[gate.key] ?? gate.defaultValue;
+      if (!gateShown || !choice.visibleWhen.equals.includes(gateValue)) continue;
+    }
+    shown.push(choice);
+  }
+  return shown;
+}
+
+/** the values that will actually be SENT — a hidden choice sends nothing */
+export function effectiveChoiceValues(
+  capability: StartCapabilityWire,
+  method: StartMethodKind,
+  values: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const choice of visibleChoices(capability, method, values)) {
+    out[choice.key] = values[choice.key] ?? choice.defaultValue;
+  }
+  return out;
+}
+
+/** the run flags this method offers */
+export function visibleFlags(capability: StartCapabilityWire, method: StartMethodKind): StartFlagWire[] {
+  return capability.flags.filter((f) => !f.methods || f.methods.includes(method));
+}
+
+/** an option's label, for a value the modal is showing back to the operator */
+export function choiceOptionLabel(choice: StartChoiceWire, value: string): string {
+  const found = choice.options.find((o) => o.value === value);
+  if (!found) throw new Error(`demo wire: "${value}" is not an option of choice "${choice.key}"`);
+  return found.label;
 }
 
 /**
