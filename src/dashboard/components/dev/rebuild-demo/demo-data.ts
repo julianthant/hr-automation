@@ -2173,9 +2173,9 @@ const krReports: DemoRowSpec = {
 };
 
 // ===========================================================================
-// Roster Group Row at the 13–40 rung — too many for a readable inline list,
-// too few for a matrix. A scroll well keeps the row a fixed height without
-// pretending 18 people are 50.
+// Roster Group Row at the scroll-well rung — too many for a readable inline
+// list. The well keeps the row a fixed height; the 50-person I-9 roster below
+// renders in exactly this shape, at exactly this height.
 // ===========================================================================
 
 const wsMemberIds = Array.from({ length: 18 }, (_, i) => `ws-m-${i}`);
@@ -3470,18 +3470,27 @@ export function bandsFor(rows: DemoRow[]): { key: BandKey; label: string; rows: 
 // ---------------------------------------------------------------------------
 // Density ladder — member count is a continuous property, so scale is
 // presentation, never a fourth row type.
+//
+// It stops at the scroll well ON PURPOSE. There used to be a fourth rung at 41+
+// that swapped the member lines for a status matrix, and the operator read that
+// matrix as a DIFFERENT KIND OF ROW: fifty coloured cells share no shape with
+// the eighteen named lines directly above them, so the same object appeared to
+// be two objects depending on how many people were in it. Scale is not a new
+// concept, and a second visual language for "the same thing but more of it" is
+// exactly what makes a product feel like it has more concepts than it has.
+//
+// Nothing is lost by that: the well is capped, so a 50-person group is the same
+// height as an 18-person one; members are ordered attention-first, so the lines
+// the operator has to act on are the ones already on screen; and `Open all N`
+// still opens the drill-in, which is where a set that size is actually worked.
 // ---------------------------------------------------------------------------
 
-export type DensityRung = "inline" | "compact" | "well" | "matrix";
-
-/** the ratified threshold: below this a person is still a line, at or above it a cell */
-export const MATRIX_THRESHOLD = 41;
+export type DensityRung = "inline" | "compact" | "well";
 
 export function densityRung(memberCount: number): DensityRung {
   if (memberCount <= 3) return "inline";
   if (memberCount <= 12) return "compact";
-  if (memberCount < MATRIX_THRESHOLD) return "well";
-  return "matrix";
+  return "well";
 }
 
 export const DENSITY_RUNGS: { key: DensityRung; range: string; what: string; exampleId: string }[] = [
@@ -3499,14 +3508,8 @@ export const DENSITY_RUNGS: { key: DensityRung; range: string; what: string; exa
   },
   {
     key: "well",
-    range: "13–40 members",
-    what: "The same compact lines in a fixed-height scroll well, plus Open all N. The row keeps its height whether it holds 13 people or 40.",
-    exampleId: "ws-batch",
-  },
-  {
-    key: "matrix",
-    range: "41+ members",
-    what: "A status matrix — one cell per person — with the attention strip ABOVE it and a Start review drill-in. The matrix is the overview, never the review.",
+    range: "13+ members",
+    what: "The same compact lines in a fixed-height scroll well, attention first, plus Open all N. The row is the same height at 13 people and at 50 — the count changes, the shape never does.",
     exampleId: "i9-batch",
   },
 ];

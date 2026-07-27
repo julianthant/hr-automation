@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -23,12 +23,23 @@ import { cn } from "@/lib/utils";
 import { QueueRowCard } from "@/components/queue-panel/QueueRowCard";
 import { StatusCounts } from "@/components/queue-panel/StatusCounts";
 import { PROPOSED_STATUS, StatusBadge, statusText, type ProposedStatus } from "./demo-status";
-import { Button, IconButton, Kbd, dsBorder, dsFocus, dsIcon, dsMotion, dsRadius, dsSize, dsSurface, dsText } from "./demo-ui";
+import {
+  Button,
+  IconButton,
+  Kbd,
+  dsBorder,
+  dsFocus,
+  dsIcon,
+  dsMotion,
+  dsRadius,
+  dsSize,
+  dsSurface,
+  dsText,
+} from "./demo-ui";
 import { FooterActions, OutcomeActionButton, RowActionMenu, type DemoActionHandler } from "./DemoActions";
 import { rowInBucket, type StatusBucket } from "./DemoShell";
 import { DEMO_DAY, dayLabel } from "./demo-days";
 import {
-  ATTENTION_STATUSES,
   bandsFor,
   DEMO_ROWS,
   DENSITY_RUNGS,
@@ -45,8 +56,8 @@ import {
 } from "./demo-data";
 
 /**
- * DEV-ONLY — the rebuild demo's queue panel. Attention bands, the four-rung
- * density ladder, the 41+ status matrix, and the triage drill-in, rendered on
+ * DEV-ONLY — the rebuild demo's queue panel. Attention bands, the three-rung
+ * density ladder and the triage drill-in, rendered on
  * the REAL QueueRowCard/RowFooter/StatusCounts chrome.
  *
  * The rows this panel receives are already scoped to the selected Workflow
@@ -102,9 +113,6 @@ export function visibleMemberIds(row: DemoRow, expandedGroups: ReadonlySet<strin
       return expandedGroups.has(row.id) ? ids : ids.slice(0, 4);
     case "well":
       return ids;
-    case "matrix":
-      // cells, not rows — the drill-in is where you walk these people
-      return [];
   }
 }
 
@@ -189,23 +197,6 @@ const MEMBER_STATUS_ICON: Record<ProposedStatus, { icon: typeof CheckCircle2; cl
     { icon: PROPOSED_STATUS[s].icon, cls: PROPOSED_STATUS[s].iconClass },
   ]),
 ) as Record<ProposedStatus, { icon: typeof CheckCircle2; cls: string }>;
-
-/**
- * A 41+ matrix cell. Same hues as everywhere else (the status's own `dot`
- * fill), with the emphasis TIER carried as opacity so the two loud statuses
- * stay the brightest cells in the grid and the finished ones recede. Each cell
- * also names its status in `title`/`aria-label`, so colour is not alone.
- */
-const MATRIX_CELL: Record<ProposedStatus, string> = {
-  verifiedDone: "bg-[var(--ds-status-verified-done-fg)] opacity-55",
-  doneWarnings: "bg-[var(--ds-status-done-warnings-fg)] opacity-80",
-  running: "bg-[var(--ds-status-running-fg)] opacity-90",
-  queued: "bg-[var(--ds-status-queued-fg)] opacity-55",
-  failed: "bg-[var(--ds-status-failed-fg)]",
-  waiting: "bg-[var(--ds-status-waiting-fg)]",
-  parked: "bg-[var(--ds-status-parked-fg)] opacity-90",
-  cancelled: "bg-[var(--ds-status-cancelled-fg)] opacity-55",
-};
 
 /**
  * ONE shell for every chip in a row header. There were six hand-rolled copies
@@ -695,13 +686,16 @@ function PacketBeforeFanout({ row, handlers }: { row: DemoRow; handlers: DemoQue
 }
 
 // ---------------------------------------------------------------------------
-// Density ladder — 1–3 inline · 4–12 compact · 13–40 scroll well · 41+ matrix
+// Density ladder — 1–3 inline · 4–12 compact · 13+ scroll well.
+// Three rungs, one member LINE shape across all of them. Scale changes the
+// container, never the language: a 50-person roster is the 18-person roster
+// with a scrollbar, because a second shape for the same object is what made
+// the queue read as if it held more concepts than it does.
 // ---------------------------------------------------------------------------
 
 function GroupBody({ row, state, handlers }: { row: DemoRow; state: DemoQueueState; handlers: DemoQueueHandlers }) {
   const ids = orderedMemberIds(row.id);
   const rung = densityRung(ids.length);
-  if (rung === "matrix") return <GroupMatrix row={row} state={state} handlers={handlers} />;
   if (rung === "inline") {
     // At three people or fewer the group IS its members — a chevron here is
     // pure friction, so they are always open and rendered as full rows.
@@ -716,86 +710,10 @@ function GroupBody({ row, state, handlers }: { row: DemoRow; state: DemoQueueSta
   return <GroupMemberList row={row} state={state} handlers={handlers} rung={rung} />;
 }
 
-function GroupMatrix({ row, state, handlers }: { row: DemoRow; state: DemoQueueState; handlers: DemoQueueHandlers }) {
-  const attention = useMemo(
-    () => (row.memberIds ?? []).filter((id) => DEMO_ROWS[id].containment !== "rejected" && ATTENTION_STATUSES.includes(DEMO_ROWS[id].status)),
-    [row.memberIds],
-  );
-  return (
-    <>
-      {/* The strip sits ABOVE the matrix on purpose. Fifty cells is a texture,
-          not a message — the sentence that names who needs you has to be read
-          first, or the matrix becomes decoration. */}
-      <div
-        className={cn(
-          "mt-[var(--ds-space-base)] ml-5 flex items-center border",
-          "gap-[var(--ds-space-base)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]",
-          dsRadius.md,
-          "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]",
-        )}
-      >
-        <AlertTriangle aria-hidden className={cn(dsIcon.md, "shrink-0 text-[color:var(--ds-status-waiting-fg)]")} />
-        <span className={cn(dsText.body, "min-w-0 flex-1 truncate text-[color:var(--ds-status-waiting-fg)]")}>
-          {attention.length} need attention — {attentionBreakdown(row.id)}
-        </span>
-        <Button
-          size="sm"
-          variant="primary"
-          onClick={(e) => {
-            e.stopPropagation();
-            handlers.onDrillIn(row.id);
-            if (attention[0]) handlers.onSelect(attention[0]);
-          }}
-        >
-          Start review
-        </Button>
-      </div>
-      <div className="mt-1.5 ml-5 flex flex-wrap gap-[3px]" role="listbox" aria-label="Member status matrix">
-        {(row.memberIds ?? []).map((id) => {
-          const m = DEMO_ROWS[id];
-          const cellSelected = state.selectedId === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              role="option"
-              aria-selected={cellSelected}
-              title={`${m.title} — ${PROPOSED_STATUS[m.status].label}${m.memberFact && m.memberFact !== "—" ? ` · ${m.memberFact}` : ""}`}
-              aria-label={`${m.title} — ${PROPOSED_STATUS[m.status].label}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                handlers.onSelect(id);
-              }}
-              className={cn(
-                "size-3.5 rounded-[3px] outline-none transition-transform hover:scale-125 focus-visible:ring-2 focus-visible:ring-ring",
-                m.containment === "rejected" ? "bg-muted-foreground/40" : MATRIX_CELL[m.status],
-                cellSelected && "ring-2 ring-primary",
-                state.checkedIds.has(id) && "ring-1 ring-success/70",
-              )}
-            />
-          );
-        })}
-      </div>
-    </>
-  );
-}
-
 /** the status pill's own word, so the empty state names the filter the operator set */
 function filterWord(filter: DemoFilter): string {
   if (filter === "needsYou") return "waiting on you or write parked";
   return PROPOSED_STATUS[filter as ProposedStatus].label.toLowerCase();
-}
-
-/** "2 failed · 1 waiting · 1 warning" — derived, never a hardcoded caption. */
-function attentionBreakdown(groupId: string): string {
-  const c = groupCounts(groupId);
-  const parts: string[] = [];
-  if (c.failed) parts.push(`${c.failed} failed`);
-  if (c.waiting) parts.push(`${c.waiting} waiting on you`);
-  if (c.parked) parts.push(`${c.parked} write parked`);
-  if (c.warnings) parts.push(`${c.warnings} with warnings`);
-  if (c.rejected) parts.push(`${c.rejected} rejected`);
-  return parts.join(" · ") || "all clear";
 }
 
 function GroupMemberList({
@@ -811,8 +729,10 @@ function GroupMemberList({
 }) {
   const ids = orderedMemberIds(row.id);
   const expanded = state.expandedGroups.has(row.id);
-  // 13–40 people: every line stays available, but inside a fixed-height well so
-  // a group of 40 is the same size on screen as a group of 13.
+  // 13 people or 50, every line stays available inside a fixed-height well, so
+  // the row is the same size on screen either way. This is the ONLY treatment
+  // above twelve members — a roster does not get a second visual language just
+  // for being long, it gets the same lines and a scrollbar.
   const visible = rung === "well" ? ids : expanded ? ids : ids.slice(0, 4);
   const noun = row.wfLabel === "Oath Signature" ? "signers" : "people";
   return (
@@ -820,7 +740,7 @@ function GroupMemberList({
       <div
         className={cn(
           "divide-y divide-border/40 overflow-hidden rounded-md border border-border/60",
-          rung === "well" && "max-h-[8.5rem] overflow-y-auto",
+          rung === "well" && "max-h-[var(--ds-h-member-well)] overflow-y-auto",
         )}
       >
         {visible.map((id) => {

@@ -252,6 +252,11 @@
   --ds-h-row: 32px; /* one queue/table row */
   --ds-h-bar: 36px; /* status bar, panel toolbar */
   --ds-h-topbar: 44px; /* the app top bar */
+  /* The scroll well a Group Row shows its members in. This is the value that
+     makes scale presentational: at ~5.5 lines a group of 50 occupies exactly
+     the same space as a group of 13, so a queue full of groups keeps a
+     predictable height and the row never has to change SHAPE to hold more. */
+  --ds-h-member-well: 136px;
   --ds-w-rail: 200px; /* the workflow rail */
   /* The run's CONTEXT RAIL — the third column of the detail region, where the
      Data ledger, the evidence and the run's provenance live so the log stream
