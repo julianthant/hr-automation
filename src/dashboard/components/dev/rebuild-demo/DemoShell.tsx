@@ -449,10 +449,29 @@ function WorkflowPanelControls({ mode, onMode }: PanelModeProps) {
 /**
  * The launcher, and the one control present in all three modes.
  *
- * It carries the current workflow's 2-char code — the same code that prefixes
- * every one of its trace ids — so it is never an anonymous glyph, and the
- * day's whole `Needs you` count across EVERY panel, because the number you must
- * not be able to miss is the one in a panel you are not looking at.
+ * It carries TWO facts, and the whole design problem is that they are about
+ * different things:
+ *
+ *  - the current workflow's 2-char code — the same code that prefixes every one
+ *    of its trace ids — so the control is never an anonymous glyph;
+ *  - the day's whole `Needs you` count across EVERY panel, because the number
+ *    you must not be able to miss is the one in a panel you are not looking at.
+ *
+ * It used to render them as `on 6`, and the operator asked what the 6 was for —
+ * which is the bug report. Read as one fact, `on 6` says "Onboarding has 6",
+ * and Onboarding does not have 6; `os`, `ic` and `oc` all read 6 beside panels
+ * holding 8, 1 and 4. Worse, it quietly broke the invariant the rest of the
+ * shell holds to: rail badges, the Status Bar and the queue header all go
+ * through `countRows` and always agree, and this was a different quantity
+ * wearing the same clothes.
+ *
+ * The fix is not to delete the number and it is not to quietly make it
+ * per-workflow — with the panel collapsed there are no per-workflow badges on
+ * screen, so a global attention signal is the entire point of the control.
+ * It is to make it read as ATTENTION, EVERYWHERE: a rule separates the two
+ * facts, and the count wears the `Needs you` composite's own `Eye` — the same
+ * glyph as the Status Bar pill, which is on screen at all times, so the
+ * association is available rather than remembered.
  */
 export function DemoWorkflowPanelToggle({
   mode,
@@ -476,8 +495,10 @@ export function DemoWorkflowPanelToggle({
       // The count goes in the LABEL, not only in the badge: an `aria-label`
       // replaces a button's contents outright, so the badge's own number was
       // being announced to nobody — the one number this control exists for.
-      aria-label={`Workflow Panel — ${active}${showing ? `, ${WORKFLOW_PANEL_MODE_LABEL[mode]}` : ", minimised"}, ${needsYou} waiting on you across every panel`}
-      title={`Workflow Panel — ${active}\n${needsYou} row${needsYou === 1 ? "" : "s"} waiting on you across every panel\nw cycles floating · icon · sidebar`}
+      // It also names WHAT it counts, for the same reason the rule and the eye
+      // exist visually: "6" beside "on" is not a fact anybody can act on.
+      aria-label={`Workflow Panel — ${active}${showing ? `, ${WORKFLOW_PANEL_MODE_LABEL[mode]}` : ", minimised"}. Needs you across every panel: ${needsYou}`}
+      title={`Workflow Panel — ${active} (${code})\nNeeds you: ${needsYou} row${needsYou === 1 ? "" : "s"} across EVERY panel, not just this one\nw cycles floating · icon · sidebar`}
       onClick={() => onMode(showing ? "icon" : "floating")}
       className={cn(
         toolbarControl(),
@@ -492,6 +513,23 @@ export function DemoWorkflowPanelToggle({
         <PanelLeftOpen aria-hidden className={dsIcon.sm} />
       )}
       <span className={dsText.nums}>{code}</span>
+      {/* The rule is what stops `on 6` reading as one fact. Left of it is the
+          panel you are in; right of it is a count that belongs to no single
+          workflow. Same hairline the Status Bar puts between its two composite
+          pills and the eight statuses, and for the same reason — it separates
+          two KINDS of thing, not two things of one kind. */}
+      <span aria-hidden className={cn("mx-[var(--ds-space-hair)] h-4 w-px shrink-0", "bg-[var(--ds-border)]")} />
+      {/* The `Needs you` composite's own glyph. Colour is never the only
+          encoding, and here it is not even the first one: the icon says which
+          quantity this is, the tone says whether it is a demand. */}
+      <Eye
+        aria-hidden
+        className={cn(
+          dsIcon.sm,
+          "shrink-0",
+          needsYou > 0 ? "text-[color:var(--ds-status-waiting-fg)]" : "text-[color:var(--ds-fg-faint)]",
+        )}
+      />
       {/* The loudest badge in the system, and the one place it is right: a
           `Waiting on you` count must survive the panel being closed. It DIMS at
           zero rather than vanishing — a badge that disappears reflows the whole
@@ -582,8 +620,11 @@ function WorkflowEntryList({
           </span>
         )}
         {/* A count that hits zero DIMS, it does not disappear — the eye must
-            not have to re-scan the rail to find out a panel is idle. */}
+            not have to re-scan the rail to find out a panel is idle. It names
+            itself on hover for the same reason the launcher's count now does:
+            a bare number beside another bare number is two facts and no nouns. */}
         <span
+          title={`${total} row${total === 1 ? "" : "s"} in ${label}`}
           className={cn(
             dsText.meta,
             dsText.nums,
