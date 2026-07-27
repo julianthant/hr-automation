@@ -9,7 +9,7 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
-import { Check, ChevronDown, Minus, Search, TriangleAlert, X } from "lucide-react";
+import { Check, ChevronDown, Lock, Minus, Pencil, Search, TriangleAlert, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { dsFocus, dsFocusWithin, dsIcon, dsMotion, dsRadius, dsText } from "./tokens";
 
@@ -423,3 +423,135 @@ export const SearchInput = forwardRef<
     </span>
   );
 });
+
+/* =========================================================================
+ * ValueField / LockedValue — a recorded value the operator may or may not correct
+ * ====================================================================== */
+
+/**
+ * A value the run OBSERVED, drawn so the operator can see it is correctable.
+ *
+ * WHY THIS EXISTS AS A PRIMITIVE (2026-07-27). Two surfaces independently grew
+ * the same defect and the operator hit it twice: the Data ledger's read values
+ * and the Review tab's extracted OCR fields were both real `<input>`s at rest,
+ * both styled `border-transparent` on no background, and both therefore looked
+ * exactly like the static text around them. Each only became visibly a field
+ * once it had already been edited — or once the pointer happened to cross it —
+ * which is backwards: hover is not an affordance, because a control you can
+ * only discover by sweeping the pointer over the page is a control that does
+ * not exist for anyone who did not sweep. Two surfaces had the need, a third
+ * will, so the treatment lives here and not in either consumer.
+ *
+ * What it says, at rest and without interaction: a control-border outline (held
+ * to 3:1 — a control's outline is what identifies it as a control), an inset
+ * surface, and a pencil. Dirty is a fill and a border, never a text colour:
+ * amber text on an amber fill is the one place this system routinely loses
+ * contrast, and the amber shell already says it. Every consumer pairs the fill
+ * with a WORD as well, because colour is never the only encoding.
+ *
+ * Label it one of two ways and never both: pass `id` and render your own
+ * `<label htmlFor>` where the label is visible (an `aria-label` would silently
+ * override that visible text), or pass `ariaLabel` where there is no label
+ * element to pair with.
+ */
+export function ValueField({
+  id,
+  ariaLabel,
+  value,
+  onChange,
+  dirty = false,
+  title,
+  className,
+}: {
+  /** pair with your own `<label htmlFor>` when the label is visible */
+  id?: string;
+  /** the accessible name when there is no label element to pair with */
+  ariaLabel?: string;
+  value: string;
+  onChange: (next: string) => void;
+  /** typed over and not yet committed — a fill and a border, never ink */
+  dirty?: boolean;
+  title?: string;
+  className?: string;
+}) {
+  return (
+    <span className={cn("relative flex min-w-0 items-center", className)}>
+      <input
+        id={id}
+        aria-label={ariaLabel}
+        title={title}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn(
+          // The right padding is the pencil's 12px plus its 4px offset plus 4px of
+          // air, composed from tokens rather than guessed — at `loose` the value
+          // ran straight into the glyph on a narrow column.
+          "w-full min-w-0 border pl-[var(--ds-space-snug)] pr-[calc(var(--ds-space-loose)+var(--ds-space-tight))]",
+          "h-[var(--ds-h-sm)] rounded-[var(--ds-radius-md)]",
+          dsText.body,
+          dsText.nums,
+          dsFocus,
+          dsMotion.fast,
+          "text-[color:var(--ds-fg)]",
+          dirty
+            ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]"
+            : cn(
+                "border-[color:var(--ds-control-border)] bg-[var(--ds-surface-2)]",
+                "hover:border-[color:var(--ds-border-loud)] focus:border-[color:var(--ds-border-loud)]",
+              ),
+        )}
+      />
+      {/* Inside the field, not beside it — a value column is the one thing on
+          these surfaces that cannot spare width, and the pencil is what says
+          "this box takes typing" before anything is typed. */}
+      <Pencil
+        aria-hidden
+        className={cn(dsIcon.sm, "pointer-events-none absolute right-[var(--ds-space-tight)] text-[color:var(--ds-fg-muted)]")}
+      />
+    </span>
+  );
+}
+
+/**
+ * A recorded value the operator may NOT correct — `ValueField`'s counterpart.
+ *
+ * The pair only works because the two are told apart by SHAPE: an editable
+ * value is a box, a locked value is flat text with a lock and no box at all.
+ * Making everything look like a field to be consistent would erase exactly the
+ * distinction that matters here — "you may change this" against "you may not"
+ * is load-bearing on a surface that files real HR transactions.
+ *
+ * `reason` is not optional in spirit. A greyed value with no explanation is how
+ * an operator learns to distrust a screen; every consumer says why.
+ */
+export function LockedValue({
+  value,
+  reason,
+  tone = "default",
+  className,
+}: {
+  value: ReactNode;
+  /** why it cannot be corrected — shown, never left to be guessed */
+  reason?: string;
+  tone?: "default" | "warning";
+  className?: string;
+}) {
+  return (
+    <span title={reason} className={cn("flex min-w-0 items-start gap-[var(--ds-space-tight)]", className)}>
+      <Lock aria-hidden className={cn(dsIcon.sm, "mt-[var(--ds-space-hair)] shrink-0 text-[color:var(--ds-fg-muted)]")} />
+      {/* It WRAPS rather than truncating: half a date is a guess, and a value
+          is the one thing on these rows that cannot be recovered from
+          anywhere else on the surface. */}
+      <span
+        className={cn(
+          dsText.body,
+          dsText.nums,
+          "min-w-0 flex-1 break-words",
+          tone === "warning" ? "text-[color:var(--ds-status-waiting-fg)]" : "text-[color:var(--ds-fg)]",
+        )}
+      >
+        {value}
+      </span>
+    </span>
+  );
+}

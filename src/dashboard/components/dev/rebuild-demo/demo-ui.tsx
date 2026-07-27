@@ -112,6 +112,14 @@ export {
   RadioGroup,
   Switch,
   SearchInput,
+  /**
+   * The correctable/locked value pair. Reach for these anywhere a surface shows
+   * a value the run OBSERVED — never re-draw a bare `<input>` for one, or it
+   * ends up invisible at rest the way the Data ledger and the OCR review both
+   * did before they shared this.
+   */
+  ValueField,
+  LockedValue,
 } from "./ds/primitives-form";
 
 export {
