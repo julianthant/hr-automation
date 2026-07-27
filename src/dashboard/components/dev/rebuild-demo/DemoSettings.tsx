@@ -25,6 +25,7 @@ import {
   BulletList,
   Button,
   Card,
+  CardBase,
   CardBody,
   Chip,
   CountBadge,
@@ -628,36 +629,46 @@ function StorageSection({ storage, onStorage }: { storage: StorageMode; onStorag
           {snapshot.reason ?? snapshot.integrity}
         </Banner>
 
+        {/* Three stat cards read across as a row: label, then the number, then
+            the note about it. The notes run one and two lines, so each is
+            pinned to the card's base — otherwise the middle card's note ended
+            a line below its neighbours' and the row lost its bottom edge. */}
         <div className="grid grid-cols-1 gap-[var(--ds-space-base)] min-[820px]:grid-cols-3">
           <Card>
-            <CardBody className="flex flex-col gap-[var(--ds-space-hair)]">
+            <CardBody grow className="flex flex-col gap-[var(--ds-space-hair)]">
               <SectionLabel>Authority generation</SectionLabel>
               <span className={cn(dsText.display, dsText.nums, "text-[color:var(--ds-fg)]")}>
                 {snapshot.authorityGeneration}
               </span>
-              <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
-                The SQLite task store's generation — every command's CAS token descends from it.
-              </span>
+              <CardBase className="pt-[var(--ds-space-hair)]">
+                <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+                  The SQLite task store's generation — every command's CAS token descends from it.
+                </span>
+              </CardBase>
             </CardBody>
           </Card>
           <Card>
-            <CardBody className="flex flex-col gap-[var(--ds-space-hair)]">
+            <CardBody grow className="flex flex-col gap-[var(--ds-space-hair)]">
               <SectionLabel>Rows on disk</SectionLabel>
               <span className={cn(dsText.display, dsText.nums, "text-[color:var(--ds-fg)]")}>
                 {snapshot.rowsOnDisk.toLocaleString()}
               </span>
-              <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
-                Across every day the tracker still holds. Notes and spans prune at 30 days; the ledger never prunes.
-              </span>
+              <CardBase className="pt-[var(--ds-space-hair)]">
+                <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+                  Across every day the tracker still holds. Notes and spans prune at 30 days; the ledger never prunes.
+                </span>
+              </CardBase>
             </CardBody>
           </Card>
           <Card>
-            <CardBody className="flex flex-col gap-[var(--ds-space-hair)]">
+            <CardBody grow className="flex flex-col gap-[var(--ds-space-hair)]">
               <SectionLabel>Newest backup</SectionLabel>
               <span className={cn(dsText.display, dsText.nums, "text-[color:var(--ds-fg)]")}>{newest.ageLabel}</span>
-              <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
-                Integrity {degraded ? "last checked" : "verified"} {snapshot.integrityCheckedAt}.
-              </span>
+              <CardBase className="pt-[var(--ds-space-hair)]">
+                <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+                  Integrity {degraded ? "last checked" : "verified"} {snapshot.integrityCheckedAt}.
+                </span>
+              </CardBase>
             </CardBody>
           </Card>
         </div>

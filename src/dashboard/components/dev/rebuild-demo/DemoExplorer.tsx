@@ -6,6 +6,7 @@ import {
   Banner,
   Button,
   Card,
+  CardBase,
   CardBody,
   Chip,
   PageHeader,
@@ -374,7 +375,7 @@ function NodeDetail({
 
         <div className="grid grid-cols-1 gap-[var(--ds-space-base)] min-[520px]:grid-cols-2">
           <Card>
-            <CardBody className="flex flex-col gap-[var(--ds-space-tight)]">
+            <CardBody grow className="flex flex-col gap-[var(--ds-space-tight)]">
               <SectionLabel>UI ids</SectionLabel>
               {node.contract.uiIds.length === 0 ? (
                 <span className={cn(dsText.body, "text-[color:var(--ds-fg-muted)]")}>None — this node drives no page.</span>
@@ -385,13 +386,18 @@ function NodeDetail({
                   </span>
                 ))
               )}
-              <span className={cn(dsText.micro, "text-[color:var(--ds-fg-faint)]")}>
-                Semantic ids, never raw selectors — a selector in a descriptor breaks every time a page moves a div.
-              </span>
+              {/* A standing caveat about the card, not the next item in the
+                  list. It sits on the card's base so it cannot float in the
+                  middle of a card whose neighbour lists more fields. */}
+              <CardBase className="pt-[var(--ds-space-snug)]">
+                <span className={cn(dsText.micro, "text-[color:var(--ds-fg-faint)]")}>
+                  Semantic ids, never raw selectors — a selector in a descriptor breaks every time a page moves a div.
+                </span>
+              </CardBase>
             </CardBody>
           </Card>
           <Card>
-            <CardBody className="flex flex-col gap-[var(--ds-space-tight)]">
+            <CardBody grow className="flex flex-col gap-[var(--ds-space-tight)]">
               <SectionLabel>Editable at a checkpoint</SectionLabel>
               {node.contract.editableFields.length === 0 ? (
                 <span className={cn(dsText.body, "text-[color:var(--ds-fg-muted)]")}>

@@ -7,6 +7,7 @@ import {
   BulletList,
   Button,
   Card,
+  CardBase,
   CardBody,
   Chip,
   PageHeader,
@@ -286,13 +287,22 @@ function Tile({
 }) {
   return (
     <Card tone={tone === "warning" ? "attention" : "default"}>
-      <CardBody className="flex flex-col gap-[var(--ds-space-hair)]">
-        <span className="flex items-center gap-[var(--ds-space-snug)]">
+      <CardBody grow className="flex flex-col gap-[var(--ds-space-hair)]">
+        {/* The header row is RESERVED at the badge's own height on every tile.
+            Only `Hours saved` carries a 20px `estimate` badge beside a 13px
+            caps label, and without the reservation that one tile's header grew
+            — dropping its big number, and the note under it, about 7px below
+            its three siblings' on the row the eye reads straight across. */}
+        <span className="flex min-h-[var(--ds-h-xs)] items-center gap-[var(--ds-space-snug)]">
           <SectionLabel>{label}</SectionLabel>
           {tone === "estimate" && <Badge tone="warning">estimate</Badge>}
         </span>
         <span className={cn(dsText.display, dsText.nums, "text-[color:var(--ds-fg)]")}>{value}</span>
-        <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>{note}</span>
+        {/* The notes run one and two lines. Pinned, they end on one baseline
+            across the row instead of each stopping wherever its own copy did. */}
+        <CardBase className="pt-[var(--ds-space-hair)]">
+          <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>{note}</span>
+        </CardBase>
       </CardBody>
     </Card>
   );
