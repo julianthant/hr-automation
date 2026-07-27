@@ -1133,6 +1133,11 @@ function ReviewTab({
                     onChange={(e) => setEdits((prev) => ({ ...prev, [key]: e.target.value }))}
                     className={cn(
                       "min-w-0 flex-1 rounded border bg-transparent px-1.5 py-0.5 font-mono text-[11.5px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      // The border arrives on hover rather than sitting on every
+                      // row at rest — a page of outlined boxes reads as a form
+                      // to fill in, not as a reading you are checking. It fades
+                      // in so the row does not flicker as the pointer crosses it.
+                      dsMotion.fast,
                       corrected
                         ? "border-warning/50 bg-warning/5 text-warning"
                         : "border-transparent text-foreground hover:border-border focus:border-border",
