@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -8,12 +8,14 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  CircleAlert,
   ClipboardList,
-  CornerDownRight,
   FileText,
   GitBranch,
   Info,
+  Loader2,
   RotateCcw,
+  ScanText,
   Search,
   SearchX,
   ShieldCheck,
@@ -59,17 +61,18 @@ import {
   groupCounts,
   isSettledRow,
   linkedGroupSummary,
+  recordStream,
   visibleMemberIds,
   orderedMemberIds,
   sortDemoRows,
+  type DemoRecord,
   type DemoRow,
   type DemoSortKey,
 } from "./demo-data";
 
 /**
- * DEV-ONLY — the rebuild demo's queue panel. Attention bands, the three-rung
- * density ladder, the per-row ⓘ explanation, and the triage drill-in, rendered
- * on the REAL QueueRowCard/RowFooter/StatusCounts chrome.
+ * DEV-ONLY — the rebuild demo's queue panel. Attention bands, ONE member shape
+ * at every count, the per-row ⓘ explanation, and the triage drill-in.
  *
  * The rows this panel receives are already scoped to the selected Workflow
  * Panel entry, and it filters them with the SAME predicate the Status Bar
@@ -348,19 +351,28 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): 
   // Only when the delegated runs have no row of their own to point at. Once
   // they do, the linked-set button in the body carries the count — two counts
   // of the same thing is exactly the divergence this rebuild exists to kill.
-  const lookups = row.linkedGroup ? 0 : (row.records ?? []).filter((r) => r.lookup).length;
+  const stream = recordStream(row, tick);
+  const lookups = row.linkedGroup ? 0 : (stream.read ?? []).filter((r) => r.lookup).length;
   return (
     <>
       {/* Depth 2 lives here and nowhere else. The packet that delegated this
           run deliberately does not repeat it — two levels of run in a queue row
-          is already the limit of what stays readable. */}
+          is already the limit of what stays readable.
+
+          While the document is still being READ the chip counts what has
+          arrived against what the run says is there, because a bare `12` on a
+          run that has reported five people is a number nobody can act on. */}
       {lookups > 0 && (
         <span
-          title={`${lookups} delegated person lookups — one per record. Reachable only from this review row; the packet never lists them.`}
+          title={
+            stream.streaming
+              ? `${lookups} delegated person lookups so far — one per person read. The rest arrive as the extraction reports them.`
+              : `${lookups} delegated person lookups — one per record. Reachable only from this review row; the packet never lists them.`
+          }
           className={rowChip("neutral")}
         >
           <GitBranch aria-hidden className={dsIcon.sm} />
-          {lookups} lookups
+          {stream.streaming ? `${lookups} of ${stream.total} lookups` : `${lookups} lookups`}
         </span>
       )}
       {/* a run started against a TEST instance can never be mistaken for a
@@ -781,15 +793,6 @@ export function DemoRowCard({
               </div>
             )}
 
-            {/* Linked delegation. A `linked` child keeps its own row in its own
-                panel and the two point at each other — one chip each, never a
-                duplicated run. `member` children live in the body instead. */}
-            {(row.reviewRunId || row.reviewOf) && (
-              <div className="col-start-2">
-                <LinkedReviewChip row={row} handlers={handlers} />
-              </div>
-            )}
-
             {/* A SET of linked children — Oath Upload's signers. Still a chip,
                 not a member list: each signer is an Oath Signature run with its
                 own row in that panel, counted there exactly once. */}
@@ -811,9 +814,19 @@ export function DemoRowCard({
               </div>
             )}
 
-            {/* ONE level of back, never a breadcrumb trail: maximum real depth
-                is 2, so there is only ever one parent worth returning to. */}
-            {row.linkedParentId && !row.reviewOf && DEMO_ROWS[row.linkedParentId] && (
+            {/* THE BACK ROUTE, on the DESTINATION. One level, never a
+                breadcrumb trail: maximum real depth is 2, so there is only ever
+                one parent worth returning to.
+
+                The `!row.reviewOf` guard is GONE. It existed because a review
+                row drew its parent as a "Delegated by …" chip in the forward
+                chip's slot and tone — a link that pointed backwards while
+                looking like every link that points forwards. Following
+                `OCR review ↗` from a packet therefore landed the operator on a
+                row with no way back to the one they came from. Now the two
+                delegated paths share ONE back chip: an arrow that points left,
+                naming the panel and the row it returns to. */}
+            {row.linkedParentId && DEMO_ROWS[row.linkedParentId] && (
               <div className="col-start-2">
                 <button
                   type="button"
@@ -822,7 +835,7 @@ export function DemoRowCard({
                     const parent = DEMO_ROWS[row.linkedParentId as string];
                     handlers.onOpenPanel(parent.wfLabel, parent.id);
                   }}
-                  title={`Delegated by ${DEMO_ROWS[row.linkedParentId].wfLabel} · ${DEMO_ROWS[row.linkedParentId].title} — open it in its own panel`}
+                  title={`Back to ${DEMO_ROWS[row.linkedParentId].wfLabel} · ${DEMO_ROWS[row.linkedParentId].title} — the run that delegated this one`}
                   className={linkChip("neutral")}
                 >
                   <ArrowLeft aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
@@ -884,6 +897,31 @@ export function DemoRowCard({
                 <PacketBeforeFanout row={row} handlers={handlers} />
               </div>
             ))}
+
+            {/* THE PEOPLE THIS RUN HAS READ. Same shape as a group's member
+                lines, because it is the same thing — a person the row is
+                accounting for — and it fills in as the extraction reports
+                them, from the queue panel and from the OCR panel alike. */}
+            {row.records && row.records.length > 0 && (
+              <div className="col-start-2">
+                <RecordStreamList row={row} tick={state.tick} />
+              </div>
+            )}
+
+            {/* THE POINTER TO RELATED WORK, demoted and LAST.
+                It used to sit high in the card on its own `ml-5` indent — so it
+                broke the left edge every other line hangs off — and it wore the
+                info tint, which made a pointer to somewhere else the loudest
+                thing on a card whose job is "approve these people". It is
+                necessary and it stays; it is now in the card's own grid, below
+                the actions in the hierarchy, and quiet. Still obviously
+                clickable: a bordered chip with a hover lift and the ↗ that
+                means "this changes panel". */}
+            {row.reviewRunId && (
+              <div className="col-start-2">
+                <LinkedReviewChip row={row} handlers={handlers} />
+              </div>
+            )}
           </div>
 
           <RowFooterLine row={row} handlers={handlers} elapsed={elapsed} />
@@ -911,36 +949,33 @@ const linkChip = (tone: "info" | "neutral"): string =>
       : cn(dsBorder.base, "bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]"),
   );
 
+/**
+ * A packet's pointer to the OCR review row that holds its records.
+ *
+ * FORWARD ONLY. It used to serve both directions — the same chip, the same info
+ * tint, the same corner-arrow glyph, whether it pointed at the review a packet
+ * delegated or back at the packet that delegated a review. A link that points
+ * backwards while looking like every link that points forwards is how following
+ * one leaves the operator stranded: the destination's chip read as another step
+ * away, not as the way home. The return trip is the neutral `←` chip in the
+ * card body, which both delegated paths now share.
+ */
 function LinkedReviewChip({ row, handlers }: { row: DemoRow; handlers: DemoQueueHandlers }) {
-  const targetId = (row.reviewRunId ?? row.reviewOf) as string;
-  const target = DEMO_ROWS[targetId];
+  const target = row.reviewRunId ? DEMO_ROWS[row.reviewRunId] : undefined;
   if (!target) return null;
   return (
-    <div className="mt-1.5 ml-5">
+    <div>
       <button
         type="button"
         onClick={(e) => {
           e.stopPropagation();
           handlers.onOpenPanel(target.wfLabel, target.id);
         }}
-        title={
-          row.reviewOf
-            ? `Open ${target.title} in the ${target.wfLabel} panel`
-            : `Open the OCR panel and select this packet's review row — the records live there, not here`
-        }
-        className={linkChip("info")}
+        title="Open the OCR panel and select this packet's review row — the records live there, not here"
+        className={linkChip("neutral")}
       >
-        {row.reviewOf ? (
-          <>
-            <CornerDownRight aria-hidden className="size-3 shrink-0" />
-            <span className="truncate">Delegated by {target.title}</span>
-          </>
-        ) : (
-          <>
-            <ClipboardList aria-hidden className="size-3 shrink-0" />
-            <span className="truncate">OCR review · {statusText(effectiveStatus(target)).toLowerCase()}</span>
-          </>
-        )}
+        <ClipboardList aria-hidden className="size-3 shrink-0" />
+        <span className="truncate">OCR review · {statusText(effectiveStatus(target)).toLowerCase()}</span>
         <ArrowUpRight aria-hidden className="size-3 shrink-0" />
       </button>
     </div>
@@ -1059,6 +1094,173 @@ function filterWord(filter: DemoFilter): string {
   return PROPOSED_STATUS[filter as ProposedStatus].label.toLowerCase();
 }
 
+/**
+ * THE WELL. One container for every list of people a row can hold, so a group's
+ * members and an OCR run's extracted records are the same object on screen —
+ * which they are: a person the row is accounting for. Its cap is what makes
+ * scale presentational (three lines do not fill it, fifty scroll inside it),
+ * and the half-cut row at the bottom of a long list IS the depth cue, which is
+ * why the cap is 136px and not a whole number of rows.
+ */
+function PersonWell({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className={cn(
+        "divide-y overflow-y-auto border",
+        dsRadius.md,
+        dsBorder.base,
+        "divide-[color:var(--ds-border-subtle)]",
+        "max-h-[var(--ds-h-member-well)]",
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * ONE person, on ONE line: status glyph · name · detail · EID, on the fixed
+ * `MEMBER_GRID` track so the names down the left and the EIDs down the right
+ * land on the same edge in every list, in every row, at every count.
+ */
+function PersonLine({
+  icon: Icon,
+  iconClass,
+  name,
+  nameClass,
+  detail,
+  eid,
+  selected,
+  onClick,
+  title,
+}: {
+  icon: typeof CheckCircle2;
+  iconClass?: string;
+  name: string;
+  nameClass?: string;
+  detail: ReactNode;
+  eid?: string;
+  selected?: boolean;
+  onClick?: (e: ReactMouseEvent) => void;
+  title?: string;
+}) {
+  const body = (
+    <>
+      <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0", iconClass)} />
+      <span className={cn("min-w-0 truncate text-[color:var(--ds-fg)]", nameClass)}>{name}</span>
+      {detail}
+      <span className={cn(dsText.meta, dsText.nums, "min-w-0 truncate text-right text-[color:var(--ds-fg-muted)]")}>
+        {eid ?? "—"}
+      </span>
+    </>
+  );
+  const shape = cn(
+    MEMBER_GRID,
+    "w-full items-center text-left",
+    "h-[var(--ds-h-sm)] gap-x-[var(--ds-space-base)] px-[var(--ds-space-base)]",
+    dsText.body,
+    "bg-[var(--ds-surface-1)]",
+  );
+  if (!onClick) {
+    return (
+      <div title={title} className={shape}>
+        {body}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className={cn(
+        shape,
+        "cursor-pointer",
+        dsFocus,
+        dsMotion.fast,
+        "hover:bg-[var(--ds-surface-3)]",
+        selected && "bg-[var(--ds-surface-selected)]",
+      )}
+    >
+      {body}
+    </button>
+  );
+}
+
+/**
+ * THE PEOPLE AN OCR RUN HAS READ, filling in as it reads them.
+ *
+ * The row used to carry a count and nothing else — `12 lookups` — which only
+ * became information once the whole document was through. The operator:
+ * *"the 12 should also appear like [a member list] as they get read. so i can
+ * see in the queue panel as well in the ocr."*
+ *
+ * It is the SAME shape as a group's member lines, because it is the same thing:
+ * a person this row is accounting for. The people the run has not reported are
+ * a NUMBER, never a placeholder line — the extraction may yet find that a page
+ * carries nobody, and a row that has already drawn them would have to take one
+ * away.
+ */
+function RecordStreamList({ row, tick }: { row: DemoRow; tick: number }) {
+  const stream = recordStream(row, tick);
+  if (stream.total === 0) return null;
+  const pending = stream.total - stream.read.length;
+  return (
+    <div className="flex flex-col gap-[var(--ds-space-snug)]">
+      <div className={cn(dsText.meta, "flex items-center gap-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]")}>
+        <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+          <ScanText aria-hidden className={dsIcon.sm} />
+          <span className={dsText.nums}>
+            {stream.read.length} of {stream.total}
+          </span>{" "}
+          read
+        </span>
+        {stream.streaming && (
+          <span className="inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-status-running-fg)]">
+            <Loader2 aria-hidden className={cn(dsIcon.sm, "animate-spin motion-reduce:animate-none")} />
+            reading
+          </span>
+        )}
+      </div>
+      {stream.read.length > 0 && (
+        <PersonWell>
+          {stream.read.map((rec) => (
+            <PersonLine
+              key={rec.id}
+              icon={RECORD_STATE_ICON[rec.state].icon}
+              iconClass={RECORD_STATE_ICON[rec.state].cls}
+              name={rec.name}
+              title={`${rec.name} — ${rec.pageNote}`}
+              detail={
+                <span className={cn(dsText.meta, "min-w-0 truncate text-[color:var(--ds-fg-muted)]")}>page {rec.page}</span>
+              }
+              eid={rec.eid}
+            />
+          ))}
+        </PersonWell>
+      )}
+      {pending > 0 && (
+        <span className={cn(dsText.meta, "text-[color:var(--ds-fg-faint)]")}>
+          <span className={dsText.nums}>{pending}</span> more page{pending === 1 ? "" : "s"} to read — each person appears here
+          as the run reports them.
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A record's own state, on the ratified status glyphs — `ready` reads as the
+ * quiet verified check, `warn` as the done-with-warnings circle, `blocked` as
+ * the same `SearchX` a rejected member carries. Not a fourth vocabulary: the
+ * same four channels, borrowed from the statuses that already mean this.
+ */
+const RECORD_STATE_ICON: Record<DemoRecord["state"], { icon: typeof CheckCircle2; cls: string }> = {
+  ready: { icon: CheckCircle2, cls: "text-[color:var(--ds-status-verified-done-fg)]" },
+  warn: { icon: CircleAlert, cls: "text-[color:var(--ds-status-done-warnings-fg)]" },
+  blocked: { icon: SearchX, cls: "text-[color:var(--ds-status-failed-fg)]" },
+};
+
 function GroupMemberList({ row, state, handlers }: { row: DemoRow; state: DemoQueueState; handlers: DemoQueueHandlers }) {
   const ids = orderedMemberIds(row.id);
   const expanded = state.expandedGroups.has(row.id);
@@ -1079,58 +1281,28 @@ function GroupMemberList({ row, state, handlers }: { row: DemoRow; state: DemoQu
           a long list IS the depth cue, which is why the cap is 136px and not a
           whole number of rows. */}
       {visible.length > 0 && (
-      <div
-        className={cn(
-          "divide-y overflow-y-auto border",
-          dsRadius.md,
-          dsBorder.base,
-          "divide-[color:var(--ds-border-subtle)]",
-          "max-h-[var(--ds-h-member-well)]",
-        )}
-      >
-        {visible.map((id) => {
-          const m = DEMO_ROWS[id];
-          const spec = MEMBER_STATUS_ICON[m.status];
-          const Icon = m.containment === "rejected" ? SearchX : spec.icon;
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handlers.onSelect(id);
-              }}
-              className={cn(
-                MEMBER_GRID,
-                "w-full cursor-pointer items-center text-left",
-                "h-[var(--ds-h-sm)] gap-x-[var(--ds-space-base)] px-[var(--ds-space-base)]",
-                dsText.body,
-                dsFocus,
-                dsMotion.fast,
-                "bg-[var(--ds-surface-1)] hover:bg-[var(--ds-surface-3)]",
-                state.selectedId === id && "bg-[var(--ds-surface-selected)]",
-              )}
-            >
-              <Icon
-                aria-hidden
-                className={cn(dsIcon.sm, "shrink-0", m.containment === "rejected" ? "text-[color:var(--ds-fg-muted)]" : spec.cls)}
+        <PersonWell>
+          {visible.map((id) => {
+            const m = DEMO_ROWS[id];
+            const spec = MEMBER_STATUS_ICON[m.status];
+            return (
+              <PersonLine
+                key={id}
+                icon={m.containment === "rejected" ? SearchX : spec.icon}
+                iconClass={m.containment === "rejected" ? "text-[color:var(--ds-fg-muted)]" : spec.cls}
+                name={m.title}
+                nameClass={m.containment === "rejected" ? "italic text-[color:var(--ds-fg-muted)]" : undefined}
+                detail={<MemberDetailCell row={m} />}
+                eid={m.eid}
+                selected={state.selectedId === id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handlers.onSelect(id);
+                }}
               />
-              <span
-                className={cn(
-                  "min-w-0 truncate text-[color:var(--ds-fg)]",
-                  m.containment === "rejected" && "italic text-[color:var(--ds-fg-muted)]",
-                )}
-              >
-                {m.title}
-              </span>
-              <MemberDetailCell row={m} />
-              <span className={cn(dsText.meta, dsText.nums, "min-w-0 truncate text-right text-[color:var(--ds-fg-muted)]")}>
-                {m.eid ?? "—"}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+            );
+          })}
+        </PersonWell>
       )}
       {/* The disclosures, at every count. A settled group carries the toggle —
           it is the only way back to its members once it is shut — and the
