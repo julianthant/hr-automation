@@ -2201,11 +2201,15 @@ const FALL_PEOPLE: { name: string; eid: string; readOffset: number }[] = [
   { name: "Dalia Haddad", eid: "10621442", readOffset: -74 },
   { name: "Ewan Doyle", eid: "10621890", readOffset: -19 },
   // …and the four the run has not reached. Their instants are in the future of
-  // the demo clock, so they arrive as the shell ticks.
-  { name: "Farrah Nabil", eid: "10622335", readOffset: 26 },
-  { name: "Gustav Lind", eid: "10622781", readOffset: 71 },
-  { name: "Hana Ito", eid: "10623220", readOffset: 118 },
-  { name: "Idris Balogun", eid: "10623664", readOffset: 165 },
+  // the demo clock, so they arrive as the shell ticks — spaced minutes apart,
+  // not seconds, because a nine-page tier-1 read genuinely takes that long and
+  // a state that resolves itself in twenty seconds is a state nobody can look
+  // at. Five of nine is what the row reads for the first three minutes after
+  // the demo is opened.
+  { name: "Farrah Nabil", eid: "10622335", readOffset: 190 },
+  { name: "Gustav Lind", eid: "10622781", readOffset: 425 },
+  { name: "Hana Ito", eid: "10623220", readOffset: 703 },
+  { name: "Idris Balogun", eid: "10623664", readOffset: 1012 },
 ];
 
 function fallRecord(i: number): DemoRecord {

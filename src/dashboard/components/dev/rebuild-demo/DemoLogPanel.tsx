@@ -1220,7 +1220,7 @@ function ReviewTab({
               a hand-picked min-height that produced a ~0.48 letterbox, i.e. a
               picture of a page shape that does not exist. `max-h-full` keeps a
               tall page inside the pane when the pane is the constraint. */}
-          <div className="flex w-full max-h-full min-h-0 flex-col items-center justify-center gap-1.5 self-center rounded-md border border-border bg-secondary/30 aspect-[var(--ds-aspect-page)]">
+          <div className="flex w-full flex-col items-center justify-center gap-1.5 self-center rounded-md border border-border bg-secondary/30 aspect-[var(--ds-aspect-page)]">
             <FileText aria-hidden className="size-6 text-muted-foreground/60" />
             <span className="text-[11px] text-muted-foreground">Page {rec.page} — source image</span>
           </div>

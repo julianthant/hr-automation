@@ -120,14 +120,27 @@ export function captureAspect(capture: DemoCapture): string {
   return capture.size ? `${capture.size.w} / ${capture.size.h}` : "var(--ds-aspect-page)";
 }
 
+/** the same ratio as a NUMBER, for deriving a width from a height budget */
+function captureAspectValue(capture: DemoCapture): number {
+  // US Letter when the capture serves no dimensions — the same fallback
+  // `captureAspect` states, kept beside it so the two cannot drift.
+  return capture.size ? capture.size.w / capture.size.h : 612 / 792;
+}
+
 function CaptureFrame({ capture, className }: { capture: DemoCapture; className?: string }) {
   return (
     <div
       role="img"
       aria-label={`${capture.label} — ${capture.failure ? "failure capture" : `${capture.kind} capture`}${capture.screen ? ` of ${capture.screen}` : ""}${capture.size ? `, ${capture.size.w} × ${capture.size.h}` : ""}. Image bytes are not part of the demo corpus.`}
-      style={{ aspectRatio: captureAspect(capture) }}
+      // WIDTH IS DERIVED FROM THE HEIGHT BUDGET, not clamped after the fact.
+      // `aspect-ratio` + `width: 100%` + `max-height` is a conflict the browser
+      // resolves by DROPPING the ratio — the frame measured 499 × 342 on a
+      // 612 × 792 capture, i.e. a portrait page drawn landscape, which is the
+      // exact defect this change exists to fix. Computing the width from the
+      // served ratio means the shape can never be the thing that gives.
+      style={{ aspectRatio: captureAspect(capture), width: `min(100%, calc(52vh * ${captureAspectValue(capture)}))` }}
       className={cn(
-        "mx-auto flex max-h-full w-full min-h-0 flex-col items-center justify-center gap-[var(--ds-space-base)] border p-[var(--ds-space-loose)]",
+        "mx-auto flex flex-col items-center justify-center gap-[var(--ds-space-base)] border p-[var(--ds-space-loose)]",
         "rounded-[var(--ds-radius-lg)] bg-[var(--ds-surface-2)]",
         capture.failure
           ? "border-[length:var(--ds-border-w-rail)] border-[color:var(--ds-danger)]"
@@ -220,7 +233,7 @@ export function CaptureLightbox({
             </Banner>
           )}
 
-          <CaptureFrame capture={capture} className="max-w-[min(100%,52ch)]" />
+          <CaptureFrame capture={capture} />
 
           <KeyValueList
             items={[
