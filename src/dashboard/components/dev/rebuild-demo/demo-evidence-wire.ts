@@ -270,7 +270,14 @@ type DemoFailureSpec = Omit<DemoFailureRecord, "runId" | "rowId" | "traceId" | "
 // 3. Evidence captures (doc 03 §2.1, doc 12 §2.2)
 // ===========================================================================
 
-export type DemoCaptureKind = "step" | "error" | "form";
+/**
+ * `confirmation` is a real fourth kind, not a step with a nicer label: it is the
+ * frame that proves a write LANDED, and on an archived run it is the one thing
+ * an auditor opens. Widened in the primitive rather than mapped onto `step` at
+ * one call site, so the archive and the live rail name the same artefact the
+ * same way.
+ */
+export type DemoCaptureKind = "step" | "error" | "form" | "confirmation";
 
 export interface DemoCapture {
   id: string;
@@ -1299,6 +1306,7 @@ export const CAPTURE_KIND_LABEL: Record<DemoCaptureKind, string> = {
   step: "Steps",
   error: "Errors",
   form: "Forms",
+  confirmation: "Confirmations",
 };
 
 // ---------------------------------------------------------------------------

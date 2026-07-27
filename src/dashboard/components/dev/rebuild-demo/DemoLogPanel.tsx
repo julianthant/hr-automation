@@ -409,7 +409,13 @@ function InlineDecision({
       </div>
 
       {capture && (
-        <CaptureLightbox captures={[capture]} index={0} onIndex={NOOP} onClose={() => setCapture(null)} row={row} />
+        <CaptureLightbox
+          captures={[capture]}
+          index={0}
+          onIndex={NOOP}
+          onClose={() => setCapture(null)}
+          subject={{ label: row.displayName ?? row.title, trace: row.trace }}
+        />
       )}
     </div>
   );

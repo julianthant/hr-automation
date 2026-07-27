@@ -78,7 +78,10 @@ export interface ExplorerEdge {
 export interface ExplorerGraph {
   workflowId: DemoWorkflowId;
   label: string;
+  /** the descriptor MAJOR this graph draws — a graph IS the run's shape */
   version: number;
+  /** the presentation half, so the graph prints the same two-part tag as the row */
+  minorVersion: number;
   /** the node the dry-run boundary sits in front of */
   dryRunBoundaryNodeId: string;
   summary: string;
@@ -95,6 +98,7 @@ export const SEPARATIONS_GRAPH: ExplorerGraph = {
   workflowId: "separations",
   label: "Separations",
   version: 7,
+  minorVersion: 2,
   dryRunBoundaryNodeId: "UCPath transaction",
   summary:
     "Reads the separation out of Kuali, proves who the person is in UCPath, checks their timekeeping, files the UCPath transaction, then finalizes the Kuali document. Everything before the UCPath transaction is read-only; a dry run stops exactly there.",

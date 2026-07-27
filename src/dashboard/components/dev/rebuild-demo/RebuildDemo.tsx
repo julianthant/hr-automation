@@ -456,7 +456,13 @@ export function RebuildDemo() {
       {shellView === "settings" ? (
         <DemoSettingsPage storage={storage} onBack={() => setShellView("queue")} />
       ) : shellView === "archive" ? (
-        <DemoArchivePage onBack={() => setShellView("queue")} onOpenSettings={() => setShellView("settings")} />
+        <DemoArchivePage
+          onBack={() => setShellView("queue")}
+          onOpenWorkflow={(label) => {
+            setShellView("queue");
+            changeWorkflow(label);
+          }}
+        />
       ) : shellView === "explorer" ? (
         <DemoExplorerPage onBack={() => setShellView("queue")} onOpenSettings={() => setShellView("settings")} />
       ) : shellView === "report" ? (
