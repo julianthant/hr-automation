@@ -276,6 +276,28 @@ the component; do not re-draw the pattern.
 A dialog's quiet left-hand note goes in `DialogFooter`'s `meta` slot, not a
 hand-rolled `mr-auto` span — see the footer rule below.
 
+### A command's answer is mounted where the command is reachable from
+
+> **If a control can be pressed from anywhere on a surface, its result has to be
+> visible from anywhere on that surface — and it is keyed to the object it is
+> about.**
+
+Two ways this breaks, both of them found by pressing the button rather than by
+reading the code:
+
+- **Scoped too narrowly.** A `Relaunch` in a panel FOOTER is reachable from every
+  tab; mounting its result inside one tab panel means pressing it from any other
+  tab looks like nothing happened. The answer goes above the tab set.
+- **Not keyed to its subject.** Clearing a result when the operator CLICKS
+  another row is not enough — a search, a filter or a re-anchored selection
+  moves the subject without a click, and a stale result then sits over a
+  different object claiming to be about it. Store the result WITH the id it came
+  from and render it only on a match.
+
+The same reasoning covers a **hazard**: it belongs on the control that can cause
+it, and it escalates on the value the operator has actually typed — not on the
+value the server currently holds.
+
 ### Where a thing goes: the top states, the stream explains
 
 > **The panel top carries a one-line state and its action. The substance lives
