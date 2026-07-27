@@ -5,17 +5,23 @@
  * file is the missing half of `demo-wire.ts`: the **Enqueue** command family
  * (`docs/rebuild/reviews/demo-feature-plan-2026-07-25.md` §1.3 — "typed
  * input-run / upload-run starts; policies `reject-active` | `supersede-active` |
- * `allow-parallel`; instance prod/test request; dry-run flag") plus the two
- * descriptor surfaces a run is started FROM (`surfaces.uploadRun`,
- * `surfaces.inputRun`, doc 02 §1.1).
+ * `allow-parallel`; instance prod/test request; dry-run flag") plus the corpora
+ * a start picks from.
+ *
+ * **What it deliberately no longer holds: a per-workflow spec table.** Wave 10
+ * moved every "what does this workflow accept, and what sub-selections does it
+ * offer" fact onto the workflow's own descriptor (`DemoWorkflowRef.start`,
+ * `demo-wire.ts`), the same move wave 7 made for rail categories. This file
+ * consumes that capability; it never restates it, so a workflow registered
+ * tomorrow gets a correct modal with no edit here.
  *
  * Three rules, the same three that keep `demo-wire.ts` honest:
  *
- *  1. **The plan is SERVER-derived, not client-guessed.** `deriveEnqueuePlan`
- *     is the mock server answering "what will this create?" from the target
- *     descriptor's own shape. The Run Modal renders that answer; it never
- *     branches on a workflow id to decide what a packet looks like. That is
- *     what makes ratified decision **D6** mechanical rather than decorative:
+ *  1. **The plan is SERVER-derived, not client-guessed.** `deriveStartPlan` is
+ *     the mock server answering "what will this create?" from the chosen
+ *     method's own `coordinator` shape. The Run Modal renders that answer; it
+ *     never branches on a workflow id to decide what a packet looks like. That
+ *     is what makes ratified decision **D6** mechanical rather than decorative:
  *     `oath-upload` declares `coordinator: "single-run"` + `linkedPanel`, so it
  *     structurally CANNOT be drawn as a member fan-out.
  *  2. **Enqueue is a command, so it has three outcomes.** `submitDemoEnqueue`
@@ -25,7 +31,9 @@
  *     teaches the operator that starting works.
  *  3. **Nothing is previewed that a real backend could not serve.** A trace id
  *     is stamped at enqueue, so the plan says "assigned at enqueue" rather than
- *     inventing one.
+ *     inventing one — and a PDF's plan counts PAGES, never people, because
+ *     before the review reads the document nobody knows how many people are in
+ *     it.
  */
 
 import type { ProposedStatus } from "./demo-status";
@@ -35,8 +43,14 @@ import {
   DEMO_WORKFLOWS,
   agoSeconds,
   fmtClockSec,
+  type CoordinatorShape,
   type DemoWorkflowId,
   type DemoWorkflowRef,
+  type StartCapabilityWire,
+  type StartMethodKind,
+  type StartMethodWire,
+  type StartSeparator,
+  type StartValueKind,
   type SystemKey,
 } from "./demo-wire";
 
@@ -88,224 +102,126 @@ export function testSystems(workflow: DemoWorkflowRef, choice: InstanceChoice): 
 }
 
 // ---------------------------------------------------------------------------
-// `surfaces.uploadRun` — what a file-backed start offers (doc 02 §1.1)
+// Entry validation — LOUD, per value, before anything is enqueued
 // ---------------------------------------------------------------------------
 
-export type UploadAccepts = "pdf" | "spreadsheet";
+export type EntryProblemCode =
+  | "not-an-eid"
+  | "not-an-email"
+  | "not-a-name"
+  | "not-a-doc-id"
+  | "not-a-recognized-value"
+  | "duplicate-entry";
 
-/**
- * `coordinator` is the whole of ratified decision D6, expressed as a served
- * field instead of a UI branch:
- *
- *  - `packet-group`  one Group Row (the packet) + a DELEGATED OCR Review Run
- *                    (`linked`, keeps its own row in the OCR panel per D4).
- *                    Members exist only after approval.
- *  - `single-run`    ONE Run Row that does the filing itself. Its children are
- *                    `linked` runs in ANOTHER panel — never members, never
- *                    nested, never delisted from their own panel (D6).
- *  - `review-only`   a standalone OCR Review Run. Approval ≡ delegation, so a
- *                    standalone run has no approve target and no fan-out.
- */
-export type CoordinatorShape = "packet-group" | "single-run" | "review-only";
-
-export interface UploadRunSpec {
-  workflow: DemoWorkflowId;
-  accepts: UploadAccepts[];
-  coordinator: CoordinatorShape;
-  /** the noun the operator uses for the thing being uploaded */
-  documentNoun: string;
-  /** `single-run` only — the panel its `linked` children live in */
-  linkedPanel?: DemoWorkflowId;
-  /** `single-run` only — what those linked children are called */
-  linkedNoun?: string;
-  /** the one line explaining what this target does with the document */
-  note: string;
+export interface EntryProblem {
+  code: EntryProblemCode;
+  message: string;
 }
-
-export const UPLOAD_RUN_SPECS: UploadRunSpec[] = [
-  {
-    workflow: "oath-signature",
-    accepts: ["pdf"],
-    coordinator: "packet-group",
-    documentNoun: "oath packet",
-    note: "Reads every signer off the packet, then signs each oath in UCPath. No ServiceNow ticket — signing only.",
-  },
-  {
-    workflow: "emergency-contact",
-    accepts: ["pdf"],
-    coordinator: "packet-group",
-    documentNoun: "contact form packet",
-    note: "Reads each employee's emergency contact off the form, then fills it in UCPath.",
-  },
-  {
-    workflow: "onbase",
-    accepts: ["pdf"],
-    coordinator: "packet-group",
-    documentNoun: "document packet",
-    note: "Reads each person off the packet, then files the document under their record in OnBase.",
-  },
-  {
-    workflow: "i9-check",
-    accepts: ["pdf"],
-    coordinator: "packet-group",
-    documentNoun: "I-9 roster scan",
-    note: "Reads each person off the scan, searches UCPath for them, and appends the retention tracker. The review completes itself — there is nothing to approve.",
-  },
-  {
-    workflow: "oath-upload",
-    accepts: ["pdf"],
-    coordinator: "single-run",
-    documentNoun: "signed oath document",
-    linkedPanel: "oath-signature",
-    linkedNoun: "signers",
-    note: "One row for the document: OCR prep → your approval → wait for the signers → file the ServiceNow ticket.",
-  },
-  {
-    workflow: "ocr",
-    accepts: ["pdf"],
-    coordinator: "review-only",
-    documentNoun: "document",
-    note: "Reads the document and stops. Nothing is approved and nothing runs afterwards — a standalone review has no target workflow.",
-  },
-];
-
-export const UPLOAD_RUN_BY_WORKFLOW = new Map(UPLOAD_RUN_SPECS.map((s) => [s.workflow, s]));
-
-// ---------------------------------------------------------------------------
-// `surfaces.inputRun` — what a typed start offers (doc 02 §1.1)
-// ---------------------------------------------------------------------------
-
-export type InputSubject = "eid" | "name" | "email";
-
-export interface InputRunSpec {
-  workflow: DemoWorkflowId;
-  subject: InputSubject;
-  placeholder: string;
-  /** how the server describes its own parser — the client never invents one */
-  parserLabel: string;
-  supportsDryRun: boolean;
-  /** an empty typed run opens the upload modal instead of erroring */
-  emptyOpensUpload: boolean;
-  presets: { key: string; label: string; values: string[]; note: string }[];
-}
-
-export const INPUT_RUN_SPECS: InputRunSpec[] = [
-  {
-    workflow: "separations",
-    subject: "eid",
-    placeholder: "10084412",
-    parserLabel: "One UCPath EID per line — 10 followed by 6 digits",
-    supportsDryRun: true,
-    emptyOpensUpload: false,
-    presets: [
-      { key: "five", label: "Five separations", values: ["10084412", "10091755", "10077300", "10102846", "10066519"], note: "the S5 group — five typed EIDs under one Group Row" },
-      { key: "bad", label: "With a bad EID", values: ["10084412", "10-4567", "10091755"], note: "entry validation refuses the line before anything is enqueued" },
-      { key: "dupe", label: "Already running", values: ["10084412", "10055501"], note: "10055501 already has an active separations run — the server rejects it" },
-    ],
-  },
-  {
-    workflow: "person-lookup",
-    subject: "email",
-    placeholder: "mdelgado@ucsd.edu",
-    parserLabel: "One campus email per line",
-    supportsDryRun: false,
-    emptyOpensUpload: true,
-    presets: [{ key: "two", label: "Two lookups", values: ["mdelgado@ucsd.edu", "rtorres@ucsd.edu"], note: "a two-member group" }],
-  },
-  {
-    workflow: "work-study",
-    subject: "eid",
-    placeholder: "10084412",
-    parserLabel: "One UCPath EID per line — 10 followed by 6 digits",
-    supportsDryRun: true,
-    emptyOpensUpload: true,
-    presets: [{ key: "one", label: "A single person", values: ["10084412"], note: "N = 1 mints a Run Row, not a group" }],
-  },
-  {
-    workflow: "kronos-pay-rule",
-    subject: "eid",
-    placeholder: "10084412",
-    parserLabel: "One UCPath EID per line — 10 followed by 6 digits",
-    supportsDryRun: true,
-    emptyOpensUpload: false,
-    presets: [{ key: "three", label: "Three pay rules", values: ["10084412", "10091755", "10077300"], note: "a three-member group" }],
-  },
-  {
-    workflow: "onboarding",
-    subject: "name",
-    placeholder: "Maria Delgado",
-    parserLabel: "One full name per line — first and last",
-    supportsDryRun: true,
-    emptyOpensUpload: true,
-    presets: [{ key: "two", label: "Two hires", values: ["Maria Delgado", "Rosa Iglesias"], note: "titles stay as typed until CRM resolves them" }],
-  },
-];
-
-export const INPUT_RUN_BY_WORKFLOW = new Map(INPUT_RUN_SPECS.map((s) => [s.workflow, s]));
-
-// ---------------------------------------------------------------------------
-// Entry validation — LOUD, per line, before anything is enqueued
-// ---------------------------------------------------------------------------
-
-export type EntryProblem =
-  | { code: "not-an-eid"; message: string }
-  | { code: "not-an-email"; message: string }
-  | { code: "not-a-name"; message: string }
-  | { code: "duplicate-entry"; message: string };
 
 export interface ParsedEntry {
-  /** 1-based line number in the typed box — a message always names the line */
-  line: number;
+  /** 1-based position in the typed list — a message always names the value */
+  position: number;
   raw: string;
+  /** which of the accepted kinds this value was read as */
+  kind?: StartValueKind;
   problem?: EntryProblem;
-  /** the value as the parser normalized it (trimmed, EID stripped of spaces) */
+  /** the value as the parser normalized it (trimmed, digits stripped of spaces) */
   value: string;
 }
 
-const EID_RE = /^10\d{6}$/;
+const EID_RE = /^\d{8}$/;
+const DOC_ID_RE = /^\d{3,6}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
+const NAME_RE = /^[^\d@]{2,}$/;
 
 /**
- * Parse the typed box. Every line is either a valid entry or a NAMED problem —
- * a line is never silently dropped, never trimmed into validity, never
- * "best-effort" coerced. Blank lines are not entries at all (the operator's
- * trailing newline is not a rejection).
+ * The order kinds are TESTED in, which is not the order they are declared in.
+ * An address is unambiguous, then a fixed-width id, then a shorter id, and a
+ * name is only ever the fallback — so a token is classified by what it IS
+ * rather than by which kind the workflow happened to list first.
  */
-export function parseEntries(text: string, subject: InputSubject): ParsedEntry[] {
+const KIND_TEST_ORDER: StartValueKind[] = ["email", "eid", "docId", "name"];
+
+const KIND_MATCH: Record<StartValueKind, (value: string) => boolean> = {
+  email: (v) => EMAIL_RE.test(v),
+  eid: (v) => EID_RE.test(v),
+  docId: (v) => DOC_ID_RE.test(v),
+  name: (v) => NAME_RE.test(v) && v.split(/[\s,]+/).filter(Boolean).length >= 2,
+};
+
+const KIND_RULE: Record<StartValueKind, { code: EntryProblemCode; rule: string }> = {
+  eid: { code: "not-an-eid", rule: "a UCPath EID is 8 digits" },
+  docId: { code: "not-a-doc-id", rule: "a Kuali document ID is 3 to 6 digits" },
+  email: { code: "not-an-email", rule: "a campus email looks like name@ucsd.edu" },
+  name: { code: "not-a-name", rule: "a name needs a first and a last part" },
+};
+
+function classify(value: string, accepts: readonly StartValueKind[]): StartValueKind | undefined {
+  for (const kind of KIND_TEST_ORDER) {
+    if (!accepts.includes(kind)) continue;
+    if (KIND_MATCH[kind](value)) return kind;
+  }
+  return undefined;
+}
+
+/**
+ * Parse the typed box against what this workflow's typed method ACCEPTS.
+ *
+ * Every value is either a recognized entry or a NAMED problem — a value is
+ * never silently dropped, never trimmed into validity, never "best-effort"
+ * coerced. The separator is served (a person-lookup list holds
+ * `Battistessa, Johnnie`, so its separator is a semicolon); a newline always
+ * separates too, because a pasted column is a list in every reading of it.
+ */
+export function parseEntries(
+  text: string,
+  accepts: readonly StartValueKind[],
+  separator: StartSeparator,
+): ParsedEntry[] {
+  const splitter = separator === "semicolon" ? /[;\n]/ : /[,\n]/;
   const seen = new Set<string>();
   const out: ParsedEntry[] = [];
-  text.split("\n").forEach((rawLine, index) => {
-    const raw = rawLine.trim();
+
+  text.split(splitter).forEach((rawToken) => {
+    const raw = rawToken.trim();
     if (raw === "") return;
-    const line = index + 1;
-    const value = subject === "eid" ? raw.replace(/\s+/g, "") : raw;
+    const position = out.length + 1;
+    // Whitespace inside a pure-digit id is a typo, not a separator.
+    const value = /^[\d\s]+$/.test(raw) ? raw.replace(/\s+/g, "") : raw.replace(/\s+/g, " ");
     const key = value.toLowerCase();
 
     if (seen.has(key)) {
-      out.push({ line, raw, value, problem: { code: "duplicate-entry", message: `“${raw}” is already on this list — one run per person.` } });
+      out.push({
+        position,
+        raw,
+        value,
+        problem: { code: "duplicate-entry", message: `“${raw}” is already on this list — one run per subject.` },
+      });
       return;
     }
     seen.add(key);
 
-    if (subject === "eid" && !EID_RE.test(value)) {
+    const kind = classify(value, accepts);
+    if (!kind) {
+      if (accepts.length === 1) {
+        const only = KIND_RULE[accepts[0]];
+        out.push({ position, raw, value, problem: { code: only.code, message: `“${raw}” is not valid here — ${only.rule}.` } });
+        return;
+      }
       out.push({
-        line,
+        position,
         raw,
         value,
-        problem: { code: "not-an-eid", message: `“${raw}” is not a UCPath EID (must be 10xxxxxx — 10 followed by 6 digits).` },
+        problem: {
+          code: "not-a-recognized-value",
+          message: `“${raw}” is neither ${accepts.map((k) => KIND_RULE[k].rule).join(" nor ")}.`,
+        },
       });
       return;
     }
-    if (subject === "email" && !EMAIL_RE.test(value)) {
-      out.push({ line, raw, value, problem: { code: "not-an-email", message: `“${raw}” is not a campus email address.` } });
-      return;
-    }
-    if (subject === "name" && value.split(/\s+/).length < 2) {
-      out.push({ line, raw, value, problem: { code: "not-a-name", message: `“${raw}” is not a full name — first and last are both required.` } });
-      return;
-    }
-    out.push({ line, raw, value });
+    out.push({ position, raw, value, kind });
   });
+
   return out;
 }
 
@@ -319,16 +235,38 @@ export function parseEntries(text: string, subject: InputSubject): ParsedEntry[]
 export const RESOLVED_SUBJECTS: Record<string, { name: string; eid: string }> = {
   "10084412": { name: "Maria Delgado", eid: "10084412" },
   "10091755": { name: "Rosa Iglesias", eid: "10091755" },
-  "10077300": { name: "Daniel Okafor", eid: "10077300" },
-  "10102846": { name: "Priya Raman", eid: "10102846" },
-  "10055501": { name: "Tomás Rivera", eid: "10055501" },
+  "10312007": { name: "Marcus Bell", eid: "10312007" },
+  "10601188": { name: "Priya Natarajan", eid: "10601188" },
+  "3930": { name: "Dana Whitmore", eid: "10233470" },
+  "3928": { name: "Nathan Cole", eid: "10233912" },
   "mdelgado@ucsd.edu": { name: "Maria Delgado", eid: "10084412" },
-  "rtorres@ucsd.edu": { name: "Rita Torres", eid: "10068220" },
+  "riglesias@ucsd.edu": { name: "Rosa Iglesias", eid: "10091755" },
+  "samuel.ortiz@ucsd.edu": { name: "Samuel Ortiz", eid: "10517722" },
+  "battistessa, johnnie": { name: "Johnnie Battistessa", eid: "10873698" },
 };
 
+/**
+ * The pending→resolved title phase, as the queue will render it. `pending` is
+ * what the row shows the moment it is enqueued; `resolved` is what it shows
+ * once the subject has actually been looked up. Nothing here guesses: a subject
+ * the backend does not know STAYS pending, which is the honest state.
+ */
+export function titlePhases(entry: ParsedEntry): {
+  pending: { title: string; subtitle: string };
+  resolved: { title: string; subtitle: string } | null;
+} {
+  const hit = RESOLVED_SUBJECTS[entry.value.toLowerCase()] ?? RESOLVED_SUBJECTS[entry.value];
+  return {
+    pending: { title: entry.value, subtitle: entry.kind === "eid" ? `EID ${entry.value}` : TRACE_PENDING },
+    resolved: hit ? { title: hit.name, subtitle: `EID ${hit.eid}` } : null,
+  };
+}
+
 // ---------------------------------------------------------------------------
-// The file corpus a start can pick from
+// The corpora a start picks FROM — documents, capture sessions, active runs
 // ---------------------------------------------------------------------------
+
+export type UploadAccepts = "pdf" | "spreadsheet";
 
 export interface UploadFileFixture {
   id: string;
@@ -337,34 +275,82 @@ export interface UploadFileFixture {
   sizeLabel: string;
   /** the ONE thing a parser knows before reading: how many pages. Never people. */
   pageCount: number;
-  /** the server already has a live run for this document */
-  activeRun?: { workflow: DemoWorkflowId; note: string };
-  /** spreadsheets are not started here — they go through the intake pipeline */
-  intakeSheetId?: string;
 }
 
 export const UPLOAD_FILES: UploadFileFixture[] = [
   { id: "oath-summer", fileName: "Oath_Packet_Summer.pdf", kind: "pdf", sizeLabel: "1.9 MB", pageCount: 12 },
-  {
-    id: "oath-spring",
-    fileName: "Oath_Packet_Spring.pdf",
-    kind: "pdf",
-    sizeLabel: "1.8 MB",
-    pageCount: 12,
-    activeRun: { workflow: "oath-signature", note: "an Oath Signature packet for this file is running now" },
-  },
+  { id: "oath-spring", fileName: "Oath_Packet_Spring.pdf", kind: "pdf", sizeLabel: "1.8 MB", pageCount: 12 },
   { id: "ec-jul", fileName: "EC_Forms_Jul25.pdf", kind: "pdf", sizeLabel: "740 KB", pageCount: 6 },
+  { id: "ec-ruiz-1", fileName: "EC_Ruiz_page1.pdf", kind: "pdf", sizeLabel: "88 KB", pageCount: 1 },
+  { id: "ec-ruiz-2", fileName: "EC_Ruiz_page2.pdf", kind: "pdf", sizeLabel: "84 KB", pageCount: 1 },
   { id: "signed-oath", fileName: "Signed_Oath_Delgado.pdf", kind: "pdf", sizeLabel: "212 KB", pageCount: 1 },
   { id: "i9-scan", fileName: "I9_Retention_Scan.pdf", kind: "pdf", sizeLabel: "3.1 MB", pageCount: 9 },
+];
+
+/**
+ * A phone capture session, as the server would serve it back to the desktop.
+ *
+ * The demo runs no capture server, so these are fixtures of sessions that have
+ * already had photos pushed into them — which is exactly what the desktop sees
+ * either way, since the desktop never touches the phone. What the demo will not
+ * do is draw a QR code that scans to nothing.
+ */
+export interface CaptureSessionFixture {
+  id: string;
+  workflow: DemoWorkflowId;
+  photoCount: number;
+  openedLabel: string;
+  deviceLabel: string;
+}
+
+export const CAPTURE_SESSIONS: CaptureSessionFixture[] = [
+  { id: "cap-os-3f21", workflow: "oath-signature", photoCount: 8, openedLabel: "2:19 PM", deviceLabel: "iPhone · operator" },
+  { id: "cap-ec-9b04", workflow: "emergency-contact", photoCount: 3, openedLabel: "2:24 PM", deviceLabel: "iPhone · operator" },
+];
+
+export function captureSessionFor(workflow: DemoWorkflowId): CaptureSessionFixture | undefined {
+  return CAPTURE_SESSIONS.find((s) => s.workflow === workflow);
+}
+
+/**
+ * What the server already has a live run for. This is a fact the FORM cannot
+ * know, which is exactly why `rejected` exists in the protocol — the modal
+ * shows it up front so the refusal is never a surprise, and the server refuses
+ * it again anyway.
+ */
+export interface ActiveStartFixture {
+  workflow: DemoWorkflowId;
+  /** the normalized subject or file name the active run holds */
+  subject: string;
+  label: string;
+  note: string;
+}
+
+export const ACTIVE_STARTS: ActiveStartFixture[] = [
   {
-    id: "ws-sheet",
-    fileName: "work-study-week-30.xlsx",
-    kind: "spreadsheet",
-    sizeLabel: "18 KB",
-    pageCount: 1,
-    intakeSheetId: "ws-week-30",
+    workflow: "separations",
+    subject: "3929",
+    label: "Doc 3929",
+    note: "a Separations run for this document is running now",
+  },
+  {
+    workflow: "work-study",
+    subject: "10601188",
+    label: "EID 10601188",
+    note: "Priya Natarajan is queued in the Work-Study panel right now",
+  },
+  {
+    workflow: "oath-signature",
+    subject: "Oath_Packet_Spring.pdf",
+    label: "Oath_Packet_Spring.pdf",
+    note: "an Oath Signature packet for this file is running now",
   },
 ];
+
+/** the first subject in this start that the server already has a run for */
+export function activeConflictFor(workflow: DemoWorkflowId, subjects: readonly string[]): ActiveStartFixture | undefined {
+  return ACTIVE_STARTS.find((a) => a.workflow === workflow && subjects.some((s) => s === a.subject));
+}
 
 // ---------------------------------------------------------------------------
 // The plan — what this start WILL create, before anything is committed
@@ -396,29 +382,158 @@ export interface EnqueuePlan {
 
 const TRACE_PENDING = "trace id assigned at enqueue";
 
+const pages = (n: number) => `${n} page${n === 1 ? "" : "s"}`;
+
+/** what the operator is starting FROM — the method plus whatever it collected */
+export interface StartSubject {
+  workflow: DemoWorkflowRef;
+  method: StartMethodWire;
+  /** typed only */
+  entries?: ParsedEntry[];
+  /** upload only — every file picked, in pick order */
+  files?: UploadFileFixture[];
+  /** capture only */
+  capture?: CaptureSessionFixture;
+}
+
 /**
- * The mock server's answer to "what will this create?", derived from the target
- * descriptor's `coordinator` shape. The Run Modal renders this and nothing
+ * The mock server's answer to "what will this create?", derived from the chosen
+ * method's own `coordinator` shape. The Run Modal renders this and nothing
  * else, so the preview cannot drift from what enqueue actually does.
  */
-export function deriveUploadPlan(spec: UploadRunSpec, fileName: string, pageCount: number): EnqueuePlan {
-  const workflow = DEMO_WORKFLOWS[spec.workflow];
-  const ocr = DEMO_WORKFLOWS.ocr;
-  const pages = `${pageCount} page${pageCount === 1 ? "" : "s"}`;
+export function deriveStartPlan(subject: StartSubject): EnqueuePlan {
+  switch (subject.method.kind) {
+    case "typed":
+      return deriveTypedPlan(subject.workflow, subject.entries ?? []);
+    case "bare":
+      return deriveBarePlan(subject.workflow);
+    case "spreadsheet":
+      // Deliberately no rows. A sheet has no plan until it has a header row and
+      // a column mapping, and a preview that guessed one would be guessing the
+      // very thing the intake exists to make an operator decide.
+      return {
+        headline: "The intake derives this plan, not the modal",
+        rows: [],
+        decisions: [
+          "A spreadsheet becomes N runs only after a header row, an operator-built column mapping and a per-cell accept-or-reject on every row. Nothing about the shape of that is knowable from the grid alone.",
+        ],
+        warnings: [],
+      };
+    case "capture": {
+      const session = subject.capture;
+      if (!session) return emptyPlan("No capture session — nothing to start");
+      return deriveDocumentPlan(subject.workflow, subject.method.coordinator, {
+        title: `${session.photoCount} captured page${session.photoCount === 1 ? "" : "s"}`,
+        pageCount: session.photoCount,
+        documentNoun: subject.method.documentNoun,
+        source: `Capture session ${session.id}`,
+      });
+    }
+    case "upload": {
+      const files = subject.files ?? [];
+      if (files.length === 0) return emptyPlan("No document picked — nothing to start");
+      const method = subject.method;
+      if (method.merge) {
+        const total = files.reduce((n, f) => n + f.pageCount, 0);
+        const merged = deriveDocumentPlan(subject.workflow, method.coordinator, {
+          title: files.length === 1 ? files[0].fileName : `${files.length} files merged`,
+          pageCount: total,
+          documentNoun: method.documentNoun,
+          source: files.length === 1 ? undefined : files.map((f) => f.fileName).join(" + "),
+          linkedPanel: method.linkedPanel,
+          linkedNoun: method.linkedNoun,
+        });
+        if (files.length > 1) {
+          merged.decisions = [
+            `OnBase imports ONE file, so these ${files.length} PDFs are merged into a single ${pages(total)} document before anything is read. That is one run, not ${files.length}.`,
+            ...merged.decisions,
+          ];
+        }
+        return merged;
+      }
+      const perFile = files.map((file) =>
+        deriveDocumentPlan(subject.workflow, method.coordinator, {
+          title: file.fileName,
+          pageCount: file.pageCount,
+          documentNoun: method.documentNoun,
+          keyPrefix: file.id,
+          linkedPanel: method.linkedPanel,
+          linkedNoun: method.linkedNoun,
+        }),
+      );
+      if (perFile.length === 1) return perFile[0];
+      return {
+        headline: `${perFile.length} independent starts · ${pages(files.reduce((n, f) => n + f.pageCount, 0))} in total`,
+        rows: perFile.flatMap((p) => p.rows),
+        decisions: [
+          `Each file is its own run. Nothing merges them and nothing groups them together — ${files.length} documents are ${files.length} separate pieces of work with ${files.length} separate receipts.`,
+          ...perFile[0].decisions,
+        ],
+        warnings: [],
+      };
+    }
+  }
+}
 
-  if (spec.coordinator === "review-only") {
+function emptyPlan(headline: string): EnqueuePlan {
+  return { headline, rows: [], decisions: [], warnings: [] };
+}
+
+function deriveBarePlan(workflow: DemoWorkflowRef): EnqueuePlan {
+  return {
+    headline: "1 Run Row",
+    rows: [
+      {
+        key: "run",
+        role: "run",
+        rowType: "run",
+        title: workflow.label,
+        subtitle: TRACE_PENDING,
+        panel: workflow.label,
+        bornAs: "queued",
+        note: "One row, no subject. It is titled with the workflow because there is nothing else true to title it with.",
+      },
+    ],
+    decisions: ["A start with no subject is still a run: it gets its own row, its own trace id and its own receipt, like everything else."],
+    warnings: [],
+  };
+}
+
+interface DocumentPlanInput {
+  title: string;
+  pageCount: number;
+  documentNoun: string;
+  /** where the pages came from, when it is not the title itself */
+  source?: string;
+  keyPrefix?: string;
+  /** `single-run` only — where its `linked` children live, and what they are called */
+  linkedPanel?: DemoWorkflowId;
+  linkedNoun?: string;
+}
+
+function deriveDocumentPlan(
+  workflow: DemoWorkflowRef,
+  coordinator: CoordinatorShape,
+  input: DocumentPlanInput,
+): EnqueuePlan {
+  const ocr = DEMO_WORKFLOWS.ocr;
+  const k = (name: string) => (input.keyPrefix ? `${input.keyPrefix}-${name}` : name);
+  const linkedPanel = input.linkedPanel ? DEMO_WORKFLOWS[input.linkedPanel].label : workflow.label;
+  const linkedNoun = input.linkedNoun ?? "linked children";
+
+  if (coordinator === "review-only") {
     return {
-      headline: "1 Review Run Row",
+      headline: `1 Review Run Row · ${pages(input.pageCount)}`,
       rows: [
         {
-          key: "review",
+          key: k("review"),
           role: "review",
           rowType: "run",
-          title: fileName,
+          title: input.title,
           subtitle: TRACE_PENDING,
           panel: ocr.label,
           bornAs: "queued",
-          note: "Reads the document and stops at a read-only review.",
+          note: input.source ? `${input.source}. Reads the document and stops at a read-only review.` : "Reads the document and stops at a read-only review.",
         },
       ],
       decisions: ["A standalone review has no approve flow — approval is delegation, and nothing delegated this run."],
@@ -426,27 +541,26 @@ export function deriveUploadPlan(spec: UploadRunSpec, fileName: string, pageCoun
     };
   }
 
-  if (spec.coordinator === "single-run") {
-    const linkedPanel = spec.linkedPanel ? DEMO_WORKFLOWS[spec.linkedPanel].label : workflow.label;
+  if (coordinator === "single-run") {
     return {
-      headline: `1 Run Row · ${pages}`,
+      headline: `1 Run Row · ${pages(input.pageCount)}`,
       rows: [
         {
-          key: "run",
+          key: k("run"),
           role: "run",
           rowType: "run",
-          title: fileName,
+          title: input.title,
           subtitle: TRACE_PENDING,
           panel: workflow.label,
           bornAs: "queued",
           note: "One row walks the whole document: OCR prep → your approval → wait for signatures → file the ticket.",
         },
         {
-          key: "linked",
+          key: k("linked"),
           role: "linked",
           rowType: "run",
           containment: "linked",
-          title: spec.linkedNoun ?? "linked children",
+          title: linkedNoun,
           subtitle: "each keeps its own row and its own trace id",
           panel: linkedPanel,
           bornAs: "not yet created",
@@ -461,54 +575,53 @@ export function deriveUploadPlan(spec: UploadRunSpec, fileName: string, pageCoun
   }
 
   return {
-    headline: `1 Group Row · ${pages}`,
+    headline: `1 Group Row · ${pages(input.pageCount)}`,
     rows: [
       {
-        key: "group",
+        key: k("group"),
         role: "group",
         rowType: "group",
-        title: fileName,
+        title: input.title,
         subtitle: TRACE_PENDING,
         panel: workflow.label,
         bornAs: "running",
-        note: "The packet. Its count badge stays empty until the review reads the document — then it shows “N people extracted”, and flips to “N people” when the members are fanned out. Nobody knows N before the pages are read.",
+        note: `The ${input.documentNoun}${input.source ? ` (${input.source})` : ""}. Its count badge stays empty until the review reads the pages — then it shows “N people extracted”, and flips to “N people” when the members are fanned out. Nobody knows N before the pages are read.`,
       },
       {
-        key: "review",
+        key: k("review"),
         role: "review",
         rowType: "run",
         containment: "linked",
-        title: `Review — ${fileName}`,
+        title: `Review — ${input.title}`,
         subtitle: TRACE_PENDING,
         panel: ocr.label,
         bornAs: "queued",
         note: "The delegated review keeps its OWN row in the OCR panel; the packet carries a link to it, never a copy.",
       },
       {
-        key: "members",
+        key: k("members"),
         role: "member",
         rowType: "member",
         containment: "member",
-        title: "member rows",
-        subtitle: "one per approved person",
+        title: "One per person the review reads",
+        subtitle: "created when the review releases them, never before",
         panel: workflow.label,
         bornAs: "not yet created",
         note:
-          spec.workflow === "i9-check"
+          workflow.id === "i9-check"
             ? "Created when the review completes — an I-9 check has nothing to approve, so the review finishes itself and fans out."
             : "Created when you approve the review. Nothing is fanned out before then.",
       },
     ],
     decisions: [
-      "A PDF upload is always a Group Row, even for one person (D2/D14) — a group of one that looked like a Run Row would make the next fan-out look like a new object.",
+      "A document upload is always a Group Row, even for one person (D2/D14) — a group of one that looked like a Run Row would make the next fan-out look like a new object.",
       "The delegated review keeps its own Run Row in the OCR panel (D4); the packet links to it rather than duplicating it.",
     ],
     warnings: [],
   };
 }
 
-export function deriveInputPlan(spec: InputRunSpec, entries: ParsedEntry[]): EnqueuePlan {
-  const workflow = DEMO_WORKFLOWS[spec.workflow];
+export function deriveTypedPlan(workflow: DemoWorkflowRef, entries: ParsedEntry[]): EnqueuePlan {
   const valid = entries.filter((e) => !e.problem);
   const rows: EnqueuePlanRow[] = [];
 
@@ -528,15 +641,15 @@ export function deriveInputPlan(spec: InputRunSpec, entries: ParsedEntry[]): Enq
   for (const entry of valid) {
     const resolved = RESOLVED_SUBJECTS[entry.value.toLowerCase()] ?? RESOLVED_SUBJECTS[entry.value];
     rows.push({
-      key: `entry-${entry.line}`,
+      key: `entry-${entry.position}`,
       role: valid.length > 1 ? "member" : "run",
       rowType: valid.length > 1 ? "member" : "run",
       containment: valid.length > 1 ? "member" : undefined,
       title: entry.value,
-      subtitle: spec.subject === "eid" ? `EID ${entry.value}` : TRACE_PENDING,
+      subtitle: entry.kind === "eid" ? `EID ${entry.value}` : TRACE_PENDING,
       panel: workflow.label,
       bornAs: "queued",
-      note: resolved ? `Resolves to ${resolved.name}` : "Nobody has looked this person up yet — the title stays as typed.",
+      note: resolved ? `Resolves to ${resolved.name}` : "Nobody has looked this subject up yet — the title stays as typed.",
     });
   }
 
@@ -547,25 +660,9 @@ export function deriveInputPlan(spec: InputRunSpec, entries: ParsedEntry[]): Enq
       valid.length > 1
         ? ["More than one typed value mints a Group Row (S5); each value becomes a Member Row under it."]
         : ["A single typed value mints a Run Row — no group, no anchor."],
-    warnings: entries.some((e) => e.problem) ? [`${entries.filter((e) => e.problem).length} typed line(s) will not be enqueued — fix or remove them first.`] : [],
-  };
-}
-
-/**
- * The pending→resolved title phase, as the queue will render it. `pending` is
- * what the row shows the moment it is enqueued; `resolved` is what it shows
- * once the subject has actually been looked up. Nothing here guesses: a subject
- * the backend does not know STAYS pending, which is the honest state.
- */
-export function titlePhases(entry: ParsedEntry, subject: InputSubject): { pending: { title: string; subtitle: string }; resolved: { title: string; subtitle: string } | null } {
-  const hit = RESOLVED_SUBJECTS[entry.value.toLowerCase()] ?? RESOLVED_SUBJECTS[entry.value];
-  const pending = {
-    title: entry.value,
-    subtitle: subject === "eid" ? `EID ${entry.value}` : TRACE_PENDING,
-  };
-  return {
-    pending,
-    resolved: hit ? { title: hit.name, subtitle: `EID ${hit.eid}` } : null,
+    warnings: entries.some((e) => e.problem)
+      ? [`${entries.filter((e) => e.problem).length} typed value(s) will not be enqueued — fix or remove them first.`]
+      : [],
   };
 }
 
@@ -604,12 +701,17 @@ export interface EnqueueRequest {
   workflow: DemoWorkflowId;
   /** the descriptor version the form was BUILT against — the CAS token */
   expectedWorkflowVersion: number;
+  /** which peer method started it */
+  method: StartMethodKind;
   plan: EnqueuePlan;
   policy: EnqueuePolicy;
   dryRun: boolean;
+  duplicateCheck?: boolean;
   instances: InstanceChoice;
-  /** upload starts only */
-  fileName?: string;
+  /** the resolved sub-selections — a hidden choice is not in here */
+  choices?: Record<string, string>;
+  /** what the start is about, in the operator's words */
+  scopeLabel?: string;
   /** a subject/document the server already has an active run for */
   activeConflictSubject?: string;
   tick?: number;
@@ -626,6 +728,11 @@ export const SERVER_WORKFLOW_VERSION: Partial<Record<DemoWorkflowId, number>> = 
 };
 
 let sequence = 0;
+
+/** test seam — the demo's own enqueue ids restart per test file */
+export function resetEnqueueSequence(): void {
+  sequence = 0;
+}
 
 /**
  * Submit one start. Pure and deterministic — same request in, same result out.
@@ -670,13 +777,26 @@ export function submitDemoEnqueue(req: EnqueueRequest): DemoEnqueueResult {
     };
   }
 
+  // 3. A start with nothing to start is refused with its own code, rather than
+  //    "succeeding" into an empty queue.
+  if (req.plan.rows.length === 0) {
+    return {
+      ...base,
+      state: "rejected",
+      code: "nothing-to-start",
+      headline: "Rejected — this start would create nothing",
+      detail: "There is no valid subject on this form, so there is no row to create. Nothing was enqueued.",
+    };
+  }
+
   const superseded = req.activeConflictSubject && req.policy === "supersede-active";
   const parallel = req.activeConflictSubject && req.policy === "allow-parallel";
 
-  const scope = req.fileName ? `“${req.fileName}”` : `${req.plan.rows.filter((r) => r.role === "member" || r.role === "run").length} typed value(s)`;
+  const scope = req.scopeLabel ?? `${req.plan.rows.filter((r) => r.role === "member" || r.role === "run").length} subject(s)`;
   const dryNote = req.dryRun
     ? " This is a DRY RUN: every read happens for real, nothing is written to any system, and the row carries a dry-run chip so it can never be mistaken for a filing."
     : "";
+  const dupeNote = req.duplicateCheck ? " A duplicate check runs first — if this document has already been filed for this person the run refuses rather than filing it twice." : "";
   const testNote = test.length ? ` Targeting the TEST instance of ${test.map((s) => SYSTEM_LABEL[s]).join(", ")} — the row carries a test badge.` : "";
   const policyNote = superseded
     ? ` The active run for ${req.activeConflictSubject} was superseded and left the queue; it keeps its receipt.`
@@ -688,7 +808,10 @@ export function submitDemoEnqueue(req: EnqueueRequest): DemoEnqueueResult {
     ...base,
     state: "applied",
     headline: req.dryRun ? "Dry run enqueued" : "Run enqueued",
-    detail: `${req.plan.headline} for ${scope}.${policyNote}${dryNote}${testNote}`,
+    detail: `${req.plan.headline} for ${scope}.${policyNote}${dryNote}${dupeNote}${testNote}`,
     created: req.plan.rows.filter((r) => r.bornAs !== "not yet created"),
   };
 }
+
+/** re-exported so a surface never has to reach past this file for the contract */
+export type { StartCapabilityWire, StartMethodWire, StartMethodKind };

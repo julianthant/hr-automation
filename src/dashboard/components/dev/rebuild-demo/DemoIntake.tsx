@@ -54,7 +54,7 @@ import {
   type SourceSheet,
   type TargetField,
 } from "./demo-data-intake";
-import { deriveInputPlan, submitDemoEnqueue, type DemoEnqueueResult } from "./demo-runstart-wire";
+import { deriveTypedPlan, submitDemoEnqueue, type DemoEnqueueResult } from "./demo-runstart-wire";
 import { EnqueueResultBanner, StageRail, type StageSpec } from "./DemoRunStartKit";
 
 /**
@@ -227,28 +227,25 @@ export function DemoIntakeDialog({
 
   const startRun = useCallback(() => {
     if (!sheet || !validation) return;
-    const spec = {
-      workflow: sheet.workflow,
-      subject: "eid" as const,
-      placeholder: "",
-      parserLabel: "",
-      supportsDryRun: true,
-      emptyOpensUpload: false,
-      presets: [],
-    };
-    const plan = deriveInputPlan(
-      spec,
-      validation.manifest.validRows.map((row, index) => ({ line: index + 1, raw: row.itemId, value: row.parsedInput.fullName ?? row.itemId })),
+    const plan = deriveTypedPlan(
+      DEMO_WORKFLOWS[sheet.workflow],
+      validation.manifest.validRows.map((row, index) => ({
+        position: index + 1,
+        raw: row.itemId,
+        value: row.parsedInput.fullName ?? row.itemId,
+        kind: "name" as const,
+      })),
     );
     setResult(
       submitDemoEnqueue({
         workflow: sheet.workflow,
         expectedWorkflowVersion: DEMO_WORKFLOWS[sheet.workflow].version,
+        method: "typed",
         plan,
         policy: "reject-active",
         dryRun: false,
         instances: {},
-        fileName: sheet.fileName,
+        scopeLabel: `“${sheet.fileName}”`,
       }),
     );
   }, [sheet, validation]);
