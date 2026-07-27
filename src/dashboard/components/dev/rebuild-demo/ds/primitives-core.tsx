@@ -349,7 +349,16 @@ export function Chip({
         type="button"
         aria-pressed={selected ?? false}
         onClick={onSelect}
-        className={cn(shell, "cursor-pointer", dsFocus, dsMotion.fast, "hover:bg-[var(--ds-surface-3)]")}
+        className={cn(
+          shell,
+          "cursor-pointer",
+          dsFocus,
+          dsMotion.fast,
+          "hover:bg-[var(--ds-surface-3)]",
+          // The same 1px dip Button uses. A filter chip is a button; without
+          // this it was the only pressable in the system that ignored a press.
+          "active:translate-y-px",
+        )}
       >
         {body}
       </button>

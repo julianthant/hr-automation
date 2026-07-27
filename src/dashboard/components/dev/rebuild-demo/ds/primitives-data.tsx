@@ -123,8 +123,9 @@ export function TH({
           className={cn(
             "inline-flex cursor-pointer items-center gap-[var(--ds-space-tight)]",
             dsFocus,
-            dsMotion.base,
+            dsMotion.fast,
             "hover:text-[color:var(--ds-fg)]",
+            "active:translate-y-px",
           )}
         >
           {children}

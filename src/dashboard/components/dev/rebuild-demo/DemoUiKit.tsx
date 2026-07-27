@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import {
   Badge,
   Banner,
+  BulletList,
   Button,
   Card,
   CardBody,
@@ -22,6 +23,8 @@ import {
   Checkbox,
   Chip,
   CountBadge,
+  MetaLine,
+  Refusal,
   DS_STATUS,
   DS_STATUS_ORDER,
   Dialog,
@@ -503,6 +506,39 @@ function ContainersSection() {
             Nothing on this page touches a real system.
           </Banner>
           <Banner tone="success" title="12 records verified" />
+
+          {/* A REFUSAL is not a failure. The triangle means something broke;
+              the shield means the product declined, on purpose, with a rule
+              behind it — and always with the code that names the rule. */}
+          <Refusal
+            title="Nothing was enqueued — this form was built on a stale contract"
+            code="workflow-version-conflict"
+            outcome="nothing is enqueued"
+            meta={["form built at v5", "server serves v6"]}
+            action={
+              <Button size="sm" variant="primary">
+                Reload the form
+              </Button>
+            }
+          >
+            Separations changed behaviour after this modal opened. Starting on the old contract
+            would run retired code against a live person.
+          </Refusal>
+
+          <Well className="flex flex-col gap-[var(--ds-space-snug)]">
+            <SectionLabel>MetaLine — the provenance line</SectionLabel>
+            <MetaLine
+              items={["receipt rc-0884019", "generated 2:20 PM", "attempt 2", "filed by local-operator"]}
+            />
+            <MetaLine tone="faint" items={["se-142012-b410", "header row 4", "fingerprint 503172dd"]} />
+            <SectionLabel>BulletList</SectionLabel>
+            <BulletList
+              items={[
+                "Every run already on disk still opens, read-only.",
+                "Nothing new can be enqueued until the volume is writable.",
+              ]}
+            />
+          </Well>
         </div>
       </div>
 
