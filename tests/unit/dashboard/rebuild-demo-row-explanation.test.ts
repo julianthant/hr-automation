@@ -8,7 +8,7 @@ import {
   rowsForVariant,
   type RowVariant,
 } from "../../../src/dashboard/components/dev/rebuild-demo/demo-catalog.js";
-import { DEMO_ROWS, densityRung } from "../../../src/dashboard/components/dev/rebuild-demo/demo-data.js";
+import { DEMO_ROWS } from "../../../src/dashboard/components/dev/rebuild-demo/demo-data.js";
 
 /**
  * The ⓘ on every queue row is DERIVED from the catalog's naming layer, never
@@ -121,21 +121,4 @@ test("SCOPE changes the review row's reason: a standalone OCR run has nothing to
   assert.equal(a.panel, b.panel);
   // … but not the same reason to exist
   assert.notEqual(a.why, b.why);
-});
-
-/**
- * The density ladder stops at the scroll well. The 41+ status matrix was
- * removed because it made a 50-person group read as a different KIND of row
- * than an 18-person one — so the property under test is that no member count
- * produces a rung the eighteen-person group does not also produce.
- */
-test("the density ladder has three rungs and nothing above twelve changes shape", () => {
-  assert.equal(densityRung(1), "inline");
-  assert.equal(densityRung(3), "inline");
-  assert.equal(densityRung(4), "compact");
-  assert.equal(densityRung(12), "compact");
-  assert.equal(densityRung(13), "well");
-  for (const n of [18, 40, 41, 50, 200]) {
-    assert.equal(densityRung(n), "well", `${n} members changed the row's shape`);
-  }
 });

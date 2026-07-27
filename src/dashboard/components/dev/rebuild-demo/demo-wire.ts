@@ -643,6 +643,54 @@ const I9_MEMBER_OUTCOMES: MemberOutcomeSpec[] = [
 ];
 
 /**
+ * Person Lookup's member outcomes.
+ *
+ * The three answers ONE lookup comes back with, in the operator's words. It had
+ * none, so its members put a free-text fact in the detail column — `resolved
+ * 10510…` beside a column already holding `10510221` in full, and `found ·
+ * INACTI…`, a truncated qualifier doing the work of an outcome. Two columns for
+ * one fact, and the one that mattered was the one being cut.
+ *
+ * The decisions worth keeping:
+ *
+ *  - **`separated` is its own key, not a qualifier on a successful `resolved`.**
+ *    UCPath found the person; what it reports is that they no longer work here,
+ *    which is a different ANSWER, not a footnote on a good one. It is also the
+ *    answer that blocks work downstream — an oath packet cannot sign a separated
+ *    employee — so it has to be one word the eye catches in a scroll well.
+ *  - **`resolved` is the QUIETEST of the three.** It is the expected answer on
+ *    almost every row, and an outcome column that shouts the ordinary case is a
+ *    column the eye stops reading.
+ *  - **`not-found` is declared even though no MEMBER in today's corpus answers
+ *    it.** It is demonstrably an answer this workflow gives — `pl-dana` is a
+ *    person-lookup run that ended with zero UCPath matches — and a vocabulary
+ *    pruned to whatever the current fixtures happen to contain is one that
+ *    throws (`resolveMemberOutcome` fails loud) the first time a real member
+ *    answers it. The vocabulary belongs to the workflow, not to the fixture.
+ *  - **The EID never appears in an outcome.** It has its own column, in full.
+ */
+const PERSON_LOOKUP_MEMBER_OUTCOMES: MemberOutcomeSpec[] = [
+  {
+    key: "resolved",
+    label: "Resolved",
+    tone: "quiet",
+    meaning: "Matched exactly one active UCPath person, and their EID is in the next column.",
+  },
+  {
+    key: "separated",
+    label: "Separated",
+    tone: "warn",
+    meaning: "The person exists in UCPath, but their HR status is inactive — they no longer work here, so anything downstream of this lookup is blocked.",
+  },
+  {
+    key: "not-found",
+    label: "Not found",
+    tone: "danger",
+    meaning: "UCPath returned nobody for this name or EID. Whatever asked for the lookup cannot proceed until the input is corrected.",
+  },
+];
+
+/**
  * The client projection of `/api/workflow-definitions`. The Workflow Panel rail,
  * the row's workflow chip and the per-row `workflowVersion` all read THIS —
  * there is no second hand-written workflow list anywhere in the demo.
@@ -734,6 +782,7 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
     category: "Search",
     version: 4,
     systems: ["ucpath", "crm"],
+    memberOutcomes: PERSON_LOOKUP_MEMBER_OUTCOMES,
     start: {
       note: "Looks one person up in UCPath and CRM and reports what it found. It writes nothing, anywhere.",
       methods: [

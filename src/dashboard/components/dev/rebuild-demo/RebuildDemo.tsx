@@ -48,7 +48,6 @@ import {
   ATTENTION_STATUSES,
   type DemoRow,
   type DemoSortKey,
-  densityRung,
   effectiveStatus,
   groupNeedsExpanding,
   LIVE_SEQUENCE,
@@ -92,14 +91,11 @@ export function RebuildDemo() {
   const [filter, setFilter] = useState<DemoFilter>("all");
   // Groups default collapsed, but a group auto-expands when a member is stuck
   // on you or has broken — you should never have to open a row to find that
-  // out. A 1–3 member group is always expanded by its rung, not by this set.
+  // out. The seed used to be gated on the member count as well, which is a
+  // condition that no longer exists: there is ONE member shape now, so what a
+  // group is holding decides whether it opens, never how much of it.
   const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(
-    () =>
-      new Set(
-        Object.values(DEMO_ROWS)
-          .filter((r) => r.rowType === "group" && densityRung(r.memberIds?.length ?? 0) === "compact" && groupNeedsExpanding(r))
-          .map((r) => r.id),
-      ),
+    () => new Set(Object.values(DEMO_ROWS).filter((r) => r.rowType === "group" && groupNeedsExpanding(r)).map((r) => r.id)),
   );
   const [tab, setTab] = useState<DemoTab | null>(null);
   const [checkedIds, setCheckedIds] = useState<ReadonlySet<string>>(

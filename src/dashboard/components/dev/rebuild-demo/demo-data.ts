@@ -2876,7 +2876,13 @@ function plSummerMember(i: number): DemoRowSpec {
     startedAt,
     endedAt: plusSeconds(startedAt, 6 + (i % 3)),
     evidence: { receiptId: `rcpt-pl-${pad(i, 2)}a1`, confidence: "verified" },
-    memberFact: blocked ? "found · INACTIVE" : `resolved ${p.eid}`,
+    // The DETAIL axis only — the outcome word carries the answer, so this
+    // carries the fact the word cannot: where the name came from, or when the
+    // employment ended. It must never restate the outcome (pinned by
+    // `rebuild-demo-member-outcome.test.ts`), which is exactly what
+    // `resolved 10510221` and `found · INACTIVE` were doing.
+    memberFact: blocked ? "inactive 06/30/2026" : `read off page ${p.page}`,
+    memberOutcome: blocked ? "separated" : "resolved",
     warnings: blocked ? { count: 1, first: "person is separated — the packet cannot sign them" } : undefined,
     feedsInto: {
       label: `Oath_Packet_Summer.pdf · record ${i + 1} (${p.name}) EID`,
@@ -3445,7 +3451,8 @@ function plVerifyMember(i: number): DemoRowSpec {
     startedAt,
     endedAt: plusSeconds(startedAt, 5),
     evidence: { receiptId: `rcpt-pl-v${pad(i, 2)}a`, confidence: "verified" },
-    memberFact: `resolved ${p.eid}`,
+    memberFact: `read off page ${p.page}`,
+    memberOutcome: "resolved",
     feedsInto: {
       label: `I9_Supporting_0724.pdf · record ${i + 1} (${p.name}) EID`,
       targetRunId: "ocr-verify",
@@ -3679,78 +3686,59 @@ export function bandsFor(rows: DemoRow[]): { key: BandKey; label: string; rows: 
 }
 
 // ---------------------------------------------------------------------------
-// Density ladder — member count is a continuous property, so scale is
-// presentation, never a fourth row type.
+// ONE member shape, at every count.
 //
-// It stops at the scroll well ON PURPOSE. There used to be a fourth rung at 41+
-// that swapped the member lines for a status matrix, and the operator read that
-// matrix as a DIFFERENT KIND OF ROW: fifty coloured cells share no shape with
-// the eighteen named lines directly above them, so the same object appeared to
-// be two objects depending on how many people were in it. Scale is not a new
-// concept, and a second visual language for "the same thing but more of it" is
-// exactly what makes a product feel like it has more concepts than it has.
+// There is no density ladder any more. There were four rungs, then three, and
+// now there is one, because every cut was the same finding arriving again: the
+// operator reads a change of SHAPE as a change of KIND. The 41+ status matrix
+// went first — fifty coloured cells share nothing with the eighteen named lines
+// above them, so the same object looked like two objects depending on how many
+// people were in it. Then, shown a 2-member group as full inline cards beside a
+// 6-member group as compact lines: *"why are some like this and some like that?
+// keep the design like above. ditch the bottom design completely."*
 //
-// Nothing is lost by that: the well is capped, so a 50-person group is the same
-// height as an 18-person one; members are ordered attention-first, so the lines
-// the operator has to act on are the ones already on screen; and `Open all N`
-// still opens the drill-in, which is where a set that size is actually worked.
+// So: count strip → compact member lines in a scroll well → drill-in. At three
+// people the well is three lines tall and does not scroll; at fifty it is the
+// same height with a scrollbar. Scale changes the container's OVERFLOW and
+// nothing else, which is the only kind of scaling that does not teach the
+// operator a second vocabulary.
+//
+// Nothing is lost by that: the well is capped by `--ds-h-member-well` (136px ≈
+// 5.67 rows — the deliberate half-cut row IS the depth cue), members are
+// ordered attention-first so the top of the well IS the attention list, and
+// `Open all N` still opens the drill-in, which is where a set that size is
+// actually worked.
 // ---------------------------------------------------------------------------
 
-export type DensityRung = "inline" | "compact" | "well";
-
-export function densityRung(memberCount: number): DensityRung {
-  if (memberCount <= 3) return "inline";
-  if (memberCount <= 12) return "compact";
-  return "well";
-}
-
-export const DENSITY_RUNGS: { key: DensityRung; range: string; what: string; exampleId: string }[] = [
-  {
-    key: "inline",
-    range: "1–3 members",
-    what: "Full Member Rows, inline and always expanded. At this size the group IS its members — hiding them behind a chevron is pure friction.",
-    exampleId: "ec-single",
-  },
-  {
-    key: "compact",
-    range: "4–12 members",
-    what: "Compact person lines: the first four, then Show all N. Each line carries the one fact that distinguishes that person's outcome.",
-    exampleId: "oath-batch",
-  },
-  {
-    key: "well",
-    range: "13+ members",
-    what: "The same compact lines in a fixed-height scroll well, attention first, plus Open all N. The row is the same height at 13 people and at 50 — the count changes, the shape never does.",
-    exampleId: "i9-batch",
-  },
-];
+/**
+ * The one shape, described once, for the catalog. It is a single entry on
+ * purpose — a "ladder" with one rung is a ladder that has finished being one.
+ */
+export const MEMBER_LIST_SHAPE = {
+  range: "1 member or 50",
+  what: "Compact person lines in a fixed-height scroll well, attention first, with Open all N into the drill-in. The row is the same height at 3 people and at 50 — the count changes, the shape never does.",
+  exampleId: "i9-batch",
+} as const;
 
 /**
  * Which of a group's members are actually ON SCREEN — and therefore which ones
  * j/k should walk.
  *
- * Deriving traversal from the same rung that renders them is what keeps the
- * keyboard and the eye in the same place. It lives beside the ladder (and
- * beside `isSettledRow`, its other input) rather than in the component, because
- * a second opinion about what is visible is a keyboard that walks into rows
+ * Deriving traversal from the same rule that renders them is what keeps the
+ * keyboard and the eye in the same place. It lives beside `isSettledRow` (its
+ * only input beyond the member set) rather than in the component, because a
+ * second opinion about what is visible is a keyboard that walks into rows
  * nobody can see.
+ *
+ * The ONE branch left is settlement, not size: a settled group is collapsed
+ * SHUT, so it puts nothing on screen to walk until the operator opens it. A
+ * group that is still asking for something keeps every member available inside
+ * the well, however many there are.
  */
 export function visibleMemberIds(row: DemoRow, expandedGroups: ReadonlySet<string>): string[] {
   const ids = orderedMemberIds(row.id);
-  const rung = densityRung(ids.length);
-  // A settled group above the inline rung is SHUT, so it puts nothing on screen
-  // to walk. At 1–3 the group IS its members (D11), so it stays open whatever
-  // its status — shutting it would leave a row showing a count of one and
-  // nothing else.
-  if (rung !== "inline" && isSettledRow(row) && !expandedGroups.has(row.id)) return [];
-  switch (rung) {
-    case "inline":
-      return ids;
-    case "compact":
-      return expandedGroups.has(row.id) ? ids : ids.slice(0, 4);
-    case "well":
-      return ids;
-  }
+  if (isSettledRow(row) && !expandedGroups.has(row.id)) return [];
+  return ids;
 }
 
 // ---------------------------------------------------------------------------
