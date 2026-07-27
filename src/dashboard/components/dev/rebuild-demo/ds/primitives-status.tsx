@@ -60,6 +60,15 @@ export interface DsStatusSpec {
   text: string;
   /** the icon's color inside the chip */
   iconTone: string;
+  /**
+   * The icon's color when it stands ALONE on a panel surface with no chip
+   * behind it (a row's leading glyph, a menu item, a legend).
+   *
+   * It cannot simply be `iconTone`: the two solid statuses paint dark ink on a
+   * bright fill, and that ink is invisible on the near-black page. For the six
+   * non-solid statuses the two are the same value.
+   */
+  soloTone: string;
   /** the standalone dot/marker fill (loud tiers) */
   dot: string;
   /** the standalone dot/marker outline (quiet tiers) — a literal class, never
@@ -82,6 +91,7 @@ export const DS_STATUS: Record<DsStatus, DsStatusSpec> = {
     chip: "bg-[var(--ds-status-waiting-solid-bg)] border-transparent",
     text: "text-[color:var(--ds-status-waiting-solid-fg)] font-semibold",
     iconTone: "text-[color:var(--ds-status-waiting-solid-fg)]",
+    soloTone: "text-[color:var(--ds-status-waiting-fg)]",
     dot: "bg-[var(--ds-status-waiting-fg)]",
     dotBorder: "border-[color:var(--ds-status-waiting-fg)]",
     meaning:
@@ -94,6 +104,7 @@ export const DS_STATUS: Record<DsStatus, DsStatusSpec> = {
     chip: "bg-[var(--ds-status-failed-solid-bg)] border-transparent",
     text: "text-[color:var(--ds-status-failed-solid-fg)] font-semibold",
     iconTone: "text-[color:var(--ds-status-failed-solid-fg)]",
+    soloTone: "text-[color:var(--ds-status-failed-fg)]",
     dot: "bg-[var(--ds-status-failed-fg)]",
     dotBorder: "border-[color:var(--ds-status-failed-fg)]",
     meaning: "Stopped on an error. Retry replays the same input.",
@@ -107,6 +118,7 @@ export const DS_STATUS: Record<DsStatus, DsStatusSpec> = {
       "bg-[var(--ds-status-parked-bg)] border-[color:var(--ds-status-parked-border)] ds-dashed",
     text: "text-[color:var(--ds-status-parked-fg)] font-medium",
     iconTone: "text-[color:var(--ds-status-parked-fg)]",
+    soloTone: "text-[color:var(--ds-status-parked-fg)]",
     dot: "bg-[var(--ds-status-parked-fg)]",
     dotBorder: "border-[color:var(--ds-status-parked-fg)]",
     meaning:
@@ -120,6 +132,7 @@ export const DS_STATUS: Record<DsStatus, DsStatusSpec> = {
       "bg-[var(--ds-status-done-warnings-bg)] border-[color:var(--ds-status-done-warnings-border)]",
     text: "text-[color:var(--ds-fg-secondary)]",
     iconTone: "text-[color:var(--ds-status-done-warnings-fg)]",
+    soloTone: "text-[color:var(--ds-status-done-warnings-fg)]",
     dot: "bg-[var(--ds-status-done-warnings-fg)]",
     dotBorder: "border-[color:var(--ds-status-done-warnings-fg)]",
     meaning:
@@ -133,6 +146,7 @@ export const DS_STATUS: Record<DsStatus, DsStatusSpec> = {
       "bg-[var(--ds-status-running-bg)] border-[color:var(--ds-status-running-border)]",
     text: "text-[color:var(--ds-status-running-fg)]",
     iconTone: "text-[color:var(--ds-status-running-fg)]",
+    soloTone: "text-[color:var(--ds-status-running-fg)]",
     dot: "bg-[var(--ds-status-running-fg)]",
     dotBorder: "border-[color:var(--ds-status-running-fg)]",
     spin: true,
@@ -146,6 +160,7 @@ export const DS_STATUS: Record<DsStatus, DsStatusSpec> = {
     chip: "bg-transparent border-[color:var(--ds-status-queued-border)]",
     text: "text-[color:var(--ds-status-queued-fg)]",
     iconTone: "text-[color:var(--ds-status-queued-fg)]",
+    soloTone: "text-[color:var(--ds-status-queued-fg)]",
     dot: "bg-[var(--ds-status-queued-fg)]",
     dotBorder: "border-[color:var(--ds-status-queued-fg)]",
     meaning: "Accepted, nothing has run. Can be bumped or cancelled.",
@@ -157,6 +172,7 @@ export const DS_STATUS: Record<DsStatus, DsStatusSpec> = {
     chip: "bg-transparent border-transparent",
     text: "text-[color:var(--ds-status-cancelled-fg)]",
     iconTone: "text-[color:var(--ds-status-cancelled-fg)]",
+    soloTone: "text-[color:var(--ds-status-cancelled-fg)]",
     dot: "bg-[var(--ds-status-cancelled-fg)]",
     dotBorder: "border-[color:var(--ds-status-cancelled-fg)]",
     // The shape cue: a struck-through label. Neither amber nor red — a
@@ -171,6 +187,7 @@ export const DS_STATUS: Record<DsStatus, DsStatusSpec> = {
     chip: "bg-transparent border-transparent",
     text: "text-[color:var(--ds-fg-muted)]",
     iconTone: "text-[color:var(--ds-status-verified-done-fg)]",
+    soloTone: "text-[color:var(--ds-status-verified-done-fg)]",
     dot: "bg-[var(--ds-status-verified-done-fg)]",
     dotBorder: "border-[color:var(--ds-status-verified-done-fg)]",
     meaning:
@@ -224,14 +241,24 @@ export function StatusPill({
   age,
   size = "md",
   hideIcon,
+  label,
   className,
 }: {
   status: DsStatus;
   /** how long it has been in this state — "12m", "2h". Show it when known. */
   age?: string;
   size?: DsStatusPillSize;
-  /** drop the icon in extremely tight cells; the label always stays */
+  /**
+   * Drop the icon in extremely tight cells, or where the row already leads with
+   * this exact glyph. The label always stays, so the status is still named.
+   */
   hideIcon?: boolean;
+  /**
+   * Override the word only for a state that is NOT one of the eight — a
+   * rejected record ("Rejected") never became work and has no status of its
+   * own. Never use this to abbreviate or rename a real status.
+   */
+  label?: string;
   className?: string;
 }) {
   const spec = DS_STATUS[status];
@@ -260,7 +287,9 @@ export function StatusPill({
           )}
         />
       )}
-      <span className={cn("truncate", spec.labelDecoration)}>{spec.label}</span>
+      <span className={cn("truncate", label === undefined && spec.labelDecoration)}>
+        {label ?? spec.label}
+      </span>
       {age && (
         <span className={cn(dsText.nums, "opacity-80")} aria-label={`for ${age}`}>
           · {age}
@@ -300,7 +329,12 @@ export function StatusDot({
   );
 }
 
-/** The status icon on its own — for buttons, menus and legends. */
+/**
+ * The status icon on its own — a row's leading glyph, a menu item, a legend.
+ * It uses `soloTone`, not `iconTone`: there is no chip behind it, so the two
+ * solid statuses must paint their hue rather than the dark ink they use ON that
+ * chip (which would be invisible against the page).
+ */
 export function StatusIcon({
   status,
   className,
@@ -316,7 +350,7 @@ export function StatusIcon({
       className={cn(
         dsIcon.md,
         "shrink-0",
-        spec.iconTone,
+        spec.soloTone,
         spec.spin && "animate-spin motion-reduce:animate-none",
         className,
       )}
