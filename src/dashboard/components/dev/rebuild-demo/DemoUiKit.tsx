@@ -4,6 +4,7 @@ import {
   Camera,
   ChevronsUp,
   Inbox,
+  Info,
   Play,
   RotateCcw,
   ShieldCheck,
@@ -68,9 +69,13 @@ import {
   Textarea,
   TimelineSteps,
   ToastProvider,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Tooltip,
   TooltipProvider,
   Well,
+  dsIcon,
   dsText,
   useToasts,
   type DsStatus,
@@ -759,6 +764,40 @@ function OverlaysSection() {
         <Tooltip content="A hint, never the only place information lives.">
           <Button variant="ghost">Hover me</Button>
         </Tooltip>
+      </Row>
+      {/* The Tooltip's counterpart. Anything the operator has to be able to
+          READ belongs here, not in a hover-only surface: this one opens on
+          CLICK, so it is reachable by pointer, touch and keyboard. It flips
+          when it would overflow, Escape and outside-click dismiss it, focus
+          enters on open and returns to the trigger on close. */}
+      <Row label="Popover">
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="secondary">Why is this parked?</Button>
+          </PopoverTrigger>
+          <PopoverContent
+            title="Why is this parked?"
+            description="ws-140902-4c1a · Work-Study"
+            width="lg"
+          >
+            <BulletList
+              items={[
+                "The UCPath save posted, but the read-back returned no confirmation.",
+                "Nothing may claim this write landed until a human checks it.",
+                "Resolving it needs the transaction number from the UCPath page.",
+              ]}
+            />
+          </PopoverContent>
+        </Popover>
+        <Popover>
+          <PopoverTrigger asChild>
+            <IconButton label="About this trace id" icon={<Info aria-hidden className={dsIcon.md} />} />
+          </PopoverTrigger>
+          <PopoverContent title="About this trace id" width="sm" side="right" hideTitle>
+            <span className={dsText.nums}>se-140211-9f3a</span> — workflow code,
+            local time of day, and the first four characters of the run id.
+          </PopoverContent>
+        </Popover>
       </Row>
 
       <Dialog open={dialog} onOpenChange={setDialog}>

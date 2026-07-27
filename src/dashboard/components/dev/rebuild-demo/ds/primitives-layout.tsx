@@ -1,5 +1,6 @@
 import {
   createContext,
+  forwardRef,
   useCallback,
   useContext,
   useId,
@@ -733,19 +734,29 @@ export function Well({ className, children }: { className?: string; children: Re
   );
 }
 
-/** A floating surface: menus and popovers built outside the Dialog primitive. */
-export function FloatingSurface({ className, children }: { className?: string; children: ReactNode }) {
-  return (
-    <div
-      className={cn(
-        "border bg-[var(--ds-surface-overlay)]",
-        "border-[color:var(--ds-border-strong)]",
-        dsRadius.md,
-        dsElev.mid,
-        className,
-      )}
-    >
-      {children}
-    </div>
-  );
-}
+/**
+ * A floating surface: menus and popovers built outside the Dialog primitive.
+ *
+ * It forwards its ref and spreads the rest of its props so a positioning
+ * primitive (Radix `Popover.Content`, a menu, an anchored panel) can adopt it
+ * with `asChild` instead of re-drawing the same four tokens locally.
+ */
+export const FloatingSurface = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
+  function FloatingSurface({ className, children, ...rest }, ref) {
+    return (
+      <div
+        ref={ref}
+        {...rest}
+        className={cn(
+          "border bg-[var(--ds-surface-overlay)]",
+          "border-[color:var(--ds-border-strong)]",
+          dsRadius.md,
+          dsElev.mid,
+          className,
+        )}
+      >
+        {children}
+      </div>
+    );
+  },
+);
