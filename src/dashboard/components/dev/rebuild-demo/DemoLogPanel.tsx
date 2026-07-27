@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -13,18 +13,13 @@ import {
   ChevronRight,
   CircleSlash,
   ClipboardList,
-  Database,
   Eye,
   FileText,
   GitBranch,
-  History,
   Loader2,
-  Lock,
   Pause,
-  Play,
   Receipt,
   RotateCcw,
-  Save,
   ScrollText,
   Search,
   ShieldCheck,
@@ -38,20 +33,11 @@ import { IconActionButton } from "@/components/shared/IconActionButton";
 import { StatusBadge, type ProposedStatus } from "./demo-status";
 import { panelKindOf, panelKindSpec, rowVariantSpec } from "./demo-catalog";
 import { BannerActions, OutcomeActionButton, ParkResolutions, type DemoActionHandler } from "./DemoActions";
-import { RunIdentityStrip, RunSelector } from "./DemoRunIdentity";
-import { actionsAt, fmtClock, tabsFor as tabsForKind, type ActionDescriptorWire, type DemoTab } from "./demo-wire";
+import { ContextRail, ContextRailSpine, useContextRail } from "./DemoContextRail";
+import { fmtClock, tabsFor as tabsForKind, type DemoTab } from "./demo-wire";
 import {
-  Banner,
   Button,
-  Chip,
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogFooter,
-  Field,
   Kbd,
-  Textarea,
-  Well,
   dsBorder,
   dsFocus,
   dsIcon,
@@ -59,21 +45,17 @@ import {
   dsRadius,
   dsSize,
   dsText,
-  useToasts,
 } from "./demo-ui";
-import { checkpointAge, checkpointFor, editPolicyFor, editPolicySummary, freshnessOf } from "./demo-flows-wire";
-import { EvidenceBar } from "./DemoEvidence";
 import { ReceiptView, runReceiptFor } from "./DemoReceipt";
 import { FailureRecordBlock, failureRecordFor } from "./DemoFailure";
 import { ParkResolveDialog, SettlingPanel, isParkResolution, type ParkResolveState } from "./DemoParkResolve";
-import type { DemoCommandResult, DemoCommandSettling } from "./demo-commands";
+import type { DemoCommandSettling } from "./demo-commands";
 import {
   DEMO_ROWS,
   effectiveStatus,
   fmtElapsed,
   gateAge,
   gateWaitSec,
-  linkedGroupSummary,
   LIVE_SEQUENCE,
   memberAttentionIds,
   orderedMemberIds,
@@ -298,16 +280,20 @@ function FailureCardView({ row, onOpenFailure }: { row: DemoRow; onOpenFailure?:
 // ---------------------------------------------------------------------------
 
 /**
- * Timeline — the run's real shape, to scale.
+ * Timeline — the run's shape, one segment per step, ALL THE SAME WIDTH.
  *
- * Replaces the old pill strip + separate progress bar. Those told you the
- * ORDER of the steps and, separately, how much bar was filled; neither told you
- * where the time actually went. Here each step is a track segment sized by its
- * REAL recorded duration, so a 1-minute Kronos search dwarfs a 12-second
- * identity check the way it does in life, and an 18-minute wait at a gate is
- * visibly the whole run. Nothing is fabricated: a step with no duration yet
- * (pending, or currently running) gets a minimum slot and a hatched fill rather
- * than an invented width.
+ * This reverses the earlier proportional design, on the operator's explicit
+ * instruction ("all the timeline elements should have equal sizes doesn't
+ * matter the time"). Proportional widths were honest — the width WAS the
+ * data — but a 34-minute gate beside three minutes of work is a true 91% of
+ * the track, and at 91% the step labels crush to `3.¹2 4..`. A timeline whose
+ * labels cannot be read tells you nothing about where the time went either.
+ *
+ * Equal widths make no claim about duration, because the duration is PRINTED
+ * as a number under every segment and the run's totals are on the axis below.
+ * That is legibility over literalism, not fabrication: nothing here implies a
+ * length it does not state in words. A step with no recorded time prints no
+ * time, and a step not yet reached stays dashed and empty.
  */
 const STEP_TONE: Record<DemoStep["state"], { bar: string; text: string; dot: string }> = {
   done: { bar: "bg-success/55", text: "text-success", dot: "bg-success" },
@@ -462,7 +448,7 @@ function SharedPipelineStrip({ row }: { row: DemoRow }) {
   const fills = sharedMemberPipeline(row);
   if (!fills) return null;
   return (
-    <div className={cn("border-b px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]", dsBorder.subtle)}>
+    <div className={cn("border-t px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]", dsBorder.subtle)}>
       <div
         className={cn(
           dsText.caps,
@@ -661,389 +647,6 @@ function LogsTab({
   );
 }
 
-/**
- * Data tab — ONE surface, not two modes (D19c).
- *
- * Every value the run touched, in order, grouped by step, with where it came
- * from and when. Reads are editable IN PLACE; writes are shown and never
- * editable, because what a run put into UCPath is a record of what happened,
- * not a form. Three things make it real rather than decorative:
- *
- *  1. **Edit-unlock rules by run state.** `editPolicyFor` is the one place a
- *     field's editability is decided, and the REASON is always shown — a greyed
- *     box with no explanation is how an operator learns to distrust a screen.
- *  2. **CAS on the checkpoint generation.** A save carries the generation the
- *     surface was captured at. If the checkpoint moved, the save is REFUSED and
- *     the operator's patch is kept and re-offered field by field against the
- *     fresh values. A patch is never silently dropped and never merged blind.
- *  3. **Freshness.** Reusing values older than the consuming node accepts
- *     requires an explicit, audited override — or a re-read.
- */
-/**
- * What the PARENT will do with this run's answer. A delegated helper run seen
- * from its own panel is context-free without this line: you can read what it
- * looked up, but not why anybody wanted it (delegation §5-S7).
- */
-function FeedsIntoLine({ row }: { row: DemoRow }) {
-  if (!row.feedsInto) return null;
-  const target = row.feedsInto.targetRunId ? DEMO_ROWS[row.feedsInto.targetRunId] : undefined;
-  return (
-    <div className="flex items-center gap-2 border-b border-log-teal/25 bg-log-teal/6 px-3 py-1.5 text-[11.5px]">
-      <ArrowRight aria-hidden className="size-3 shrink-0 text-log-teal" />
-      <span className="shrink-0 font-semibold text-log-teal">Result feeds</span>
-      <span className="min-w-0 truncate text-secondary-foreground">{row.feedsInto.label}</span>
-      {target && <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">{target.trace}</span>}
-    </div>
-  );
-}
-
-function DataTab({ row, onAction, tick }: { row: DemoRow; onAction: DemoActionHandler; tick: number }) {
-  const { toast } = useToasts();
-  const [edits, setEdits] = useState<Record<string, string>>({});
-  const [seededFrom, setSeededFrom] = useState<number | null>(null);
-  const [conflict, setConflict] = useState<DemoCommandResult | null>(null);
-  const [baseGeneration, setBaseGeneration] = useState<number | null>(null);
-  const [freshnessPending, setFreshnessPending] = useState<ActionDescriptorWire | null>(null);
-  const [overrideReason, setOverrideReason] = useState("");
-
-  useEffect(() => {
-    setEdits({});
-    setSeededFrom(null);
-    setConflict(null);
-    setBaseGeneration(null);
-    setFreshnessPending(null);
-    setOverrideReason("");
-  }, [row.id]);
-
-  const cp = checkpointFor(row);
-  const held = baseGeneration ?? cp.heldGeneration;
-  const fresh = freshnessOf(cp, tick);
-  const dataActions = actionsAt(row.actions, "data");
-  const saveAction = dataActions.find((a) => a.command === "edit-checkpoint");
-  const rerunAction = dataActions.find((a) => a.command === "rerun-with-existing-data");
-
-  if (row.data.length === 0) {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col">
-        <FeedsIntoLine row={row} />
-        <EmptyTab icon={Database} text="No data points recorded — this run has not read or written anything yet." />
-      </div>
-    );
-  }
-
-  const reads = row.data.filter((d) => d.dir === "read");
-  const writes = row.data.filter((d) => d.dir === "write");
-  const staged = writes.filter((d) => d.staged).length;
-  const unconfirmed = writes.filter((d) => d.unconfirmed).length;
-  const steps = [...new Set(row.data.map((d) => d.step))];
-
-  /** what the server holds for a field at the generation this surface is on */
-  const baseValue = (point: DemoDataPoint) =>
-    held >= cp.serverGeneration ? (cp.freshValues[point.field] ?? point.value) : point.value;
-
-  const changed = reads.filter((d) => edits[d.field] !== undefined && edits[d.field] !== baseValue(d));
-  const locked = reads.every((d) => !editPolicyFor(row, d).editable);
-  const lockReason = locked ? editPolicyFor(row, reads[0]) : null;
-
-  const submitSave = (generation: number) => {
-    if (!saveAction) return;
-    const payload: Record<string, string> = { expectedGeneration: String(generation) };
-    for (const d of changed) payload[d.field] = edits[d.field];
-    const result = onAction(row, { ...saveAction, payload });
-    if (!result) return;
-    if (result.state === "conflict") {
-      setConflict(result);
-      toast({
-        tone: "warning",
-        title: "Not saved — the checkpoint moved",
-        description: `Your ${changed.length} edit${changed.length === 1 ? "" : "s"} are still here and are being re-offered against the values the server now holds. Nothing was overwritten.`,
-      });
-      return;
-    }
-    setConflict(null);
-    toast({ tone: "success", title: result.headline, description: result.detail });
-  };
-
-  const submitRerun = (payload: Record<string, string>) => {
-    if (!rerunAction) return;
-    const result = onAction(row, { ...rerunAction, payload });
-    setFreshnessPending(null);
-    setOverrideReason("");
-    if (result?.state === "applied") toast({ tone: "info", title: result.headline, description: result.detail });
-  };
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <FeedsIntoLine row={row} />
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/40 px-3 py-2 text-[11px] text-muted-foreground">
-        <span className="inline-flex items-center gap-1 text-log-cyan">
-          <ArrowDownToLine aria-hidden className="size-3" />
-          {reads.length} read
-        </span>
-        {writes.length > 0 && (
-          <span className="inline-flex items-center gap-1 text-log-teal">
-            <ArrowUpFromLine aria-hidden className="size-3" />
-            {writes.length} written
-            {staged > 0 && <span className="rounded border border-warning/40 px-1 text-[9.5px] font-semibold text-warning">{staged} staged</span>}
-            {unconfirmed > 0 && (
-              <span
-                title="Sent, but never read back — the outcome is unknown until you resolve the park"
-                className="rounded border border-log-violet/45 px-1 text-[9.5px] font-semibold text-log-violet"
-              >
-                {unconfirmed} unconfirmed
-              </span>
-            )}
-          </span>
-        )}
-        <span
-          title={`Captured ${checkpointAge(cp, tick)} ago · the ${cp.consumingNode} node accepts reads up to ${cp.maxAgeMin}m old`}
-          className="inline-flex items-center gap-1 font-mono text-[10px]"
-        >
-          checkpoint gen {held}
-          {fresh.stale && <span className="rounded border border-warning/40 px-1 font-semibold text-warning">{fresh.ageMin}m old</span>}
-        </span>
-        <span className="ml-auto">{editPolicySummary(row)}</span>
-      </div>
-
-      {/* Why the surface is locked, in one sentence, before the operator
-          discovers it by clicking a field that does not respond. */}
-      {locked && lockReason && !lockReason.editable && (
-        <div className="px-3 pt-2">
-          <Banner tone="info" title="These values cannot be edited right now" icon={<Lock aria-hidden className="size-4" />}>
-            {lockReason.reason}
-          </Banner>
-        </div>
-      )}
-
-      {/* The CAS refusal. The patch is HELD — the operator decides field by
-          field against the fresh values, and nothing is merged for them. */}
-      {conflict && (
-        <div className="px-3 pt-2">
-          <Banner tone="danger" title={conflict.headline} icon={<TriangleAlert aria-hidden className="size-4" />}>
-            <span className="block">{conflict.detail}</span>
-            {cp.movedBecause && (
-              <span className={cn(dsText.meta, "mt-[var(--ds-space-tight)] block text-[color:var(--ds-fg-muted)]")}>
-                The checkpoint moved because {cp.movedBecause}.
-              </span>
-            )}
-            <span className="mt-[var(--ds-space-base)] flex flex-col gap-[var(--ds-space-tight)]">
-              {changed.map((d) => (
-                <span key={d.field} className={cn(dsText.meta, "flex flex-wrap items-center gap-[var(--ds-space-tight)]")}>
-                  <span className="w-32 shrink-0 text-[color:var(--ds-fg-muted)]">{d.field}</span>
-                  <Chip label="yours">{edits[d.field]}</Chip>
-                  <Chip label="server now">{cp.freshValues[d.field] ?? d.value}</Chip>
-                  <button
-                    type="button"
-                    onClick={() => setEdits((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => k !== d.field)))}
-                    className={cn(dsText.meta, "underline underline-offset-2 text-[color:var(--ds-fg-secondary)]", dsFocus)}
-                  >
-                    take the server&apos;s
-                  </button>
-                </span>
-              ))}
-            </span>
-            <span className="mt-[var(--ds-space-base)] flex flex-wrap gap-[var(--ds-space-base)]">
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={() => {
-                  setBaseGeneration(cp.serverGeneration);
-                  submitSave(cp.serverGeneration);
-                }}
-              >
-                {`Keep my edits and save against generation ${cp.serverGeneration}`}
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  setEdits({});
-                  setBaseGeneration(cp.serverGeneration);
-                  setConflict(null);
-                }}
-              >
-                Discard my edits and load the fresh checkpoint
-              </Button>
-            </span>
-          </Banner>
-        </div>
-      )}
-
-      <div className="min-h-0 flex-1 overflow-y-auto pb-3">
-        {steps.map((step) => (
-          <div key={step}>
-            <div className="flex items-center gap-2 px-3 pb-0.5 pt-2.5 text-[11px] font-semibold text-secondary-foreground">
-              {step}
-              <span aria-hidden className="h-px flex-1 bg-border/60" />
-            </div>
-            {row.data
-              .filter((d) => d.step === step)
-              .map((d, i) => {
-                const policy = editPolicyFor(row, d);
-                const base = baseValue(d);
-                const value = edits[d.field] ?? base;
-                const dirty = value !== base;
-                const movedByServer = held >= cp.serverGeneration && cp.freshValues[d.field] !== undefined;
-                return (
-                  <div key={`${d.field}-${i}`} className="flex items-center gap-2.5 px-3 py-[5px] text-[12px] hover:bg-accent/30">
-                    {d.dir === "read" ? (
-                      <ArrowDownToLine aria-hidden className="size-3 shrink-0 text-log-cyan" />
-                    ) : (
-                      <ArrowUpFromLine aria-hidden className="size-3 shrink-0 text-log-teal" />
-                    )}
-                    <span className="flex w-36 shrink-0 items-center gap-1.5 truncate text-muted-foreground">
-                      {d.field}
-                      {dirty && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warning" />}
-                    </span>
-                    {policy.editable ? (
-                      <input
-                        aria-label={`${d.field} — edit this read value`}
-                        value={value}
-                        onChange={(e) => setEdits((prev) => ({ ...prev, [d.field]: e.target.value }))}
-                        className={cn(
-                          "min-w-0 flex-1 rounded border bg-transparent px-1.5 py-0.5 font-mono text-[11.5px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          dirty ? "border-warning/50 bg-warning/5" : "border-transparent hover:border-border focus:border-border",
-                        )}
-                      />
-                    ) : (
-                      <span className="flex min-w-0 flex-1 items-center gap-1.5" title={policy.reason}>
-                        <Lock aria-hidden className="size-3 shrink-0 text-muted-foreground/70" />
-                        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">{base}</span>
-                        {/* the one-word WHY; the sentence is in the row title and
-                            in the surface banner, never only in a tooltip */}
-                        <span className="shrink-0 rounded border border-border px-1 text-[9.5px] text-muted-foreground">{policy.tag}</span>
-                      </span>
-                    )}
-                    {movedByServer && (
-                      <span
-                        title={`This value changed on the server: ${d.value} → ${cp.freshValues[d.field]}`}
-                        className="shrink-0 rounded border border-info/45 px-1 text-[9.5px] font-semibold text-info"
-                      >
-                        refreshed
-                      </span>
-                    )}
-                    {d.staged && <span className="shrink-0 rounded border border-warning/40 px-1 text-[9.5px] font-semibold text-warning">staged</span>}
-                    {d.unconfirmed && (
-                      <span className="shrink-0 rounded border border-log-violet/45 px-1 text-[9.5px] font-semibold text-log-violet">unconfirmed</span>
-                    )}
-                    <SystemChip system={d.system} />
-                    <span className="w-14 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground">{d.ts}</span>
-                  </div>
-                );
-              })}
-          </div>
-        ))}
-      </div>
-
-      {/* The footer's controls are DESCRIPTORS (`actions[]` at the `data`
-          placement) — a row whose checkpoint may not be saved is simply not
-          sent a Save, so there is nothing here to disable. */}
-      {dataActions.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-border/60 bg-secondary/20 px-3 py-2">
-          <button
-            type="button"
-            onClick={() => {
-              setSeededFrom(Math.max(row.run - 1, 1));
-              setEdits(Object.fromEntries(reads.filter((f) => editPolicyFor(row, f).editable).slice(0, 2).map((f) => [f.field, baseValue(f)])));
-            }}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <History aria-hidden className="size-3" />
-            Load a prior run
-          </button>
-          <span className="text-[11px] text-muted-foreground">
-            {seededFrom !== null && changed.length === 0
-              ? `Loaded run #${seededFrom} — edit anything above.`
-              : changed.length === 0
-                ? "Unchanged — a new run would use exactly these values."
-                : `${changed.length} value${changed.length === 1 ? "" : "s"} changed`}
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              setEdits({});
-              setSeededFrom(null);
-            }}
-            disabled={changed.length === 0 && seededFrom === null}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
-          >
-            <RotateCcw aria-hidden className="size-3" />
-            Reset
-          </button>
-          {saveAction && (
-            <button
-              type="button"
-              disabled={changed.length === 0}
-              title={saveAction.detail}
-              onClick={() => submitSave(held)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
-            >
-              <Save aria-hidden className="size-3" />
-              {saveAction.label}
-            </button>
-          )}
-          {rerunAction && (
-            <button
-              type="button"
-              title={rerunAction.detail}
-              onClick={() => (fresh.stale ? setFreshnessPending(rerunAction) : submitRerun({ freshness: "within-limit" }))}
-              className="inline-flex items-center gap-1.5 rounded-md border border-primary/50 bg-primary/15 px-2.5 py-1 text-[11px] font-semibold text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <Play aria-hidden className="size-3" />
-              {changed.length > 0 ? "Start run with these values" : rerunAction.label}
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Freshness. Reusing a stale read is allowed — but only deliberately,
-          with a reason that goes into the run's evidence. */}
-      <Dialog open={Boolean(freshnessPending)} onOpenChange={(open) => !open && setFreshnessPending(null)}>
-        <DialogContent
-          size="md"
-          title="These values are older than the next write accepts"
-          description={`Captured ${checkpointAge(cp, tick)} ago. The ${cp.consumingNode} node accepts reads up to ${cp.maxAgeMin} minutes old, so reusing them is a decision, not a default.`}
-        >
-          <DialogBody className="flex flex-col gap-[var(--ds-space-cozy)]">
-            <Well className="flex flex-wrap items-center gap-[var(--ds-space-snug)]">
-              <Chip label="captured">{fmtClock(cp.capturedAt)}</Chip>
-              <Chip label="age" tone="warning">{`${fresh.ageMin}m`}</Chip>
-              <Chip label="limit">{`${fresh.maxAgeMin}m`}</Chip>
-              <Chip label="consumed by">{fresh.consumingNode}</Chip>
-            </Well>
-            <Field
-              label="Why reuse them?"
-              description="Recorded on the new run's receipt beside every reused value, so a replay is never mistaken for a fresh observation."
-            >
-              <Textarea
-                rows={2}
-                value={overrideReason}
-                onChange={(e) => setOverrideReason(e.target.value)}
-                placeholder="Kuali is read-only until 5 PM; these values were confirmed against the paper form this morning."
-              />
-            </Field>
-          </DialogBody>
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setFreshnessPending(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="dangerGhost"
-              disabled={overrideReason.trim().length < 8}
-              onClick={() => submitRerun({ freshness: "override", reason: overrideReason.trim() })}
-            >
-              Override — reuse these values
-            </Button>
-            <Button variant="primary" onClick={() => submitRerun({ freshness: "re-read" })}>
-              Re-read live instead
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Review tab — ONE person at a time, page beside extraction.
 // This is the surface the operator signs off from: every person is looked at
@@ -1191,9 +794,11 @@ function ReviewTab({ row }: { row: DemoRow }) {
         )}
       </div>
 
-      {/* page  ↔  extraction */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-y-auto min-[860px]:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)]">
-        <div className="flex flex-col gap-1.5 border-b border-border/60 p-3 min-[860px]:border-b-0 min-[860px]:border-r">
+      {/* page  ↔  extraction — a CONTAINER query, because what has to fit is
+          the centre column, not the window. Side by side needs ~680px; below
+          that the page stacks above the fields rather than squeezing both. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-y-auto @min-[42.5rem]:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)]">
+        <div className="flex flex-col gap-1.5 border-b border-border/60 p-3 @min-[42.5rem]:border-b-0 @min-[42.5rem]:border-r">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{rec.pageNote}</span>
           <div className="flex min-h-[13rem] flex-1 flex-col items-center justify-center gap-1.5 rounded-md border border-border bg-secondary/30">
             <FileText aria-hidden className="size-6 text-muted-foreground/60" />
@@ -1755,7 +1360,6 @@ const TAB_META: Record<DemoTab, { label: string; icon: typeof ScrollText }> = {
   people: { label: "People", icon: Users },
   review: { label: "Review", icon: ClipboardList },
   logs: { label: "Logs", icon: ScrollText },
-  data: { label: "Data", icon: Database },
   receipt: { label: "Receipt", icon: Receipt },
 };
 
@@ -1767,6 +1371,126 @@ const OUTCOME_TONE: Record<DemoRow["outcome"]["tone"], { bar: string; dot: strin
   destructive: { bar: "border-destructive/30 bg-destructive/6 text-destructive", dot: "bg-destructive", btn: "border-destructive/45 bg-destructive/12 text-destructive" },
   muted: { bar: "border-border bg-secondary/20 text-muted-foreground", dot: "bg-muted-foreground", btn: "border-border bg-card text-secondary-foreground" },
 };
+
+/**
+ * The detail REGION: run shape · run detail · run context.
+ *
+ * The problem it solves is vertical, not decorative. Nine bands used to stack
+ * above one scrolling body, and only the body carried `min-h-0 flex-1
+ * overflow-y-auto` — so at 1280×720 the log stream, the reason the panel is
+ * open at all, was left about 125px of a 542px panel. Splitting the region on
+ * READING PATTERN (live state in the centre, reference in the rail) gives the
+ * stream back everything the moved bands were eating.
+ *
+ * Three placements, and the middle one is the operator's own call:
+ *
+ *  - **< 1180px** — one column: shape, then detail, then context, and the
+ *    region scrolls. The rail degrades to a section, never to nothing; Data
+ *    and Evidence stay reachable.
+ *  - **1180–1479px** — three columns, but the run's shape spans the full
+ *    region width. Equal-width segments need width, and at 1280 the centre
+ *    column alone is ~420px — six steps in 420px is six illegible stubs.
+ *  - **≥ 1480px** — the centre column is wide enough to hold the shape on its
+ *    own, so the rail rises beside it and gets the full height for its ledger.
+ *
+ * 1480 is measured, not chosen: 470 queue + 348 rail + 2 gaps + the region's
+ * padding leaves the centre column ~590px there, which is the width at which
+ * a six-segment timeline still prints readable labels.
+ */
+function PanelRegion({
+  row,
+  tick,
+  onOpenPanel,
+  onAction,
+  isMember,
+  children,
+}: {
+  row: DemoRow;
+  tick: number;
+  onOpenPanel: (workflow: string, id: string) => void;
+  onAction: DemoActionHandler;
+  isMember: boolean;
+  children: ReactNode;
+}) {
+  const { collapsed, setOpen: setRailOpen } = useContextRail();
+  const hasShape = row.steps.length > 0 || Boolean(sharedMemberPipeline(row));
+
+  return (
+    <div
+      className={cn(
+        // Below the three-column threshold the region is a scrolling stack, so
+        // the rail sits under the panel instead of squeezing it to nothing.
+        "flex min-h-0 flex-col gap-[var(--ds-space-cozy)] overflow-y-auto",
+        "min-[1280px]:grid min-[1280px]:h-full min-[1280px]:overflow-hidden",
+        "min-[1280px]:grid-rows-[auto_minmax(0,1fr)]",
+        collapsed
+          ? "min-[1280px]:grid-cols-[minmax(0,1fr)_var(--ds-w-context-spine)]"
+          : "min-[1280px]:grid-cols-[minmax(0,1fr)_var(--ds-w-context-rail)]",
+      )}
+    >
+      {hasShape && (
+        <section
+          aria-label="Run shape"
+          className={cn(
+            // NOT `overflow-hidden`, on purpose: a step's hover card hangs
+            // below the strip, and an 87px strip that clips its own overlay
+            // renders the detail unreachable. Nothing inside paints to the
+            // corner, so the radius needs no clip.
+            "min-w-0 shrink-0 border",
+            "border-[color:var(--ds-border)] bg-[var(--ds-surface-1)]",
+            dsRadius.lg,
+            // full region width until the centre column can hold it alone
+            "min-[1280px]:col-span-2 min-[1280px]:row-start-1",
+            "min-[1480px]:col-span-1 min-[1480px]:col-start-1",
+          )}
+        >
+          <Timeline row={row} tick={tick} />
+          <SharedPipelineStrip row={row} />
+        </section>
+      )}
+
+      <section
+        aria-label="Run detail"
+        className={cn(
+          // A CONTAINER, not a viewport reader. The centre column's width is
+          // now a function of the rail's state as well as the window's — the
+          // same 1280px window gives it 414px with the rail open and 728px
+          // with it collapsed — so any layout inside that used to switch on a
+          // `min-[Npx]:` viewport query would switch at the wrong moment.
+          "@container flex min-h-[24rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card",
+          "min-[1280px]:col-start-1 min-[1280px]:row-start-2 min-[1280px]:min-h-0",
+        )}
+      >
+        {children}
+      </section>
+
+      {collapsed ? (
+        <ContextRailSpine
+          row={row}
+          onOpen={() => setRailOpen(true)}
+          className={cn(
+            "min-[1280px]:col-start-2 min-[1280px]:row-start-2",
+            "min-[1480px]:row-start-1 min-[1480px]:row-span-2",
+          )}
+        />
+      ) : (
+        <ContextRail
+          row={row}
+          tick={tick}
+          isMember={isMember}
+          onOpenPanel={onOpenPanel}
+          onAction={onAction}
+          onClose={() => setRailOpen(false)}
+          className={cn(
+            "shrink-0",
+            "min-[1280px]:col-start-2 min-[1280px]:row-start-2 min-[1280px]:shrink",
+            "min-[1480px]:row-start-1 min-[1480px]:row-span-2",
+          )}
+        />
+      )}
+    </div>
+  );
+}
 
 export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedIds, onToggleChecked, onAction, tick, liveCount }: DemoLogPanelProps) {
   /**
@@ -1812,11 +1536,18 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
   const tone = OUTCOME_TONE[row.outcome.tone];
   const elapsed = row.elapsedSec !== undefined ? fmtElapsed(row.elapsedSec + tick) : undefined;
   const attentionMember = isMember && (status === "failed" || status === "waiting" || status === "doneWarnings");
-  const linkedTarget = row.reviewRunId ?? row.reviewOf ?? row.linkedParentId;
-  const linked = linkedGroupSummary(row);
+  /**
+   * The gate banner and the outcome line were saying the same sentence twice —
+   * "Waiting on you — approve 5 of 6 people, or open the review" one band above
+   * a banner that says it at length and carries the buttons. Where the banner
+   * renders, the banner wins; the outcome line keeps its real job, which is the
+   * runs that have NO gate and would otherwise state their result nowhere but a
+   * status chip.
+   */
+  const gateBannerShown = Boolean(row.gate) && panelKindOf(row) !== "review";
 
   return (
-    <section aria-label="Run detail" className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
+    <PanelRegion row={row} tick={tick} onOpenPanel={onOpenPanel} onAction={handleAction} isMember={isMember}>
       {isMember ? (
         <>
           <ConveyorHeader row={row} onSelect={onSelect} checkedIds={checkedIds} />
@@ -1846,8 +1577,9 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
               // The narrow-width casualty, on purpose. The panel kind is also
               // named on the tab bar below, and the row's own title is worth
               // more than a second copy of it — without this the title was
-              // truncating to a single letter at 1180px.
-              "ml-auto hidden shrink-0 border px-[var(--ds-space-snug)] min-[1400px]:inline-flex",
+              // truncating to a single letter. Keyed to the COLUMN now, since
+              // the column's width no longer follows the window's.
+              "ml-auto hidden shrink-0 border px-[var(--ds-space-snug)] @min-[34rem]:inline-flex",
               dsRadius.sm,
               dsText.caps,
               dsBorder.base,
@@ -1860,72 +1592,23 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
         </div>
       )}
 
-      {/* cross-panel delegation link — a `linked` child and its parent point at
-          each other instead of duplicating the run, and the link CHANGES PANEL
-          rather than pulling a copy of the row into this one. */}
-      {linkedTarget && DEMO_ROWS[linkedTarget] && (
-        <button
-          type="button"
-          onClick={() => onOpenPanel(DEMO_ROWS[linkedTarget].wfLabel, linkedTarget)}
+      {/* The outcome line — one sentence of "so what". It is suppressed when the
+          gate banner below is already carrying that sentence AND the buttons
+          that answer it; two bands saying the same thing is how a dense panel
+          teaches an operator to skim past both. */}
+      {!gateBannerShown && (
+        <div
           className={cn(
-            "flex w-full cursor-pointer items-center border-b text-left",
+            "flex items-center border-b",
             "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
-            dsText.body,
-            dsFocus,
-            dsMotion.fast,
-            "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
-            "hover:brightness-125",
+            tone.bar,
           )}
         >
-          <ClipboardList aria-hidden className="size-3.5 shrink-0" />
-          <span className="min-w-0 truncate">
-            {row.reviewRunId
-              ? `Records live on the OCR review row — open the OCR panel (${DEMO_ROWS[row.reviewRunId]?.records?.length ?? 0} people)`
-              : row.reviewOf
-                ? `Delegated by ${DEMO_ROWS[row.reviewOf]?.title ?? "the packet"} — open the packet row`
-                : // one level of back, no breadcrumb trail: `← OCR · <packet>`
-                  `← ${DEMO_ROWS[linkedTarget]?.wfLabel} · ${DEMO_ROWS[linkedTarget]?.title} — the run that asked for this one`}
-          </span>
-          <ArrowRight aria-hidden className="ml-auto size-3 shrink-0" />
-        </button>
+          <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
+          <span className={cn(dsText.body, "min-w-0 truncate")}>{row.outcome.text}</span>
+          <OutcomeActionButton row={row} onAction={handleAction} className="ml-auto" />
+        </div>
       )}
-
-      {/* a SET of linked children — Oath Upload's signers. A chip, never a
-          member list: each signer is a run of its own in another panel. */}
-      {linked && (
-        <button
-          type="button"
-          onClick={() => onOpenPanel(linked.panel, linked.targetId)}
-          className={cn(
-            "flex w-full cursor-pointer items-center border-b text-left",
-            "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
-            dsText.body,
-            dsFocus,
-            dsMotion.fast,
-            "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
-            "hover:brightness-125",
-          )}
-        >
-          <Users aria-hidden className="size-3.5 shrink-0" />
-          <span className="min-w-0 truncate">
-            {linked.label} — {linked.total === 1 ? "it runs" : "each runs"} in the {linked.panel} panel, counted there and not here
-          </span>
-          <ArrowRight aria-hidden className="ml-auto size-3 shrink-0" />
-        </button>
-      )}
-
-      {/* pinned outcome bar */}
-      <div
-        className={cn(
-          "flex items-center border-b",
-          "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
-          tone.bar,
-        )}
-      >
-        <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
-        <span className={cn(dsText.body, "min-w-0 truncate")}>{row.outcome.text}</span>
-        <OutcomeActionButton row={row} onAction={handleAction} className="ml-auto" />
-      </div>
 
       {/* Requeue-while-settling: an absence observation was accepted, the row
           went back into work to earn the second one, and it is neither finished
@@ -1936,15 +1619,11 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
         </div>
       )}
 
-      {/* WHICH run is this: actor, priority, descriptor + app version, resolved
-          instance, dry-run, preset. A member inherits all of it from its group,
-          so the strip stays on the rows that own those facts. */}
-      {!isMember && <RunIdentityStrip row={row} />}
-      <RunSelector row={row} />
-
       {/* the gate is pinned above the tabs — visible from every tab, on every
-          panel kind, instead of hiding inside a Review tab most rows lack */}
-      {row.gate && panelKindOf(row) !== "review" && <GateBanner row={row} tick={tick} onAction={handleAction} />}
+          panel kind, instead of hiding inside a Review tab most rows lack. It
+          NEVER moves to the rail and is never behind a disclosure: a decision
+          the run is blocked on has to be the loudest thing in the panel. */}
+      {gateBannerShown && <GateBanner row={row} tick={tick} onAction={handleAction} />}
 
       {/* the failure record is pinned in the same slot as the gate, for the same
           reason: what broke, what is half-done and what is safe to retry must be
@@ -1952,10 +1631,6 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
       {failure && (
         <FailureRecordBlock failure={failure} open={failureOpen} onOpen={setFailureOpen} onOpenRow={onSelect} />
       )}
-
-      <Timeline row={row} tick={tick} />
-      <SharedPipelineStrip row={row} />
-      <EvidenceBar row={row} />
 
       {/* tabs — derived from the panel kind, never a fixed five */}
       {/* The ratified tab treatment: a 2px underline on the active tab, not a
@@ -2019,7 +1694,6 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
           onOpenFailure={failure ? () => setFailureOpen(true) : undefined}
         />
       )}
-      {effectiveTab === "data" && <DataTab row={row} onAction={handleAction} tick={tick} />}
       {effectiveTab === "review" && <ReviewTab row={row} />}
       {effectiveTab === "people" && <PeopleTab row={row} onSelect={onSelect} onOpenPanel={onOpenPanel} checkedIds={checkedIds} />}
       {effectiveTab === "receipt" && <ReceiptTab row={row} />}
@@ -2077,6 +1751,6 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
         onSettling={setSettling}
         tick={tick}
       />
-    </section>
+    </PanelRegion>
   );
 }
