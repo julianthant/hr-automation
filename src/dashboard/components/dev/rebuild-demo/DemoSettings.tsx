@@ -296,7 +296,7 @@ function LeafSection({
   const dirty = leaves.filter((leaf) => draft[leaf.key] !== undefined && draft[leaf.key] !== leaf.effective);
 
   return (
-    <Panel className="min-h-0">
+    <Panel className="min-h-0 flex-1">
       <PanelHeader
         title={section.label}
         subtitle={section.blurb}
@@ -387,14 +387,14 @@ function LeafSection({
 function SystemUrlsSection({ storage, onResult }: { storage: StorageMode; onResult: (r: SettingChangeResult) => void }) {
   const testCount = DEMO_SYSTEM_URLS.filter((entry) => entry.resolved === "test").length;
   return (
-    <Panel className="min-h-0">
+    <Panel className="min-h-0 flex-1">
       <PanelHeader
         title="System URLs"
         subtitle={SYSTEM_URL_SECTION.blurb}
         icon={<Link2 aria-hidden className={dsIcon.lg} />}
         meta={`${testCount} on a test instance`}
       />
-      <PanelBody>
+      <PanelBody className="flex flex-col">
         <Banner
           tone={testCount > 0 ? "warning" : "info"}
           title={
@@ -481,7 +481,7 @@ function SystemUrlsSection({ storage, onResult }: { storage: StorageMode; onResu
 
 function BudgetsSection() {
   return (
-    <Panel className="min-h-0">
+    <Panel className="min-h-0 flex-1">
       <PanelHeader
         title="Performance budgets"
         subtitle="What the executor is allowed to hold at once. A cap that is full is why a queued row is not moving."
@@ -554,7 +554,7 @@ function PreflightSection() {
   const failing = DEMO_PREFLIGHT.filter((check) => check.verdict === "fail").length;
   const warning = DEMO_PREFLIGHT.filter((check) => check.verdict === "warning").length;
   return (
-    <Panel className="min-h-0">
+    <Panel className="min-h-0 flex-1">
       <PanelHeader
         title="Preflight / doctor"
         subtitle="Advisory only. Nothing here blocks a run — it tells you what will fail before you spend a Duo prompt finding out."
@@ -613,7 +613,7 @@ function StorageSection({ storage, onStorage }: { storage: StorageMode; onStorag
   const degraded = snapshot.mode === "read-only-degraded";
   const newest = snapshot.backups[0];
   return (
-    <Panel className="min-h-0">
+    <Panel className="min-h-0 flex-1">
       <PanelHeader
         title="Storage health"
         subtitle="The tracker volume, the authority generation, and the backups a restore would use."
@@ -745,7 +745,7 @@ function VersionsSection({ onBump }: { onBump: (target: BumpTarget) => void }) {
   const blocked = registry.filter((entry) => entry.nonTerminal > 0).length;
 
   return (
-    <Panel className="min-h-0">
+    <Panel className="min-h-0 flex-1">
       <PanelHeader
         title="Version registry"
         subtitle="The dashboard's authoritative record of every workflow's current version. Active surfaces only ever contain current-version runs."
@@ -913,7 +913,7 @@ export function DemoSettingsPage({
         ))}
       </nav>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-[var(--ds-space-base)] overflow-y-auto p-[var(--ds-space-cozy)]">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-[var(--ds-space-base)] p-[var(--ds-space-cozy)]">
         {result && <ResultBanner result={result} onDismiss={() => setResult(null)} />}
         {storage === "read-only-degraded" && !result && (
           <Banner tone="danger" title="Storage is read-only — no setting can be saved">

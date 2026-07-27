@@ -192,7 +192,7 @@ export function DemoRunModal({
 
           <section className="flex flex-col gap-[var(--ds-space-snug)]">
             <SectionLabel>Document</SectionLabel>
-            <ul className="flex flex-col gap-[var(--ds-space-snug)]">
+            <ul className="flex flex-col gap-[var(--ds-space-tight)]">
               {UPLOAD_FILES.map((item) => (
                 <li key={item.id}>
                   <FileChoice
@@ -327,15 +327,14 @@ function FileChoice({ file, selected, onSelect }: { file: UploadFileFixture; sel
           onSelect();
         }
       }}
-      className="flex-row items-center gap-[var(--ds-space-base)] p-[var(--ds-space-base)]"
+      className="min-h-[var(--ds-h-lg)] flex-row items-center gap-[var(--ds-space-base)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]"
     >
-      <Icon aria-hidden className={cn(dsIcon.lg, "shrink-0", dsFg.muted)} />
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className={cn(dsText.ui, "truncate", dsFg.base)}>{file.fileName}</span>
-        <span className={cn(dsText.meta, dsText.nums, dsFg.muted)}>
-          {file.sizeLabel} · {file.pageCount} page{file.pageCount === 1 ? "" : "s"}
-        </span>
-      </span>
+      <Icon aria-hidden className={cn(dsIcon.md, "shrink-0", dsFg.muted)} />
+      <span className={cn(dsText.ui, "min-w-0 flex-1 truncate", dsFg.base)}>{file.fileName}</span>
+      <MetaLine
+        className="shrink-0"
+        items={[file.sizeLabel, `${file.pageCount} page${file.pageCount === 1 ? "" : "s"}`]}
+      />
       {file.activeRun && <Badge tone="warning">already running</Badge>}
       {file.intakeSheetId && <Badge tone="info">spreadsheet</Badge>}
     </Card>

@@ -9,6 +9,7 @@ import {
   Card,
   CardBody,
   Chip,
+  PageHeader,
   Panel,
   PanelBody,
   PanelFooter,
@@ -54,18 +55,20 @@ export function DemoActivityReportPage({ onBack, onOpenSettings }: { onBack: () 
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-[var(--ds-space-base)] border-b border-[color:var(--ds-border)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]">
-        <Button variant="ghost" size="sm" icon={<ArrowLeft aria-hidden className={dsIcon.md} />} onClick={onBack}>
-          Back to the dashboard
-        </Button>
-        <span className="flex items-center gap-[var(--ds-space-snug)]">
-          <ChartNoAxesColumn aria-hidden className={cn(dsIcon.lg, "text-[color:var(--ds-fg-muted)]")} />
-          <span className={cn(dsText.section, "font-semibold text-[color:var(--ds-fg)]")}>Activity report</span>
-        </span>
-        <Button className="ml-auto" variant="ghost" size="sm" icon={<Settings aria-hidden className={dsIcon.md} />} onClick={onOpenSettings}>
-          Settings
-        </Button>
-      </div>
+      <PageHeader
+        title="Activity report"
+        icon={<ChartNoAxesColumn aria-hidden className={dsIcon.lg} />}
+        back={
+          <Button variant="ghost" size="sm" icon={<ArrowLeft aria-hidden className={dsIcon.md} />} onClick={onBack}>
+            Back to the dashboard
+          </Button>
+        }
+        actions={
+          <Button variant="ghost" size="sm" icon={<Settings aria-hidden className={dsIcon.md} />} onClick={onOpenSettings}>
+            Settings
+          </Button>
+        }
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto p-[var(--ds-space-cozy)]">
         <Panel>

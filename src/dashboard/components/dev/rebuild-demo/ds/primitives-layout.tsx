@@ -297,6 +297,56 @@ export function Banner({
 }
 
 /* =========================================================================
+ * PageHeader — the bar at the top of a full-page takeover
+ * ====================================================================== */
+
+/**
+ * The header a full-page view wears when it replaces the dashboard: a way back,
+ * what you are looking at, and at most one action.
+ *
+ * The three takeovers (Archive, Explorer, Activity report) each hand-rolled
+ * this, and drifted — two put the back button before the title and one after,
+ * the icons were `size-4` in two places and `dsIcon.lg` in the third, and only
+ * two of the three marked themselves read-only. Leaving the dashboard should
+ * look the same every time you do it.
+ */
+export function PageHeader({
+  title,
+  icon,
+  badge,
+  back,
+  actions,
+  className,
+}: {
+  title: ReactNode;
+  icon?: ReactNode;
+  /** e.g. a read-only marker — sits with the title, not with the actions */
+  badge?: ReactNode;
+  /** the way back to the dashboard, always leftmost */
+  back?: ReactNode;
+  actions?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <header
+      className={cn(
+        "flex shrink-0 flex-wrap items-center gap-[var(--ds-space-base)] border-b px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
+        "border-[color:var(--ds-border)]",
+        className,
+      )}
+    >
+      {back}
+      <span className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
+        {icon && <span className="shrink-0 text-[color:var(--ds-fg-muted)]">{icon}</span>}
+        <span className={cn(dsText.section, "truncate font-semibold text-[color:var(--ds-fg)]")}>{title}</span>
+        {badge}
+      </span>
+      {actions && <span className="ml-auto flex shrink-0 items-center gap-[var(--ds-space-tight)]">{actions}</span>}
+    </header>
+  );
+}
+
+/* =========================================================================
  * MetaLine — the provenance line
  * ====================================================================== */
 
