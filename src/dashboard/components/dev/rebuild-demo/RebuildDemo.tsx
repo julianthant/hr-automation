@@ -412,9 +412,8 @@ export function RebuildDemo() {
               <h1 className={cn(dsText.title, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>
                 {activeWorkflow === ALL_WORKFLOWS ? "All workflows" : activeWorkflow}
               </h1>
-              <span className={cn(dsText.meta, dsText.nums, "shrink-0 text-[color:var(--ds-fg-muted)]")}>
-                {counts.all}
-                <span className="ml-1 font-sans">rows</span>
+              <span className={cn(dsText.meta, "shrink-0 text-[color:var(--ds-fg-muted)]")}>
+                <span className={dsText.nums}>{counts.all}</span> {counts.all === 1 ? "row" : "rows"}
               </span>
               <span
                 className={cn(
