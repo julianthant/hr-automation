@@ -199,9 +199,9 @@ export function ProgressBar({
     tone === "success"
       ? "bg-[var(--ds-success-fg)]"
       : tone === "warning"
-        ? "bg-[var(--ds-status-waiting-fg)]"
+        ? "bg-[var(--ds-status-waiting-mark)]"
         : tone === "danger"
-          ? "bg-[var(--ds-danger)]"
+          ? "bg-[var(--ds-danger-solid)]"
           : "bg-[var(--ds-accent)]";
 
   return (
@@ -250,9 +250,9 @@ export interface DsStep {
 
 const STEP_DOT: Record<DsStepState, string> = {
   done: "bg-[var(--ds-success-fg)] border-transparent",
-  current: "bg-[var(--ds-status-running-fg)] border-transparent",
+  current: "bg-[var(--ds-status-running-mark)] border-transparent",
   pending: "bg-[var(--ds-surface-3)] border-[color:var(--ds-border-strong)]",
-  failed: "bg-[var(--ds-status-failed-fg)] border-transparent",
+  failed: "bg-[var(--ds-status-failed-mark)] border-transparent",
   skipped: "bg-transparent border-[color:var(--ds-border-strong)]",
 };
 

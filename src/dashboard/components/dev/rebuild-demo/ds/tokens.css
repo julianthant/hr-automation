@@ -6,11 +6,30 @@
    Builder agents compose primitives; primitives read these tokens; nothing
    else hardcodes a value. That is the whole contract.
 
-   PARITY, NOT REINVENTION. Every token below either aliases a token the real
-   dashboard already defines in `src/dashboard/index.css` (so the demo tracks
-   the product's theme automatically) or is a deliberate, documented refinement
-   of one. There is no second palette here — only names for what the product
-   already is, plus the handful of decisions the product never made explicit.
+   TWO THEMES, ONE PRODUCT. The demo ships a togglable pair — `Graphite Warm`
+   (dark) and `Paper Ink` (light) — selected by a `data-demo-theme` attribute.
+   Each theme block below redeclares BOTH the product's own semantic tokens
+   (`--background`, `--warning`, …, which the demo's surfaces read directly
+   through Tailwind utilities) AND the `--ds-*` layer derived from them, so a
+   theme is one contiguous, auditable block rather than a diff against another.
+
+   WHY AN ATTRIBUTE AND NOT A CLASS. The shipped dashboard hardcodes
+   `class="dark"` on BOTH `<html>` and `<body>` (`index.html`), and `.dark`
+   re-scopes every semantic token. A demo-scoped light theme therefore has to
+   win against a `.dark` ANCESTOR: the selector lists below carry
+   `:root[data-demo-theme=…]` (0,2,0) and `body[data-demo-theme=…]` (0,1,1),
+   both of which outrank `.dark` (0,1,0) on the element that carries it, plus a
+   bare `[data-demo-theme=…]` for the demo's own root container. `ds/theme.ts`
+   stamps all three. Overlays portal to `<body>`, which is exactly why the body
+   selector is not optional.
+
+   The `:root` block keeps a FALLBACK that aliases the app's own theme, so a
+   primitive rendered outside a themed subtree still resolves every token.
+
+   PALETTE BUDGET: one accent + four semantic hues (info / success / warning /
+   danger), and nothing else. `Running` is neutral on purpose — it is the most
+   common status on screen and a hue spent there is a hue spent everywhere. The
+   categorical `--log-*` accents are retired to a neutral ramp (see each theme).
 
    Naming: --ds-<group>-<role>[-<state>]
      surface | border | fg | control | status | radius | text | lh | space
@@ -45,6 +64,10 @@
   --ds-border: var(--border); /* the default 1px separator */
   --ds-border-strong: var(--input); /* input outlines, resting controls */
   --ds-border-loud: color-mix(in srgb, var(--foreground) 22%, transparent);
+  /* The outline that IDENTIFIES a control (input, select, checkbox, switch).
+     WCAG 1.4.11 wants 3:1 for that; a decorative separator does not need it,
+     which is why this is a different token from --ds-border-strong. */
+  --ds-control-border: color-mix(in srgb, var(--foreground) 38%, transparent);
   --ds-border-w: 1px; /* structure */
   --ds-border-w-emphasis: 2px; /* selection, active tab underline */
   --ds-border-w-rail: 3px; /* the left rail marker on nav/attention rows */
@@ -68,14 +91,15 @@
   --ds-control-bg-hover: var(--accent);
   --ds-control-bg-active: color-mix(in srgb, var(--accent) 70%, var(--background));
   --ds-control-fg: var(--foreground);
-  --ds-control-border: var(--ds-border-strong);
 
-  --ds-accent: var(--primary); /* near-white — the product's "primary" */
+  --ds-accent: var(--primary); /* the product's "primary" */
+  --ds-accent-mark: var(--primary); /* the raw swatch — bars, dots, fills */
   --ds-accent-fg: var(--primary-foreground);
   --ds-accent-hover: color-mix(in srgb, var(--primary) 88%, hsl(0 0% 100%));
   --ds-accent-quiet: color-mix(in srgb, var(--primary) 12%, transparent);
 
-  --ds-danger: var(--destructive);
+  --ds-danger: var(--destructive); /* danger as TEXT */
+  --ds-danger-solid: var(--destructive); /* danger as a solid FILL */
   --ds-danger-fg: hsl(0 65% 8%); /* dark ink on the dark theme's bright red */
   --ds-danger-quiet: color-mix(in srgb, var(--destructive) 12%, transparent);
   --ds-danger-border: color-mix(in srgb, var(--destructive) 45%, transparent);
@@ -90,18 +114,30 @@
      for the full mapping table.
 
      Loudness ladder, deliberately:
-       1 Waiting on you  solid amber  — the operator is the blocker
-       2 Failed          solid red    — the run is broken
-       3 Write parked    dashed violet— a write may or may not have landed
-       4 Done w/ warnings tinted amber— finished, needs eyes, not urgent
-       5 Running         tinted blue  — in motion (the only animated status)
-       6 Queued          outline slate— accepted, inert
-       7 Cancelled       ghost neutral— a deliberate act is not an alert
-       8 Verified done   ghost green  — the quietest thing on screen
+       1 Waiting on you  solid amber   — the operator is the blocker
+       2 Failed          solid red     — the run is broken
+       3 Write parked    dashed amber  — a write may or may not have landed
+       4 Done w/ warnings tinted amber — finished, needs eyes, not urgent
+       5 Running         tinted NEUTRAL— in motion (the only animated status)
+       6 Queued          outline neutral—accepted, inert
+       7 Cancelled       ghost neutral — a deliberate act is not an alert
+       8 Verified done   ghost green   — the quietest thing on screen
+
+     The three amber tiers are the point, not an accident: amber means "a human
+     is involved", and the FILL WEIGHT (solid / dashed / faint tint) is the
+     priority signal. Colour never carries a status alone — the icon, the tier
+     and the label all differ too.
+
+     Every status carries BOTH a `-fg` (the value it is rendered as TEXT, held
+     to 4.5:1 on every surface in the ladder) and a `-mark` (the raw swatch, for
+     the dot, the rail, the bar and any solid fill). On a dark theme they are
+     usually the same value; on a light one they are not, because the swatch
+     that reads as a dot at 6px fails as 11px body text.
      --------------------------------------------------------------------- */
 
   /* 1 — Waiting on you (LOUD: solid fill, dark ink) */
   --ds-status-waiting-fg: var(--warning);
+  --ds-status-waiting-mark: var(--warning);
   --ds-status-waiting-bg: color-mix(in srgb, var(--warning) 14%, transparent);
   --ds-status-waiting-border: color-mix(in srgb, var(--warning) 55%, transparent);
   --ds-status-waiting-solid-bg: var(--warning);
@@ -109,47 +145,58 @@
 
   /* 2 — Failed (LOUD: solid fill, dark ink) */
   --ds-status-failed-fg: var(--destructive);
+  --ds-status-failed-mark: var(--destructive);
   --ds-status-failed-bg: color-mix(in srgb, var(--destructive) 14%, transparent);
   --ds-status-failed-border: color-mix(in srgb, var(--destructive) 55%, transparent);
   --ds-status-failed-solid-bg: var(--destructive);
   --ds-status-failed-solid-fg: var(--ds-danger-fg);
 
   /* 3 — Write parked (tint + a DASHED border no other status uses) */
-  --ds-status-parked-fg: var(--log-violet);
-  --ds-status-parked-bg: color-mix(in srgb, var(--log-violet) 13%, transparent);
-  --ds-status-parked-border: color-mix(in srgb, var(--log-violet) 60%, transparent);
+  --ds-status-parked-fg: var(--warning);
+  --ds-status-parked-mark: var(--warning);
+  --ds-status-parked-bg: color-mix(in srgb, var(--warning) 13%, transparent);
+  --ds-status-parked-border: color-mix(in srgb, var(--warning) 60%, transparent);
 
   /* 4 — Done with warnings (amber icon, muted label — FYI, not a demand) */
   --ds-status-done-warnings-fg: var(--warning);
+  --ds-status-done-warnings-mark: var(--warning);
   --ds-status-done-warnings-bg: color-mix(in srgb, var(--warning) 9%, transparent);
   --ds-status-done-warnings-border: color-mix(in srgb, var(--warning) 30%, transparent);
 
-  /* 5 — Running (the only status whose icon moves) */
-  --ds-status-running-fg: var(--info);
-  --ds-status-running-bg: color-mix(in srgb, var(--info) 13%, transparent);
-  --ds-status-running-border: color-mix(in srgb, var(--info) 40%, transparent);
+  /* 5 — Running (NEUTRAL: the only status whose icon moves, and the only
+         differentiator it needs. It is the most common status on screen, so a
+         hue spent here is a hue spent everywhere.) */
+  --ds-status-running-fg: var(--ds-fg-muted);
+  --ds-status-running-mark: var(--ds-fg-muted);
+  --ds-status-running-bg: color-mix(in srgb, var(--foreground) 6%, transparent);
+  --ds-status-running-border: color-mix(in srgb, var(--foreground) 18%, transparent);
 
   /* 6 — Queued (outline only: no fill = nothing has happened yet) */
-  --ds-status-queued-fg: var(--log-slate);
+  --ds-status-queued-fg: var(--ds-fg-muted);
+  --ds-status-queued-mark: var(--ds-fg-muted);
   --ds-status-queued-bg: transparent;
-  --ds-status-queued-border: color-mix(in srgb, var(--log-slate) 45%, transparent);
+  --ds-status-queued-border: color-mix(in srgb, var(--muted-foreground) 45%, transparent);
 
   /* 7 — Cancelled (neutral + struck-through label; NOT amber, NOT red —
          a deliberate stop is neither a warning nor a failure) */
   --ds-status-cancelled-fg: var(--ds-fg-muted);
+  --ds-status-cancelled-mark: var(--ds-fg-muted);
   --ds-status-cancelled-bg: transparent;
   --ds-status-cancelled-border: transparent;
 
   /* 8 — Verified done (ghost: green icon, muted label, no chrome at all) */
   --ds-status-verified-done-fg: var(--success);
+  --ds-status-verified-done-mark: var(--success);
   --ds-status-verified-done-bg: transparent;
   --ds-status-verified-done-border: transparent;
 
   /* Neutral/informational accents reused by Banner, Chip and the log surfaces */
   --ds-info-fg: var(--info);
+  --ds-info-mark: var(--info);
   --ds-info-bg: color-mix(in srgb, var(--info) 12%, transparent);
   --ds-info-border: color-mix(in srgb, var(--info) 40%, transparent);
   --ds-success-fg: var(--success);
+  --ds-success-mark: var(--success);
   --ds-success-bg: color-mix(in srgb, var(--success) 12%, transparent);
   --ds-success-border: color-mix(in srgb, var(--success) 38%, transparent);
 
@@ -255,17 +302,346 @@
   --ds-ease-standard: cubic-bezier(0.45, 0, 0.55, 1); /* things moving in place */
 }
 
-/* Light theme corrections. The demo shell is dark-only, but the primitives
-   are used inside the real (themeable) dashboard, so the two places where a
-   dark-theme ink choice would fail AA in light mode are flipped here. */
-:root:not(.dark) {
-  --ds-danger-fg: hsl(0 0% 100%); /* the light theme's red is dark */
-  --ds-status-failed-solid-fg: hsl(0 0% 100%);
-  --ds-elev-1: 0 1px 2px hsl(0 0% 0% / 0.08);
+/* ==========================================================================
+   THEME · DARK — "Graphite Warm"
+   ==========================================================================
+   Warm near-black. Depth comes from the surface ladder plus a white-alpha
+   hairline; shadows are reserved for things that float. One accent (amber)
+   and four semantic hues, and that is the whole live palette.
+   ========================================================================== */
+[data-demo-theme="dark"],
+:root[data-demo-theme="dark"],
+body[data-demo-theme="dark"] {
+  color-scheme: dark;
+
+  /* --- the product's own semantic tokens ------------------------------- */
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #18181b;
+  --card-foreground: #fafafa;
+  /* a hair above the card so an overlay reads as floating even before its
+     shadow lands — the scrim alone cannot separate a drawer from a panel */
+  --popover: #1c1c1f;
+  --popover-foreground: #fafafa;
+  /* THE ACCENT IS NOT THE ACTION. Graphite Warm's accent is amber (#f5a623),
+     which is the SAME hue family as `warning` — so filling every primary button
+     with it would make the primary action shout at exactly the volume reserved
+     for `Waiting on you`, and a screen with one waiting run would read as five.
+     The primary action is therefore the highest-contrast neutral fill (the
+     Vercel/Height convention this theme is drawn from) and the amber survives as
+     `--ds-accent-mark`: the product's warm identity note, spent on marks, never
+     on a verb. Paper Ink has no such collision, so ITS accent is its action. */
+  --primary: #fafafa;
+  --primary-foreground: #09090b;
+  --secondary: #202024;
+  --secondary-foreground: #d4d4d8;
+  --muted: #121215;
+  --muted-foreground: #a1a1aa;
+  --accent: #27272a;
+  --accent-foreground: #fafafa;
+  /* #f04438 is the swatch; as TEXT it drops to 3.96:1 on the raised surface,
+     so the token every `text-destructive` reads is the lifted red and the
+     swatch survives on the solid chip, the dot and the rail (`-mark`). */
+  --destructive: #f97066;
+  --destructive-foreground: #2a0806;
+  --info: #4ea1f3;
+  --info-foreground: #06182b;
+  --success: #12b76a;
+  --success-foreground: #04140c;
+  --warning: #f79009;
+  --warning-foreground: #1a1204;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.16);
+  --ring: #a1a1aa;
+
+  /* The categorical log accents are RETIRED to a neutral ramp. The log stream
+     used to paint four hues on top of four status hues at once — the noisiest
+     surface in the product. Reads and writes are now told apart by direction
+     icon and type weight; only the genuinely semantic one (an unconfirmed /
+     parked write) keeps a hue, and it is the warning amber it always meant. */
+  --log-teal: #fafafa; /* a WRITE — the load-bearing direction */
+  --log-cyan: #d4d4d8; /* a READ */
+  --log-slate: #a1a1aa; /* navigation, search, inert chrome */
+  --log-violet: #f79009; /* unconfirmed / parked — warning, not a category */
+  --chart-1: #fafafa;
+  --chart-2: #a1a1aa;
+  --chart-3: #4ea1f3;
+  --chart-4: #12b76a;
+  --chart-5: #f79009;
+
+  /* --- surface ---------------------------------------------------------- */
+  --ds-surface-page: var(--background);
+  --ds-surface-1: var(--card);
+  --ds-surface-2: var(--muted);
+  --ds-surface-3: var(--accent);
+  --ds-surface-overlay: var(--popover);
+  --ds-surface-scrim: rgba(0, 0, 0, 0.66);
+  --ds-surface-selected: color-mix(in srgb, var(--primary) 10%, transparent);
+  --ds-surface-disabled: color-mix(in srgb, var(--muted) 60%, transparent);
+
+  /* --- border ----------------------------------------------------------- */
+  --ds-border-subtle: rgba(255, 255, 255, 0.05);
+  --ds-border: rgba(255, 255, 255, 0.08);
+  --ds-border-strong: rgba(255, 255, 255, 0.16);
+  --ds-border-loud: rgba(255, 255, 255, 0.28);
+  --ds-control-border: rgba(255, 255, 255, 0.38); /* 3.6:1 on the card plane */
+
+  /* --- foreground ------------------------------------------------------- */
+  --ds-fg: var(--foreground);
+  --ds-fg-secondary: var(--secondary-foreground);
+  --ds-fg-muted: var(--muted-foreground);
+  --ds-fg-faint: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+  --ds-fg-inverse: var(--primary-foreground);
+  --ds-fg-link: var(--info);
+
+  /* --- control + accent ------------------------------------------------- */
+  --ds-control-bg: var(--secondary);
+  --ds-control-bg-hover: var(--accent);
+  --ds-control-bg-active: color-mix(in srgb, var(--accent) 70%, var(--background));
+  --ds-control-fg: var(--foreground);
+
+  --ds-accent: #fafafa; /* the primary action's fill */
+  --ds-accent-mark: #f5a623; /* the identity note — a mark, never a verb */
+  --ds-accent-fg: #09090b;
+  --ds-accent-hover: #ffffff;
+  --ds-accent-quiet: color-mix(in srgb, #fafafa 12%, transparent);
+
+  --ds-danger: #f97066;
+  --ds-danger-solid: #f04438;
+  --ds-danger-fg: #2a0806;
+  --ds-danger-quiet: color-mix(in srgb, #f04438 12%, transparent);
+  --ds-danger-border: color-mix(in srgb, #f04438 45%, transparent);
+
+  /* --- status ----------------------------------------------------------- */
+  --ds-status-waiting-fg: #f79009;
+  --ds-status-waiting-mark: #f79009;
+  --ds-status-waiting-bg: color-mix(in srgb, #f79009 14%, transparent);
+  --ds-status-waiting-border: color-mix(in srgb, #f79009 55%, transparent);
+  --ds-status-waiting-solid-bg: #f79009;
+  --ds-status-waiting-solid-fg: #1a1204;
+
+  --ds-status-failed-fg: #f97066;
+  --ds-status-failed-mark: #f04438;
+  --ds-status-failed-bg: color-mix(in srgb, #f04438 14%, transparent);
+  --ds-status-failed-border: color-mix(in srgb, #f04438 55%, transparent);
+  --ds-status-failed-solid-bg: #f04438;
+  --ds-status-failed-solid-fg: #2a0806;
+
+  --ds-status-parked-fg: #f79009;
+  --ds-status-parked-mark: #f79009;
+  --ds-status-parked-bg: color-mix(in srgb, #f79009 13%, transparent);
+  --ds-status-parked-border: color-mix(in srgb, #f79009 60%, transparent);
+
+  --ds-status-done-warnings-fg: #f79009;
+  --ds-status-done-warnings-mark: #f79009;
+  --ds-status-done-warnings-bg: color-mix(in srgb, #f79009 9%, transparent);
+  --ds-status-done-warnings-border: color-mix(in srgb, #f79009 30%, transparent);
+
+  --ds-status-running-fg: var(--ds-fg-muted);
+  --ds-status-running-mark: var(--ds-fg-muted);
+  --ds-status-running-bg: rgba(255, 255, 255, 0.06);
+  --ds-status-running-border: rgba(255, 255, 255, 0.18);
+
+  --ds-status-queued-fg: var(--ds-fg-muted);
+  --ds-status-queued-mark: var(--ds-fg-muted);
+  --ds-status-queued-bg: transparent;
+  --ds-status-queued-border: rgba(255, 255, 255, 0.22);
+
+  --ds-status-cancelled-fg: var(--ds-fg-muted);
+  --ds-status-cancelled-mark: var(--ds-fg-muted);
+  --ds-status-cancelled-bg: transparent;
+  --ds-status-cancelled-border: transparent;
+
+  --ds-status-verified-done-fg: #12b76a;
+  --ds-status-verified-done-mark: #12b76a;
+  --ds-status-verified-done-bg: transparent;
+  --ds-status-verified-done-border: transparent;
+
+  --ds-info-fg: #4ea1f3;
+  --ds-info-mark: #4ea1f3;
+  --ds-info-bg: color-mix(in srgb, #4ea1f3 12%, transparent);
+  --ds-info-border: color-mix(in srgb, #4ea1f3 40%, transparent);
+  --ds-success-fg: #12b76a;
+  --ds-success-mark: #12b76a;
+  --ds-success-bg: color-mix(in srgb, #12b76a 12%, transparent);
+  --ds-success-border: color-mix(in srgb, #12b76a 38%, transparent);
+
+  /* --- focus + elevation ------------------------------------------------ */
+  --ds-focus-ring: color-mix(in srgb, #fafafa 85%, transparent);
+  --ds-elev-1: 0 1px 2px hsl(0 0% 0% / 0.35);
   --ds-elev-2:
-    0 4px 12px -2px hsl(0 0% 0% / 0.1), 0 1px 3px hsl(0 0% 0% / 0.06);
+    0 4px 12px -2px hsl(0 0% 0% / 0.45), 0 1px 3px hsl(0 0% 0% / 0.32);
   --ds-elev-3:
-    0 16px 40px -8px hsl(0 0% 0% / 0.16), 0 2px 8px -2px hsl(0 0% 0% / 0.1);
+    0 16px 40px -8px hsl(0 0% 0% / 0.62), 0 2px 8px -2px hsl(0 0% 0% / 0.45);
+}
+
+/* ==========================================================================
+   THEME · LIGHT — "Paper Ink"
+   ==========================================================================
+   A tinted page with white cards, so a panel reads as a sheet lying on a desk
+   rather than a region of the same paint. Elevation here is a SHADOW, because
+   a hairline alone cannot separate white from white — this is the one place
+   the two themes reach for different mechanics to say the same thing.
+
+   NOT AN INVERSION. Four of the five hues are re-picked, not lightened: the
+   dark theme's swatches all fail 4.5:1 as body text on white, so each hue
+   carries a darker `-fg` for text and keeps its swatch on the dot / bar /
+   border (`-mark`). Every pair below was measured, including status text
+   against the RENDERED tint rather than against the page.
+   ========================================================================== */
+[data-demo-theme="light"],
+:root[data-demo-theme="light"],
+body[data-demo-theme="light"] {
+  color-scheme: light;
+
+  /* --- the product's own semantic tokens ------------------------------- */
+  --background: #f6f8fa;
+  --foreground: #0b0f19;
+  --card: #ffffff;
+  --card-foreground: #0b0f19;
+  --popover: #ffffff;
+  --popover-foreground: #0b0f19;
+  /* the swatch is #4f46e5; text uses the step down so it clears 4.5:1 on the
+     accent tint as well as on paper (`--ds-accent-mark` keeps the swatch) */
+  --primary: #4338ca;
+  --primary-foreground: #ffffff;
+  --secondary: #eff2f6;
+  --secondary-foreground: #334155;
+  --muted: #f1f4f8;
+  --muted-foreground: #475569;
+  --accent: #e8ecf2;
+  --accent-foreground: #0b0f19;
+  --destructive: #b42318;
+  --destructive-foreground: #ffffff;
+  --info: #0369a1; /* swatch #0ba5ec — 2.8:1 as text, so text steps down */
+  --info-foreground: #ffffff;
+  --success: #065f46; /* swatch #059669 — 3.8:1 as text, so text steps down */
+  --success-foreground: #ffffff;
+  --warning: #b54708;
+  --warning-foreground: #ffffff;
+  --border: #e4e7ec;
+  --input: #d0d5dd;
+  --ring: #667085;
+
+  --log-teal: #0b0f19; /* a WRITE */
+  --log-cyan: #334155; /* a READ */
+  --log-slate: #475569; /* navigation, search, inert chrome */
+  --log-violet: #b54708; /* unconfirmed / parked */
+  --chart-1: #0b0f19;
+  --chart-2: #475569;
+  --chart-3: #0369a1;
+  --chart-4: #065f46;
+  --chart-5: #b54708;
+
+  /* --- surface ---------------------------------------------------------- */
+  --ds-surface-page: var(--background);
+  --ds-surface-1: var(--card);
+  --ds-surface-2: var(--muted);
+  --ds-surface-3: var(--accent);
+  --ds-surface-overlay: var(--popover);
+  --ds-surface-scrim: rgba(16, 24, 40, 0.45);
+  --ds-surface-selected: color-mix(in srgb, #4f46e5 9%, transparent);
+  --ds-surface-disabled: color-mix(in srgb, var(--muted) 70%, transparent);
+
+  /* --- border ----------------------------------------------------------- */
+  --ds-border-subtle: #edeff2;
+  --ds-border: #e4e7ec;
+  --ds-border-strong: #d0d5dd;
+  --ds-border-loud: #b4bcc8;
+  --ds-control-border: #7e8899; /* 3.6:1 on white, 3.4:1 on the page */
+
+  /* --- foreground ------------------------------------------------------- */
+  --ds-fg: var(--foreground);
+  --ds-fg-secondary: var(--secondary-foreground);
+  --ds-fg-muted: var(--muted-foreground);
+  --ds-fg-faint: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+  --ds-fg-inverse: var(--primary-foreground);
+  --ds-fg-link: var(--info);
+
+  /* --- control + accent ------------------------------------------------- */
+  --ds-control-bg: var(--secondary);
+  --ds-control-bg-hover: var(--accent);
+  --ds-control-bg-active: color-mix(in srgb, var(--accent) 70%, #d5dbe4);
+  --ds-control-fg: var(--foreground);
+
+  --ds-accent: #4338ca;
+  --ds-accent-mark: #4f46e5;
+  --ds-accent-fg: #ffffff;
+  --ds-accent-hover: #3730a3; /* light hovers DARKEN; dark hovers lighten */
+  --ds-accent-quiet: color-mix(in srgb, #4f46e5 12%, transparent);
+
+  --ds-danger: #b42318;
+  --ds-danger-solid: #b42318;
+  --ds-danger-fg: #ffffff;
+  --ds-danger-quiet: color-mix(in srgb, #b42318 10%, transparent);
+  --ds-danger-border: color-mix(in srgb, #b42318 40%, transparent);
+
+  /* --- status ----------------------------------------------------------- */
+  /* The amber family sits on an OPAQUE warm tint rather than an alpha wash:
+     on paper a 14% amber over white reads as dirty grey, and the measured
+     5.2:1 of #b54708 on #fffaeb is the pair this theme was picked for. */
+  --ds-status-waiting-fg: #b54708;
+  --ds-status-waiting-mark: #f79009;
+  --ds-status-waiting-bg: #fffaeb;
+  --ds-status-waiting-border: color-mix(in srgb, #b54708 40%, transparent);
+  --ds-status-waiting-solid-bg: #b54708;
+  --ds-status-waiting-solid-fg: #ffffff;
+
+  --ds-status-failed-fg: #b42318;
+  --ds-status-failed-mark: #b42318;
+  --ds-status-failed-bg: color-mix(in srgb, #b42318 10%, transparent);
+  --ds-status-failed-border: color-mix(in srgb, #b42318 40%, transparent);
+  --ds-status-failed-solid-bg: #b42318;
+  --ds-status-failed-solid-fg: #ffffff;
+
+  --ds-status-parked-fg: #b54708;
+  --ds-status-parked-mark: #f79009;
+  --ds-status-parked-bg: #fffaeb;
+  --ds-status-parked-border: color-mix(in srgb, #b54708 50%, transparent);
+
+  --ds-status-done-warnings-fg: #b54708;
+  --ds-status-done-warnings-mark: #f79009;
+  --ds-status-done-warnings-bg: #fffaeb;
+  --ds-status-done-warnings-border: color-mix(in srgb, #b54708 24%, transparent);
+
+  --ds-status-running-fg: var(--ds-fg-muted);
+  --ds-status-running-mark: var(--ds-fg-muted);
+  --ds-status-running-bg: color-mix(in srgb, #0b0f19 5%, transparent);
+  --ds-status-running-border: color-mix(in srgb, #0b0f19 14%, transparent);
+
+  --ds-status-queued-fg: var(--ds-fg-muted);
+  --ds-status-queued-mark: var(--ds-fg-muted);
+  --ds-status-queued-bg: transparent;
+  --ds-status-queued-border: color-mix(in srgb, #475569 35%, transparent);
+
+  --ds-status-cancelled-fg: var(--ds-fg-muted);
+  --ds-status-cancelled-mark: var(--ds-fg-muted);
+  --ds-status-cancelled-bg: transparent;
+  --ds-status-cancelled-border: transparent;
+
+  --ds-status-verified-done-fg: #065f46;
+  --ds-status-verified-done-mark: #059669;
+  --ds-status-verified-done-bg: transparent;
+  --ds-status-verified-done-border: transparent;
+
+  --ds-info-fg: #0369a1;
+  --ds-info-mark: #0ba5ec;
+  --ds-info-bg: color-mix(in srgb, #0ba5ec 12%, transparent);
+  --ds-info-border: color-mix(in srgb, #0369a1 40%, transparent);
+  --ds-success-fg: #065f46;
+  --ds-success-mark: #059669;
+  --ds-success-bg: color-mix(in srgb, #059669 12%, transparent);
+  --ds-success-border: color-mix(in srgb, #065f46 38%, transparent);
+
+  /* --- focus + elevation ------------------------------------------------ */
+  --ds-focus-ring: color-mix(in srgb, #0b0f19 85%, transparent);
+  /* White on white cannot be separated by a hairline alone, so this is the one
+     theme where a resting card is allowed a shadow. */
+  --ds-elev-1: 0 1px 3px rgba(16, 24, 40, 0.1);
+  --ds-elev-2:
+    0 4px 12px -2px rgba(16, 24, 40, 0.12), 0 1px 3px rgba(16, 24, 40, 0.08);
+  --ds-elev-3:
+    0 16px 40px -8px rgba(16, 24, 40, 0.18), 0 2px 8px -2px rgba(16, 24, 40, 0.1);
 }
 
 /* ==========================================================================

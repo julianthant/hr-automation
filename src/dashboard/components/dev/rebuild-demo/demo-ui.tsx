@@ -37,6 +37,9 @@ export {
   dsIcon,
 } from "./ds/tokens";
 
+export { useDemoTheme, DEMO_THEME_ATTR, DEMO_THEME_LABEL } from "./ds/theme";
+export type { DemoTheme } from "./ds/theme";
+
 export {
   Button,
   IconButton,

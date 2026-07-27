@@ -16,11 +16,16 @@ import { Button, dsBorder, dsIcon, dsRadius, dsSurface, dsText } from "./demo-ui
  * workflows use it, and a jump straight to a live example in the demo.
  */
 
+/**
+ * Three row types, one treatment. These chips used to be three hues (info /
+ * violet / teal) for three CATEGORIES — and a category is exactly what a hue
+ * must not be spent on here, because the same screen uses hue for status. The
+ * chip already carries the type's name; weight is all the separation it needs.
+ */
 const TYPE_TONE: Record<RowVariantSpec["rowType"], string> = {
-  "Run Row": "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
-  "Group Row":
-    "border-[color:var(--ds-status-parked-border)] bg-[var(--ds-status-parked-bg)] text-[color:var(--ds-status-parked-fg)]",
-  "Member Row": "border-log-teal/40 bg-log-teal/10 text-log-teal",
+  "Run Row": "border-[color:var(--ds-border-loud)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg)]",
+  "Group Row": "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-secondary)]",
+  "Member Row": "border-[color:var(--ds-border-subtle)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)]",
 };
 
 /** one specimen card — every section builds the same object */

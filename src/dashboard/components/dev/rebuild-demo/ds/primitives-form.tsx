@@ -134,7 +134,7 @@ export function Field({
 
 const controlShell = cn(
   "w-full min-w-0 border bg-[var(--ds-surface-2)]",
-  "border-[color:var(--ds-border-strong)] text-[color:var(--ds-fg)]",
+  "border-[color:var(--ds-control-border)] text-[color:var(--ds-fg)]",
   "placeholder:text-[color:var(--ds-fg-faint)]",
   dsRadius.md,
   dsFocus,
@@ -232,7 +232,7 @@ export function Checkbox({
         {...props}
         className={cn(
           "mt-px inline-flex size-4 shrink-0 cursor-pointer items-center justify-center border",
-          "border-[color:var(--ds-border-strong)] bg-[var(--ds-surface-2)]",
+          "border-[color:var(--ds-control-border)] bg-[var(--ds-surface-2)]",
           "data-[state=checked]:border-transparent data-[state=checked]:bg-[var(--ds-accent)]",
           "data-[state=indeterminate]:border-transparent data-[state=indeterminate]:bg-[var(--ds-accent)]",
           "disabled:cursor-not-allowed disabled:opacity-50",
@@ -300,7 +300,7 @@ export function RadioGroup<T extends string>({
             onChange={() => onValueChange(option.value)}
             className={cn(
               "mt-px size-4 shrink-0 cursor-pointer appearance-none rounded-full border",
-              "border-[color:var(--ds-border-strong)] bg-[var(--ds-surface-2)]",
+              "border-[color:var(--ds-control-border)] bg-[var(--ds-surface-2)]",
               "checked:border-[length:var(--ds-border-w-emphasis)] checked:border-[color:var(--ds-accent)]",
               "checked:bg-[var(--ds-surface-page)]",
               dsFocus,
@@ -354,7 +354,7 @@ export function Switch({
           "relative inline-flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full border",
           checked
             ? "border-transparent bg-[var(--ds-accent)]"
-            : "border-[color:var(--ds-border-strong)] bg-[var(--ds-surface-2)]",
+            : "border-[color:var(--ds-control-border)] bg-[var(--ds-surface-2)]",
           "disabled:cursor-not-allowed disabled:opacity-50",
           dsFocus,
           dsMotion.fast,
@@ -389,7 +389,7 @@ export const SearchInput = forwardRef<
     <span
       className={cn(
         "flex min-w-0 items-center gap-[var(--ds-space-snug)] border bg-[var(--ds-surface-2)]",
-        "h-[var(--ds-h-md)] border-[color:var(--ds-border-strong)] px-[var(--ds-space-base)]",
+        "h-[var(--ds-h-md)] border-[color:var(--ds-control-border)] px-[var(--ds-space-base)]",
         dsRadius.md,
         dsFocusWithin,
         className,

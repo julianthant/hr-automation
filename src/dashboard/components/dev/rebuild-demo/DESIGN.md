@@ -78,6 +78,39 @@ Four steps. If you want a fifth, the surface is saying too much.
 | `dsText.caps` | 10px upper | group headers, column heads — never sentences |
 | `dsText.nums` | — | **every** id, count, duration, rate, amount |
 
+### Colour — one accent, four semantic hues, and nothing else
+
+The live palette is capped: **one accent** plus **info / success / warning /
+danger**. There is no categorical hue. `--log-cyan|teal|violet|slate` are
+retired — the first three resolve to steps on a neutral ink ramp and
+`--log-violet` resolves to the warning amber, so a log stream that used to
+paint four categorical hues on top of four status hues now paints one.
+Differentiate a category by **icon, label, type weight or a single subtle
+tint** — never by giving it a hue.
+
+**The accent is not automatically the action.** `--ds-accent` is the primary
+button's fill and `--ds-accent-mark` is the identity note. On Paper Ink they are
+the same indigo. On Graphite Warm they are NOT: its accent is amber, the same
+family as `warning`, so filling every primary button with it would make the
+primary action shout at exactly the volume reserved for `Waiting on you` — a
+rule-1 violation. There, the primary action is the highest-contrast neutral fill
+and the amber survives on marks.
+
+### Themes — a togglable pair
+
+Two compositions of one product, selected by a `data-demo-theme` attribute:
+**`dark` — Graphite Warm** (warm near-black, depth from surface + hairline) and
+**`light` — Paper Ink** (tinted page, white cards, depth from a shadow). Each is
+authored as its own block in `ds/tokens.css`; neither is a lightening of the
+other, and four of the five hues are re-picked between them.
+
+`useDemoTheme()` (exported from `demo-ui`) owns the selection, persists it, and
+stamps the attribute on **`<html>`, `<body>` and the demo's root container**.
+All three matter: the shipped dashboard hardcodes `class="dark"` on `<html>`
+*and* `<body>`, and a `.dark` ancestor re-scopes every token — so the theme
+selectors are written to outrank it on the element that carries it. Every
+overlay portals to `<body>`, which is why the body stamp is not optional.
+
 ### Space — 8px rhythm
 
 `hair 2 · tight 4 · snug 6 · base 8 · cozy 12 · loose 16 · section 24 · page 32`
@@ -112,20 +145,30 @@ icon and label — so colour is never doing the work alone.
 |---|---|---|---|---|
 | **Waiting on you** | amber `--warning` | **solid fill**, dark ink, semibold, `· age` suffix | `UserRoundSearch` | **1 — loudest** |
 | **Failed** | red `--destructive` | **solid fill**, dark ink, semibold | `TriangleAlert` | **2 — loudest** |
-| **Write parked** | violet `--log-violet` | tint + **dashed** hairline (nothing else dashes) | `PauseCircle` | 3 |
+| **Write parked** | amber, dashed | tint + **dashed** hairline (nothing else dashes) | `PauseCircle` | 3 |
 | **Done with warnings** | amber, faint tint | amber icon, **muted grey label** — FYI, not a demand | `CircleAlert` | 4 |
-| **Running** | blue `--info` | tint + **the only spinning icon** | `Loader2` | 5 |
-| **Queued** | slate `--log-slate` | **outline only, no fill** — nothing has happened yet | `Clock` | 6 |
+| **Running** | **none — neutral** | tint + **the only spinning icon** | `Loader2` | 5 |
+| **Queued** | neutral | **outline only, no fill** — nothing has happened yet | `Clock` | 6 |
 | **Cancelled** | neutral muted | ghost + **struck-through label** | `Ban` | 7 |
 | **Verified done** | green `--success` | **no chip at all** — green check, muted label | `CheckCircle2` | 8 — quietest |
 
-Two decisions worth knowing:
+Three decisions worth knowing:
 
-- **Waiting and Done-with-warnings share amber on purpose.** Amber means "a
-  human is involved". Solid = act now; faint tint = look when you can. The fill
-  weight, not the hue, is the priority signal.
+- **Waiting, Write parked and Done-with-warnings all share amber on purpose.**
+  Amber means "a human is involved". Solid fill = act now; dashed = a write is
+  in doubt; faint tint = look when you can. The fill weight, not the hue, is
+  the priority signal.
+- **Running has no hue.** It is the most common status on screen, so a hue
+  spent there is a hue spent everywhere. Its spinner is the only moving icon in
+  the product, which is a stronger signal than a colour ever was.
 - **Cancelled is neutral, not amber and not red.** A deliberate stop is neither
   a warning nor a failure; the strikethrough carries it.
+
+Every status carries two colour tokens, and they are not interchangeable:
+`--ds-status-<s>-fg` is what it is rendered as **text** (held to 4.5:1 on every
+surface), `--ds-status-<s>-mark` is the raw swatch for the **dot, rail and bar**.
+On the light theme they differ — the swatch that reads as a 6px dot fails as
+11px body text.
 
 `StatusDot` shapes by tier: filled **disc** (solid) · **ring** (dashed/tinted/
 outline) · hollow ring (ghost). Always pair a bare dot with the label somewhere
@@ -243,7 +286,10 @@ This demo is asserted through the accessibility tree, so a missing label is a
 - ❌ Write a key-frame animation or a bare `animation` property anywhere under
   `src/dashboard/**` — guard-enforced, and motion belongs in the tokens.
 - ❌ Use an arbitrary `z-[…]`; use `dsLayer`.
-- ❌ Put load-bearing information in a tooltip only.
+- ❌ Put load-bearing information in a tooltip only. If it has to be reachable,
+  it goes in the UI or in a **`Popover`** (click-to-open, keyboard- and
+  touch-reachable) — never in a hover-only surface.
+- ❌ Introduce a fifth hue, or give a *category* a colour of its own.
 - ❌ Show a determinate progress bar for something whose denominator you do not
   know — use the indeterminate form.
 - ❌ Fork a primitive to add a variant. Add the variant to the primitive.
@@ -258,11 +304,12 @@ This demo is asserted through the accessibility tree, so a missing label is a
 |---|---|
 | `ds/tokens.css` | every value in the system — the only place a literal may live |
 | `ds/tokens.ts` | the class names builders type (`dsText`, `dsLayer`, `dsFocus`, …) |
+| `ds/theme.ts` | `useDemoTheme()` — the dark/light pair and where it is stamped |
 | `ds/primitives-core.tsx` | Button, IconButton, Badge, CountBadge, Chip, Kbd, Spinner, Skeleton, Separator |
 | `ds/primitives-status.tsx` | the eight statuses + StatusPill / StatusDot / StatusIcon |
 | `ds/primitives-layout.tsx` | Panel, Card, Banner, **Refusal**, **MetaLine**, **BulletList**, EmptyState, Tabs, Well, FloatingSurface |
 | `ds/primitives-form.tsx` | Field, Input, Textarea, Select, Checkbox, RadioGroup, Switch, SearchInput |
-| `ds/primitives-overlay.tsx` | Dialog, Drawer, Tooltip, Toast |
+| `ds/primitives-overlay.tsx` | Dialog, Drawer, **Popover**, Tooltip, Toast |
 | `ds/primitives-data.tsx` | Table, ProgressBar, TimelineSteps, KeyValueList |
 | `demo-ui.tsx` | **the barrel — import from here** |
 | `DemoUiKit.tsx` | the specimen page: every primitive, every state |

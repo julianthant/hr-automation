@@ -124,7 +124,7 @@ function KitHeader() {
     <header className="sticky top-0 z-10 flex h-[var(--ds-h-topbar)] shrink-0 items-center gap-[var(--ds-space-cozy)] border-b border-[color:var(--ds-border)] bg-[var(--ds-surface-1)] px-[var(--ds-space-cozy)]">
       <span className="flex items-center gap-[var(--ds-space-base)]">
         <span className="flex size-6 items-center justify-center rounded-[var(--ds-radius-md)] bg-[var(--ds-accent-quiet)]">
-          <ShieldCheck aria-hidden className="size-3.5 text-[color:var(--ds-fg)]" />
+          <ShieldCheck aria-hidden className="size-3.5 text-[color:var(--ds-accent-mark)]" />
         </span>
         <span className={cn(dsText.ui, "font-semibold")}>Rebuild demo — design system</span>
       </span>

@@ -64,7 +64,7 @@ const buttonVariants = cva(
           "hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]",
         ),
         danger: cn(
-          "bg-[var(--ds-danger)] text-[color:var(--ds-danger-fg)] border-transparent font-semibold",
+          "bg-[var(--ds-danger-solid)] text-[color:var(--ds-danger-fg)] border-transparent font-semibold",
           "hover:brightness-110",
         ),
         dangerGhost: cn(
