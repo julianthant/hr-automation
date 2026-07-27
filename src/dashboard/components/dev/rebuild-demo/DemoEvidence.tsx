@@ -102,13 +102,32 @@ const KIND_ORDER: DemoCaptureKind[] = ["error", "confirmation", "step", "form"];
  * fabrication this rebuild exists to stop. So the frame renders what the
  * backend actually serves about the capture and says plainly what it is.
  */
+/**
+ * A capture's own SHAPE, as a CSS aspect ratio.
+ *
+ * The backend serves the captured dimensions and nothing was using them — the
+ * frame took a hand-picked `min-h`, so a portrait document page and a landscape
+ * browser viewport were drawn as the same box. They are not the same shape, and
+ * the shape is the cheapest true thing a placeholder can say about the image it
+ * is standing in for.
+ *
+ * A capture with no served size falls back to the LETTER token, because every
+ * capture in this product is either a page or a screen and the page is what a
+ * placeholder with no dimensions is most likely to be standing in for. The
+ * fallback is a shape, never a claim: nothing here says the image is that size.
+ */
+export function captureAspect(capture: DemoCapture): string {
+  return capture.size ? `${capture.size.w} / ${capture.size.h}` : "var(--ds-aspect-page)";
+}
+
 function CaptureFrame({ capture, className }: { capture: DemoCapture; className?: string }) {
   return (
     <div
       role="img"
-      aria-label={`${capture.label} — ${capture.failure ? "failure capture" : `${capture.kind} capture`}${capture.screen ? ` of ${capture.screen}` : ""}. Image bytes are not part of the demo corpus.`}
+      aria-label={`${capture.label} — ${capture.failure ? "failure capture" : `${capture.kind} capture`}${capture.screen ? ` of ${capture.screen}` : ""}${capture.size ? `, ${capture.size.w} × ${capture.size.h}` : ""}. Image bytes are not part of the demo corpus.`}
+      style={{ aspectRatio: captureAspect(capture) }}
       className={cn(
-        "flex flex-col items-center justify-center gap-[var(--ds-space-base)] border p-[var(--ds-space-loose)]",
+        "mx-auto flex max-h-full w-full min-h-0 flex-col items-center justify-center gap-[var(--ds-space-base)] border p-[var(--ds-space-loose)]",
         "rounded-[var(--ds-radius-lg)] bg-[var(--ds-surface-2)]",
         capture.failure
           ? "border-[length:var(--ds-border-w-rail)] border-[color:var(--ds-danger)]"
@@ -201,7 +220,7 @@ export function CaptureLightbox({
             </Banner>
           )}
 
-          <CaptureFrame capture={capture} className="min-h-[220px]" />
+          <CaptureFrame capture={capture} className="max-w-[min(100%,52ch)]" />
 
           <KeyValueList
             items={[
@@ -412,10 +431,16 @@ export function EvidenceSection({ row }: { row: DemoRow }) {
                   : "border-[color:var(--ds-border)] hover:border-[color:var(--ds-border-loud)] hover:bg-[var(--ds-surface-3)]",
               )}
             >
+              {/* The thumbnail is the capture's own SHAPE at a shared height —
+                  a portrait document page and a landscape browser viewport
+                  read as different things before either is opened, which is the
+                  one true thing a byte-less placeholder can offer. Fixed
+                  height, derived width, so the row still lands on one baseline. */}
               <span
                 aria-hidden
+                style={{ aspectRatio: captureAspect(c) }}
                 className={cn(
-                  "flex h-9 w-full items-center justify-center border bg-[var(--ds-surface-1)] rounded-[var(--ds-radius-sm)]",
+                  "flex h-[var(--ds-h-evidence-thumb)] shrink-0 items-center justify-center self-center border bg-[var(--ds-surface-1)] rounded-[var(--ds-radius-sm)]",
                   c.failure ? "border-[color:var(--ds-danger-border)]" : "border-[color:var(--ds-border-subtle)]",
                 )}
               >

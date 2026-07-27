@@ -354,6 +354,23 @@
      third the width of a queue fact, and a 148px track would leave one chip a
      line and half the card empty. */
   --ds-w-capacity-cell: 76px;
+  /* THE SHAPE OF A PAGE. US Letter is 612 × 792 pt — measured from the real
+     packet the OCR fixtures are built on (`data/documents/single-oath.pdf`),
+     and the same ratio the corpus's own 1275 × 1650 document capture carries.
+     Every placeholder that stands in for a document page used to be sized by a
+     hand-picked min-height (≈400 × 840, aspect 0.48), which is not the shape of
+     anything the operator has ever scanned: it made a portrait page read as a
+     letterbox and gave the review pane a picture of a document nobody would
+     recognise. As a RATIO it is correct at every size, so one value serves the
+     review pane, the evidence tiles and the lightbox. An evidence capture that
+     SERVES its own dimensions uses those instead — a 1600 × 1000 browser
+     viewport is not a page and must not be drawn as one. */
+  --ds-aspect-page: 612 / 792;
+  /* The height every evidence thumbnail is drawn at, so a row of them lands on
+     one baseline while each keeps its OWN width — a page and a viewport are
+     different shapes, and that difference is the tile's only cheap way to say
+     which of the two you are about to open. */
+  --ds-h-evidence-thumb: 44px;
 
   /* ---------------------------------------------------------------------
      RADIUS — derived from the product's --radius (8px) so the demo can
