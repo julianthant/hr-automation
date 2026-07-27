@@ -168,7 +168,7 @@ export function ReceiptView({ receipt, row }: { receipt: DemoRunReceipt; row: De
   const reads = receipt.actions.filter((a) => a.kind === "read" || a.kind === "local");
 
   return (
-    <div className="flex flex-col gap-[var(--ds-space-loose)] px-3 py-3">
+    <div className="flex flex-col gap-[var(--ds-space-loose)] p-[var(--ds-space-cozy)]">
       {/* the verdict, and the two things that qualify it */}
       <div
         className={cn(

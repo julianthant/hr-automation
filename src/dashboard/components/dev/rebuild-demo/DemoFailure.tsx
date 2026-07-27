@@ -132,7 +132,7 @@ export function FailureRecordBlock({
         : "text-[color:var(--ds-status-waiting-fg)]";
 
   return (
-    <div className="border-b border-[color:var(--ds-danger-border)] bg-[var(--ds-danger-quiet)] px-3 py-2">
+    <div className="border-b border-[color:var(--ds-danger-border)] bg-[var(--ds-danger-quiet)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]">
       <div className="flex flex-wrap items-center gap-[var(--ds-space-snug)]">
         <TriangleAlert aria-hidden className={cn(dsIcon.md, "shrink-0 text-[color:var(--ds-danger)]")} />
         <span className={cn(dsText.ui, "font-semibold text-[color:var(--ds-danger)]")}>{failure.summary}</span>

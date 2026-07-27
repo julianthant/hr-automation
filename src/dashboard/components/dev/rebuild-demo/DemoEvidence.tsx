@@ -273,7 +273,7 @@ export function EvidenceBar({ row }: { row: DemoRow }) {
   };
 
   return (
-    <div className="flex items-center gap-[var(--ds-space-base)] border-b border-border/60 px-3 py-1.5">
+    <div className="flex items-center gap-[var(--ds-space-base)] border-b border-[color:var(--ds-border-subtle)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]">
       <div className="flex min-w-0 flex-1 items-center gap-[var(--ds-space-snug)] overflow-x-auto">
         {present.length > 1 && (
           <>
