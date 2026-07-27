@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useLayoutEffect, useState } from "react";
 
 /**
  * DEV-ONLY — the demo's theme pair.
@@ -68,7 +68,10 @@ export function useDemoTheme(): {
 } {
   const [theme, setThemeState] = useState<DemoTheme>(readStoredTheme);
 
-  useEffect(() => {
+  /* A LAYOUT effect, not a plain one: React commits it before the browser
+     paints, so a reload with `light` stored never flashes the dark palette for
+     a frame on the way in. */
+  useLayoutEffect(() => {
     const html = document.documentElement;
     const { body } = document;
     /* A palette change is a CUT. Without this, the elements carrying
