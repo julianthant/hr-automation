@@ -118,7 +118,7 @@ export function DemoExplorerPage({ onBack, onOpenSettings }: { onBack: () => voi
         {/* ---- the graph, with the run over it ---- */}
         <Panel className="min-h-0">
           <PanelHeader
-            title={`${graph.label} v${graph.version}`}
+            title={`${graph.label} ${fmtVersionTag({ major: graph.version, minor: graph.minorVersion })}`}
             subtitle={graph.summary}
             meta={`${graph.nodes.length} nodes · ${graph.edges.length} edges`}
           />
@@ -143,7 +143,7 @@ export function DemoExplorerPage({ onBack, onOpenSettings }: { onBack: () => voi
                 </div>
 
                 {run.workflowVersion !== graph.version && (
-                  <Banner tone="warning" title={`This run ran under ${fmtVersionTag({ major: run.workflowVersion, minor: run.workflowMinorVersion })}; the graph is v${graph.version}.0`} className="mb-[var(--ds-space-cozy)]">
+                  <Banner tone="warning" title={`This run ran under ${fmtVersionTag({ major: run.workflowVersion, minor: run.workflowMinorVersion })}; the graph is ${fmtVersionTag({ major: graph.version, minor: graph.minorVersion })}`} className="mb-[var(--ds-space-cozy)]">
                     Nodes that do not line up are the version difference, not a missing step. A run is only ever comparable with the
                     descriptor it executed — which is exactly why a version bump moves prior runs into the archive.
                   </Banner>

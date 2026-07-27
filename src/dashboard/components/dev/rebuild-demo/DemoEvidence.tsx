@@ -94,7 +94,7 @@ export function downloadDemoFile(filename: string, body: string, type: string): 
 // Evidence bar + capture lightbox (D19b)
 // ---------------------------------------------------------------------------
 
-const KIND_ORDER: DemoCaptureKind[] = ["error", "step", "form"];
+const KIND_ORDER: DemoCaptureKind[] = ["error", "confirmation", "step", "form"];
 
 /**
  * The capture frame. The demo corpus carries no image BYTES, and a drawn
@@ -140,13 +140,19 @@ export function CaptureLightbox({
   index,
   onIndex,
   onClose,
-  row,
+  subject,
 }: {
   captures: DemoCapture[];
   index: number;
   onIndex: (i: number) => void;
   onClose: () => void;
-  row: DemoRow;
+  /**
+   * Whose captures these are. Deliberately NOT a `DemoRow`: an archived run is
+   * a stored snapshot, not a projected row, and it needs exactly this viewer.
+   * Narrowing the prop to the two facts the surface actually prints is what
+   * lets the archive reuse it instead of growing a second one.
+   */
+  subject: { label: string; trace: string };
 }) {
   const capture = captures[index];
   const step = useCallback(
@@ -186,7 +192,7 @@ export function CaptureLightbox({
       <DialogContent
         size="xl"
         title={`${capture.label} — capture ${index + 1} of ${captures.length}`}
-        description={`${capture.failure ? "Failure capture" : `${capture.kind} capture`} · ${row.displayName ?? row.title} · ${row.trace}`}
+        description={`${capture.failure ? "Failure capture" : `${capture.kind} capture`} · ${subject.label} · ${subject.trace}`}
       >
         <DialogBody className="flex flex-col gap-[var(--ds-space-cozy)]">
           {capture.failure && (
@@ -209,7 +215,7 @@ export function CaptureLightbox({
               ...(capture.urlRedacted ? [{ key: "URL (redacted)", value: capture.urlRedacted }] : []),
               ...(capture.size ? [{ key: "Viewport", value: `${capture.size.w} × ${capture.size.h}` }] : []),
               ...(capture.ref ? [{ key: "Content ref", value: capture.ref }] : []),
-              { key: "Run", value: row.trace },
+              { key: "Run", value: subject.trace },
             ]}
           />
           {capture.note && (
@@ -435,7 +441,13 @@ export function EvidenceSection({ row }: { row: DemoRow }) {
       )}
 
       {open !== null && (
-        <CaptureLightbox captures={captures} index={open} onIndex={setOpen} onClose={() => setOpen(null)} row={row} />
+        <CaptureLightbox
+          captures={captures}
+          index={open}
+          onIndex={setOpen}
+          onClose={() => setOpen(null)}
+          subject={{ label: row.displayName ?? row.title, trace: row.trace }}
+        />
       )}
     </section>
   );
