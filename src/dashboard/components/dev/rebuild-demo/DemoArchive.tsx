@@ -87,7 +87,7 @@ import {
   type RelaunchResult,
 } from "./demo-archive-wire";
 import { CaptureLightbox, downloadDemoFile } from "./DemoEvidence";
-import { DEMO_WORKFLOWS, workflowVersionTag } from "./demo-wire";
+import { DEMO_WORKFLOWS, fmtClock, workflowVersionTag } from "./demo-wire";
 import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
 import { DemoVersionBumpDialog, type BumpTarget } from "./DemoVersionBump";
 
@@ -134,7 +134,12 @@ export function DemoArchivePage({
   const [view, setView] = useState<ArchiveView>("runs");
   const [query, setQuery] = useState<ArchiveQuery>(EMPTY_ARCHIVE_QUERY);
   const [selectedId, setSelectedId] = useState(DEMO_ARCHIVE[0]?.runId ?? "");
-  const [relaunch, setRelaunch] = useState<RelaunchResult | null>(null);
+  /**
+   * The relaunch result is keyed to the run it came from. Clearing it on a list
+   * CLICK was not enough: search re-selects a run without one, so a result from
+   * the previous run sat above a different run's detail claiming to be about it.
+   */
+  const [relaunch, setRelaunch] = useState<{ runId: string; result: RelaunchResult } | null>(null);
   const [confirming, setConfirming] = useState<ArchivedRunWire | null>(null);
   const [bump, setBump] = useState<BumpTarget | null>(null);
 
@@ -319,7 +324,6 @@ export function DemoArchivePage({
                               aria-current={active ? "true" : undefined}
                               onClick={() => {
                                 setSelectedId(run.runId);
-                                setRelaunch(null);
                               }}
                               className={cn(
                                 "flex w-full min-w-0 items-center gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)] text-left",
@@ -370,7 +374,7 @@ export function DemoArchivePage({
           {selected ? (
             <ArchivedRunDetail
               run={selected}
-              relaunch={relaunch}
+              relaunch={relaunch?.runId === selected.runId ? relaunch.result : null}
               onRelaunch={() => setConfirming(selected)}
               onDismiss={() => setRelaunch(null)}
               onOpenWorkflow={onOpenWorkflow}
@@ -393,7 +397,7 @@ export function DemoArchivePage({
         onCancel={() => setConfirming(null)}
         onConfirm={(run) => {
           setConfirming(null);
-          setRelaunch(relaunchFromArchive(run));
+          setRelaunch({ runId: run.runId, result: relaunchFromArchive(run) });
         }}
       />
 
@@ -497,6 +501,38 @@ function ArchivedRunDetail({
         }
       />
 
+      {/* The command that produces this is in the panel FOOTER, which is
+          visible from every tab — so its answer is mounted above the tab set
+          rather than inside one of them. It landed in the Summary panel first,
+          and pressing Relaunch from the Evidence tab showed nothing at all. */}
+      {relaunch && <div className="px-[var(--ds-space-cozy)] pt-[var(--ds-space-cozy)]">
+        
+          <Banner
+            tone="success"
+            title={relaunch.headline}
+            action={
+              <span className="flex items-center gap-[var(--ds-space-tight)]">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon={<ArrowUpRight aria-hidden className={dsIcon.md} />}
+                  onClick={() => onOpenWorkflow(relaunch.created.panel)}
+                >
+                  Open {relaunch.created.panel}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={onDismiss}>
+                  Dismiss
+                </Button>
+              </span>
+            }
+          >
+            <span className="flex flex-col gap-[var(--ds-space-tight)]">
+              <span>{relaunch.detail}</span>
+              <MetaLine items={[`new run ${relaunch.created.traceId}`, `lands in ${relaunch.created.panel}`]} />
+            </span>
+          </Banner>
+      </div>}
+
       <Tabs value={tab} onValueChange={(next) => setTab(next as ArchiveTab)} className="min-h-0 flex-1">
         <TabList label="Archived run detail">
           <Tab value="summary">Summary</Tab>
@@ -517,39 +553,10 @@ function ArchivedRunDetail({
         </TabList>
 
         <TabPanel value="summary" className="flex flex-col gap-[var(--ds-space-cozy)] p-[var(--ds-space-cozy)]">
-          {relaunch && (
-            <Banner
-              tone="success"
-              title={relaunch.headline}
-              action={
-                <span className="flex items-center gap-[var(--ds-space-tight)]">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    icon={<ArrowUpRight aria-hidden className={dsIcon.md} />}
-                    onClick={() => onOpenWorkflow(relaunch.created.panel)}
-                  >
-                    Open {relaunch.created.panel}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={onDismiss}>
-                    Dismiss
-                  </Button>
-                </span>
-              }
-            >
-              <span className="flex flex-col gap-[var(--ds-space-tight)]">
-                <span>{relaunch.detail}</span>
-                <MetaLine items={[`new run ${relaunch.created.traceId}`, `lands in ${relaunch.created.panel}`]} />
-              </span>
-            </Banner>
-          )}
-
           {/* Identity. Without dryRun / instance / priority an archived
               rehearsal is indistinguishable from an archived filing. */}
           <ChipRow>
-            <Chip label="ran on">
-              {run.workflowLabel} {archivedVersionTag(run)}
-            </Chip>
+            <Chip label="version">{archivedVersionTag(run)}</Chip>
             <Chip label="app">{run.appVersion}</Chip>
             <Chip label="trace">{run.traceId}</Chip>
             <Chip label="by">{run.requestedBy}</Chip>
@@ -567,11 +574,12 @@ function ArchivedRunDetail({
                 test instance
               </Chip>
             )}
-            {olderMajor && <Chip tone="warning">current is {workflowVersionTag(workflow)} — shape moved</Chip>}
+            {olderMajor && <Chip tone="warning">shape moved · {workflowVersionTag(workflow)}</Chip>}
           </ChipRow>
 
           <MetaLine
             items={[
+              run.workflowLabel,
               `code ${run.workflowCode}`,
               `enqueued ${run.enqueuedAt}`,
               `ended ${run.endedAt}`,
@@ -953,7 +961,7 @@ function EvidenceTile({ item, onOpen }: { item: ArchivedEvidenceWire; onOpen: ()
         <Badge tone={item.kind === "error" ? "danger" : item.kind === "confirmation" ? "success" : "neutral"}>{item.kind}</Badge>
         <span className="flex min-w-0 flex-1 flex-col">
           <span className={cn(dsText.ui, "truncate text-[color:var(--ds-fg)]")}>{item.label}</span>
-          <MetaLine items={[item.step, item.system?.toUpperCase(), item.capturedAt, item.ref]} />
+          <MetaLine items={[item.step, item.system?.toUpperCase(), item.capturedAt ? fmtClock(item.capturedAt) : undefined, item.ref]} />
         </span>
         {/* Whether the BYTES are still there. A content ref with no retention
             state is a link the operator cannot tell from a dead one. */}
