@@ -263,6 +263,13 @@
      keeps its height. `spine` is the collapsed width: a label and a chevron,
      never zero, so the operator can always see where it went. */
   --ds-w-context-rail: 348px;
+  /* The rail while the Data surface is being EDITED in it. 348px reads a
+     ledger fine but is tight to type a date into once the row carries a label,
+     a value, its badges and its system; 520 puts the clock back on the line and
+     still leaves the centre column enough to keep the stream readable at 1280.
+     It is a task width, not a preference — the rail returns to 348 the moment
+     the operator narrows it. */
+  --ds-w-context-rail-wide: 520px;
   --ds-w-context-spine: 34px;
   /* Popover widths. A popover explains ONE thing; if it needs to be wider than
      `lg` it is a Dialog or a panel section, not a popover. */

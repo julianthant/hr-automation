@@ -7,9 +7,10 @@ import {
   Database,
   History,
   Lock,
+  Maximize2,
+  Minimize2,
   PanelRightClose,
   PanelRightOpen,
-  Pencil,
   Play,
   RotateCcw,
   Save,
@@ -28,6 +29,7 @@ import {
   DialogFooter,
   Field,
   IconButton,
+  MetaLine,
   SectionLabel,
   Separator,
   Textarea,
@@ -38,10 +40,17 @@ import {
   dsText,
   useToasts,
 } from "./demo-ui";
-import { EvidenceSection } from "./DemoEvidence";
+import { EvidenceSection, SystemChip } from "./DemoEvidence";
 import { RunIdentityStrip, RunSelector } from "./DemoRunIdentity";
 import { actionsAt, fmtClock, type ActionDescriptorWire } from "./demo-wire";
-import { checkpointAge, checkpointFor, editPolicyFor, editPolicySummary, freshnessOf } from "./demo-flows-wire";
+import {
+  checkpointAge,
+  checkpointFor,
+  editPolicyFor,
+  editPolicySummary,
+  freshnessOf,
+  type DemoEditLock,
+} from "./demo-flows-wire";
 import type { DemoActionHandler } from "./DemoActions";
 import type { DemoCommandResult } from "./demo-commands";
 import { DEMO_ROWS, linkedGroupSummary, type DemoDataPoint, type DemoRow } from "./demo-data";
@@ -72,16 +81,29 @@ import { DEMO_ROWS, linkedGroupSummary, type DemoDataPoint, type DemoRow } from 
  * touched at the same time, and two mutually-exclusive tabs made that
  * impossible.
  *
- * WHAT DOES NOT MOVE. The gate banner and the failure record stay in the centre
+ * WHAT DOES NOT MOVE. The decision and the failure record stay in the centre
  * column, always, never behind an interaction: `Waiting on you` and `Failed`
  * are the only two things allowed to shout (DESIGN.md rule 1), and a decision
  * parked in a collapsible rail is a decision that never gets made.
  *
  * The Data surface's CONTRACT is unchanged (D19c): reads are editable, writes
  * are shown and never editable, staged is staged, unconfirmed is unconfirmed,
- * and nothing gains success styling it has not earned. What changed is where
- * it is read and where it is edited — the ledger reads here, the edit happens
- * in a focused Dialog, because editing is a task and reference is not.
+ * and nothing gains success styling it has not earned.
+ *
+ * ORDER, and where the editing happens (2026-07-27, operator direction).
+ * EVIDENCE COMES FIRST — it is what an operator reaches for while reading a
+ * run, and it was sitting underneath the longest section on the rail. And DATA
+ * IS ONE SURFACE again: the `Edit & re-run` Dialog is gone, reads are corrected
+ * in place in the ledger itself, and the two outcomes — carry THIS run on with
+ * these values, or start a NEW run from them — are that ledger's own footer. A
+ * dialog turned "correct a value" into "open a thing, correct a value, close
+ * the thing", which is the same mutual exclusion that moving Data off the tab
+ * set existed to end. 348px is tight for editing, so the surface WIDENS itself
+ * (`--ds-w-context-rail-wide`) instead of hiding in a modal.
+ *
+ * The ledger's row is deliberately the shape the old Data TAB had — direction
+ * icon, quiet label, value in tabular mono, badges, system, clock — narrowed
+ * rather than redrawn, because the operator recognises that row.
  */
 
 // ---------------------------------------------------------------------------
@@ -126,11 +148,27 @@ function useThreeColumnRegion(): boolean {
   return wide;
 }
 
-export function useContextRail(): { open: boolean; collapsed: boolean; setOpen: (open: boolean) => void } {
+export interface ContextRailState {
+  open: boolean;
+  collapsed: boolean;
+  setOpen: (open: boolean) => void;
+  /**
+   * The Data surface has taken the rail over to be edited in. Deliberately NOT
+   * persisted: open/closed is a preference, "I am editing right now" is a task,
+   * and a rail that boots 520px wide because of something the operator did
+   * yesterday would be answering a question nobody asked.
+   */
+  dataExpanded: boolean;
+  setDataExpanded: (expanded: boolean) => void;
+}
+
+export function useContextRail(): ContextRailState {
   const [open, setOpenState] = useState(readStoredRailOpen);
+  const [dataExpanded, setDataExpanded] = useState(false);
   const wide = useThreeColumnRegion();
   const setOpen = useCallback((next: boolean) => {
     setOpenState(next);
+    if (!next) setDataExpanded(false);
     try {
       window.localStorage.setItem(RAIL_STORAGE_KEY, next ? "open" : "closed");
     } catch {
@@ -138,80 +176,12 @@ export function useContextRail(): { open: boolean; collapsed: boolean; setOpen: 
       // reason to refuse the operator this one.
     }
   }, []);
-  return { open, collapsed: !open && wide, setOpen };
+  return { open, collapsed: !open && wide, setOpen, dataExpanded, setDataExpanded };
 }
 
 // ---------------------------------------------------------------------------
-// the Data ledger — read-only here, editable in the dialog
+// The Data surface — ONE surface: the ledger AND its editing, together
 // ---------------------------------------------------------------------------
-
-/**
- * One value the run touched. The rail is ~316px of usable width, so the field
- * and its value stack rather than sharing a line — a truncated `emp…` beside a
- * truncated `Maria L…` is two half-facts, which is worse than one whole one.
- */
-function LedgerRow({ point, base, refreshed }: { point: DemoDataPoint; base: string; refreshed?: string }) {
-  return (
-    <div className="flex flex-col gap-[var(--ds-space-hair)] py-[var(--ds-space-hair)]">
-      <div className="flex items-baseline gap-[var(--ds-space-tight)]">
-        <span className={cn(dsText.meta, "min-w-0 flex-1 truncate text-[color:var(--ds-fg-muted)]")}>{point.field}</span>
-        <span className={cn(dsText.micro, dsText.nums, "shrink-0 text-[color:var(--ds-fg-faint)]")}>
-          {point.system.toUpperCase()} · {point.ts}
-        </span>
-      </div>
-      <div className="flex flex-wrap items-center gap-[var(--ds-space-tight)]">
-        <span
-          title={base}
-          className={cn(dsText.body, dsText.nums, "min-w-0 flex-1 truncate text-[color:var(--ds-fg)]")}
-        >
-          {base}
-        </span>
-        {refreshed !== undefined && (
-          <Badge tone="info" title={`This value changed on the server: ${point.value} → ${refreshed}`}>
-            refreshed
-          </Badge>
-        )}
-        {point.staged && <Badge tone="warning">staged</Badge>}
-        {point.unconfirmed && (
-          <Badge tone="warning" title="Sent, but never read back — the outcome is unknown until you resolve the park">
-            unconfirmed
-          </Badge>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** read / write are LANES, labelled once, so no row has to spend width on an icon */
-function LedgerLane({
-  dir,
-  points,
-  baseValue,
-  refreshedValue,
-}: {
-  dir: "read" | "write";
-  points: DemoDataPoint[];
-  baseValue: (p: DemoDataPoint) => string;
-  refreshedValue: (p: DemoDataPoint) => string | undefined;
-}) {
-  if (points.length === 0) return null;
-  const read = dir === "read";
-  const Icon = read ? ArrowDownToLine : ArrowUpFromLine;
-  return (
-    <div className="flex flex-col">
-      <div className="flex items-center gap-[var(--ds-space-tight)] pt-[var(--ds-space-tight)]">
-        <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
-        <span className={cn(dsText.caps, "text-[color:var(--ds-fg-muted)]")}>{read ? "Read" : "Written"}</span>
-        <span className={cn(dsText.micro, dsText.nums, "text-[color:var(--ds-fg-faint)]")}>{points.length}</span>
-      </div>
-      <div className="flex flex-col border-l border-[color:var(--ds-border-subtle)] pl-[var(--ds-space-base)]">
-        {points.map((p, i) => (
-          <LedgerRow key={`${p.field}-${i}`} point={p} base={baseValue(p)} refreshed={refreshedValue(p)} />
-        ))}
-      </div>
-    </div>
-  );
-}
 
 /**
  * What the PARENT will do with this run's answer. A delegated helper run seen
@@ -235,13 +205,173 @@ function FeedsIntoLine({ row }: { row: DemoRow }) {
   );
 }
 
-function DataSection({ row, onAction, tick }: { row: DemoRow; onAction: DemoActionHandler; tick: number }) {
-  const [editOpen, setEditOpen] = useState(false);
-  useEffect(() => setEditOpen(false), [row.id]);
+/**
+ * ONE value the run touched — the row from the old Data TAB, narrowed.
+ *
+ * Same shape and same reading order as the tab had, because that is the row the
+ * operator knows: DIRECTION as an icon, the field label quiet, the value in
+ * tabular mono and doing the work, then what is true about it (refreshed /
+ * staged / unconfirmed / why it is locked), then which system and when.
+ *
+ * The narrowing is honest rather than decorative. The rail is ~316px of usable
+ * width, so the clock folds away below a container width and comes back the
+ * moment the surface is expanded — a timestamp is the least load-bearing thing
+ * on the line, and dropping it beats truncating the value. Nothing else is
+ * removed; the label gives up width first, the value last.
+ */
+function LedgerRow({
+  point,
+  base,
+  value,
+  policy,
+  dirty,
+  refreshed,
+  onEdit,
+}: {
+  point: DemoDataPoint;
+  /** what the server holds for this field at the generation we are on */
+  base: string;
+  value: string;
+  policy: DemoEditLock;
+  dirty: boolean;
+  refreshed?: string;
+  onEdit: (next: string) => void;
+}) {
+  const Icon = point.dir === "read" ? ArrowDownToLine : ArrowUpFromLine;
+  return (
+    <div className="flex items-center gap-[var(--ds-space-tight)] py-[var(--ds-space-hair)]">
+      <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+      <span
+        title={point.field}
+        className={cn(dsText.meta, "w-24 shrink-0 truncate text-[color:var(--ds-fg-muted)]", "@min-[26rem]:w-36")}
+      >
+        {point.field}
+      </span>
+      {dirty && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--ds-status-waiting-mark)]" />}
+      {policy.editable ? (
+        <input
+          aria-label={`${point.field} — edit this read value`}
+          value={value}
+          onChange={(e) => onEdit(e.target.value)}
+          className={cn(
+            "min-w-0 flex-1 border bg-transparent px-[var(--ds-space-tight)]",
+            "h-[var(--ds-h-sm)] rounded-[var(--ds-radius-md)]",
+            dsText.body,
+            dsText.nums,
+            dsFocus,
+            dsMotion.fast,
+            "text-[color:var(--ds-fg)]",
+            dirty
+              ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]"
+              : "border-transparent hover:border-[color:var(--ds-border)] focus:border-[color:var(--ds-border)]",
+          )}
+        />
+      ) : (
+        <span className="flex min-w-0 flex-1 items-center gap-[var(--ds-space-tight)]" title={policy.reason}>
+          <Lock aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-faint)]")} />
+          <span title={base} className={cn(dsText.body, dsText.nums, "min-w-0 flex-1 truncate text-[color:var(--ds-fg)]")}>
+            {base}
+          </span>
+          {/* The one-word WHY. It folds away in the narrow rail — the lock
+              icon, the direction arrow and the surface's own summary line all
+              still say it, and the sentence is on the row's title — because at
+              316px a two-badge row was truncating the VALUE, which is the one
+              thing on the line that cannot be recovered from anywhere else. */}
+          <Badge className="hidden shrink-0 @min-[26rem]:inline-flex">{policy.tag}</Badge>
+        </span>
+      )}
+      {refreshed !== undefined && (
+        <Badge tone="info" className="shrink-0" title={`This value changed on the server: ${point.value} → ${refreshed}`}>
+          refreshed
+        </Badge>
+      )}
+      {point.staged && (
+        <Badge tone="warning" className="shrink-0">
+          staged
+        </Badge>
+      )}
+      {point.unconfirmed && (
+        <Badge
+          tone="warning"
+          className="shrink-0"
+          title="Sent, but never read back — the outcome is unknown until you resolve the park"
+        >
+          unconfirmed
+        </Badge>
+      )}
+      <SystemChip system={point.system} className="mr-0 shrink-0" />
+      <span className={cn(dsText.micro, dsText.nums, "hidden shrink-0 text-[color:var(--ds-fg-faint)] @min-[26rem]:inline")}>
+        {point.ts}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The merged Data surface (D19c), living in the rail with its editing intact.
+ *
+ * Everything the `Edit & re-run` dialog used to do happens HERE now:
+ *
+ *  1. **Edit-unlock rules by run state.** `editPolicyFor` is still the one place
+ *     a field's editability is decided, and the REASON is always shown — a
+ *     greyed box with no explanation is how an operator learns to distrust a
+ *     screen.
+ *  2. **CAS on the checkpoint generation.** A save carries the generation the
+ *     surface was captured at. If the checkpoint moved the save is REFUSED and
+ *     the patch is kept and re-offered field by field against the fresh values.
+ *     A patch is never silently dropped and never merged blind.
+ *  3. **Freshness.** Reusing values older than the consuming node accepts takes
+ *     an explicit, audited override — or a re-read. That confirm is still a
+ *     dialog, because it is a question with a typed answer, not a surface.
+ *
+ * And it keeps the two outcomes APART, in words: the save arm either continues
+ * THIS run or just records a correction (the server decides which by sending
+ * one descriptor or the other), and beside it `Start a new run with these
+ * values` mints a separate run with its own trace and its own receipt.
+ */
+function DataSection({
+  row,
+  onAction,
+  tick,
+  expanded,
+  onExpandedChange,
+}: {
+  row: DemoRow;
+  onAction: DemoActionHandler;
+  tick: number;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+}) {
+  const { toast } = useToasts();
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [seededFrom, setSeededFrom] = useState<number | null>(null);
+  const [conflict, setConflict] = useState<DemoCommandResult | null>(null);
+  const [baseGeneration, setBaseGeneration] = useState<number | null>(null);
+  const [freshnessPending, setFreshnessPending] = useState<ActionDescriptorWire | null>(null);
+  const [overrideReason, setOverrideReason] = useState("");
+
+  useEffect(() => {
+    setEdits({});
+    setSeededFrom(null);
+    setConflict(null);
+    setBaseGeneration(null);
+    setFreshnessPending(null);
+    setOverrideReason("");
+  }, [row.id]);
 
   const cp = checkpointFor(row);
+  const held = baseGeneration ?? cp.heldGeneration;
   const fresh = freshnessOf(cp, tick);
   const dataActions = actionsAt(row.actions, "data");
+  /**
+   * The save arm is whichever one the server sent. `continue-with-data` on a
+   * run that still has work to release, `edit-checkpoint` on one that does not,
+   * and NEITHER on a parked run — where saving a checkpoint and releasing work
+   * on an unknown write is how somebody gets terminated twice (D20).
+   */
+  const saveAction = dataActions.find((a) => a.command === "continue-with-data" || a.command === "edit-checkpoint");
+  const rerunAction = dataActions.find((a) => a.command === "rerun-with-existing-data");
+  const continues = saveAction?.command === "continue-with-data";
 
   const reads = row.data.filter((d) => d.dir === "read");
   const writes = row.data.filter((d) => d.dir === "write");
@@ -249,32 +379,63 @@ function DataSection({ row, onAction, tick }: { row: DemoRow; onAction: DemoActi
   const unconfirmed = writes.filter((d) => d.unconfirmed).length;
   const steps = [...new Set(row.data.map((d) => d.step))];
 
-  const held = cp.heldGeneration;
   const baseValue = (point: DemoDataPoint) =>
     held >= cp.serverGeneration ? (cp.freshValues[point.field] ?? point.value) : point.value;
   const refreshedValue = (point: DemoDataPoint) =>
     held >= cp.serverGeneration ? cp.freshValues[point.field] : undefined;
 
+  const changed = reads.filter((d) => edits[d.field] !== undefined && edits[d.field] !== baseValue(d));
   // Why the values cannot be touched, in one sentence, so a locked ledger never
   // reads as a broken one. Writes are locked BY CONTRACT, so they never count.
-  const lock = reads.length > 0 ? editPolicyFor(row, reads[0]) : null;
   const locked = reads.length > 0 && reads.every((d) => !editPolicyFor(row, d).editable);
+  const lockReason = locked ? editPolicyFor(row, reads[0]) : null;
+
+  const submitSave = (generation: number) => {
+    if (!saveAction) return;
+    const payload: Record<string, string> = { expectedGeneration: String(generation) };
+    for (const d of changed) payload[d.field] = edits[d.field];
+    const result = onAction(row, { ...saveAction, payload });
+    if (!result) return;
+    if (result.state === "conflict") {
+      setConflict(result);
+      toast({
+        tone: "warning",
+        title: "Not saved — the checkpoint moved",
+        description: `Your ${changed.length} edit${changed.length === 1 ? "" : "s"} are still here and are being re-offered against the values the server now holds. Nothing was overwritten.`,
+      });
+      return;
+    }
+    setConflict(null);
+    toast({ tone: "success", title: result.headline, description: result.detail });
+  };
+
+  const submitRerun = (payload: Record<string, string>) => {
+    if (!rerunAction) return;
+    const result = onAction(row, { ...rerunAction, payload });
+    setFreshnessPending(null);
+    setOverrideReason("");
+    if (result?.state === "applied") toast({ tone: "info", title: result.headline, description: result.detail });
+  };
 
   return (
-    <section aria-label="Data" className="flex flex-col gap-[var(--ds-space-snug)]">
+    <section aria-label="Data" className="flex shrink-0 flex-col gap-[var(--ds-space-snug)]">
       <div className="flex items-center gap-[var(--ds-space-snug)]">
         <SectionLabel className="min-w-0 truncate">Data</SectionLabel>
-        {dataActions.length > 0 && (
-          <Button
-            size="sm"
-            variant="secondary"
-            className="ml-auto"
-            onClick={() => setEditOpen(true)}
-            icon={<Pencil aria-hidden className={dsIcon.sm} />}
-          >
-            Edit &amp; re-run
-          </Button>
-        )}
+        {/* The expand affordance, not a modal: 348px is tight for typing a date
+            into, so the surface takes the room it needs and gives it back. */}
+        <IconButton
+          size="sm"
+          className="ml-auto"
+          label={expanded ? "Narrow the data surface" : "Widen the data surface to edit"}
+          onClick={() => onExpandedChange(!expanded)}
+          icon={
+            expanded ? (
+              <Minimize2 aria-hidden className={dsIcon.md} />
+            ) : (
+              <Maximize2 aria-hidden className={dsIcon.md} />
+            )
+          }
+        />
       </div>
 
       <FeedsIntoLine row={row} />
@@ -311,150 +472,6 @@ function DataSection({ row, onAction, tick }: { row: DemoRow; onAction: DemoActi
             </Chip>
           </div>
 
-          <div className="flex flex-col gap-[var(--ds-space-base)]">
-            {steps.map((step) => {
-              const inStep = row.data.filter((d) => d.step === step);
-              return (
-                <div key={step} className="flex flex-col">
-                  <div className="flex items-center gap-[var(--ds-space-snug)]">
-                    <span className={cn(dsText.meta, "min-w-0 truncate font-semibold text-[color:var(--ds-fg-secondary)]")}>
-                      {step}
-                    </span>
-                    <span aria-hidden className="h-px flex-1 bg-[var(--ds-border-subtle)]" />
-                  </div>
-                  <LedgerLane
-                    dir="read"
-                    points={inStep.filter((d) => d.dir === "read")}
-                    baseValue={baseValue}
-                    refreshedValue={refreshedValue}
-                  />
-                  <LedgerLane
-                    dir="write"
-                    points={inStep.filter((d) => d.dir === "write")}
-                    baseValue={baseValue}
-                    refreshedValue={refreshedValue}
-                  />
-                </div>
-              );
-            })}
-          </div>
-
-          <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
-            {locked && lock && !lock.editable ? lock.reason : editPolicySummary(row)}
-          </p>
-        </>
-      )}
-
-      <EditRerunDialog row={row} open={editOpen} onOpenChange={setEditOpen} onAction={onAction} tick={tick} />
-    </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Edit & re-run — a TASK, so it gets a dialog rather than a rail section
-// ---------------------------------------------------------------------------
-
-/**
- * Everything the old Data tab's edit mode did, unchanged in behaviour:
- *
- *  1. **Edit-unlock rules by run state.** `editPolicyFor` is still the one
- *     place a field's editability is decided, and the REASON is always shown —
- *     a greyed box with no explanation is how an operator learns to distrust a
- *     screen.
- *  2. **CAS on the checkpoint generation.** A save carries the generation the
- *     surface was captured at. If the checkpoint moved the save is REFUSED and
- *     the patch is kept and re-offered field by field against the fresh values.
- *     A patch is never silently dropped and never merged blind.
- *  3. **Freshness.** Reusing values older than the consuming node accepts takes
- *     an explicit, audited override — or a re-read.
- *
- * The freshness confirm renders INSIDE this dialog's own content, not as a
- * sibling: Radix stacks dismissable layers by React tree position, so a nested
- * confirm mounted outside reads as an outside-click and dismisses its parent.
- */
-function EditRerunDialog({
-  row,
-  open,
-  onOpenChange,
-  onAction,
-  tick,
-}: {
-  row: DemoRow;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onAction: DemoActionHandler;
-  tick: number;
-}) {
-  const { toast } = useToasts();
-  const [edits, setEdits] = useState<Record<string, string>>({});
-  const [seededFrom, setSeededFrom] = useState<number | null>(null);
-  const [conflict, setConflict] = useState<DemoCommandResult | null>(null);
-  const [baseGeneration, setBaseGeneration] = useState<number | null>(null);
-  const [freshnessPending, setFreshnessPending] = useState<ActionDescriptorWire | null>(null);
-  const [overrideReason, setOverrideReason] = useState("");
-
-  useEffect(() => {
-    setEdits({});
-    setSeededFrom(null);
-    setConflict(null);
-    setBaseGeneration(null);
-    setFreshnessPending(null);
-    setOverrideReason("");
-  }, [row.id, open]);
-
-  const cp = checkpointFor(row);
-  const held = baseGeneration ?? cp.heldGeneration;
-  const fresh = freshnessOf(cp, tick);
-  const dataActions = actionsAt(row.actions, "data");
-  const saveAction = dataActions.find((a) => a.command === "edit-checkpoint");
-  const rerunAction = dataActions.find((a) => a.command === "rerun-with-existing-data");
-
-  const reads = row.data.filter((d) => d.dir === "read");
-  const baseValue = (point: DemoDataPoint) =>
-    held >= cp.serverGeneration ? (cp.freshValues[point.field] ?? point.value) : point.value;
-  const changed = reads.filter((d) => edits[d.field] !== undefined && edits[d.field] !== baseValue(d));
-  const locked = reads.length > 0 && reads.every((d) => !editPolicyFor(row, d).editable);
-  const lockReason = locked ? editPolicyFor(row, reads[0]) : null;
-  const steps = [...new Set(row.data.map((d) => d.step))];
-
-  const submitSave = (generation: number) => {
-    if (!saveAction) return;
-    const payload: Record<string, string> = { expectedGeneration: String(generation) };
-    for (const d of changed) payload[d.field] = edits[d.field];
-    const result = onAction(row, { ...saveAction, payload });
-    if (!result) return;
-    if (result.state === "conflict") {
-      setConflict(result);
-      toast({
-        tone: "warning",
-        title: "Not saved — the checkpoint moved",
-        description: `Your ${changed.length} edit${changed.length === 1 ? "" : "s"} are still here and are being re-offered against the values the server now holds. Nothing was overwritten.`,
-      });
-      return;
-    }
-    setConflict(null);
-    toast({ tone: "success", title: result.headline, description: result.detail });
-  };
-
-  const submitRerun = (payload: Record<string, string>) => {
-    if (!rerunAction) return;
-    const result = onAction(row, { ...rerunAction, payload });
-    setFreshnessPending(null);
-    setOverrideReason("");
-    if (result?.state === "applied") {
-      toast({ tone: "info", title: result.headline, description: result.detail });
-      onOpenChange(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        size="lg"
-        title="Edit &amp; re-run"
-        description={`Every value ${row.displayName ?? row.title} touched. Reads can be corrected; a write is a record of what happened and is never editable.`}
-      >
-        <DialogBody className="flex flex-col gap-[var(--ds-space-cozy)]">
           {locked && lockReason && !lockReason.editable && (
             <Banner tone="info" title="These values cannot be edited right now" icon={<Lock aria-hidden className={dsIcon.md} />}>
               {lockReason.reason}
@@ -513,182 +530,171 @@ function EditRerunDialog({
             </Banner>
           )}
 
-          {steps.map((step) => (
-            <div key={step} className="flex flex-col gap-[var(--ds-space-tight)]">
-              <div className="flex items-center gap-[var(--ds-space-snug)]">
-                <SectionLabel className="shrink-0">{step}</SectionLabel>
-                <span aria-hidden className="h-px flex-1 bg-[var(--ds-border-subtle)]" />
+          {/* The ledger, grouped by STEP — the run's own order, so a value is
+              read next to the thing that read it. */}
+          <div className="flex flex-col gap-[var(--ds-space-base)]">
+            {steps.map((step) => (
+              <div key={step} className="flex flex-col">
+                <div className="flex items-center gap-[var(--ds-space-snug)]">
+                  <span className={cn(dsText.meta, "min-w-0 truncate font-semibold text-[color:var(--ds-fg-secondary)]")}>
+                    {step}
+                  </span>
+                  <span aria-hidden className="h-px flex-1 bg-[var(--ds-border-subtle)]" />
+                </div>
+                {row.data
+                  .filter((d) => d.step === step)
+                  .map((d, i) => {
+                    const base = baseValue(d);
+                    const value = edits[d.field] ?? base;
+                    return (
+                      <LedgerRow
+                        key={`${d.field}-${i}`}
+                        point={d}
+                        base={base}
+                        value={value}
+                        policy={editPolicyFor(row, d)}
+                        dirty={value !== base}
+                        refreshed={refreshedValue(d)}
+                        onEdit={(next) => setEdits((prev) => ({ ...prev, [d.field]: next }))}
+                      />
+                    );
+                  })}
               </div>
-              {row.data
-                .filter((d) => d.step === step)
-                .map((d, i) => {
-                  const policy = editPolicyFor(row, d);
-                  const base = baseValue(d);
-                  const value = edits[d.field] ?? base;
-                  const dirty = value !== base;
-                  const movedByServer = held >= cp.serverGeneration && cp.freshValues[d.field] !== undefined;
-                  const Icon = d.dir === "read" ? ArrowDownToLine : ArrowUpFromLine;
-                  return (
-                    <div key={`${d.field}-${i}`} className="flex items-center gap-[var(--ds-space-base)]">
-                      <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
-                      <span className={cn(dsText.body, "flex w-36 shrink-0 items-center gap-[var(--ds-space-tight)] truncate text-[color:var(--ds-fg-muted)]")}>
-                        {d.field}
-                        {dirty && (
-                          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--ds-status-waiting-mark)]" />
-                        )}
-                      </span>
-                      {policy.editable ? (
-                        <input
-                          aria-label={`${d.field} — edit this read value`}
-                          value={value}
-                          onChange={(e) => setEdits((prev) => ({ ...prev, [d.field]: e.target.value }))}
-                          className={cn(
-                            "min-w-0 flex-1 border bg-transparent px-[var(--ds-space-snug)]",
-                            "h-[var(--ds-h-md)] rounded-[var(--ds-radius-md)]",
-                            dsText.body,
-                            dsText.nums,
-                            dsFocus,
-                            "text-[color:var(--ds-fg)]",
-                            dirty
-                              ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]"
-                              : "border-[color:var(--ds-border)]",
-                          )}
-                        />
-                      ) : (
-                        <span className="flex min-w-0 flex-1 items-center gap-[var(--ds-space-tight)]" title={policy.reason}>
-                          <Lock aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-faint)]")} />
-                          <span className={cn(dsText.body, dsText.nums, "min-w-0 flex-1 truncate text-[color:var(--ds-fg)]")}>
-                            {base}
-                          </span>
-                          {/* the one-word WHY; the sentence is in the row title
-                              and in the banner, never only in a tooltip */}
-                          <Badge>{policy.tag}</Badge>
-                        </span>
-                      )}
-                      {movedByServer && (
-                        <Badge tone="info" title={`This value changed on the server: ${d.value} → ${cp.freshValues[d.field]}`}>
-                          refreshed
-                        </Badge>
-                      )}
-                      {d.staged && <Badge tone="warning">staged</Badge>}
-                      {d.unconfirmed && <Badge tone="warning">unconfirmed</Badge>}
-                    </div>
-                  );
-                })}
-            </div>
-          ))}
+            ))}
+          </div>
 
-          {/* Freshness. Reusing a stale read is allowed — but only deliberately,
-              with a reason that goes into the run's evidence. Nested INSIDE
-              this content on purpose (see the note above). */}
-          <Dialog open={Boolean(freshnessPending)} onOpenChange={(next) => !next && setFreshnessPending(null)}>
-            <DialogContent
-              size="md"
-              title="These values are older than the next write accepts"
-              description={`Captured ${checkpointAge(cp, tick)} ago. The ${cp.consumingNode} node accepts reads up to ${cp.maxAgeMin} minutes old, so reusing them is a decision, not a default.`}
-            >
-              <DialogBody className="flex flex-col gap-[var(--ds-space-cozy)]">
-                <Well className="flex flex-wrap items-center gap-[var(--ds-space-snug)]">
-                  <Chip label="captured">{fmtClock(cp.capturedAt)}</Chip>
-                  <Chip label="age" tone="warning">{`${fresh.ageMin}m`}</Chip>
-                  <Chip label="limit">{`${fresh.maxAgeMin}m`}</Chip>
-                  <Chip label="consumed by">{fresh.consumingNode}</Chip>
-                </Well>
-                <Field
-                  label="Why reuse them?"
-                  description="Recorded on the new run's receipt beside every reused value, so a replay is never mistaken for a fresh observation."
+          <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+            {locked && lockReason && !lockReason.editable ? lockReason.reason : editPolicySummary(row)}
+          </p>
+
+          {/* The two outcomes. They are DESCRIPTORS (`actions[]` at the `data`
+              placement) — a row whose checkpoint may not be saved is simply not
+              sent a save arm, so there is nothing here to disable, and a parked
+              row is sent neither. */}
+          {(saveAction || rerunAction) && (
+            <div className="flex flex-col gap-[var(--ds-space-snug)] border-t border-[color:var(--ds-border-subtle)] pt-[var(--ds-space-snug)]">
+              <MetaLine
+                items={[
+                  seededFrom !== null && changed.length === 0
+                    ? `Loaded run #${seededFrom} — edit anything above`
+                    : changed.length === 0
+                      ? "Unchanged — either outcome would use exactly these values"
+                      : `${changed.length} value${changed.length === 1 ? "" : "s"} changed`,
+                  continues ? "this run resumes · or start a separate one" : "a correction · or a separate run",
+                ]}
+              />
+              <div className="flex flex-wrap items-center gap-[var(--ds-space-tight)]">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<History aria-hidden className={dsIcon.sm} />}
+                  onClick={() => {
+                    setSeededFrom(Math.max(row.run - 1, 1));
+                    setEdits(
+                      Object.fromEntries(
+                        reads
+                          .filter((f) => editPolicyFor(row, f).editable)
+                          .slice(0, 2)
+                          .map((f) => [f.field, baseValue(f)]),
+                      ),
+                    );
+                  }}
                 >
-                  <Textarea
-                    rows={2}
-                    value={overrideReason}
-                    onChange={(e) => setOverrideReason(e.target.value)}
-                    placeholder="Kuali is read-only until 5 PM; these values were confirmed against the paper form this morning."
-                  />
-                </Field>
-              </DialogBody>
-              <DialogFooter>
-                <Button variant="secondary" onClick={() => setFreshnessPending(null)}>
-                  Cancel
+                  Load a prior run
                 </Button>
                 <Button
-                  variant="dangerGhost"
-                  disabled={overrideReason.trim().length < 8}
-                  onClick={() => submitRerun({ freshness: "override", reason: overrideReason.trim() })}
+                  size="sm"
+                  variant="ghost"
+                  icon={<RotateCcw aria-hidden className={dsIcon.sm} />}
+                  disabled={changed.length === 0 && seededFrom === null}
+                  onClick={() => {
+                    setEdits({});
+                    setSeededFrom(null);
+                  }}
                 >
-                  Override — reuse these values
+                  Reset
                 </Button>
-                <Button variant="primary" onClick={() => submitRerun({ freshness: "re-read" })}>
-                  Re-read live instead
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </DialogBody>
+                <span aria-hidden className="flex-1" />
+                {/* Exactly one of these two carries `primary`, and the SERVER
+                    picks which: on a run with work left to release, continuing
+                    it is the affirmative action; on one with nothing left,
+                    starting a new run is. */}
+                {saveAction && (
+                  <Button
+                    size="sm"
+                    variant={saveAction.intent === "primary" ? "primary" : "secondary"}
+                    icon={continues ? <Play aria-hidden className={dsIcon.sm} /> : <Save aria-hidden className={dsIcon.sm} />}
+                    disabled={changed.length === 0}
+                    title={saveAction.detail}
+                    onClick={() => submitSave(held)}
+                  >
+                    {saveAction.label}
+                  </Button>
+                )}
+                {rerunAction && (
+                  <Button
+                    size="sm"
+                    variant={rerunAction.intent === "primary" ? "primary" : "secondary"}
+                    icon={<Play aria-hidden className={dsIcon.sm} />}
+                    title={rerunAction.detail}
+                    onClick={() => (fresh.stale ? setFreshnessPending(rerunAction) : submitRerun({ freshness: "within-limit" }))}
+                  >
+                    {rerunAction.label}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
-        {/* The footer's controls are DESCRIPTORS (`actions[]` at the `data`
-            placement) — a row whose checkpoint may not be saved is simply not
-            sent a Save, so there is nothing here to disable. */}
-        <DialogFooter
-          meta={
-            seededFrom !== null && changed.length === 0
-              ? `Loaded run #${seededFrom} — edit anything above.`
-              : changed.length === 0
-                ? "Unchanged — a new run would use exactly these values."
-                : `${changed.length} value${changed.length === 1 ? "" : "s"} changed`
-          }
+      {/* Freshness. Reusing a stale read is allowed — but only deliberately,
+          with a reason that goes into the run's evidence. This one stays a
+          dialog on purpose: it is a question with a typed answer and two
+          mutually exclusive exits, which is what a dialog is for. */}
+      <Dialog open={Boolean(freshnessPending)} onOpenChange={(next) => !next && setFreshnessPending(null)}>
+        <DialogContent
+          size="md"
+          title="These values are older than the next write accepts"
+          description={`Captured ${checkpointAge(cp, tick)} ago. The ${cp.consumingNode} node accepts reads up to ${cp.maxAgeMin} minutes old, so reusing them is a decision, not a default.`}
         >
-          <Button
-            variant="ghost"
-            icon={<History aria-hidden className={dsIcon.md} />}
-            onClick={() => {
-              setSeededFrom(Math.max(row.run - 1, 1));
-              setEdits(
-                Object.fromEntries(
-                  reads
-                    .filter((f) => editPolicyFor(row, f).editable)
-                    .slice(0, 2)
-                    .map((f) => [f.field, baseValue(f)]),
-                ),
-              );
-            }}
-          >
-            Load a prior run
-          </Button>
-          <Button
-            variant="ghost"
-            icon={<RotateCcw aria-hidden className={dsIcon.md} />}
-            disabled={changed.length === 0 && seededFrom === null}
-            onClick={() => {
-              setEdits({});
-              setSeededFrom(null);
-            }}
-          >
-            Reset
-          </Button>
-          {saveAction && (
-            <Button
-              variant="secondary"
-              icon={<Save aria-hidden className={dsIcon.md} />}
-              disabled={changed.length === 0}
-              title={saveAction.detail}
-              onClick={() => submitSave(held)}
+          <DialogBody className="flex flex-col gap-[var(--ds-space-cozy)]">
+            <Well className="flex flex-wrap items-center gap-[var(--ds-space-snug)]">
+              <Chip label="captured">{fmtClock(cp.capturedAt)}</Chip>
+              <Chip label="age" tone="warning">{`${fresh.ageMin}m`}</Chip>
+              <Chip label="limit">{`${fresh.maxAgeMin}m`}</Chip>
+              <Chip label="consumed by">{fresh.consumingNode}</Chip>
+            </Well>
+            <Field
+              label="Why reuse them?"
+              description="Recorded on the new run's receipt beside every reused value, so a replay is never mistaken for a fresh observation."
             >
-              {saveAction.label}
+              <Textarea
+                rows={2}
+                value={overrideReason}
+                onChange={(e) => setOverrideReason(e.target.value)}
+                placeholder="Kuali is read-only until 5 PM; these values were confirmed against the paper form this morning."
+              />
+            </Field>
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setFreshnessPending(null)}>
+              Cancel
             </Button>
-          )}
-          {rerunAction && (
             <Button
-              variant="primary"
-              icon={<Play aria-hidden className={dsIcon.md} />}
-              title={rerunAction.detail}
-              onClick={() => (fresh.stale ? setFreshnessPending(rerunAction) : submitRerun({ freshness: "within-limit" }))}
+              variant="dangerGhost"
+              disabled={overrideReason.trim().length < 8}
+              onClick={() => submitRerun({ freshness: "override", reason: overrideReason.trim() })}
             >
-              {changed.length > 0 ? "Start run with these values" : rerunAction.label}
+              Override — reuse these values
             </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            <Button variant="primary" onClick={() => submitRerun({ freshness: "re-read" })}>
+              Re-read live instead
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </section>
   );
 }
 
@@ -797,6 +803,8 @@ export function ContextRail({
   onClose,
   tick,
   isMember,
+  dataExpanded,
+  onDataExpandedChange,
   className,
 }: {
   row: DemoRow;
@@ -806,6 +814,9 @@ export function ContextRail({
   tick: number;
   /** a member inherits its identity from its group, so that strip stays off it */
   isMember: boolean;
+  /** the Data surface has the rail to itself, to be edited in */
+  dataExpanded: boolean;
+  onDataExpandedChange: (expanded: boolean) => void;
   className?: string;
 }) {
   const sections = useMemo(
@@ -819,7 +830,10 @@ export function ContextRail({
     <aside
       aria-label="Run context"
       className={cn(
-        "flex min-h-0 min-w-0 flex-col overflow-hidden border",
+        // A CONTAINER, so the ledger row can decide for itself whether the
+        // clock fits. Its width is a function of the rail's own expanded state
+        // as much as the window's, which a viewport query cannot see.
+        "@container flex min-h-0 min-w-0 flex-col overflow-hidden border",
         "border-[color:var(--ds-border)] bg-[var(--ds-surface-1)] rounded-[var(--ds-radius-lg)]",
         className,
       )}
@@ -831,7 +845,9 @@ export function ContextRail({
         )}
       >
         <Database aria-hidden className={cn(dsIcon.md, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
-        <span className={cn(dsText.title, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>Context</span>
+        <span className={cn(dsText.title, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>
+          {dataExpanded ? "Context · editing data" : "Context"}
+        </span>
         <IconButton
           label="Hide run context"
           size="sm"
@@ -842,20 +858,55 @@ export function ContextRail({
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col gap-[var(--ds-space-cozy)] overflow-y-auto px-[var(--ds-space-cozy)] py-[var(--ds-space-cozy)]">
-        <DataSection row={row} onAction={onAction} tick={tick} />
-        <Separator />
-        <EvidenceSection row={row} />
-        <Separator />
-        <section aria-label="Provenance" className="flex flex-col gap-[var(--ds-space-snug)]">
-          <SectionLabel>Provenance</SectionLabel>
-          {!isMember && <RunIdentityStrip row={row} />}
-          <RunSelector row={row} />
-        </section>
-        {sections.hasDelegation && (
+        {/**
+         * ORDER: Evidence · Data · Provenance · Delegation.
+         *
+         * Evidence first on the operator's own instruction, and it holds up on
+         * its own terms: it is the shortest section and the one most often
+         * reached for mid-read, so putting the long editable ledger above it
+         * meant scrolling past a form to look at a screenshot.
+         *
+         * While Data is EXPANDED the rail is Data's: the other three sections
+         * would only be scroll distance between the ledger and its footer at a
+         * moment when the operator is typing into it, and every one of them is
+         * one press away again.
+         */}
+        {!dataExpanded && (
+          <>
+            <EvidenceSection row={row} />
+            <Separator />
+          </>
+        )}
+
+        <DataSection
+          row={row}
+          onAction={onAction}
+          tick={tick}
+          expanded={dataExpanded}
+          onExpandedChange={onDataExpandedChange}
+        />
+
+        {!dataExpanded && (
           <>
             <Separator />
-            <DelegationLinks row={row} onOpenPanel={onOpenPanel} />
+            <section aria-label="Provenance" className="flex flex-col gap-[var(--ds-space-snug)]">
+              <SectionLabel>Provenance</SectionLabel>
+              {!isMember && <RunIdentityStrip row={row} />}
+              <RunSelector row={row} />
+            </section>
+            {sections.hasDelegation && (
+              <>
+                <Separator />
+                <DelegationLinks row={row} onOpenPanel={onOpenPanel} />
+              </>
+            )}
           </>
+        )}
+
+        {dataExpanded && (
+          <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+            Evidence, provenance and delegation are hidden while you edit — narrow the surface to bring them back.
+          </p>
         )}
       </div>
     </aside>
