@@ -32,6 +32,7 @@ import { effectiveStatus, fmtElapsed, type DemoRow } from "./demo-data";
 import {
   agoSeconds,
   buildWorkflowCategoryGroups,
+  DEMO_APP_VERSION,
   DEMO_WORKFLOW_LIST,
   DEMO_WORKFLOWS,
   fmtClockSec,
@@ -421,6 +422,7 @@ export function DemoTopBar({
   onToggleTheme,
   storage,
   onStorage,
+  onOpenHelp,
 }: {
   view: DemoShellView;
   onView: (v: DemoShellView) => void;
@@ -436,6 +438,8 @@ export function DemoTopBar({
   /** the demo's own fixture switch, behind the demo badge — never a product control */
   storage: StorageMode;
   onStorage: (mode: StorageMode) => void;
+  /** the other route to the same shortcut registry — Settings → Help → Keyboard */
+  onOpenHelp: () => void;
 }) {
   return (
     <header
@@ -512,7 +516,7 @@ export function DemoTopBar({
         {/* The keyboard legend lives HERE now, behind the control that used to
             do nothing — it was a permanent 36px strip across the top of the
             queue, which is a row the panels wanted more than the legend did. */}
-        <DemoShortcutsPopover />
+        <DemoShortcutsPopover onOpenHelp={onOpenHelp} />
         {/* The theme pair. One control, and its LABEL names the destination
             ("Switch to Paper Ink"), because a lone sun/moon glyph never says
             which of the two states it is reporting. */}
@@ -1837,6 +1841,21 @@ export function DemoSessionPanel({ tick }: { tick: number }) {
         </button>
         <span className="flex shrink-0 items-center gap-[var(--ds-space-snug)]">
           <IconButton size="sm" label="Add a worker" onClick={NOOP} icon={<Plus aria-hidden className={dsIcon.md} />} />
+          {/* The APP's version, stated ONCE for the whole dashboard.
+              It used to ride the context rail's Provenance chips, i.e. on every
+              run — and the app build is not a property of a run, it is a
+              property of the thing you are looking at. Every run on screen is
+              being SERVED by this build, so one statement in the one bar that is
+              mounted under every view says it for all of them. The archived and
+              historical runs keep their OWN `appVersion` where it genuinely
+              differs, which is exactly why it must not be repeated here. */}
+          <span
+            title={`The app build serving this dashboard. A run that RAN under a different build carries its own — that is a fact about the run and stays on the run.`}
+            className={cn(dsText.meta, dsText.nums, "shrink-0 text-[color:var(--ds-fg-muted)]")}
+          >
+            {DEMO_APP_VERSION}
+          </span>
+          <span aria-hidden className="h-[var(--ds-h-xs)] w-px shrink-0 bg-[var(--ds-border)]" />
           <span className={cn(dsText.meta, "inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-success-fg)]")}>
             <span aria-hidden className="size-1.5 rounded-full bg-[var(--ds-success-fg)] animate-pulse motion-reduce:animate-none" />
             Live

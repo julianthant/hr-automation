@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, ChevronLeft, ChevronRight, FlaskConical, History, Pencil, Sliders, TriangleAlert } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, FlaskConical, History, Info, Pencil, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -11,13 +11,16 @@ import {
 } from "@/components/ui/dialog";
 import {
   Badge,
-  ChipRow,
+  BulletList,
   Button,
-  Chip,
   Field,
   IconButton,
   Input,
+  KeyValueList,
   MetaLine,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   SectionLabel,
   dsIcon,
   dsText,
@@ -25,7 +28,7 @@ import {
 } from "./demo-ui";
 import { StatusBadge } from "./demo-status";
 import { attemptDuration, attemptTrace, fmtElapsed, type DemoRerunDiffEntry, type DemoRow } from "./demo-data";
-import { fmtVersionTag, workflowVersionTag, type ActionDescriptorWire } from "./demo-wire";
+import { DEMO_APP_VERSION, fmtVersionTag, workflowVersionTag, type ActionDescriptorWire } from "./demo-wire";
 
 /**
  * DEV-ONLY — WHICH RUN IS THIS, exactly.
@@ -33,11 +36,13 @@ import { fmtVersionTag, workflowVersionTag, type ActionDescriptorWire } from "./
  * Four facts the queue row can only afford a chip for, and one the demo could
  * not show at all:
  *
- *  - **Identity strip** — who asked for this run, at what priority, under which
- *    descriptor + app version, against which system instance, and whether a
- *    preset put values in that nobody typed. Every one of these is a served
- *    field (`requestedBy` / `priority` / `workflowVersion` / `appVersion` /
- *    `resolvedInstance` / `preset`); none is inferred.
+ *  - **Provenance bar** — the workflow version, in the Log Panel's bottom bar,
+ *    with the two run HAZARDS beside it and everything else behind its ⓘ: who
+ *    asked for this run, at what priority, under which app build, against which
+ *    system instance, and whether a preset put values in that nobody typed.
+ *    Every one of these is a served field (`requestedBy` / `priority` /
+ *    `workflowVersion` / `appVersion` / `resolvedInstance` / `preset`); none is
+ *    inferred.
  *  - **Run selector** — `‹ #2 of 2 ›` over the attempt lineage, so a failed
  *    first attempt is one click away instead of lost.
  *  - **Rerun diff** — what actually differed between the last two attempts.
@@ -61,110 +66,129 @@ import { fmtVersionTag, workflowVersionTag, type ActionDescriptorWire } from "./
 // Identity strip
 // ---------------------------------------------------------------------------
 
-export function RunIdentityStrip({ row }: { row: DemoRow }) {
+/**
+ * The run's PROVENANCE, in the Log Panel's bottom bar.
+ *
+ * It used to be a `Provenance` section in the context rail carrying seven chips
+ * — `by`, `priority`, `wf`, `app`, `test`, `dry run`, `preset` — on EVERY run.
+ * Three of those were not provenance and two were not about the run at all:
+ *
+ *  - the **app** build is a property of the dashboard, not of a run, so it is
+ *    stated once on the Sessions bar (`DemoShell`) and only reappears on a run
+ *    that RAN under a different build, which is where it is a real fact;
+ *  - **by** and **priority** are the same two words on every row an operator
+ *    starts on their own machine, so they cost a chip each to say nothing —
+ *    they moved into the ⓘ, in full, with the reason each matters;
+ *  - the **workflow version** is the one that changes what a row means, and it
+ *    belongs where the run's own stream is read.
+ *
+ * **The two hazards stay VISIBLE.** `dry run` and `test instance` are outcomes
+ * about this run, not teaching, so they are never behind the disclosure — a
+ * rehearsal that reads as a filing is the single most expensive misread this
+ * product can produce.
+ */
+export function RunProvenanceBar({ row }: { row: DemoRow }) {
   const testSystems = Object.entries(row.resolvedInstance).filter(([, v]) => v === "test");
   const ranVersion = fmtVersionTag({ major: row.workflowVersion, minor: row.workflowMinorVersion });
-  const [presetOpen, setPresetOpen] = useState(false);
-  useEffect(() => setPresetOpen(false), [row.id]);
+  const shapeMoved = row.workflowVersion !== row.workflow.version;
+  const staleApp = row.appVersion !== DEMO_APP_VERSION;
 
   return (
-    <div className="flex flex-col gap-[var(--ds-space-tight)]">
-      {/* A set of PEER facts, so it lays on the shared chip track — every line
-          ends on the same edge instead of leaving whichever chip wrapped last
-          hanging alone under a full line. */}
-      <ChipRow>
-        {row.displayName && (
-          <Chip
-            label="named"
-            tone="info"
-            className="cursor-default"
-            title={`Named by you. The subject is still ${row.title} and the trace id ${row.trace} is unchanged — history matches either way.`}
-          >
-            {row.displayName}
-          </Chip>
+    <span className="flex min-w-0 shrink-0 items-center gap-[var(--ds-space-snug)]">
+      <span
+        title={
+          shapeMoved
+            ? `Ran under ${row.workflow.label} ${ranVersion}; runs are served by ${workflowVersionTag(row.workflow)} now. The run's SHAPE moved, so these are not comparable — a retry would replay retired code.`
+            : `${row.workflow.label} ${ranVersion} — the version currently serving runs.`
+        }
+        className={cn(
+          dsText.meta,
+          dsText.nums,
+          "shrink-0",
+          shapeMoved ? "text-[color:var(--ds-status-waiting-fg)]" : "text-[color:var(--ds-fg-muted)]",
         )}
-        <Chip label="by" title="Every run and every command records who asked for it.">
-          {row.requestedBy}
-        </Chip>
-        <Chip
-          label="priority"
-          tone={row.priority === "bulk" ? "neutral" : "info"}
-          title={
-            row.priority === "bulk"
-              ? "Bulk — yields the worker to anything interactive. A 50-person packet must never make one urgent separation wait."
-              : "Interactive — takes a worker ahead of bulk work."
-          }
-        >
-          {row.priority}
-        </Chip>
-        {/* MAJOR is what makes a run incomparable — the minor digit is
-            presentation, so a row one minor behind is still the same run shape
-            and is deliberately NOT flagged. */}
-        <Chip
-          label="wf"
-          tone={row.workflowVersion !== row.workflow.version ? "warning" : "neutral"}
-          title={
-            row.workflowVersion !== row.workflow.version
-              ? `Ran under ${row.workflow.label} ${ranVersion}; runs are served by ${workflowVersionTag(row.workflow)} now. The run's SHAPE moved, so these are not comparable — a retry would replay retired code.`
-              : `${row.workflow.label} ${ranVersion} — the version currently serving runs.`
-          }
-        >
-          {ranVersion}
-        </Chip>
-        <Chip label="app" title="The app build that served this run — the other half of the archive key.">
-          {row.appVersion}
-        </Chip>
-        {testSystems.length > 0 && (
-          <Chip
-            label="test"
-            tone="warning"
-            icon={<TriangleAlert aria-hidden className={dsIcon.sm} />}
-            title={`Ran against the TEST instance of ${testSystems.map(([k]) => k).join(", ")} — nothing here reached production.`}
-          >
-            {testSystems.map(([k]) => k).join(", ")}
-          </Chip>
-        )}
-        {row.dryRun && (
-          <Chip
-            label="dry run"
-            tone="info"
-            icon={<FlaskConical aria-hidden className={dsIcon.sm} />}
-            title="A rehearsal: it reads every system and writes to none. The receipt says what it WOULD have written."
-          >
-            writes nothing
-          </Chip>
-        )}
-        {row.preset && (
-          <Chip
-            label="preset"
-            tone="info"
-            icon={<Sliders aria-hidden className={dsIcon.sm} />}
-            selected={presetOpen}
-            onSelect={() => setPresetOpen((v) => !v)}
-            title="A saved preset merged constant values into this run's inputs — open it to see exactly which."
-          >
-            {`${row.preset.name} +${row.preset.merged.length}`}
-          </Chip>
-        )}
-      </ChipRow>
+      >
+        {ranVersion}
+      </span>
 
-      {row.preset && presetOpen && (
-        <div className="flex flex-col gap-[var(--ds-space-tight)] rounded-[var(--ds-radius-md)] border border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]">
-          <p className={cn(dsText.meta, "max-w-[80ch] text-[color:var(--ds-fg-secondary)]")}>
-            {row.preset.source} “{row.preset.name}” — merged into every member at enqueue. These values were not typed for this
-            run; the preset put them there.
-          </p>
-          <dl className="grid grid-cols-[minmax(0,128px)_minmax(0,1fr)] gap-x-[var(--ds-space-base)] gap-y-[var(--ds-space-hair)]">
-            {row.preset.merged.map((f) => (
-              <div key={f.field} className="contents">
-                <dt className={cn(dsText.meta, "truncate text-[color:var(--ds-fg-muted)]")}>{f.field}</dt>
-                <dd className={cn(dsText.meta, dsText.nums, "min-w-0 truncate text-[color:var(--ds-fg)]")}>{f.value}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
+      {/* Hazards, never disclosed. */}
+      {row.dryRun && (
+        <span
+          title="A rehearsal: it read every system and wrote to none. The receipt says what it WOULD have written."
+          className={cn(dsText.meta, "inline-flex shrink-0 items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-info-fg)]")}
+        >
+          <FlaskConical aria-hidden className={dsIcon.sm} />
+          dry run
+        </span>
       )}
-    </div>
+      {testSystems.length > 0 && (
+        <span
+          title={`Ran against the TEST instance of ${testSystems.map(([k]) => k).join(", ")} — nothing here reached production.`}
+          className={cn(
+            dsText.meta,
+            "inline-flex shrink-0 items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-status-waiting-fg)]",
+          )}
+        >
+          <TriangleAlert aria-hidden className={dsIcon.sm} />
+          test
+        </span>
+      )}
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <IconButton size="xs" label="Run provenance" icon={<Info aria-hidden className={dsIcon.sm} />} />
+        </PopoverTrigger>
+        <PopoverContent title="Provenance" description={row.trace} width="lg" side="top" align="end">
+          <div className="flex flex-col gap-[var(--ds-space-base)]">
+            <KeyValueList
+              items={[
+                { key: "Workflow", value: `${row.workflow.label} ${ranVersion}`, tone: shapeMoved ? "warning" : "default" },
+                { key: "App build", value: row.appVersion, tone: staleApp ? "warning" : "default" },
+                { key: "Requested by", value: row.requestedBy },
+                { key: "Priority", value: row.priority },
+                ...(row.displayName ? [{ key: "Named", value: row.displayName }] : []),
+                ...Object.entries(row.resolvedInstance).map(([system, instance]) => ({
+                  key: system,
+                  value: instance,
+                  tone: instance === "test" ? ("warning" as const) : ("default" as const),
+                })),
+              ]}
+            />
+            <BulletList
+              items={[
+                row.priority === "bulk"
+                  ? "Bulk yields the worker to anything interactive — a 50-person packet must never make one urgent separation wait."
+                  : "Interactive takes a worker ahead of bulk work.",
+                shapeMoved
+                  ? `This run's SHAPE is a prior major. It is not comparable with a ${workflowVersionTag(row.workflow)} run, and a retry would replay retired code.`
+                  : "The MAJOR digit is the run's shape; the minor is presentation, so a row one minor behind is still the same run.",
+                staleApp
+                  ? `Served by app ${row.appVersion}; this dashboard is ${DEMO_APP_VERSION}. The app build is the other half of the archive key.`
+                  : `Served by the app build this dashboard is running (${DEMO_APP_VERSION}), which is why it is stated once on the Sessions bar rather than on every run.`,
+                ...(row.displayName
+                  ? [`Named by you. The subject is still ${row.title} and the trace id ${row.trace} is unchanged — history matches either way.`]
+                  : []),
+              ]}
+            />
+            {row.preset && (
+              <div className="flex min-w-0 flex-col gap-[var(--ds-space-tight)]">
+                <SectionLabel>
+                  {row.preset.source} “{row.preset.name}” — merged at enqueue
+                </SectionLabel>
+                <dl className="grid grid-cols-[minmax(0,128px)_minmax(0,1fr)] gap-x-[var(--ds-space-base)] gap-y-[var(--ds-space-hair)]">
+                  {row.preset.merged.map((f) => (
+                    <div key={f.field} className="contents">
+                      <dt className={cn(dsText.meta, "truncate text-[color:var(--ds-fg-muted)]")}>{f.field}</dt>
+                      <dd className={cn(dsText.meta, dsText.nums, "min-w-0 truncate text-[color:var(--ds-fg)]")}>{f.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
+    </span>
   );
 }
 
