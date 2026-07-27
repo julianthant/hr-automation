@@ -28,11 +28,14 @@ import {
   DemoSessionPanel,
   DemoStatusBar,
   DemoTopBar,
-  DemoWorkflowPanel,
+  DemoWorkflowPanelToggle,
+  DemoWorkflowSidebar,
+  DemoWorkflowWindow,
   type DemoShellView,
   rowInBucket,
   rowsForWorkflow,
   topLevelRows,
+  useWorkflowPanelMode,
 } from "./DemoShell";
 // Row lookups go through the ALL-DAYS map: a row selected from a prior day must
 // open exactly like a row from today.
@@ -70,6 +73,9 @@ export function RebuildDemo() {
   const [selectedId, setSelectedId] = useState("oath-summer");
   const [shellView, setShellView] = useState<DemoShellView>("queue");
   const [activeWorkflow, setActiveWorkflow] = useState(DEFAULT_WORKFLOW);
+  // Floating window · icon · docked sidebar, persisted. The 200px column is a
+  // choice now rather than a tax, and the default costs the panels nothing.
+  const { mode: panelMode, setMode: setPanelMode, cycleMode: cyclePanelMode, opened: panelOpened } = useWorkflowPanelMode();
   // the day partition every surface reads — the top bar's date IS this value
   const [day, setDay] = useState(DEMO_DAY);
   const [view, setView] = useState<DemoView>({ kind: "queue" });
@@ -334,10 +340,20 @@ export function RebuildDemo() {
           setView({ kind: "drill", groupId: row.id });
         }
       } else if (e.key === "Escape") {
+        // Escape dismisses the INNERMOST thing: back out of a drill-in first,
+        // and only once you are at the top level does it minimise the panel.
+        // Reversing that would make drill-out unreachable while the panel is
+        // showing, which is its default state.
         if (view.kind === "drill") {
           e.preventDefault();
           setView({ kind: "queue" });
+        } else if (panelMode === "floating") {
+          e.preventDefault();
+          setPanelMode("icon");
         }
+      } else if (e.key === "w") {
+        e.preventDefault();
+        cyclePanelMode();
       } else if (e.key === "c") {
         const row = DEMO_ROWS[selectedId];
         if (row?.rowType === "member" && row.containment !== "rejected") {
@@ -353,7 +369,7 @@ export function RebuildDemo() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view, filter, expandedGroups, sort, selectedId, select, toggleChecked, scopedRows]);
+  }, [view, filter, expandedGroups, sort, selectedId, select, toggleChecked, scopedRows, panelMode, setPanelMode, cyclePanelMode]);
 
   // keep the selected row visible when keyboard-navigating
   useEffect(() => {
@@ -421,7 +437,17 @@ export function RebuildDemo() {
         <DemoCatalogView onOpenExample={openExample} />
       ) : (
         <div className="flex min-h-0 flex-1">
-          <DemoWorkflowPanel active={activeWorkflow} onActive={changeWorkflow} rows={dayRows} />
+          {/* Docked only in `sidebar`. In the other two modes the panel costs
+              the queue and the detail panel no width at all. */}
+          {panelMode === "sidebar" && (
+            <DemoWorkflowSidebar
+              mode={panelMode}
+              onMode={setPanelMode}
+              active={activeWorkflow}
+              onActive={changeWorkflow}
+              rows={dayRows}
+            />
+          )}
 
           <main className="flex min-h-0 flex-1 flex-col">
             {/* Two bars above the panels, and that is the whole budget. The
@@ -453,6 +479,9 @@ export function RebuildDemo() {
               outcome={bulkOutcome}
               onDismissOutcome={() => setBulkOutcome(null)}
               onSelectRow={select}
+              leading={
+                <DemoWorkflowPanelToggle mode={panelMode} onMode={setPanelMode} active={activeWorkflow} rows={dayRows} />
+              }
               runStart={<DemoRunStartControls />}
             />
 
@@ -468,7 +497,12 @@ export function RebuildDemo() {
               }}
             />
 
-            <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 min-[1180px]:grid-cols-[470px_minmax(0,1fr)]">
+            {/* The panel REGION. It is the positioning context for the floating
+                Workflow Panel, so the window can overlay the panels without
+                ever covering the bars above them — and the grid inside it stays
+                a plain two-cell grid for wave 3 to split. */}
+            <div className="relative min-h-0 flex-1">
+            <div className="grid h-full grid-cols-1 gap-3 p-3 min-[1180px]:grid-cols-[470px_minmax(0,1fr)]">
               <DemoQueue
                 rows={scopedRows}
                 state={state}
@@ -489,6 +523,18 @@ export function RebuildDemo() {
                 tick={tick}
                 liveCount={liveCount}
               />
+            </div>
+
+              {panelMode === "floating" && (
+                <DemoWorkflowWindow
+                  mode={panelMode}
+                  onMode={setPanelMode}
+                  active={activeWorkflow}
+                  onActive={changeWorkflow}
+                  rows={dayRows}
+                  opened={panelOpened}
+                />
+              )}
             </div>
           </main>
         </div>

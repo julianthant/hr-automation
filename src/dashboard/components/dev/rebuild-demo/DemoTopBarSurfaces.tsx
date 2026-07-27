@@ -104,6 +104,7 @@ const DEMO_SHORTCUTS: { keys: string[]; join?: string; what: string }[] = [
   { keys: ["Esc"], what: "back out of a group" },
   { keys: ["c"], what: "mark the selected member checked" },
   { keys: ["1", "4"], join: "–", what: "switch the detail panel's tab" },
+  { keys: ["w"], what: "cycle the Workflow Panel — floating, icon, sidebar" },
 ];
 
 export function DemoShortcutsPopover() {

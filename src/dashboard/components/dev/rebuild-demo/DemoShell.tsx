@@ -1,4 +1,4 @@
-import { useMemo, useState, type ComponentType, type SVGProps } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type SVGProps } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -11,7 +11,12 @@ import {
   Gauge,
   Hourglass,
   LayoutDashboard,
+  Minus,
+  PanelLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pause,
+  PictureInPicture2,
   Plus,
   RotateCw,
   Moon,
@@ -31,9 +36,11 @@ import {
   type DemoNavigateTo,
 } from "./DemoTopBarSurfaces";
 import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
+import { toolbarControl } from "./DemoBulkBar";
 import {
   Badge,
   Button,
+  CountBadge,
   DEMO_THEME_LABEL,
   DS_STATUS,
   IconButton,
@@ -303,7 +310,173 @@ const RAIL_GROUPS: { label: DemoWorkflowCategory; entries: { label: string; note
   entries: DEMO_WORKFLOW_LIST.filter((w) => w.category === category).map((w) => ({ label: w.label, note: RAIL_NOTES[w.label] })),
 }));
 
-export function DemoWorkflowPanel({
+/** label → the workflow's own 2-char code, the prefix of every one of its trace ids */
+const WORKFLOW_CODE: Record<string, string> = Object.fromEntries(DEMO_WORKFLOW_LIST.map((w) => [w.label, w.code]));
+
+/**
+ * Where the Workflow Panel is, and how much of the window it costs.
+ *
+ * `floating` — a window over the panels. It costs no column, so the queue and
+ * the detail panel get the full width; it is dismissable, and dismissing it
+ * lands on `icon`.
+ * `icon` — nothing is drawn over the content at all. The toggle in the action
+ * bar is the launcher, and it keeps carrying the `Needs you` count so a
+ * collapsed panel can never hide one.
+ * `sidebar` — docked, 200px, always visible. For the operator who wants it.
+ */
+export type WorkflowPanelMode = "floating" | "icon" | "sidebar";
+
+const PANEL_MODE_CYCLE: WorkflowPanelMode[] = ["floating", "icon", "sidebar"];
+
+export const WORKFLOW_PANEL_MODE_LABEL: Record<WorkflowPanelMode, string> = {
+  floating: "floating window",
+  icon: "icon",
+  sidebar: "sidebar",
+};
+
+const PANEL_MODE_STORAGE_KEY = "rebuild-demo.workflow-panel";
+const WORKFLOW_PANEL_ID = "demo-workflow-panel";
+const WORKFLOW_PANEL_TOGGLE_ID = "demo-workflow-panel-toggle";
+
+function readStoredPanelMode(): WorkflowPanelMode {
+  if (typeof window === "undefined") return "floating";
+  try {
+    const stored = window.localStorage.getItem(PANEL_MODE_STORAGE_KEY);
+    return PANEL_MODE_CYCLE.find((m) => m === stored) ?? "floating";
+  } catch {
+    // A blocked localStorage (private mode, storage off) is a real browser
+    // state, not a failure to read a mode: it means there is no stored
+    // preference, which is the documented default.
+    return "floating";
+  }
+}
+
+/**
+ * Owns the mode, its persistence, and one thing more: whether the OPERATOR has
+ * moved it this session (`opened`).
+ *
+ * That flag is what keeps the window honest on first paint. A window that
+ * animates in and grabs focus because it was the persisted default is animating
+ * on page load and stealing the caret from the queue — both banned. Opened by a
+ * press, the same window should do exactly that, because then it did come from
+ * somewhere and the operator is looking at it.
+ */
+export function useWorkflowPanelMode(): {
+  mode: WorkflowPanelMode;
+  setMode: (mode: WorkflowPanelMode) => void;
+  cycleMode: () => void;
+  opened: boolean;
+} {
+  const [mode, setModeState] = useState<WorkflowPanelMode>(readStoredPanelMode);
+  const [opened, setOpened] = useState(false);
+
+  const setMode = useCallback((next: WorkflowPanelMode) => {
+    setOpened(true);
+    setModeState(next);
+    try {
+      window.localStorage.setItem(PANEL_MODE_STORAGE_KEY, next);
+    } catch {
+      // Same as above: an unwritable store loses the preference for next time,
+      // which is not a reason to refuse the operator this one.
+    }
+  }, []);
+
+  const cycleMode = useCallback(() => {
+    setMode(PANEL_MODE_CYCLE[(PANEL_MODE_CYCLE.indexOf(mode) + 1) % PANEL_MODE_CYCLE.length]);
+  }, [mode, setMode]);
+
+  return { mode, setMode, cycleMode, opened };
+}
+
+interface PanelModeProps {
+  mode: WorkflowPanelMode;
+  onMode: (mode: WorkflowPanelMode) => void;
+}
+
+/**
+ * The panel's own window controls. Every transition is one press from here or
+ * from the toggle, and `w` cycles all three from anywhere — a state you can only
+ * reach with the mouse is one a keyboard operator does not have.
+ */
+function WorkflowPanelControls({ mode, onMode }: PanelModeProps) {
+  return (
+    <span className="flex shrink-0 items-center gap-[var(--ds-space-hair)]">
+      {mode === "sidebar" ? (
+        <IconButton
+          size="sm"
+          label="Float the Workflow Panel"
+          onClick={() => onMode("floating")}
+          icon={<PictureInPicture2 aria-hidden className={dsIcon.md} />}
+        />
+      ) : (
+        <IconButton
+          size="sm"
+          label="Dock the Workflow Panel as a sidebar"
+          onClick={() => onMode("sidebar")}
+          icon={<PanelLeft aria-hidden className={dsIcon.md} />}
+        />
+      )}
+      <IconButton
+        size="sm"
+        label="Minimise the Workflow Panel to an icon"
+        onClick={() => onMode("icon")}
+        icon={<Minus aria-hidden className={dsIcon.md} />}
+      />
+    </span>
+  );
+}
+
+/**
+ * The launcher, and the one control present in all three modes.
+ *
+ * It carries the current workflow's 2-char code — the same code that prefixes
+ * every one of its trace ids — so it is never an anonymous glyph, and the
+ * day's whole `Needs you` count across EVERY panel, because the number you must
+ * not be able to miss is the one in a panel you are not looking at.
+ */
+export function DemoWorkflowPanelToggle({
+  mode,
+  onMode,
+  active,
+  rows,
+}: PanelModeProps & {
+  active: string;
+  /** the day's corpus — every panel's rows, not the active panel's */
+  rows: DemoRow[];
+}) {
+  const needsYou = useMemo(() => countRows(rows).needsYou, [rows]);
+  const showing = mode !== "icon";
+  const code = WORKFLOW_CODE[active] ?? "";
+  return (
+    <button
+      id={WORKFLOW_PANEL_TOGGLE_ID}
+      type="button"
+      aria-expanded={showing}
+      aria-controls={mode === "floating" ? WORKFLOW_PANEL_ID : undefined}
+      aria-label={`Workflow Panel — ${active}${showing ? `, ${WORKFLOW_PANEL_MODE_LABEL[mode]}` : ", minimised"}`}
+      title={`Workflow Panel — ${active}\n${needsYou} row${needsYou === 1 ? "" : "s"} waiting on you across every panel\nw cycles floating · icon · sidebar`}
+      onClick={() => onMode(showing ? "icon" : "floating")}
+      className={cn(
+        toolbarControl(),
+        showing
+          ? cn(dsBorder.loud, "bg-[var(--ds-surface-selected)] font-semibold text-[color:var(--ds-fg)]")
+          : cn(dsBorder.base, dsSurface.card, "text-[color:var(--ds-fg-muted)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]"),
+      )}
+    >
+      {showing ? (
+        <PanelLeftClose aria-hidden className={dsIcon.sm} />
+      ) : (
+        <PanelLeftOpen aria-hidden className={dsIcon.sm} />
+      )}
+      <span className={dsText.nums}>{code}</span>
+      {/* The loudest badge in the system, and the one place it is right: a
+          `Waiting on you` count must survive the panel being closed. */}
+      <CountBadge value={needsYou} tone="attention" zeroStyle="hide" />
+    </button>
+  );
+}
+
+function WorkflowEntryList({
   active,
   onActive,
   rows,
@@ -403,10 +576,7 @@ export function DemoWorkflowPanel({
   );
 
   return (
-    <nav
-      aria-label="Workflow Panel"
-      className={cn("flex shrink-0 flex-col overflow-y-auto", dsSize.wRail, dsSurface.card, "py-[var(--ds-space-cozy)]")}
-    >
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-[var(--ds-space-cozy)]">
       {RAIL_GROUPS.map((g) => (
         <div key={g.label} className="pb-[var(--ds-space-cozy)]">
           {/* More air above a group heading than below it — the label belongs to
@@ -433,7 +603,162 @@ export function DemoWorkflowPanel({
       >
         Badges, Status Bar pills and the queue all go through one counting path — they cannot disagree.
       </p>
+    </div>
+  );
+}
+
+/** The header both presentations share: the surface's name, then its controls. */
+function WorkflowPanelHeader({ mode, onMode }: PanelModeProps) {
+  return (
+    <div
+      className={cn(
+        "flex shrink-0 items-center border-b",
+        dsSize.hBar,
+        dsBorder.subtle,
+        "gap-[var(--ds-space-base)] pl-[var(--ds-space-cozy)] pr-[var(--ds-space-snug)]",
+      )}
+    >
+      <span className={cn(dsText.caps, "min-w-0 flex-1 truncate text-[color:var(--ds-fg-muted)]")}>Workflow Panel</span>
+      <WorkflowPanelControls mode={mode} onMode={onMode} />
+    </div>
+  );
+}
+
+interface WorkflowPanelProps extends PanelModeProps {
+  active: string;
+  onActive: (label: string) => void;
+  rows: DemoRow[];
+}
+
+/** `sidebar` — docked, consuming a 200px column, exactly as it always did. */
+export function DemoWorkflowSidebar({ mode, onMode, active, onActive, rows }: WorkflowPanelProps) {
+  return (
+    <nav
+      aria-label="Workflow Panel"
+      className={cn("flex min-h-0 shrink-0 flex-col border-r", dsSize.wRail, dsBorder.base, dsSurface.card)}
+    >
+      <WorkflowPanelHeader mode={mode} onMode={onMode} />
+      <WorkflowEntryList active={active} onActive={onActive} rows={rows} />
     </nav>
+  );
+}
+
+/**
+ * `floating` — the same panel as a window over the panel region.
+ *
+ * It is deliberately NOT built on `Popover`/`Dialog`. Both of those register
+ * modal presence, which makes the toast viewport step aside and go inert for as
+ * long as they are mounted, and this is the DEFAULT state — a demo that boots
+ * with its toasts permanently inert would be reporting a bug, not a design. So
+ * it composes the sanctioned floating tokens directly and owns the three things
+ * Radix would have given it: Escape, outside-click, and focus.
+ *
+ * Focus is scoped, not seized. Tab cycles inside the window once the caret is
+ * in it and Escape leaves — but the window never pulls focus off the queue just
+ * because it happens to be the persisted mode on a fresh load.
+ */
+export function DemoWorkflowWindow({
+  mode,
+  onMode,
+  active,
+  onActive,
+  rows,
+  /** did the operator open this, or is it simply how the app booted? */
+  opened,
+}: WorkflowPanelProps & { opened: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [entered, setEntered] = useState(!opened);
+
+  // It arrives from the toggle above it — so it is allowed to be animated, and
+  // only when it actually arrived rather than was already there.
+  useEffect(() => {
+    if (entered) return;
+    const id = window.requestAnimationFrame(() => setEntered(true));
+    return () => window.cancelAnimationFrame(id);
+  }, [entered]);
+
+  // Opened by a press: put the caret on the panel you are in, so the keyboard
+  // route into the list is one press and not fourteen tabs.
+  useEffect(() => {
+    if (!opened) return;
+    ref.current?.querySelector<HTMLElement>('[aria-current="page"]')?.focus();
+  }, [opened]);
+
+  // Clicking anywhere else dismisses it. Capture phase, so the click that
+  // dismisses the window still reaches the row it landed on — you never lose a
+  // press to a panel you were finished with.
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const el = ref.current;
+      const target = e.target as Node | null;
+      if (!el || !target) return;
+      if (el.contains(target)) return;
+      // The toggle owns its own press; letting this fire too would minimise and
+      // re-open in one click.
+      if (document.getElementById(WORKFLOW_PANEL_TOGGLE_ID)?.contains(target)) return;
+      onMode("icon");
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [onMode]);
+
+  /**
+   * Hand focus back to the launcher — but ONLY when it was inside the window.
+   * Stealing it from whatever the operator just clicked would be worse than not
+   * returning it at all, which is why the outside-click path above does not
+   * route through here.
+   *
+   * It runs BEFORE the state change, not in an unmount cleanup: a passive
+   * cleanup fires after React has already detached the node, by which point the
+   * caret is on `<body>` and there is nothing left to ask.
+   */
+  const leave = useCallback(
+    (next: WorkflowPanelMode) => {
+      if (ref.current?.contains(document.activeElement)) {
+        document.getElementById(WORKFLOW_PANEL_TOGGLE_ID)?.focus();
+      }
+      onMode(next);
+    },
+    [onMode],
+  );
+
+  return (
+    <div
+      ref={ref}
+      id={WORKFLOW_PANEL_ID}
+      role="dialog"
+      aria-label="Workflow Panel"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          leave("icon");
+          return;
+        }
+        if (e.key !== "Tab") return;
+        const focusable = Array.from(
+          ref.current?.querySelectorAll<HTMLElement>("button:not([disabled])") ?? [],
+        );
+        if (focusable.length === 0) return;
+        const edge = e.shiftKey ? focusable[0] : focusable[focusable.length - 1];
+        if (document.activeElement !== edge) return;
+        e.preventDefault();
+        (e.shiftKey ? focusable[focusable.length - 1] : focusable[0]).focus();
+      }}
+      className={cn(
+        "absolute left-[var(--ds-space-cozy)] flex flex-col overflow-hidden border",
+        "inset-y-[var(--ds-space-cozy)]",
+        dsSize.wRail,
+        dsLayer.menu,
+        dsRadius.lg,
+        dsElev.high,
+        dsMotion.enter,
+        "origin-top-left border-[color:var(--ds-border-strong)] bg-[var(--ds-surface-overlay)]",
+        entered ? "translate-y-0 scale-100 opacity-100" : "-translate-y-1 scale-[0.985] opacity-0",
+      )}
+    >
+      <WorkflowPanelHeader mode={mode} onMode={leave} />
+      <WorkflowEntryList active={active} onActive={onActive} rows={rows} />
+    </div>
   );
 }
 
