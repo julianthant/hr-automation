@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { QueueRowCard } from "@/components/queue-panel/QueueRowCard";
 import { StatusCounts } from "@/components/queue-panel/StatusCounts";
 import { PROPOSED_STATUS, StatusBadge, statusText, type ProposedStatus } from "./demo-status";
+import { Button, dsBorder, dsFocus, dsIcon, dsMotion, dsRadius, dsSize, dsText } from "./demo-ui";
 import { FooterActions, OutcomeActionButton, RowActionMenu, type DemoActionHandler } from "./DemoActions";
 import { rowInBucket, type StatusBucket } from "./DemoShell";
 import { DEMO_DAY, dayLabel } from "./demo-days";
@@ -131,16 +132,21 @@ function FactChipView({ label, value, arrowTo, warn }: NonNullable<DemoRow["fact
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-[5px] border px-1.5 py-px text-[10.5px]",
-        warn ? "border-warning/40 bg-warning/8 text-warning" : "border-border bg-secondary/50 text-secondary-foreground",
+        "inline-flex items-center border",
+        "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
+        dsRadius.sm,
+        dsText.meta,
+        warn
+          ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]"
+          : "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-secondary)]",
       )}
     >
-      {label && <span className="text-muted-foreground">{label}</span>}
-      <span className={cn("font-mono", !warn && "text-foreground")}>{value}</span>
+      {label && <span className="text-[color:var(--ds-fg-muted)]">{label}</span>}
+      <span className={cn(dsText.nums, !warn && "text-[color:var(--ds-fg)]")}>{value}</span>
       {arrowTo && (
         <>
-          <ArrowRight aria-hidden className="size-2.5 text-muted-foreground" />
-          <span className="font-mono text-foreground">{arrowTo}</span>
+          <ArrowRight aria-hidden className="size-2.5 shrink-0 text-[color:var(--ds-fg-muted)]" />
+          <span className={cn(dsText.nums, "text-[color:var(--ds-fg)]")}>{arrowTo}</span>
         </>
       )}
     </span>
@@ -201,6 +207,33 @@ const MATRIX_CELL: Record<ProposedStatus, string> = {
   cancelled: "bg-[var(--ds-status-cancelled-fg)] opacity-55",
 };
 
+/**
+ * ONE shell for every chip in a row header. There were six hand-rolled copies
+ * of the same span here, differing only in tone and in whether they were
+ * `font-semibold` — which is exactly how a queue ends up with six chip heights
+ * on one line. Tone is the only thing a caller chooses.
+ */
+type RowChipTone = "neutral" | "info" | "warning" | "violet";
+
+const ROW_CHIP_TONE: Record<RowChipTone, string> = {
+  neutral: "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)]",
+  info: "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
+  warning:
+    "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
+  violet:
+    "border-[color:var(--ds-status-parked-border)] bg-[var(--ds-status-parked-bg)] text-[color:var(--ds-status-parked-fg)]",
+};
+
+const rowChip = (tone: RowChipTone, extra?: string): string =>
+  cn(
+    "inline-flex shrink-0 items-center border",
+    "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
+    dsRadius.sm,
+    dsText.micro,
+    ROW_CHIP_TONE[tone],
+    extra,
+  );
+
 function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): ReactNode {
   const status = effectiveStatus(row);
   // Only when the delegated runs have no row of their own to point at. Once
@@ -215,9 +248,9 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): 
       {lookups > 0 && (
         <span
           title={`${lookups} delegated person lookups — one per record. Reachable only from this review row; the packet never lists them.`}
-          className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary/50 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+          className={rowChip("neutral")}
         >
-          <GitBranch aria-hidden className="size-3" />
+          <GitBranch aria-hidden className={dsIcon.sm} />
           {lookups} lookups
         </span>
       )}
@@ -229,7 +262,7 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): 
             .filter(([, v]) => v === "test")
             .map(([k]) => k)
             .join(", ")} — nothing here reached production.`}
-          className="inline-flex items-center gap-1 rounded-md border border-info/45 bg-info/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-info"
+          className={rowChip("info", cn(dsText.caps, "tracking-[var(--ds-tracking-caps)]"))}
         >
           test
         </span>
@@ -237,7 +270,7 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): 
       {row.dryRun && (
         <span
           title="Dry run — this rehearsal reads the systems and writes nothing."
-          className="inline-flex items-center gap-1 rounded-md border border-log-violet/45 bg-log-violet/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-log-violet"
+          className={rowChip("violet", cn(dsText.caps, "tracking-[var(--ds-tracking-caps)]"))}
         >
           dry run
         </span>
@@ -245,7 +278,7 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): 
       {row.workflowVersion !== row.workflow.version && (
         <span
           title={`Ran under ${row.workflow.label} v${row.workflowVersion}; runs are served by v${row.workflow.version} now. Archived runs are not comparable with today's.`}
-          className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+          className={rowChip("neutral", dsText.nums)}
         >
           v{row.workflowVersion}
         </span>
@@ -253,39 +286,39 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): 
       {row.attemptHistory && (
         <span
           title={row.attemptHistory.prior}
-          className="inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/12 px-1.5 py-0.5 text-[10px] font-semibold text-warning"
+          className={rowChip("warning", "font-semibold")}
         >
-          <RotateCcw aria-hidden className="size-3" />
+          <RotateCcw aria-hidden className={dsIcon.sm} />
           attempt {row.attemptHistory.n}
         </span>
       )}
       {row.warnings && (
         <span
           title={row.warnings.first}
-          className="inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/12 px-1.5 py-0.5 text-[10px] font-semibold text-warning"
+          className={rowChip("warning", "font-semibold")}
         >
-          <AlertTriangle aria-hidden className="size-3" />
+          <AlertTriangle aria-hidden className={dsIcon.sm} />
           {row.warnings.count}
         </span>
       )}
       {row.failShots && (
         <span
           title={`${row.failShots} failure screenshots`}
-          className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+          className={rowChip("neutral")}
         >
-          <Camera aria-hidden className="size-3" />
+          <Camera aria-hidden className={dsIcon.sm} />
           {row.failShots}
         </span>
       )}
       {row.receiptShield && (
-        <span title={row.receiptShield} className="inline-flex items-center text-success">
-          <ShieldCheck aria-hidden className="size-3.5" />
+        <span title={row.receiptShield} className="inline-flex shrink-0 items-center text-[color:var(--ds-success-fg)]">
+          <ShieldCheck aria-hidden className={dsIcon.md} />
           <span className="sr-only">{row.receiptShield}</span>
         </span>
       )}
       {row.rowType === "member" && checked.has(row.id) && (
-        <span title="Marked checked by you" className="inline-flex items-center text-success">
-          <CheckCircle2 aria-hidden className="size-3.5" />
+        <span title="Marked checked by you" className="inline-flex shrink-0 items-center text-[color:var(--ds-success-fg)]">
+          <CheckCircle2 aria-hidden className={dsIcon.md} />
           <span className="sr-only">checked</span>
         </span>
       )}
@@ -307,24 +340,28 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): 
  */
 function sublineFor(row: DemoRow): { tone: string; text: string } | null {
   const status = effectiveStatus(row);
-  if (status === "failed" && row.error) return { tone: "text-destructive", text: row.error };
+  if (status === "failed" && row.error) return { tone: "text-[color:var(--ds-status-failed-fg)]", text: row.error };
   if (status === "waiting" && row.gate)
     return {
-      tone: "text-warning",
+      tone: "text-[color:var(--ds-status-waiting-fg)]",
       text:
         row.gate.kind === "identity" && row.gate.candidates
           ? `${row.gate.title.replace("Waiting on you — ", "")} — ${row.gate.candidates[0].name} vs ${row.gate.candidates[1].name}`
           : row.gate.title,
     };
   // Parked is an UNKNOWN outcome, never a hold you resume.
-  if (status === "parked") return { tone: "text-log-violet", text: row.outcome.text };
-  if (status === "cancelled") return { tone: "text-muted-foreground", text: "Cancelled by you — nothing written" };
-  if (status === "running" && row.liveText) return { tone: "text-primary/85", text: row.liveText };
-  if (row.rowType === "group" && row.ocrPhase) return { tone: "text-muted-foreground", text: row.ocrPhase };
+  if (status === "parked") return { tone: "text-[color:var(--ds-status-parked-fg)]", text: row.outcome.text };
+  if (status === "cancelled") return { tone: "text-[color:var(--ds-fg-muted)]", text: "Cancelled by you — nothing written" };
+  if (status === "running" && row.liveText) return { tone: "text-[color:var(--ds-status-running-fg)]", text: row.liveText };
+  if (row.rowType === "group" && row.ocrPhase) return { tone: "text-[color:var(--ds-fg-muted)]", text: row.ocrPhase };
   // A group's own decision lives on a member, so the group has no gate of its
   // own to quote — its rolled-up outcome is the sentence that says what is
   // blocked and what is at risk.
-  if (row.rowType === "group") return { tone: status === "waiting" ? "text-warning" : "text-muted-foreground", text: row.outcome.text };
+  if (row.rowType === "group")
+    return {
+      tone: status === "waiting" ? "text-[color:var(--ds-status-waiting-fg)]" : "text-[color:var(--ds-fg-muted)]",
+      text: row.outcome.text,
+    };
   return null;
 }
 
@@ -410,8 +447,9 @@ export function DemoRowCard({
             <span
               title={row.displayName ? `Named by you — subject is ${row.title}` : undefined}
               className={cn(
-                "truncate text-[14px] font-semibold text-foreground",
-                row.containment === "rejected" && "italic font-normal text-muted-foreground",
+                dsText.title,
+                "truncate font-semibold text-[color:var(--ds-fg)]",
+                row.containment === "rejected" && "italic font-normal text-[color:var(--ds-fg-muted)]",
               )}
             >
               {row.displayName ?? row.title}
@@ -419,9 +457,7 @@ export function DemoRowCard({
             {/* which workflow owns this row — needed the moment the queue shows
                 more than one workflow, and the only thing that tells a packet
                 apart from the OCR review row that shares its filename */}
-            <span className="shrink-0 rounded border border-border bg-secondary/50 px-1.5 py-px text-[9.5px] uppercase tracking-wider text-muted-foreground">
-              {row.wfLabel}
-            </span>
+            <span className={rowChip("neutral", cn(dsText.caps, "tracking-[var(--ds-tracking-caps)]"))}>{row.wfLabel}</span>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">{headerChips(row, state.checkedIds, state.tick)}</div>
         </div>
@@ -429,13 +465,22 @@ export function DemoRowCard({
         {/* A counted anchor ("5 separations") has no subject of its own, so the
             names ARE its identity — without them the row is a number. */}
         {row.memberPreview && row.groupNoun && (
-          <div className="mt-0.5 ml-5 truncate text-[11px] text-muted-foreground" title={row.memberPreview}>
+          <div
+            className={cn(dsText.meta, "mt-[var(--ds-space-hair)] ml-5 truncate text-[color:var(--ds-fg-muted)]")}
+            title={row.memberPreview}
+          >
             {row.memberPreview}
           </div>
         )}
 
         {sub && (
-          <div className={cn("mt-1.5 ml-5 flex min-w-0 items-center gap-2 text-[11px] font-mono", sub.tone)}>
+          <div
+            className={cn(
+              dsText.meta,
+              "mt-[var(--ds-space-snug)] ml-5 flex min-w-0 items-center gap-[var(--ds-space-base)] font-mono",
+              sub.tone,
+            )}
+          >
             <span className="min-w-0 truncate">{sub.text}</span>
             <OutcomeActionButton row={row} onAction={handlers.onAction} className="ml-auto" />
           </div>
@@ -458,9 +503,9 @@ export function DemoRowCard({
                 handlers.onOpenPanel(linked.panel, linked.targetId);
               }}
               title={`Open the ${linked.panel} panel — ${linked.total === 1 ? "this run lives" : "these runs live"} there, not under this row`}
-              className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-info/35 bg-info/8 px-2 py-0.5 text-[10.5px] text-info outline-none hover:bg-info/15 focus-visible:ring-2 focus-visible:ring-ring"
+              className={linkChip("info")}
             >
-              <Users aria-hidden className="size-3 shrink-0" />
+              <Users aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
               <span className="truncate">{linked.label}</span>
               <ArrowUpRight aria-hidden className="size-3 shrink-0" />
             </button>
@@ -479,9 +524,9 @@ export function DemoRowCard({
                 handlers.onOpenPanel(parent.wfLabel, parent.id);
               }}
               title={`Delegated by ${DEMO_ROWS[row.linkedParentId].wfLabel} · ${DEMO_ROWS[row.linkedParentId].title} — open it in its own panel`}
-              className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 py-0.5 text-[10.5px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              className={linkChip("neutral")}
             >
-              <ArrowLeft aria-hidden className="size-3 shrink-0" />
+              <ArrowLeft aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
               <span className="truncate">
                 {DEMO_ROWS[row.linkedParentId].wfLabel} · {DEMO_ROWS[row.linkedParentId].title}
               </span>
@@ -499,11 +544,14 @@ export function DemoRowCard({
 
         {isGroup && counts && (memberCount > 0 ? (
           <>
-            <div className="mt-1.5 ml-5 flex items-center gap-2.5 text-[11px]">
+            <div className={cn(dsText.meta, "mt-[var(--ds-space-snug)] ml-5 flex items-center gap-[var(--ds-space-cozy)]")}>
               <StatusCounts counts={{ done: counts.done + counts.warnings, running: counts.running, queued: counts.queued, failed: counts.failed }} />
               {counts.waiting > 0 && (
-                <span className="inline-flex items-center gap-1 text-warning" aria-label={`${counts.waiting} waiting on you`}>
-                  <Eye aria-hidden className="size-3" />
+                <span
+                  className="inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-status-waiting-fg)]"
+                  aria-label={`${counts.waiting} waiting on you`}
+                >
+                  <Eye aria-hidden className={dsIcon.sm} />
                   {counts.waiting}
                 </span>
               )}
@@ -511,15 +559,18 @@ export function DemoRowCard({
                   with an unreadable page comes to read as clean. */}
               {counts.rejected > 0 && (
                 <span
-                  className="inline-flex items-center gap-1 text-muted-foreground"
+                  className="inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-fg-muted)]"
                   title={`${counts.rejected} rejected — never became work, excluded from the rollup, and the reason this group cannot read as Verified done`}
                 >
-                  <SearchX aria-hidden className="size-3" />
+                  <SearchX aria-hidden className={dsIcon.sm} />
                   {counts.rejected} rejected
                 </span>
               )}
-              <span className="ml-auto inline-flex items-center gap-1 text-success" aria-label="checked progress">
-                <CheckCircle2 aria-hidden className="size-3" />
+              <span
+                className="ml-auto inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-success-fg)]"
+                aria-label="checked progress"
+              >
+                <CheckCircle2 aria-hidden className={dsIcon.sm} />
                 {[...(row.memberIds ?? [])].filter((id) => state.checkedIds.has(id)).length}/{memberCount} checked
               </span>
             </div>
@@ -532,6 +583,24 @@ export function DemoRowCard({
     </QueueRowCard>
   );
 }
+
+/**
+ * A chip that CHANGES PANEL. Three of these existed as three copies of the same
+ * span; the delegation links and the parent back-link now share one shape, so
+ * "this points somewhere else" always looks the same in a row.
+ */
+const linkChip = (tone: "info" | "neutral"): string =>
+  cn(
+    "inline-flex max-w-full cursor-pointer items-center border",
+    "h-[var(--ds-h-xs)] gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
+    dsRadius.sm,
+    dsText.meta,
+    dsFocus,
+    dsMotion.fast,
+    tone === "info"
+      ? "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)] hover:brightness-125"
+      : cn(dsBorder.base, "bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]"),
+  );
 
 function LinkedReviewChip({ row, handlers }: { row: DemoRow; handlers: DemoQueueHandlers }) {
   const targetId = (row.reviewRunId ?? row.reviewOf) as string;
@@ -550,7 +619,7 @@ function LinkedReviewChip({ row, handlers }: { row: DemoRow; handlers: DemoQueue
             ? `Open ${target.title} in the ${target.wfLabel} panel`
             : `Open the OCR panel and select this packet's review row — the records live there, not here`
         }
-        className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-info/35 bg-info/8 px-2 py-0.5 text-[10.5px] text-info outline-none hover:bg-info/15 focus-visible:ring-2 focus-visible:ring-ring"
+        className={linkChip("info")}
       >
         {row.reviewOf ? (
           <>
@@ -581,35 +650,42 @@ function PacketBeforeFanout({ row, handlers }: { row: DemoRow; handlers: DemoQue
   if (row.extractedCount === undefined) return null;
   return (
     <div className="mt-1.5 ml-5 flex flex-col gap-1.5">
-      <div className="flex flex-wrap items-center gap-2 text-[11px]">
-        <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/50 px-2 py-0.5 font-medium text-secondary-foreground">
-          <Users aria-hidden className="size-3 text-muted-foreground" />
+      <div className={cn(dsText.meta, "flex flex-wrap items-center gap-[var(--ds-space-base)]")}>
+        <span className={rowChip("neutral", "font-medium")}>
+          <Users aria-hidden className={cn(dsIcon.sm, "text-[color:var(--ds-fg-muted)]")} />
           {row.extractedCount} people
         </span>
-        <span className="text-muted-foreground">extracted — no member rows yet, they are created when you approve</span>
+        <span className="text-[color:var(--ds-fg-muted)]">extracted — no member rows yet, they are created when you approve</span>
       </div>
       {bulk && (
-        <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-warning/35 bg-warning/6 px-2.5 py-1.5">
-          <button
-            type="button"
+        <div
+          className={cn(
+            "flex flex-wrap items-center border",
+            "gap-[var(--ds-space-snug)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]",
+            dsRadius.md,
+            "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]",
+          )}
+        >
+          <Button
+            size="sm"
+            variant="primary"
             onClick={(e) => e.stopPropagation()}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-warning/55 bg-warning/15 px-2.5 py-0.5 text-[11px] font-semibold text-warning outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            icon={<CheckCircle2 aria-hidden className={dsIcon.sm} />}
           >
-            <CheckCircle2 aria-hidden className="size-3" />
             Approve {bulk.approvable} of {bulk.total}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
             onClick={(e) => {
               e.stopPropagation();
               if (row.reviewRunId) handlers.onOpenPanel(DEMO_ROWS[row.reviewRunId].wfLabel, row.reviewRunId);
             }}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-0.5 text-[11px] font-semibold text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            iconAfter={<ArrowUpRight aria-hidden className={dsIcon.sm} />}
           >
             Open review
-            <ArrowUpRight aria-hidden className="size-3" />
-          </button>
-          <span className="min-w-0 flex-1 text-[10.5px] leading-snug text-muted-foreground">
+          </Button>
+          <span className={cn(dsText.meta, "min-w-0 flex-1 leading-snug text-[color:var(--ds-fg-muted)]")}>
             {bulk.blockedNote} {bulk.editNote}
           </span>
         </div>
@@ -650,22 +726,29 @@ function GroupMatrix({ row, state, handlers }: { row: DemoRow; state: DemoQueueS
       {/* The strip sits ABOVE the matrix on purpose. Fifty cells is a texture,
           not a message — the sentence that names who needs you has to be read
           first, or the matrix becomes decoration. */}
-      <div className="mt-2 ml-5 flex items-center gap-2 rounded-md border border-warning/35 bg-warning/6 px-2.5 py-1.5">
-        <AlertTriangle aria-hidden className="size-3.5 shrink-0 text-warning" />
-        <span className="min-w-0 flex-1 truncate text-[11.5px] text-warning">
+      <div
+        className={cn(
+          "mt-[var(--ds-space-base)] ml-5 flex items-center border",
+          "gap-[var(--ds-space-base)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]",
+          dsRadius.md,
+          "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]",
+        )}
+      >
+        <AlertTriangle aria-hidden className={cn(dsIcon.md, "shrink-0 text-[color:var(--ds-status-waiting-fg)]")} />
+        <span className={cn(dsText.body, "min-w-0 flex-1 truncate text-[color:var(--ds-status-waiting-fg)]")}>
           {attention.length} need attention — {attentionBreakdown(row.id)}
         </span>
-        <button
-          type="button"
+        <Button
+          size="sm"
+          variant="primary"
           onClick={(e) => {
             e.stopPropagation();
             handlers.onDrillIn(row.id);
             if (attention[0]) handlers.onSelect(attention[0]);
           }}
-          className="shrink-0 rounded-md border border-warning/45 bg-warning/12 px-2.5 py-0.5 text-[10.5px] font-semibold text-warning outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Start review
-        </button>
+        </Button>
       </div>
       <div className="mt-1.5 ml-5 flex flex-wrap gap-[3px]" role="listbox" aria-label="Member status matrix">
         {(row.memberIds ?? []).map((id) => {
@@ -753,18 +836,42 @@ function GroupMemberList({
                 handlers.onSelect(id);
               }}
               className={cn(
-                "flex w-full items-center gap-2 bg-card px-2.5 py-1 text-left text-[11.5px] outline-none hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                state.selectedId === id && "bg-info/8",
+                "flex w-full cursor-pointer items-center text-left",
+                "h-[var(--ds-h-sm)] gap-[var(--ds-space-base)] px-[var(--ds-space-base)]",
+                dsText.body,
+                dsFocus,
+                dsMotion.fast,
+                "bg-[var(--ds-surface-1)] hover:bg-[var(--ds-surface-3)]",
+                state.selectedId === id && "bg-[var(--ds-surface-selected)]",
               )}
             >
-              <Icon aria-hidden className={cn("size-3 shrink-0", m.containment === "rejected" ? "text-muted-foreground" : spec.cls)} />
-              <span className={cn("min-w-0 flex-1 truncate text-foreground", m.containment === "rejected" && "italic text-muted-foreground")}>
+              <Icon
+                aria-hidden
+                className={cn(dsIcon.sm, "shrink-0", m.containment === "rejected" ? "text-[color:var(--ds-fg-muted)]" : spec.cls)}
+              />
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate text-[color:var(--ds-fg)]",
+                  m.containment === "rejected" && "italic text-[color:var(--ds-fg-muted)]",
+                )}
+              >
                 {m.title}
               </span>
-              <span className={cn("shrink-0 truncate font-mono text-[10px]", m.status === "failed" && m.containment !== "rejected" ? "text-destructive" : "text-muted-foreground")}>
+              <span
+                className={cn(
+                  dsText.meta,
+                  dsText.nums,
+                  "shrink-0 truncate",
+                  m.status === "failed" && m.containment !== "rejected"
+                    ? "text-[color:var(--ds-status-failed-fg)]"
+                    : "text-[color:var(--ds-fg-muted)]",
+                )}
+              >
                 {m.memberFact}
               </span>
-              <span className="w-16 shrink-0 text-right font-mono text-[10px] text-muted-foreground tabular-nums">{m.eid ?? "—"}</span>
+              <span className={cn(dsText.meta, dsText.nums, "w-16 shrink-0 text-right text-[color:var(--ds-fg-muted)]")}>
+                {m.eid ?? "—"}
+              </span>
             </button>
           );
         })}
@@ -776,9 +883,15 @@ function GroupMemberList({
             e.stopPropagation();
             handlers.onDrillIn(row.id);
           }}
-          className="mt-1 inline-flex items-center gap-1 text-[10.5px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn(
+            dsText.meta,
+            "mt-[var(--ds-space-snug)] inline-flex cursor-pointer items-center gap-[var(--ds-space-tight)]",
+            dsFocus,
+            dsMotion.fast,
+            "text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
+          )}
         >
-          <ArrowRight aria-hidden className="size-3" />
+          <ArrowRight aria-hidden className={dsIcon.sm} />
           Open all {ids.length} {noun}
         </button>
       ) : (
@@ -788,9 +901,15 @@ function GroupMemberList({
             e.stopPropagation();
             handlers.onToggleGroup(row.id);
           }}
-          className="mt-1 inline-flex items-center gap-1 text-[10.5px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn(
+            dsText.meta,
+            "mt-[var(--ds-space-snug)] inline-flex cursor-pointer items-center gap-[var(--ds-space-tight)]",
+            dsFocus,
+            dsMotion.fast,
+            "text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
+          )}
         >
-          {expanded ? <ChevronUp aria-hidden className="size-3" /> : <ChevronDown aria-hidden className="size-3" />}
+          {expanded ? <ChevronUp aria-hidden className={dsIcon.sm} /> : <ChevronDown aria-hidden className={dsIcon.sm} />}
           {expanded ? "Collapse" : `Show all ${ids.length} ${noun}`}
         </button>
       )}
@@ -945,26 +1064,43 @@ export function DemoQueue({
 
   return (
     <section aria-label="Queue" className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
-      <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2 text-[12px] text-muted-foreground">
-        <span className="text-[13px] font-semibold text-foreground">Queue</span>· {dayLabel(day)}
-        <span className="ml-auto font-mono text-[10px]">{inView.length} runs</span>
+      <div
+        className={cn(
+          "flex shrink-0 items-center border-b",
+          dsSize.hBar,
+          dsBorder.subtle,
+          dsText.meta,
+          "gap-[var(--ds-space-snug)] px-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]",
+        )}
+      >
+        <h2 className={cn(dsText.title, "font-semibold text-[color:var(--ds-fg)]")}>Queue</h2>· {dayLabel(day)}
+        <span className="ml-auto">
+          <span className={dsText.nums}>{inView.length}</span> {inView.length === 1 ? "run" : "runs"}
+        </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto pb-3">
         {/* Empty is a STATE: what would be here, why it is not, and what to do
             — in that order. "No rows" on its own teaches the operator nothing
             and reads like a failure. */}
         {inView.length === 0 && (
-          <div className="mx-3 mt-3 flex flex-col items-start gap-1.5 rounded-lg border border-dashed border-border px-4 py-6">
-            <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-foreground">
-              <FileText aria-hidden className="size-3.5 text-muted-foreground" />
+          <div
+            className={cn(
+              "mx-[var(--ds-space-cozy)] mt-[var(--ds-space-cozy)] flex flex-col items-start border border-dashed",
+              "gap-[var(--ds-space-snug)] px-[var(--ds-space-loose)] py-[var(--ds-space-section)]",
+              dsRadius.lg,
+              dsBorder.base,
+            )}
+          >
+            <span className={cn(dsText.ui, "inline-flex items-center gap-[var(--ds-space-snug)] font-semibold text-[color:var(--ds-fg)]")}>
+              <FileText aria-hidden className={cn(dsIcon.md, "text-[color:var(--ds-fg-muted)]")} />
               {state.filter === "all" ? `No ${workflowLabel} runs on Jul 25` : `No ${workflowLabel} runs are ${filterWord(state.filter)}`}
             </span>
-            <p className="max-w-[52ch] text-[11.5px] leading-relaxed text-muted-foreground">
+            <p className={cn(dsText.body, "max-w-[52ch] leading-relaxed text-[color:var(--ds-fg-muted)]")}>
               {state.filter === "all"
                 ? "This workflow is registered and can be run — it simply has no runs today. A panel that vanishes when idle is a panel you stop trusting, so it stays."
                 : "Rows exist in this workflow, just none in this status. The badge beside the workflow and the pill above both read zero here because all three read the same count."}
             </p>
-            <p className="text-[11px] text-muted-foreground">
+            <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
               {state.filter === "all"
                 ? "Start one from the run controls, or pick another workflow in the rail."
                 : "Clear the status pill to see everything in this workflow."}
@@ -977,35 +1113,49 @@ export function DemoQueue({
             <div key={band.key}>
               <div
                 className={cn(
-                  "mx-3 mt-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-widest",
-                  band.key === "attention" ? "text-warning" : "text-muted-foreground",
+                  dsText.caps,
+                  "mx-[var(--ds-space-cozy)] mt-[var(--ds-space-loose)] mb-[var(--ds-space-snug)] flex items-center gap-[var(--ds-space-base)]",
+                  band.key === "attention"
+                    ? "text-[color:var(--ds-status-waiting-fg)]"
+                    : "text-[color:var(--ds-fg-muted)]",
                 )}
               >
                 {/* "Finished today" is only true on today's partition */}
                 {band.key === "finished" && !isToday ? "Finished" : band.label}
                 <span
                   className={cn(
-                    "rounded-full border px-1.5 font-mono text-[10px] tabular-nums",
-                    band.key === "attention" ? "border-warning/50" : "border-border",
+                    dsText.nums,
+                    dsText.micro,
+                    "inline-flex h-[var(--ds-h-xs)] items-center rounded-full border px-[var(--ds-space-snug)]",
+                    band.key === "attention" ? "border-[color:var(--ds-status-waiting-border)]" : dsBorder.base,
                   )}
                 >
                   {band.rows.length}
                 </span>
-                <span aria-hidden className="h-px flex-1 bg-border/60" />
+                <span aria-hidden className="h-px flex-1 bg-[var(--ds-border-subtle)]" />
               </div>
               {band.key === "finished" && state.filter === "all" && (
-                <div className="mx-3 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-dashed border-border px-3 py-1.5 text-[11px] text-muted-foreground">
-                  <span className="font-semibold text-secondary-foreground">{isToday ? "Today:" : `${dayLabel(day)}:`}</span>
+                <div
+                  className={cn(
+                    dsText.meta,
+                    "mx-[var(--ds-space-cozy)] mt-[var(--ds-space-base)] flex flex-wrap items-center border border-dashed",
+                    "gap-x-[var(--ds-space-cozy)] gap-y-[var(--ds-space-tight)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
+                    dsRadius.md,
+                    dsBorder.base,
+                    "text-[color:var(--ds-fg-muted)]",
+                  )}
+                >
+                  <span className="font-semibold text-[color:var(--ds-fg-secondary)]">{isToday ? "Today:" : `${dayLabel(day)}:`}</span>
                   <span>
-                    <span className="font-semibold text-success">{digest.done}</span> verified
+                    <span className="font-semibold text-[color:var(--ds-success-fg)]">{digest.done}</span> verified
                   </span>
                   {digest.warned > 0 && (
-                    <span className="text-warning">
+                    <span className="text-[color:var(--ds-status-waiting-fg)]">
                       <span className="font-semibold">{digest.warned}</span> with warnings
                     </span>
                   )}
                   {digest.failed > 0 && (
-                    <span className="text-destructive">
+                    <span className="text-[color:var(--ds-status-failed-fg)]">
                       <span className="font-semibold">{digest.failed}</span> failed
                     </span>
                   )}
