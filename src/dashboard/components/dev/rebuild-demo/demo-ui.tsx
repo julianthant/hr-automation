@@ -97,6 +97,12 @@ export {
   PageHeader,
   Banner,
   MetaLine,
+  /**
+   * A wrapping row of PEER facts. Reach for it instead of `flex flex-wrap`
+   * whenever a set of chips can wrap — it is what gives every line the same
+   * ending edge, so a four-fact row never reads as three plus an orphan.
+   */
+  ChipRow,
   Refusal,
   BulletList,
   EmptyState,
@@ -145,6 +151,19 @@ export {
   PopoverAnchor,
   PopoverClose,
   PopoverContent,
+  /**
+   * An object's own commands, on the object. Right-click (or the platform's
+   * context-menu key, or the shortcut a shell binds through
+   * `openContextMenuFor`) — never a `⋯` button, which is a control whose only
+   * job is to admit there are more controls.
+   */
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  openContextMenuFor,
   Tooltip,
   TooltipProvider,
   ToastProvider,

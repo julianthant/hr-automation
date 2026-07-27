@@ -9,6 +9,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+import * as ContextMenuPrimitive from "@radix-ui/react-context-menu";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
@@ -665,6 +666,171 @@ function PopoverSurface({
         </div>
       </FloatingSurface>
     </PopoverPrimitive.Content>
+  );
+}
+
+/* =========================================================================
+ * ContextMenu — the commands an object carries, on its own object
+ *
+ * The queue row used to hang a `⋯` button off its footer. That button is a
+ * control whose only job is to admit there are more controls: it costs a slot
+ * on every row in the queue, it names nothing, and it puts the row's full
+ * command set behind a target the operator has to hit. Production already
+ * solved this for the Session Panel's browser tiles — right-click opens the
+ * recovery menu (`terminal-drawer/WorkflowBox.tsx`) — so this is that pattern
+ * promoted to a primitive instead of a second hand-rolled copy.
+ *
+ * KEYBOARD PARITY IS NOT OPTIONAL. A menu that only opens under the pointer
+ * makes every command in it unreachable from the keyboard, which in a
+ * keyboard-first console is worse than the `⋯` it replaced. Two routes exist:
+ * the platform's own context-menu key (Menu / Shift+F10, which the browser
+ * dispatches as a `contextmenu` event on the focused element — Radix's trigger
+ * answers it), and an app shortcut that dispatches the same event on the
+ * selected object. `openContextMenuFor()` below is that second route, so the
+ * shell can bind one key and every consumer inherits it.
+ * ====================================================================== */
+
+export const ContextMenu = ContextMenuPrimitive.Root;
+export const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
+export const ContextMenuSeparator = ContextMenuPrimitive.Separator;
+
+/**
+ * Open an element's context menu from the keyboard.
+ *
+ * Radix's `ContextMenu.Root` has no controlled `open` prop — it opens from the
+ * DOM `contextmenu` event, by design — so the honest keyboard route is to
+ * dispatch that exact event rather than to reach inside the primitive. The
+ * coordinates are the element's own top-left corner plus a small inset, which
+ * is where a pointer-opened menu would have appeared had the operator clicked
+ * the object's leading edge. Returns false when there is nothing to open, so a
+ * caller never reports a menu it did not open.
+ */
+export function openContextMenuFor(element: Element | null | undefined): boolean {
+  if (!(element instanceof HTMLElement)) return false;
+  const box = element.getBoundingClientRect();
+  element.dispatchEvent(
+    new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: Math.round(box.left + 16),
+      clientY: Math.round(box.top + 16),
+    }),
+  );
+  return true;
+}
+
+/**
+ * The surface. Same floating language as `Popover` — overlay surface, menu
+ * layer, mid elevation — and the same origin-aware entry, scaled from 0.97
+ * out of the point Radix resolved rather than from a hand-picked corner.
+ *
+ * It registers modal presence for the reason every dismissable layer in this
+ * system does: a `danger` toast never auto-dismisses and the viewport is
+ * `fixed bottom-right`, so a menu opened on a row near the bottom of the queue
+ * would otherwise share that corner with a surface that eats clicks.
+ */
+export function ContextMenuContent({
+  label,
+  className,
+  children,
+}: {
+  /** REQUIRED — the menu's accessible name ("Commands for Maria Lopez"). */
+  label: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <ContextMenuPrimitive.Portal>
+      <ContextMenuSurface label={label} className={className}>
+        {children}
+      </ContextMenuSurface>
+    </ContextMenuPrimitive.Portal>
+  );
+}
+
+function ContextMenuSurface({
+  label,
+  className,
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  const entered = useEntered();
+  useRegisterModal();
+  return (
+    <ContextMenuPrimitive.Content
+      aria-label={label}
+      collisionPadding={8}
+      className={cn(
+        "min-w-[var(--ds-w-menu)] max-w-[calc(100vw-var(--ds-space-section))] overflow-hidden border py-[var(--ds-space-tight)]",
+        "border-[color:var(--ds-border-strong)] bg-[var(--ds-surface-overlay)]",
+        dsRadius.md,
+        dsElev.mid,
+        dsLayer.menu,
+        dsMotion.enter,
+        "origin-[var(--radix-context-menu-content-transform-origin)]",
+        entered ? "opacity-100 scale-100" : "opacity-0 scale-[0.97]",
+        className,
+      )}
+    >
+      {children}
+    </ContextMenuPrimitive.Content>
+  );
+}
+
+/** A group heading inside the menu. Never a sentence — it names a set. */
+export function ContextMenuLabel({ children }: { children: ReactNode }) {
+  return (
+    <ContextMenuPrimitive.Label
+      className={cn(dsText.caps, "px-[var(--ds-space-cozy)] py-[var(--ds-space-tight)] text-[color:var(--ds-fg-muted)]")}
+    >
+      {children}
+    </ContextMenuPrimitive.Label>
+  );
+}
+
+/**
+ * One command. `tone="destructive"` is the single irreversible slot — the same
+ * rule the rest of the system holds to, so a menu never offers two.
+ */
+export function ContextMenuItem({
+  icon,
+  tone = "neutral",
+  hint,
+  disabled,
+  onSelect,
+  children,
+}: {
+  icon?: ReactNode;
+  tone?: "neutral" | "destructive";
+  /** a trailing keyboard hint or short qualifier — never an explanation */
+  hint?: ReactNode;
+  disabled?: boolean;
+  onSelect?: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <ContextMenuPrimitive.Item
+      disabled={disabled}
+      onSelect={onSelect}
+      className={cn(
+        "flex cursor-pointer select-none items-center gap-[var(--ds-space-snug)] outline-none",
+        "px-[var(--ds-space-cozy)] py-[var(--ds-space-tight)]",
+        dsText.body,
+        dsMotion.fast,
+        tone === "destructive" ? "text-[color:var(--ds-danger)]" : "text-[color:var(--ds-fg-secondary)]",
+        tone === "destructive"
+          ? "data-[highlighted]:bg-[var(--ds-danger-quiet)]"
+          : "data-[highlighted]:bg-[var(--ds-surface-3)] data-[highlighted]:text-[color:var(--ds-fg)]",
+        "data-[disabled]:pointer-events-none data-[disabled]:opacity-45",
+      )}
+    >
+      {icon && <span className="inline-flex shrink-0">{icon}</span>}
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      {hint && <span className={cn(dsText.micro, "shrink-0 text-[color:var(--ds-fg-faint)]")}>{hint}</span>}
+    </ContextMenuPrimitive.Item>
   );
 }
 
