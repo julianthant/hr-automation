@@ -195,15 +195,19 @@ export function DemoTopBar({
         "gap-[var(--ds-space-cozy)] px-[var(--ds-space-cozy)]",
       )}
     >
-      <span className="flex shrink-0 items-center gap-[var(--ds-space-base)]">
+      {/* The app's name is the page's ONE h1. It reads at `dsText.ui` like the
+          chrome it is — heading LEVEL is the document outline, not a type size —
+          and it is the outline's root on every view, including the takeovers,
+          whose `PageHeader` deliberately does not compete for it. */}
+      <div className="flex shrink-0 items-center gap-[var(--ds-space-base)]">
         <span
           aria-hidden
           className={cn("flex items-center justify-center", dsRadius.md, "size-[var(--ds-h-sm)] bg-[var(--ds-accent-quiet)]")}
         >
           <ShieldCheck className={cn(dsIcon.md, "text-[color:var(--ds-accent-mark)]")} />
         </span>
-        <span className={cn(dsText.ui, "font-semibold text-[color:var(--ds-fg)]")}>HR Automation</span>
-      </span>
+        <h1 className={cn(dsText.ui, "font-semibold text-[color:var(--ds-fg)]")}>HR Automation</h1>
+      </div>
       {/* A standing environment marker, not news. It has to be unmissable when
           you look at it and invisible when you are not — the loud tier belongs
           to `Waiting on you` and `Failed`, and nothing else may take it. */}
