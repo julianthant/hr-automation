@@ -1190,6 +1190,177 @@ export const DEMO_ARCHIVE: ArchivedRunWire[] = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// THE ARCHIVE AT SCALE
+//
+// Eight hand-authored runs is what an archive looks like on its first day. The
+// operator: *"think about when we have a lot more stuff to put in there with a
+// lot of runs? how do we manage all of those? you need to see the bigger
+// picture."* — and they are right that the answer cannot be found on eight
+// rows, because eight rows fit however badly you draw them.
+//
+// So the corpus holds what a few version bumps actually leave behind. These are
+// GENERATED, deterministically, into the SAME array every other surface reads:
+// there is no second archive for the report's ledger or the version registry to
+// disagree with. They are lean but complete-shaped — every one carries the steps,
+// logs, attempts, retention and provenance the "self-contained" contract
+// requires — because a row that would fail that contract is not a row this page
+// should be sized against.
+//
+// Three deliberate constraints so the authored fixtures stay the interesting
+// ones: no generated run carries EVIDENCE (the purged-pointer case is authored),
+// none is swept by a bump with no change record (that gap is authored, and is
+// exactly one), and none runs longer than the authored 51-minute cohort.
+// ---------------------------------------------------------------------------
+
+/** a fixed-seed LCG — the corpus must be identical on every load and in tests */
+function seeded(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
+}
+
+const BULK_FIRST = ["Rowan", "Priya", "Malik", "Sofia", "Jonas", "Aisha", "Teodor", "Lena", "Kwame", "Ines", "Viktor", "Mei", "Odis", "Fatou", "Ansel", "Yara"];
+const BULK_LAST = ["Vaszary", "Okonkwo", "Lindqvist", "Marchetti", "Abergel", "Thackeray", "Nwosu", "Halvorsen", "Petrosyan", "Cardoso", "Bergstrom", "Adeyemi"];
+
+const BULK_SHAPES: {
+  workflowId: DemoWorkflowId;
+  version: number;
+  minor: number;
+  bumpId: string;
+  statuses: ProposedStatus[];
+}[] = [
+  { workflowId: "emergency-contact", version: 3, minor: 1, bumpId: "chg-ec-4", statuses: ["verifiedDone", "verifiedDone", "verifiedDone", "doneWarnings", "failed"] },
+  { workflowId: "separations", version: 6, minor: 0, bumpId: "chg-app-2026073", statuses: ["verifiedDone", "verifiedDone", "doneWarnings", "cancelled"] },
+  { workflowId: "onboarding", version: 4, minor: 2, bumpId: "chg-app-2026073", statuses: ["verifiedDone", "verifiedDone", "verifiedDone", "failed"] },
+  { workflowId: "work-study", version: 2, minor: 0, bumpId: "chg-app-2026073", statuses: ["verifiedDone", "doneWarnings"] },
+  { workflowId: "ocr", version: 8, minor: 0, bumpId: "chg-ocr-9", statuses: ["verifiedDone", "verifiedDone", "doneWarnings"] },
+  { workflowId: "oath-signature", version: 5, minor: 1, bumpId: "chg-app-2026073", statuses: ["verifiedDone", "verifiedDone", "cancelled"] },
+  { workflowId: "person-lookup", version: 3, minor: 0, bumpId: "chg-app-2026073", statuses: ["verifiedDone", "verifiedDone", "verifiedDone"] },
+  { workflowId: "i9-check", version: 1, minor: 0, bumpId: "chg-app-2026073", statuses: ["verifiedDone", "doneWarnings", "failed"] },
+];
+
+const BULK_MONTHS = ["Jul", "Jun", "May"];
+
+function bulkRun(index: number, rand: () => number): ArchivedRunWire {
+  const shape = BULK_SHAPES[index % BULK_SHAPES.length];
+  const workflow = DEMO_WORKFLOWS[shape.workflowId];
+  const first = BULK_FIRST[Math.floor(rand() * BULK_FIRST.length)];
+  const last = BULK_LAST[Math.floor(rand() * BULK_LAST.length)];
+  const name = `${first} ${last}`;
+  const status = shape.statuses[index % shape.statuses.length];
+  const eid = String(10_700_000 + index * 7);
+  const seconds = 18 + Math.floor(rand() * 2_000);
+  const durationLabel = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const month = BULK_MONTHS[index % BULK_MONTHS.length];
+  const day = 1 + (index % 27);
+  const hour = 7 + (index % 10);
+  const minute = index % 60;
+  const clock = `${month} ${day}, ${hour}:${String(minute).padStart(2, "0")} AM`;
+  const trace = `${workflow.code}-${String(hour).padStart(2, "0")}${String(minute).padStart(2, "0")}${String(index % 60).padStart(2, "0")}-${(0x1000 + index).toString(16)}`;
+  const failed = status === "failed";
+  const wroteToTest = index % 23 === 0;
+  const dryRun = index % 31 === 0;
+
+  return {
+    runId: `arch-bulk-${index}`,
+    traceId: trace,
+    workflowId: shape.workflowId,
+    workflowLabel: workflow.label,
+    workflowCode: workflow.code,
+    workflowVersion: shape.version,
+    workflowMinorVersion: shape.minor,
+    appVersion: "2026.07.2",
+    title: name,
+    subtitle: eid,
+    finalStatus: status,
+    enqueuedAt: clock,
+    endedAt: clock,
+    durationLabel,
+    requestedBy: DEMO_OPERATOR,
+    archivedAt: "Jul 20, 9:02 AM",
+    bumpId: shape.bumpId,
+    dryRun,
+    priority: index % 5 === 0 ? "interactive" : "bulk",
+    resolvedInstance: Object.fromEntries(workflow.systems.map((system) => [system, wroteToTest ? "test" : "prod"])),
+    receipt: {
+      headline: failed
+        ? `Failed · nothing was filed for ${name}`
+        : `${workflow.label} complete for ${name}`,
+      confidence: failed ? "unknown" : status === "doneWarnings" ? "partial" : "verified",
+      lines: [
+        { label: "Employee ID", value: eid, verified: !failed },
+        { label: "Ran for", value: durationLabel },
+      ],
+    },
+    // Deliberately none: the purged-pointer and lightbox cases are carried by
+    // the authored runs, and 800 synthetic capture refs would bury them.
+    evidence: [],
+    input: [
+      { label: "Employee ID", value: eid },
+      { label: "Requested", value: clock },
+    ],
+    ledger:
+      failed || dryRun || shape.workflowId === "person-lookup" || shape.workflowId === "ocr"
+        ? []
+        : [
+            {
+              system: workflow.systems[0],
+              action: `${workflow.label} update for ${name}`,
+              confirmation: `${workflow.code.toUpperCase()}-2026-${String(1000 + index).slice(-4)}`,
+              instance: wroteToTest ? "test" : "prod",
+            },
+          ],
+    steps: [
+      { label: "Navigation", state: "done", durationLabel: "4s" },
+      { label: "Read the record", state: "done", durationLabel: "9s" },
+      failed
+        ? { label: "Write", state: "failed", durationLabel: "2s" }
+        : { label: "Write", state: "done", durationLabel: `${Math.max(1, Math.floor(seconds / 4))}s` },
+    ],
+    logs: [
+      { at: clock, level: "info", text: `${workflow.label} started for ${name}` },
+      failed
+        ? { at: clock, level: "error", text: "The page did not reach the confirmation state before the step's budget." }
+        : { at: clock, level: "write", text: `Filed and read back for ${eid}.` },
+    ],
+    data: [{ direction: "read", field: "Employee ID", value: eid, system: workflow.systems[0], at: clock }],
+    members: [],
+    decisions: [],
+    attempts: [{ ordinal: 1, traceId: trace, outcome: status, at: clock, note: failed ? "the only attempt" : "first and only attempt" }],
+    failure: failed
+      ? {
+          headline: `${workflow.label} stopped before it filed anything for ${name}`,
+          writeState: "Nothing was written. The run stopped before the submit, so a retry cannot duplicate.",
+          classification: "timeout · page never reached the confirmation state",
+          cause: "The step's budget elapsed while the page was still loading.",
+        }
+      : undefined,
+    retention: {
+      policy: "An archived row is kept indefinitely; its evidence is kept 90 days from the run's end.",
+      rowPurgeAt: "kept indefinitely",
+      evidencePurgeAt: "no evidence to purge",
+    },
+    provenance: {
+      archivedBy: "hr-automation (migration)",
+      snapshotHash: `sha256:${(0xa0000 + index * 37).toString(16)}…${(index % 1000).toString(16)}`,
+      snapshotVerifiedAt: "Jul 25, 2:12 AM",
+      schema: "archive/v1",
+    },
+  };
+}
+
+/** how many generated runs sit behind the eight authored ones */
+export const ARCHIVE_BULK_COUNT = 812;
+
+{
+  const rand = seeded(0x5eed_1234);
+  for (let i = 0; i < ARCHIVE_BULK_COUNT; i += 1) DEMO_ARCHIVE.push(bulkRun(i, rand));
+}
+
+
 export function archiveForBump(bumpId: string): ArchivedRunWire[] {
   return DEMO_ARCHIVE.filter((run) => run.bumpId === bumpId);
 }
@@ -1207,13 +1378,24 @@ export const ARCHIVE_RETENTION_NOTE =
 // Finding something — the reason anyone opens an archive
 // ---------------------------------------------------------------------------
 
-export type ArchiveSortKey = "newest" | "oldest" | "longest" | "name";
+/**
+ * THE COLUMNS THE TABLE SORTS ON.
+ *
+ * They are the columns, not a separate list of "sorts" — a sort menu offering
+ * an order the table has no column for is an order nobody can verify, and a
+ * column the table shows but cannot sort is a column the operator will try to
+ * click. One vocabulary, so the header IS the control.
+ */
+export type ArchiveSortKey = "status" | "name" | "trace" | "workflow" | "when" | "duration";
+export type ArchiveSortDir = "asc" | "desc";
 
 export const ARCHIVE_SORT_LABEL: Record<ArchiveSortKey, string> = {
-  newest: "Newest run first",
-  oldest: "Oldest run first",
-  longest: "Longest run first",
-  name: "By name",
+  status: "Outcome",
+  name: "Name",
+  trace: "Trace",
+  workflow: "Workflow",
+  when: "When",
+  duration: "Ran for",
 };
 
 export interface ArchiveQuery {
@@ -1222,6 +1404,7 @@ export interface ArchiveQuery {
   status: ProposedStatus | "all";
   instance: "all" | "prod" | "test";
   sort: ArchiveSortKey;
+  dir: ArchiveSortDir;
 }
 
 export const EMPTY_ARCHIVE_QUERY: ArchiveQuery = {
@@ -1229,8 +1412,16 @@ export const EMPTY_ARCHIVE_QUERY: ArchiveQuery = {
   workflowId: "all",
   status: "all",
   instance: "all",
-  sort: "newest",
+  sort: "when",
+  dir: "desc",
 };
+
+/** whether anything is narrowing the list — drives the empty state's copy */
+export function archiveQueryIsFiltered(query: ArchiveQuery): boolean {
+  return (
+    query.text.trim() !== "" || query.workflowId !== "all" || query.status !== "all" || query.instance !== "all"
+  );
+}
 
 /**
  * Everything about a run a search should match. The archive had NO search at
@@ -1271,6 +1462,38 @@ function durationSeconds(label: string): number {
   return Number(hours?.[1] ?? 0) * 3600 + Number(minutes?.[1] ?? 0) * 60 + Number(seconds?.[1] ?? 0);
 }
 
+/** the ORDER the eight statuses are ranked in when the outcome column is sorted */
+const STATUS_RANK: ProposedStatus[] = [
+  "waiting",
+  "failed",
+  "parked",
+  "doneWarnings",
+  "running",
+  "queued",
+  "cancelled",
+  "verifiedDone",
+];
+
+/**
+ * ONE comparator per column, ascending. Direction is applied once, at the end,
+ * so a column cannot accidentally invert only one of its two directions — which
+ * is the bug every hand-rolled per-direction comparator eventually grows.
+ *
+ * `when` is deliberately FIXTURE ORDER rather than a parse of `endedAt`. The
+ * archive's stored clock is a display string ("Jul 22, 9:15 AM") with no year
+ * and no zone; inventing a date out of it to sort by would be exactly the kind
+ * of fabricated value this product refuses. The corpus is authored newest-first,
+ * which is the real ordering the backend would serve.
+ */
+const COMPARATORS: Record<ArchiveSortKey, (a: ArchivedRunWire, b: ArchivedRunWire) => number> = {
+  status: (a, b) => STATUS_RANK.indexOf(a.finalStatus) - STATUS_RANK.indexOf(b.finalStatus),
+  name: (a, b) => (a.displayName ?? a.title).localeCompare(b.displayName ?? b.title),
+  trace: (a, b) => a.traceId.localeCompare(b.traceId),
+  workflow: (a, b) => a.workflowLabel.localeCompare(b.workflowLabel) || a.workflowVersion - b.workflowVersion,
+  when: (a, b) => (SORT_INDEX.get(a.runId) ?? 0) - (SORT_INDEX.get(b.runId) ?? 0),
+  duration: (a, b) => durationSeconds(a.durationLabel) - durationSeconds(b.durationLabel),
+};
+
 export function queryArchive(runs: readonly ArchivedRunWire[], query: ArchiveQuery): ArchivedRunWire[] {
   const text = query.text.trim().toLowerCase();
   const matched = runs.filter((run) => {
@@ -1282,18 +1505,71 @@ export function queryArchive(runs: readonly ArchivedRunWire[], query: ArchiveQue
     return true;
   });
 
-  const sorted = [...matched];
-  if (query.sort === "name") {
-    sorted.sort((a, b) => (a.displayName ?? a.title).localeCompare(b.displayName ?? b.title));
-  } else if (query.sort === "longest") {
-    sorted.sort((a, b) => durationSeconds(b.durationLabel) - durationSeconds(a.durationLabel));
-  } else {
-    // Fixture order IS newest-first; the archive has no parseable instant, so
-    // "oldest" is that order reversed rather than a date maths invented here.
-    sorted.sort((a, b) => (SORT_INDEX.get(a.runId) ?? 0) - (SORT_INDEX.get(b.runId) ?? 0));
-    if (query.sort === "oldest") sorted.reverse();
+  const compare = COMPARATORS[query.sort];
+  const sorted = [...matched].sort((a, b) => {
+    const primary = compare(a, b);
+    // A STABLE tiebreak on fixture order. Without it, sorting 800 rows by a
+    // six-value column reshuffles equal rows on every re-render and the row the
+    // operator was reading moves under the pointer.
+    return primary !== 0 ? primary : (SORT_INDEX.get(a.runId) ?? 0) - (SORT_INDEX.get(b.runId) ?? 0);
+  });
+  return query.dir === "desc" ? sorted.reverse() : sorted;
+}
+
+/** one collapsible section of the table: the bump that swept these runs */
+export interface ArchiveBumpSection {
+  bumpId: string;
+  runs: ArchivedRunWire[];
+}
+
+/**
+ * Group a QUERIED list by the bump that swept it, preserving the sort inside
+ * each section and ordering the sections by where their first run landed.
+ *
+ * Grouping is applied AFTER the sort so the two are independent: the operator
+ * chooses an order, and the sections are the places that order runs through.
+ * Interleaving them the other way round would make "sort by duration" mean
+ * "sort by duration inside whatever order the bumps happen to be in", which is
+ * not an order anybody can predict.
+ */
+export function groupArchiveByBump(runs: readonly ArchivedRunWire[]): ArchiveBumpSection[] {
+  const sections: ArchiveBumpSection[] = [];
+  const index = new Map<string, ArchiveBumpSection>();
+  for (const run of runs) {
+    let section = index.get(run.bumpId);
+    if (!section) {
+      section = { bumpId: run.bumpId, runs: [] };
+      index.set(run.bumpId, section);
+      sections.push(section);
+    }
+    section.runs.push(run);
   }
-  return sorted;
+  return sections;
+}
+
+/**
+ * The flat list a virtualiser walks: section headers and run rows in ONE
+ * sequence, so the window can hold either and the two cannot get out of step.
+ *
+ * A collapsed section contributes its header and nothing else — which is what
+ * makes collapsing cheap at any size, because the rows are never built.
+ */
+export type ArchiveTableItem =
+  | { kind: "section"; bumpId: string; count: number; collapsed: boolean }
+  | { kind: "run"; run: ArchivedRunWire; bumpId: string };
+
+export function flattenArchiveTable(
+  sections: readonly ArchiveBumpSection[],
+  collapsed: ReadonlySet<string>,
+): ArchiveTableItem[] {
+  const items: ArchiveTableItem[] = [];
+  for (const section of sections) {
+    const shut = collapsed.has(section.bumpId);
+    items.push({ kind: "section", bumpId: section.bumpId, count: section.runs.length, collapsed: shut });
+    if (shut) continue;
+    for (const run of section.runs) items.push({ kind: "run", run, bumpId: section.bumpId });
+  }
+  return items;
 }
 
 // ---------------------------------------------------------------------------

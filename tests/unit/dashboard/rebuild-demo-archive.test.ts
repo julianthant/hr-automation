@@ -2,9 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  ARCHIVE_BULK_COUNT,
   ARCHIVE_RETENTION_NOTE,
   DEMO_ARCHIVE,
   EMPTY_ARCHIVE_QUERY,
+  ARCHIVE_SORT_LABEL,
+  archiveQueryIsFiltered,
+  flattenArchiveTable,
+  groupArchiveByBump,
   allTopLevelRows,
   archivedCapture,
   archivedRunTouchedTest,
@@ -18,6 +23,7 @@ import {
   resetRelaunchSequence,
   submitVersionBump,
   type ArchiveQuery,
+  type ArchiveSortKey,
 } from "@/components/dev/rebuild-demo/demo-archive-wire";
 import { fmtClock, type DemoWorkflowId } from "@/components/dev/rebuild-demo/demo-wire";
 
@@ -66,12 +72,20 @@ test("a search that matches nothing returns nothing rather than everything", () 
 });
 
 test("filters narrow by workflow, outcome and instance", () => {
+  // Property, not a count: the corpus now holds what a few version bumps
+  // actually leave behind, so pinning a literal here would only pin the
+  // fixture's size.
   const ec = queryArchive(DEMO_ARCHIVE, q({ workflowId: "emergency-contact" }));
-  assert.equal(ec.length, 3);
+  assert.ok(ec.length > 0);
   assert.ok(ec.every((r) => r.workflowId === "emergency-contact"));
+  assert.ok(ec.length < DEMO_ARCHIVE.length, "the workflow filter narrowed nothing");
 
   const failed = queryArchive(DEMO_ARCHIVE, q({ status: "failed" }));
-  assert.deepEqual(failed.map((r) => r.runId), ["arch-onb-kai-app2"]);
+  assert.ok(failed.every((r) => r.finalStatus === "failed"));
+  assert.ok(
+    failed.some((r) => r.runId === "arch-onb-kai-app2"),
+    "the authored failure is the one with a full failure record — it must survive every filter change",
+  );
 
   const test = queryArchive(DEMO_ARCHIVE, q({ instance: "test" }));
   assert.ok(test.length > 0, "the archive must hold a run that touched a test instance");
@@ -81,14 +95,110 @@ test("filters narrow by workflow, outcome and instance", () => {
   assert.equal(test.length + prod.length, DEMO_ARCHIVE.length);
 });
 
-test("sorting reorders without dropping or duplicating a run", () => {
-  const newest = queryArchive(DEMO_ARCHIVE, q({ sort: "newest" }));
-  const oldest = queryArchive(DEMO_ARCHIVE, q({ sort: "oldest" }));
-  const longest = queryArchive(DEMO_ARCHIVE, q({ sort: "longest" }));
-  const byName = queryArchive(DEMO_ARCHIVE, q({ sort: "name" }));
-  for (const list of [newest, oldest, longest, byName]) assert.equal(list.length, DEMO_ARCHIVE.length);
-  assert.deepEqual([...oldest].reverse().map((r) => r.runId), newest.map((r) => r.runId));
-  assert.equal(longest[0].runId, "arch-ws-cohort-app2", "the 51m run sorts first by duration");
+// ---------------------------------------------------------------------------
+// AT SCALE — the property the whole table redesign rests on
+// ---------------------------------------------------------------------------
+
+test("the archive holds a REAL number of runs, in ONE corpus", () => {
+  // Eight rows is what an archive looks like on its first day, and eight rows
+  // fit however badly you draw them. The generated runs live in the SAME array
+  // every other surface reads — the report's ledger and the version registry
+  // included — so there is no second archive for them to disagree with.
+  assert.ok(DEMO_ARCHIVE.length > 800, `the archive is only ${DEMO_ARCHIVE.length} rows — it proves nothing about scale`);
+  assert.equal(DEMO_ARCHIVE.length, ARCHIVE_BULK_COUNT + 8);
+  // Ids are unique, or the virtualiser's keys collide and rows swap under the
+  // pointer while scrolling.
+  assert.equal(new Set(DEMO_ARCHIVE.map((r) => r.runId)).size, DEMO_ARCHIVE.length);
+  assert.equal(new Set(DEMO_ARCHIVE.map((r) => r.traceId)).size, DEMO_ARCHIVE.length);
+});
+
+test("the generated runs keep the authored ones the interesting ones", () => {
+  const generated = DEMO_ARCHIVE.filter((r) => r.runId.startsWith("arch-bulk-"));
+  assert.equal(generated.length, ARCHIVE_BULK_COUNT);
+  // Three constraints, so 800 synthetic rows cannot bury the cases the demo
+  // exists to show.
+  assert.ok(generated.every((r) => r.evidence.length === 0), "a generated run carries evidence — it would bury the purged pointer");
+  assert.ok(generated.every((r) => changeRecordFor(r.bumpId) !== undefined), "a generated run has no change record — that gap is authored, and is exactly one");
+  assert.ok(
+    generated.every((r) => r.durationLabel !== "51m 4s"),
+    "a generated run matches the authored longest — the duration sort would stop being verifiable",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The table's own seams: column sorts, sections, and the flat window list
+// ---------------------------------------------------------------------------
+
+test("every sortable column is a column the table shows, and every sort is total", () => {
+  const keys = Object.keys(ARCHIVE_SORT_LABEL) as ArchiveSortKey[];
+  assert.deepEqual(keys, ["status", "name", "trace", "workflow", "when", "duration"]);
+  for (const key of keys) {
+    for (const dir of ["asc", "desc"] as const) {
+      const sorted = queryArchive(DEMO_ARCHIVE, q({ sort: key, dir }));
+      assert.equal(sorted.length, DEMO_ARCHIVE.length, `${key}/${dir} dropped or duplicated a run`);
+      assert.equal(new Set(sorted.map((r) => r.runId)).size, DEMO_ARCHIVE.length);
+    }
+  }
+});
+
+test("a sort is STABLE — equal rows keep one order across renders", () => {
+  // 800 rows over a six-value column means most comparisons are ties. Without a
+  // tiebreak the tied rows reshuffle on every re-sort and the row the operator
+  // is reading moves under the pointer.
+  const a = queryArchive(DEMO_ARCHIVE, q({ sort: "status", dir: "asc" })).map((r) => r.runId);
+  const b = queryArchive(DEMO_ARCHIVE, q({ sort: "status", dir: "asc" })).map((r) => r.runId);
+  assert.deepEqual(a, b);
+});
+
+test("reversing the direction reverses the list exactly", () => {
+  for (const key of ["name", "duration", "when"] as ArchiveSortKey[]) {
+    const asc = queryArchive(DEMO_ARCHIVE, q({ sort: key, dir: "asc" })).map((r) => r.runId);
+    const desc = queryArchive(DEMO_ARCHIVE, q({ sort: key, dir: "desc" })).map((r) => r.runId);
+    assert.deepEqual([...asc].reverse(), desc, `${key} is not symmetric between its two directions`);
+  }
+});
+
+test("the duration column really sorts by duration — the 51m cohort is the longest", () => {
+  const longest = queryArchive(DEMO_ARCHIVE, q({ sort: "duration", dir: "desc" }));
+  assert.equal(longest[0].runId, "arch-ws-cohort-app2");
+});
+
+test("grouping is applied AFTER the sort, and keeps every run exactly once", () => {
+  const rows = queryArchive(DEMO_ARCHIVE, q({ sort: "name", dir: "asc" }));
+  const sections = groupArchiveByBump(rows);
+  assert.ok(sections.length > 1, "the corpus has only one bump — the sections prove nothing");
+  assert.equal(sections.reduce((n, s) => n + s.runs.length, 0), rows.length);
+  assert.equal(new Set(sections.map((s) => s.bumpId)).size, sections.length);
+  // The chosen order survives INSIDE each section, which is what makes the two
+  // controls independent.
+  for (const section of sections) {
+    const names = section.runs.map((r) => r.displayName ?? r.title);
+    assert.deepEqual(names, [...names].sort((x, y) => x.localeCompare(y)), `${section.bumpId} lost the sort`);
+  }
+});
+
+test("a collapsed section contributes its header and NOTHING else", () => {
+  const sections = groupArchiveByBump(queryArchive(DEMO_ARCHIVE, q({})));
+  const open = flattenArchiveTable(sections, new Set());
+  assert.equal(open.filter((i) => i.kind === "section").length, sections.length);
+  assert.equal(open.filter((i) => i.kind === "run").length, DEMO_ARCHIVE.length);
+
+  const first = sections[0];
+  const partly = flattenArchiveTable(sections, new Set([first.bumpId]));
+  assert.equal(partly.filter((i) => i.kind === "section").length, sections.length, "a collapsed section lost its header");
+  assert.equal(partly.filter((i) => i.kind === "run").length, DEMO_ARCHIVE.length - first.runs.length);
+
+  const shut = flattenArchiveTable(sections, new Set(sections.map((s) => s.bumpId)));
+  assert.equal(shut.length, sections.length, "collapsing everything must cost one item per section, whatever the corpus size");
+});
+
+test("the empty state can tell a filtered miss from an empty archive", () => {
+  assert.equal(archiveQueryIsFiltered(EMPTY_ARCHIVE_QUERY), false);
+  assert.equal(archiveQueryIsFiltered(q({ text: "noor" })), true);
+  assert.equal(archiveQueryIsFiltered(q({ instance: "test" })), true);
+  // A sort is not a filter: changing the order must never make the empty state
+  // offer to "clear the search".
+  assert.equal(archiveQueryIsFiltered(q({ sort: "duration", dir: "asc" })), false);
 });
 
 test("a filter that excludes the selected run leaves a list the selection can land inside", () => {
