@@ -8,7 +8,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { CircleAlert, Info, TriangleAlert, CheckCircle2 } from "lucide-react";
+import { CircleAlert, Info, ShieldAlert, TriangleAlert, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { dsElev, dsFocus, dsIcon, dsMotion, dsRadius, dsText } from "./tokens";
 
@@ -297,6 +297,158 @@ export function Banner({
 }
 
 /* =========================================================================
+ * MetaLine — the provenance line
+ * ====================================================================== */
+
+/**
+ * "Where this came from", in one line: ids, codes, clocks, actors, hashes.
+ *
+ * Every surface in this product ends up printing one — `code X · query "Y" · no
+ * corpus was scanned`, `receipt R · generated 2:20 PM · attempt 2`, `header row
+ * 4 · fingerprint 503172dd`. They were hand-rolled seven different ways, four of
+ * them reaching for a raw `font-mono` (which drops the tabular figures that stop
+ * a clock from jittering) instead of `dsText.nums`. One component, one treatment.
+ *
+ * Segments are joined with the product's ` · ` separator so no call site has to
+ * remember it, and `undefined`/`null`/`false` segments drop out — a conditional
+ * fact never leaves a dangling dot behind.
+ */
+export function MetaLine({
+  items,
+  tone = "muted",
+  className,
+}: {
+  items: ReactNode[];
+  /** `faint` for a footer's standing note; `muted` for a fact about this run */
+  tone?: "muted" | "faint";
+  className?: string;
+}) {
+  const shown = items.filter((item) => item !== null && item !== undefined && item !== false);
+  if (shown.length === 0) return null;
+  return (
+    <span
+      className={cn(
+        dsText.meta,
+        dsText.nums,
+        tone === "faint" ? "text-[color:var(--ds-fg-faint)]" : "text-[color:var(--ds-fg-muted)]",
+        className,
+      )}
+    >
+      {shown.map((item, index) => (
+        <span key={index}>
+          {index > 0 && <span aria-hidden> · </span>}
+          {item}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/* =========================================================================
+ * Refusal — the server said no
+ * ====================================================================== */
+
+/**
+ * A REFUSAL, which is not the same thing as a failure.
+ *
+ * A failure is the product breaking; a refusal is the product declining, on
+ * purpose, with a rule behind it — a stale contract, an unresolved parked write,
+ * a fence that has not cleared. This surface exists in seven places (enqueue
+ * rejected, an intake block, a park-resolve fence miss, a search lookup that
+ * could not run, a setting the environment owns, a bump that would bury a live
+ * run, a notification backfill gap) and was drawn seven different ways.
+ *
+ * Two things it always does, because they are the whole point:
+ *
+ *  - **It carries the CODE**, in the standard `MetaLine` position. A refusal the
+ *    operator cannot quote is a refusal they cannot get help with.
+ *  - **It says what was NOT done.** Pass `outcome` — "nothing was recorded",
+ *    "nothing is enqueued". `role="alert"` comes from `Banner`'s danger tone.
+ *
+ * `ShieldAlert` is deliberately not `TriangleAlert`: the triangle means
+ * something broke, the shield means something was refused. Two different
+ * questions, two different icons.
+ */
+export function Refusal({
+  title,
+  code,
+  outcome,
+  meta = [],
+  action,
+  className,
+  children,
+}: {
+  title: ReactNode;
+  /** the machine-readable refusal code — required; a refusal without one is a shrug */
+  code: string;
+  /** what was NOT done, in the product's own words */
+  outcome?: ReactNode;
+  /** extra provenance segments beside the code */
+  meta?: ReactNode[];
+  action?: ReactNode;
+  className?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <Banner
+      tone="danger"
+      title={title}
+      icon={<ShieldAlert aria-hidden className={dsIcon.lg} />}
+      action={action}
+      className={className}
+    >
+      <span className="flex flex-col gap-[var(--ds-space-tight)]">
+        {children && <span>{children}</span>}
+        <MetaLine items={[`code ${code}`, ...meta, outcome]} />
+      </span>
+    </Banner>
+  );
+}
+
+/* =========================================================================
+ * BulletList
+ * ====================================================================== */
+
+/**
+ * A short list of facts. Five surfaces were rendering these as a column of
+ * `<p>· {item}</p>` — a literal middle-dot character, which a screen reader
+ * reads aloud and which gives the reader no list semantics at all. Same look,
+ * real `<ul>`, the marker drawn rather than spoken.
+ */
+export function BulletList({
+  items,
+  tone = "secondary",
+  className,
+}: {
+  items: ReactNode[];
+  tone?: "secondary" | "muted";
+  className?: string;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <ul className={cn("flex min-w-0 flex-col gap-[var(--ds-space-hair)]", className)}>
+      {items.map((item, index) => (
+        <li
+          key={index}
+          className={cn(
+            dsText.body,
+            "flex min-w-0 gap-[var(--ds-space-snug)]",
+            tone === "muted"
+              ? "text-[color:var(--ds-fg-muted)]"
+              : "text-[color:var(--ds-fg-secondary)]",
+          )}
+        >
+          <span aria-hidden className="select-none text-[color:var(--ds-fg-faint)]">
+            ·
+          </span>
+          <span className="min-w-0 flex-1">{item}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/* =========================================================================
  * EmptyState
  * ====================================================================== */
 
@@ -468,7 +620,8 @@ export function Tab({
         "h-[var(--ds-h-bar)] px-[var(--ds-space-base)]",
         dsText.ui,
         dsFocus,
-        dsMotion.base,
+        dsMotion.fast,
+        "active:translate-y-px",
         "border-b-2 border-transparent -mb-px",
         selected
           ? "border-b-[color:var(--ds-accent)] font-semibold text-[color:var(--ds-fg)]"

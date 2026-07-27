@@ -85,6 +85,9 @@ export {
   CardFooter,
   SectionLabel,
   Banner,
+  MetaLine,
+  Refusal,
+  BulletList,
   EmptyState,
   Tabs,
   TabList,
@@ -122,6 +125,7 @@ export {
   TooltipProvider,
   ToastProvider,
   useToasts,
+  useDsModalPresence,
 } from "./ds/primitives-overlay";
 export type {
   DsDialogSize,

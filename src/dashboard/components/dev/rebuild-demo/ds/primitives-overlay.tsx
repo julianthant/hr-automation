@@ -68,6 +68,38 @@ function useRegisterModal(): void {
   }, []);
 }
 
+/**
+ * Register a modal surface that is NOT one of this file's Dialog/Drawer.
+ *
+ * The registry above is what moves the toast viewport out of a decision's way,
+ * and `ds`'s own overlays opt in automatically. Any OTHER dialog primitive
+ * rendered inside this app — notably `@/components/ui/dialog`, which the demo's
+ * `ConfirmCommandDialog` and `RenameRunDialog` are built on — is invisible to it,
+ * so a persistent `danger` toast can still sit on top of those footers and eat
+ * the click. Those dialogs cannot see this module's internals, so this is the
+ * seam they call instead.
+ *
+ * Call it from a component that MOUNTS ONLY WHILE THE DIALOG IS OPEN (the
+ * content, not the root) — the count is keyed to mount, not to an `open` prop:
+ *
+ * ```tsx
+ * function ConfirmBody() {
+ *   useDsModalPresence();      // ← unregisters on unmount
+ *   return <DialogHeader>…</DialogHeader>;
+ * }
+ *
+ * <Dialog open={open}>
+ *   <DialogContent>{open && <ConfirmBody />}</DialogContent>
+ * </Dialog>
+ * ```
+ *
+ * Radix's `DialogContent` already unmounts its children on close, so rendering
+ * the hook's host inside `DialogContent` is enough in the common case.
+ */
+export function useDsModalPresence(): void {
+  useRegisterModal();
+}
+
 /** Is any Dialog or Drawer open right now? */
 function useModalOpen(): boolean {
   return useSyncExternalStore(
@@ -104,13 +136,20 @@ const DIALOG_SIZE: Record<DsDialogSize, string> = {
   xl: "max-w-[min(94vw,1100px)]",
 };
 
-function Scrim({ layer, entered }: { layer: string; entered: boolean }) {
+/**
+ * The backdrop. `slow` matches a DRAWER's own `--ds-dur-4` slide: at the default
+ * `--ds-dur-3` the scrim finished 60ms before the panel landed, so the last
+ * third of the drawer slid over an already-solid backdrop and read as two
+ * separate events instead of one surface arriving.
+ */
+function Scrim({ layer, entered, slow }: { layer: string; entered: boolean; slow?: boolean }) {
   return (
     <DialogPrimitive.Overlay
       className={cn(
         "fixed inset-0 bg-[var(--ds-surface-scrim)]",
         layer,
         dsMotion.enter,
+        slow && "duration-[var(--ds-dur-4)]",
         entered ? "opacity-100" : "opacity-0",
       )}
     />
@@ -230,17 +269,45 @@ export function DialogBody({ className, children }: { className?: string; childr
   );
 }
 
-/** Actions right-aligned, primary last — the operator's eye ends on the verb. */
-export function DialogFooter({ className, children }: { className?: string; children: ReactNode }) {
+/**
+ * Actions right-aligned, primary last — the operator's eye ends on the verb.
+ *
+ * `meta` is the quiet left-hand slot every dialog in this product wants: the
+ * contract version, the source file, the standing rule. It was being hand-rolled
+ * as `<span className="… mr-auto">` on five surfaces with five different text
+ * treatments, so it lives here now and the footers line up. It also `min-w-0`s
+ * and truncates, which the hand-rolled ones did not — a long filename used to
+ * push the actions off the right edge.
+ */
+export function DialogFooter({
+  meta,
+  className,
+  children,
+}: {
+  meta?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
   return (
     <footer
       className={cn(
-        "flex shrink-0 items-center justify-end gap-[var(--ds-space-base)] border-t px-[var(--ds-space-loose)] py-[var(--ds-space-cozy)]",
+        "flex shrink-0 items-center gap-[var(--ds-space-base)] border-t px-[var(--ds-space-loose)] py-[var(--ds-space-cozy)]",
         "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)]",
+        meta ? "justify-between" : "justify-end",
         className,
       )}
     >
-      {children}
+      {meta && (
+        <span
+          className={cn(
+            dsText.meta,
+            "min-w-0 flex-1 truncate text-[color:var(--ds-fg-muted)]",
+          )}
+        >
+          {meta}
+        </span>
+      )}
+      <span className="flex shrink-0 items-center gap-[var(--ds-space-base)]">{children}</span>
     </footer>
   );
 }
@@ -311,7 +378,7 @@ function DrawerSurface({
   const isRight = side === "right";
   return (
     <>
-      <Scrim layer={dsLayer.drawer} entered={entered} />
+      <Scrim layer={dsLayer.drawer} entered={entered} slow />
       <DialogPrimitive.Content
         style={isRight ? { width: size } : { height: size }}
         className={cn(
