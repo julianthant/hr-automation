@@ -20,11 +20,11 @@
  *     week cannot read as a finished one.
  */
 
-import type { ProposedStatus } from "./demo-status";
+import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
 import type { DemoRow } from "./demo-data";
 import { effectiveStatus } from "./demo-data";
 import { ALL_DEMO_ROWS, DEMO_DAYS, dayLabel, dayOfRow, topLevelRowsForDay } from "./demo-days";
-import { DEMO_WORKFLOWS, type DemoWorkflowId } from "./demo-wire";
+import { buildWorkflowCategoryGroups, DEMO_WORKFLOWS, type DemoWorkflowId } from "./demo-wire";
 import { DEMO_ARCHIVE, isTerminal } from "./demo-archive-wire";
 
 // ---------------------------------------------------------------------------
@@ -99,6 +99,28 @@ export interface LedgerLine {
   test: number;
 }
 
+/**
+ * One rail CATEGORY's block of the per-workflow table, with its own subtotal.
+ *
+ * The table was fifteen flat rows in run-count order, which answers "which
+ * workflow ran most" and nothing else. A supervisor's question is "how did
+ * Onboarding do against Separations", and that is a question about the same
+ * grouping the rail uses — so the report groups by each descriptor's OWN
+ * `category`, exactly like the rail, and there is no second taxonomy to drift.
+ */
+export interface CategoryBlock {
+  label: string;
+  lines: WorkflowLine[];
+  subtotal: WorkflowLine;
+}
+
+/** the day's outstanding work, bucketed by WHAT IT IS WAITING ON */
+export interface OutstandingBucket {
+  key: ProposedStatus;
+  label: string;
+  rows: DemoRow[];
+}
+
 export interface ActivityReport {
   span: ReportSpan;
   generatedAt: string;
@@ -115,6 +137,8 @@ export interface ActivityReport {
   /** failed ÷ terminal, as a percentage. Non-terminal rows are excluded. */
   errorRatePct: number;
   byWorkflow: WorkflowLine[];
+  /** the same lines, grouped by the rail's own categories, with subtotals */
+  byCategory: CategoryBlock[];
   hoursSaved: number;
   ledger: LedgerLine[];
   caveats: string[];
@@ -189,6 +213,19 @@ export function buildActivityReport(span: ReportSpan, generatedAt: string): Acti
   const byWorkflow = [...perWorkflow.values()].sort((a, b) => b.runs - a.runs);
   const minutes = byWorkflow.reduce((n, line) => n + line.minutesSaved, 0);
 
+  // Grouped by the RAIL's own categories, from the same registry projection the
+  // rail reads — a category with no runs in this span is dropped rather than
+  // printed as a block of zeros, which is the same rule the rail applies.
+  const byCategory: CategoryBlock[] = buildWorkflowCategoryGroups()
+    .map((group) => {
+      const lines = group.workflows
+        .map((w) => perWorkflow.get(w.id))
+        .filter((line): line is WorkflowLine => line !== undefined)
+        .sort((a, b) => b.runs - a.runs);
+      return { label: group.label, lines, subtotal: sumLines(group.label, lines) };
+    })
+    .filter((block) => block.lines.length > 0);
+
   // The ledger is never pruned and never archived, so it is the only block here
   // that reaches back past the span's own rows.
   const ledgerMap = new Map<string, LedgerLine>();
@@ -208,6 +245,7 @@ export function buildActivityReport(span: ReportSpan, generatedAt: string): Acti
     totals,
     errorRatePct,
     byWorkflow,
+    byCategory,
     hoursSaved: Math.round((minutes / 60) * 10) / 10,
     ledger: [...ledgerMap.values()].sort((a, b) => b.entries - a.entries),
     caveats: [
@@ -220,9 +258,66 @@ export function buildActivityReport(span: ReportSpan, generatedAt: string): Acti
   };
 }
 
+/**
+ * A category's own row, summed from its workflows. It carries a label rather
+ * than a workflow id because nothing addresses it as a workflow — a subtotal
+ * that pretends to be a line is a subtotal something eventually sorts.
+ */
+function sumLines(label: string, lines: WorkflowLine[]): WorkflowLine {
+  return lines.reduce<WorkflowLine>(
+    (acc, line) => ({
+      ...acc,
+      runs: acc.runs + line.runs,
+      verified: acc.verified + line.verified,
+      warnings: acc.warnings + line.warnings,
+      failed: acc.failed + line.failed,
+      cancelled: acc.cancelled + line.cancelled,
+      outstanding: acc.outstanding + line.outstanding,
+      minutesSaved: acc.minutesSaved + line.minutesSaved,
+    }),
+    {
+      workflowId: "ocr",
+      label,
+      code: "",
+      runs: 0,
+      verified: 0,
+      warnings: 0,
+      failed: 0,
+      cancelled: 0,
+      outstanding: 0,
+      minutesSaved: 0,
+    },
+  );
+}
+
 /** the report's own view of what is still open — the honest counterweight */
 export function outstandingRows(span: ReportSpan): DemoRow[] {
   return span.days.flatMap((day) => topLevelRowsForDay(day)).filter((row) => !isTerminal(effectiveStatus(row)));
+}
+
+/**
+ * The outstanding work, BUCKETED BY WHAT IT IS WAITING ON.
+ *
+ * It used to be one flat wrap of seventeen status-pill-plus-name chips across
+ * three lines — unscannable, uncountable, unactionable, and it answered none of
+ * the four questions an operator actually has about open work. Those questions
+ * ARE the four non-terminal statuses, so the bucket set is the status vocabulary
+ * rather than a grouping invented for this surface, and a bucket with nothing in
+ * it is dropped instead of printing a zero.
+ *
+ * The names are kept — one press away, per bucket — because "which four are
+ * waiting on me" has to be answerable. Spraying them across the surface is what
+ * made them unreadable, not their presence.
+ */
+export const OUTSTANDING_ORDER: ProposedStatus[] = ["waiting", "parked", "running", "queued"];
+
+export function outstandingBuckets(span: ReportSpan): OutstandingBucket[] {
+  const rows = outstandingRows(span);
+  return OUTSTANDING_ORDER.map((key) => ({
+    key,
+    label: PROPOSED_STATUS[key].label,
+    rows: rows.filter((row) => effectiveStatus(row) === key),
+  })).filter((bucket) => bucket.rows.length > 0);
 }
 
 export function workflowLabel(id: DemoWorkflowId): string {
