@@ -19,7 +19,6 @@ import {
   GitBranch,
   ImageOff,
   Loader2,
-  Lock,
   Pause,
   Receipt,
   RotateCcw,
@@ -34,7 +33,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { IconActionButton } from "@/components/shared/IconActionButton";
-import { StatusBadge, type ProposedStatus } from "./demo-status";
+import { MemberOutcomePending, MemberOutcomeWord, StatusBadge, type ProposedStatus } from "./demo-status";
 import { panelKindOf, panelKindSpec, rowVariantSpec } from "./demo-catalog";
 import { BannerActions, OutcomeActionButton, ParkResolutions, type DemoActionHandler } from "./DemoActions";
 import { ContextRail, ContextRailSpine, useContextRail } from "./DemoContextRail";
@@ -57,6 +56,8 @@ import {
   FloatingSurface,
   IconButton,
   Kbd,
+  LockedValue,
+  ValueField,
   dsBorder,
   dsFocus,
   dsIcon,
@@ -155,19 +156,24 @@ export interface DemoLogPanelProps {
 
 /**
  * The log stream is the noisiest surface in the product, so it is the one that
- * had to give colour back. `--log-*` are no longer four CATEGORICAL hues — each
- * now resolves to a step on a neutral ink ramp (see `ds/tokens.css`), except
- * `--log-violet`, which resolves to the warning amber because "unconfirmed
- * write" was never a category in the first place. Direction is carried by the
- * arrow icon and by weight: a WRITE (`log-teal` → the base foreground) is the
- * load-bearing one, a READ (`log-cyan`) sits a step back, and navigation
- * (`log-slate`) is quieter still. Do not re-introduce a hue here.
+ * had to give colour back — but only where colour is INFORMATION.
+ *
+ * The four categorical `--log-*` hues stay retired: `nav` and `search` are
+ * chrome and read as a step on the neutral ink ramp, because "this line was a
+ * navigation" is not a fact an operator needs to spot from across the panel.
+ *
+ * DIRECTION is different, and it is the one axis that gets its hue back
+ * (`--ds-read-*` / `--ds-write-*`, see `ds/tokens.css`). It is the same pair
+ * the Data ledger uses, so blue means "the run read this" and purple means "the
+ * run changed something" on BOTH surfaces — a colour that means one thing in
+ * one panel and nothing in the next is worse than no colour at all. The arrow
+ * glyphs stay: colour is never the only differentiator.
  */
 const LINE_ICON: Record<LineKind, { icon: typeof Check; cls: string }> = {
   nav: { icon: ArrowRight, cls: "text-log-slate" },
   search: { icon: Search, cls: "text-log-slate" },
-  read: { icon: ArrowDownToLine, cls: "text-log-cyan" },
-  write: { icon: ArrowUpFromLine, cls: "text-log-teal" },
+  read: { icon: ArrowDownToLine, cls: "text-[color:var(--ds-read-fg)]" },
+  write: { icon: ArrowUpFromLine, cls: "text-[color:var(--ds-write-fg)]" },
   ok: { icon: Check, cls: "text-success" },
   error: { icon: X, cls: "text-destructive" },
   warn: { icon: TriangleAlert, cls: "text-warning" },
@@ -199,7 +205,9 @@ function Pill({ dir, label, value }: { dir: "read" | "write"; label: string; val
     <span
       className={cn(
         "mr-1 inline-flex items-center gap-1 rounded-[5px] border px-1.5 py-px text-[10.5px]",
-        read ? "border-log-cyan/30 bg-log-cyan/8 text-log-cyan" : "border-log-teal/30 bg-log-teal/8 text-log-teal",
+        read
+          ? "border-[color:var(--ds-read-border)] bg-[var(--ds-read-bg)] text-[color:var(--ds-read-fg)]"
+          : "border-[color:var(--ds-write-border)] bg-[var(--ds-write-bg)] text-[color:var(--ds-write-fg)]",
       )}
     >
       <Icon aria-hidden className="size-2.5" />
@@ -1114,50 +1122,66 @@ function ReviewTab({
             const chip = SOURCE_CHIP[source];
             return (
               <div key={f.label} className="flex items-baseline gap-2 border-b border-border/40 py-[5px] text-[12px] last:border-b-0">
-                {/* 96px, not 112: the four things on this line are the label,
-                    the value, where it came from and how sure we are, and the
-                    VALUE is the one being checked against the page. The label
-                    gives up the width. */}
-                <span className="flex w-24 shrink-0 items-center gap-1.5 text-muted-foreground">
-                  {f.label}
+                {/* 80px, not 96 and not 112: the four things on this line are
+                    the label, the value, where it came from and how sure we
+                    are, and the VALUE is the one being checked against the
+                    page. The label gives up the width — and it gave up another
+                    16px when the value became a visible field, because the
+                    box's own padding has to come from somewhere and it must
+                    not come from the value. */}
+                <span className="flex w-20 shrink-0 items-center gap-1.5 text-muted-foreground">
+                  {/* Truncates rather than wraps. A wrapping label makes every
+                      row a different height the moment one field is corrected,
+                      and a checklist you scan down is worth more than the last
+                      two characters of a label the input also announces. */}
+                  <span className="min-w-0 truncate" title={f.label}>
+                    {f.label}
+                  </span>
                   {corrected && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warning" />}
                 </span>
                 {/* A value may only change with its page on screen — which is
                     why the packet row offers bulk approve but never an edit,
                     and why the input lives beside the scan rather than in a
-                    form somewhere else. */}
+                    form somewhere else.
+
+                    THE SHARED PAIR (2026-07-27, operator: the same "how do I
+                    edit this" they hit on the Data ledger, hit again here). An
+                    editable extracted field used to draw `border-transparent`
+                    with the outline arriving only on HOVER, on the theory that
+                    a page of outlined boxes reads as a form to fill in rather
+                    than a reading to check. That theory cost more than it
+                    bought: at rest the field was indistinguishable from the
+                    locked `UCPath` value on the line below it, so it only
+                    looked editable AFTER it had been edited. It now uses the
+                    same `ValueField` / `LockedValue` pair as the Data ledger —
+                    a box takes typing, flat text with a lock does not, and the
+                    distinction is carried by SHAPE at rest rather than by a
+                    pointer the operator has to think to move.
+
+                    Nothing about the correction itself changed: provenance
+                    still flips to `you`, the model confidence is still DROPPED
+                    rather than inherited, the dirty dot still marks the label,
+                    and the approve action still counts the corrections. */}
                 {f.editable && !readOnly ? (
-                  <input
-                    aria-label={`${f.label} — correct against the page shown beside it${corrected ? `. Corrected by you; read from the page as ${f.value}` : ""}`}
+                  <ValueField
+                    ariaLabel={`${f.label} — correct against the page shown beside it${corrected ? `. Corrected by you; read from the page as ${f.value}` : ""}`}
+                    title={value}
                     value={value}
-                    onChange={(e) => setEdits((prev) => ({ ...prev, [key]: e.target.value }))}
-                    className={cn(
-                      "min-w-0 flex-1 rounded border bg-transparent px-1.5 py-0.5 font-mono text-[11.5px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      // The border arrives on hover rather than sitting on every
-                      // row at rest — a page of outlined boxes reads as a form
-                      // to fill in, not as a reading you are checking. It fades
-                      // in so the row does not flicker as the pointer crosses it.
-                      dsMotion.fast,
-                      corrected
-                        ? "border-warning/50 bg-warning/5 text-warning"
-                        : "border-transparent text-foreground hover:border-border focus:border-border",
-                    )}
+                    dirty={corrected}
+                    onChange={(next) => setEdits((prev) => ({ ...prev, [key]: next }))}
+                    className="flex-1"
                   />
                 ) : (
-                  <span
-                    title={
+                  <LockedValue
+                    value={f.value}
+                    tone={f.warn ? "warning" : "default"}
+                    reason={
                       readOnly
                         ? "A read-only report records what was read; there is nothing downstream for a correction to reach."
                         : "Looked up in a system of record — not read off this page, so there is nothing here to correct."
                     }
-                    className={cn(
-                      "flex min-w-0 flex-1 items-center gap-1.5 font-mono text-[11.5px]",
-                      f.warn ? "text-warning" : "text-foreground",
-                    )}
-                  >
-                    <Lock aria-hidden className="size-3 shrink-0 text-muted-foreground/70" />
-                    <span className="min-w-0 flex-1 truncate">{f.value}</span>
-                  </span>
+                    className="flex-1"
+                  />
                 )}
                 <span
                   title={corrected ? `You typed this. The page was read as “${f.value}”.` : undefined}
@@ -1394,9 +1418,16 @@ function PeopleTab({
     return m.status === "verifiedDone";
   });
   const checkedCount = ordered.filter((id) => checkedIds.has(id)).length;
+  // Read off the WORKFLOW, never off its id: the next workflow that declares a
+  // vocabulary gets the outcome column with nothing to change here.
+  const hasOutcomes = Boolean(row.workflow.memberOutcomes);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    // `@container`, not a viewport query: this list lives in the centre column,
+    // which is 414px with the context rail open and 728px with it collapsed at
+    // the SAME 1280px viewport. A media query would fold the Detail column at
+    // the wrong moment in both directions.
+    <div className="@container flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
         <div className="inline-flex rounded-md border border-border bg-secondary/40 p-0.5">
           {PEOPLE_FILTERS.map((f) => (
@@ -1428,6 +1459,38 @@ function PeopleTab({
         </button>
       </div>
 
+      {/* The column heads exist because the outcome and the detail are two
+          different questions and the list is long enough that the eye needs to
+          be told which column answers which. `Outcome` only appears for a
+          workflow that declares a vocabulary — a group with no vocabulary has
+          one free-text column and captioning it twice would be a lie.
+
+          `Detail` folds below 40rem, in lockstep with the cells it captions.
+          At 414px the fixed columns plus the status pill consume the whole row,
+          so the detail cell was rendering at zero width under a caption that
+          promised something — a heading over an empty column is the same lie in
+          the other direction. Folded, the detail still rides each row's `title`
+          and the outcome (the axis that decides what to do next) keeps its
+          place. */}
+      <div
+        className={cn(
+          "flex items-center gap-2 border-b px-3 py-1",
+          "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)]",
+        )}
+      >
+        <span aria-hidden className="size-3.5 shrink-0" />
+        <span className={cn(dsText.caps, "w-36 shrink-0 text-[color:var(--ds-fg-muted)]")}>Person</span>
+        <span className={cn(dsText.caps, "w-20 shrink-0 text-[color:var(--ds-fg-muted)]")}>EID</span>
+        {hasOutcomes && (
+          <span className={cn(dsText.caps, "w-[var(--ds-w-member-detail)] shrink-0 text-[color:var(--ds-fg-muted)]")}>
+            Outcome
+          </span>
+        )}
+        <span className={cn(dsText.caps, "hidden min-w-0 flex-1 text-[color:var(--ds-fg-muted)] @min-[40rem]:block")}>
+          Detail
+        </span>
+      </div>
+
       <div className="min-h-0 flex-1 overflow-y-auto">
         {shown.map((id) => {
           const m = DEMO_ROWS[id];
@@ -1439,19 +1502,42 @@ function PeopleTab({
               key={id}
               type="button"
               onClick={() => onSelect(id)}
+              title={m.memberFact ?? undefined}
               className="flex w-full items-center gap-2 border-b border-border/40 px-3 py-1.5 text-left outline-none hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Icon aria-hidden className={cn("size-3.5 shrink-0", rejected ? "text-muted-foreground" : spec.cls)} />
-              <span className={cn("w-40 shrink-0 truncate text-[12.5px] font-medium text-foreground", rejected && "italic font-normal text-muted-foreground")}>
+              <span className={cn("w-36 shrink-0 truncate text-[12.5px] font-medium text-foreground", rejected && "italic font-normal text-muted-foreground")}>
                 {m.title}
               </span>
               <span className="w-20 shrink-0 font-mono text-[10.5px] text-muted-foreground">{m.eid ?? "—"}</span>
-              <span className={cn("min-w-0 flex-1 truncate text-[11.5px]", m.status === "failed" ? "text-destructive" : "text-muted-foreground")}>
-                {m.memberFact ?? m.outcome.text}
+              {/* THE OUTCOME, in its own fixed column and in the vocabulary its
+                  workflow declares — the same word, the same tone and the same
+                  renderer the queue uses. Until this pass the People tab still
+                  read the free-text `memberFact`, so the operator saw the typed
+                  `Not found` in the queue and the crammed `no UCPath mat…` here,
+                  on the same person, one click apart. */}
+              {hasOutcomes &&
+                (m.memberOutcomeSpec ? (
+                  <MemberOutcomeWord outcome={m.memberOutcomeSpec} className="w-[var(--ds-w-member-detail)] shrink-0" />
+                ) : (
+                  <MemberOutcomePending className="w-[var(--ds-w-member-detail)] shrink-0" />
+                ))}
+              <span
+                className={cn(
+                  "hidden min-w-0 flex-1 truncate text-[11.5px] @min-[40rem]:block",
+                  m.status === "failed" ? "text-destructive" : "text-muted-foreground",
+                )}
+              >
+                {m.memberFact ?? (hasOutcomes ? "—" : m.outcome.text)}
               </span>
-              {checkedIds.has(id) && <Check aria-hidden className="size-3 shrink-0 text-success" />}
-              {/* a rejected page is not a failed person — it never became work */}
-              <StatusBadge status={m.status} label={rejected ? "Rejected" : undefined} />
+              {/* `ml-auto` so the status still lands on the right edge in the
+                  narrow column, where the flex-1 detail cell is not there to
+                  push it. It is a no-op at the wide rung. */}
+              <span className="ml-auto flex shrink-0 items-center gap-2">
+                {checkedIds.has(id) && <Check aria-hidden className="size-3 shrink-0 text-success" />}
+                {/* a rejected page is not a failed person — it never became work */}
+                <StatusBadge status={m.status} label={rejected ? "Rejected" : undefined} />
+              </span>
             </button>
           );
         })}
@@ -1499,7 +1585,7 @@ function StagedBlock({ points }: { points: DemoDataPoint[] }) {
       <div className={cn("rounded-lg border px-3 py-1.5", unconfirmed ? "border-log-violet/35 bg-log-violet/6" : "border-border bg-secondary/20")}>
         {points.map((d) => (
           <div key={d.field} className="flex items-center gap-2 py-[3px] text-[12px]">
-            <ArrowUpFromLine aria-hidden className="size-3 text-log-teal" />
+            <ArrowUpFromLine aria-hidden className="size-3 text-[color:var(--ds-write-fg)]" />
             <span className="w-36 shrink-0 text-muted-foreground">{d.field}</span>
             <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">{d.value}</span>
             <SystemChip system={d.system} />
