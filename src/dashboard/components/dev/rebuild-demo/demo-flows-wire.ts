@@ -445,6 +445,88 @@ export interface DemoCheckpoint {
   freshValues: Record<string, string>;
   /** why the checkpoint moved — a conflict with no reason is unactionable */
   movedBecause?: string;
+  /**
+   * Fields an OPERATOR corrected and the server APPLIED, keyed by field label.
+   * Kept apart from `freshValues` because they answer different questions: a
+   * fresh value is "the source system moved underneath you", a corrected value
+   * is "you changed this and it landed". Rendering one as the other would have
+   * the surface tell the operator their own correction was somebody else's.
+   */
+  correctedValues: Record<string, string>;
+}
+
+/**
+ * One applied correction patch, as the server holds it after a save.
+ *
+ * `observed` is the machine-read value each correction REPLACED. It is kept for
+ * the same reason `RecordCorrectionWire.from` is kept on the review surface: a
+ * correction never overwrites what was read, it sits beside it, and the receipt
+ * prints both.
+ */
+export interface DemoAppliedCorrections {
+  generation: number;
+  values: Record<string, string>;
+  observed: Record<string, string>;
+  /**
+   * A demo INSTANT (`<date>T<hh:mm:ss>`), never a formatted clock — it becomes
+   * the checkpoint's `capturedAt`, which `checkpointAge` and `fmtClock` parse
+   * and throw on. Handing them a display string takes the surface down.
+   */
+  savedAt: string;
+  savedBy: string;
+}
+
+/**
+ * The applied-correction store — the demo's stand-in for the checkpoint table.
+ *
+ * It exists because a save that shows "Checkpoint saved" and changes nothing is
+ * success styling on something that did not happen, which is the one thing this
+ * product's rules forbid outright. A save now MOVES the world: the field's base
+ * value becomes the corrected one, the generation advances, and the surface
+ * adopts the generation the server returned rather than guessing the next one.
+ */
+const APPLIED_CORRECTIONS = new Map<string, DemoAppliedCorrections>();
+
+export function appliedCorrectionsFor(runId: string): DemoAppliedCorrections | undefined {
+  return APPLIED_CORRECTIONS.get(runId);
+}
+
+/**
+ * Apply a patch and return the checkpoint's NEW generation.
+ *
+ * The generation is the server's to mint — the client adopts what comes back
+ * and never re-derives it, because a client that computes `held + 1` is a
+ * client that silently disagrees with the server the first time anything else
+ * touches the checkpoint.
+ */
+export function applyCheckpointCorrection(
+  row: DemoRow,
+  values: Record<string, string>,
+  savedAt: string,
+  savedBy: string = DEMO_OPERATOR,
+): DemoAppliedCorrections {
+  const previous = APPLIED_CORRECTIONS.get(row.runId);
+  const baseline = checkpointFor(row);
+  const observed = { ...(previous?.observed ?? {}) };
+  for (const field of Object.keys(values)) {
+    if (observed[field] !== undefined) continue;
+    const point = row.data.find((d) => d.field === field);
+    if (point) observed[field] = point.value;
+  }
+  const applied: DemoAppliedCorrections = {
+    generation: baseline.serverGeneration + 1,
+    values: { ...(previous?.values ?? {}), ...values },
+    observed,
+    savedAt,
+    savedBy,
+  };
+  APPLIED_CORRECTIONS.set(row.runId, applied);
+  return applied;
+}
+
+/** tests only — the store is module state, so a test that writes must clear */
+export function resetAppliedCorrections(): void {
+  APPLIED_CORRECTIONS.clear();
 }
 
 const CHECKPOINT_MAX_AGE_MIN: Partial<Record<string, number>> = {
@@ -478,17 +560,55 @@ const STALE_CHECKPOINTS: Record<string, { server: number; fresh: Record<string, 
 };
 
 export function checkpointFor(row: DemoRow): DemoCheckpoint {
+  const maxAgeMin = CHECKPOINT_MAX_AGE_MIN[row.workflow.id] ?? 60;
+  const consumingNode = CONSUMING_NODE[row.workflow.id] ?? "the next write";
+
+  // An applied correction SUPERSEDES the stale-checkpoint fixture: the operator
+  // has since saved against the server's own generation, so the two are back in
+  // agreement and there is no conflict left to re-offer.
+  const applied = APPLIED_CORRECTIONS.get(row.runId);
+  if (applied) {
+    return {
+      runId: row.runId,
+      heldGeneration: applied.generation,
+      serverGeneration: applied.generation,
+      capturedAt: applied.savedAt,
+      maxAgeMin,
+      consumingNode,
+      freshValues: {},
+      correctedValues: applied.values,
+    };
+  }
+
   const stale = STALE_CHECKPOINTS[row.id];
   return {
     runId: row.runId,
     heldGeneration: 4,
     serverGeneration: stale?.server ?? 4,
     capturedAt: row.endedAt ?? row.startedAt ?? row.enqueuedAt,
-    maxAgeMin: CHECKPOINT_MAX_AGE_MIN[row.workflow.id] ?? 60,
-    consumingNode: CONSUMING_NODE[row.workflow.id] ?? "the next write",
+    maxAgeMin,
+    consumingNode,
     freshValues: stale?.fresh ?? {},
     movedBecause: stale?.because,
+    correctedValues: {},
   };
+}
+
+/**
+ * The value the SERVER holds for one field at the generation the surface is on
+ * — an operator's applied correction first, then a value the source system
+ * moved, then what the run observed.
+ *
+ * It is a function rather than a lookup because three things can be true about
+ * one field and only one of them may be shown as "the value"; the other two are
+ * kept beside it (`correctedValues` keeps the observed reading, `freshValues`
+ * keeps what the run read before the source moved).
+ */
+export function checkpointBaseValue(cp: DemoCheckpoint, point: DemoDataPoint, held: number): string {
+  const corrected = cp.correctedValues[point.field];
+  if (corrected !== undefined) return corrected;
+  if (held >= cp.serverGeneration) return cp.freshValues[point.field] ?? point.value;
+  return point.value;
 }
 
 export function checkpointIsStale(cp: DemoCheckpoint): boolean {
@@ -577,12 +697,20 @@ export function editPolicyFor(row: DemoRow, point: DemoDataPoint): DemoEditLock 
   return { editable: true };
 }
 
-/** the one-line summary the Data tab header shows for the whole surface */
+/**
+ * The one-line note under the ledger.
+ *
+ * It used to be the ONLY thing telling an operator a read value could be typed
+ * into, which is why they could not find the editing: a sentence is not an
+ * affordance. The fields carry that now, so the open case says only the thing
+ * a field's shape cannot — that a write is locked by contract rather than by
+ * this run's state, and will never unlock.
+ */
 export function editPolicySummary(row: DemoRow): string {
   const status = effectiveStatus(row);
   if (status === "running" || status === "queued") return "Locked while the run owns the checkpoint";
   if (status === "parked") return "Locked until the parked write is resolved";
   if (row.records) return "Edits happen on the Review tab, beside the page";
-  return "Read values are editable — writes never are";
+  return "Writes are shown here, never edited — they are a record of what happened.";
 }
 

@@ -19,7 +19,7 @@
 
 import { DEMO_OPERATOR, fmtClock, fmtClockSec, agoSeconds, plusSeconds, type ActionDescriptorWire, type DemoCommandKey } from "./demo-wire";
 import type { DemoRow } from "./demo-data";
-import { checkpointFor, fenceCleared, fenceClearsAt, writeFenceFor } from "./demo-flows-wire";
+import { applyCheckpointCorrection, checkpointFor, fenceCleared, fenceClearsAt, writeFenceFor } from "./demo-flows-wire";
 
 export type DemoCommandResultState = "applied" | "conflict" | "rejected";
 
@@ -77,6 +77,17 @@ export interface DemoCommandResult {
   cas?: { kind: "checkpoint-generation"; expected: number; server: number };
   /** applied-but-not-finished — a recorded absence observation still settling */
   settling?: DemoCommandSettling;
+  /**
+   * Applied checkpoint save only — the generation the server minted for the
+   * patch, and the fields it landed on.
+   *
+   * The client ADOPTS this rather than computing `held + 1`. A surface that
+   * derives the next generation itself is a surface that will disagree with the
+   * server the first time anything else touches the checkpoint, and it would
+   * disagree silently — the next save would come back `conflict` with no edit
+   * on screen to explain it.
+   */
+  checkpoint?: { generation: number; corrected: string[] };
   clock: string;
   requestedBy: string;
 }
@@ -272,9 +283,15 @@ export interface SubmitContext {
 }
 
 /**
- * Submit one command. Pure and deterministic: same row + action + context in,
- * same result out. There is no backend and nothing mutates — the point is to
- * make all three result shapes REACHABLE, not to simulate a database.
+ * Submit one command. Deterministic: same row + action + context in, same result
+ * out. The point is to make all three result shapes REACHABLE, not to simulate a
+ * database.
+ *
+ * ONE command writes: a checkpoint save lands its patch in the applied-correction
+ * store (`demo-flows-wire.ts`) before it returns. That is deliberate and it is
+ * the fix for a real defect — the save used to return "Checkpoint saved" over a
+ * world that had not moved, so the field stayed dirty forever while the surface
+ * claimed it was settled. Everything else here is still read-only.
  */
 export function submitDemoCommand(row: DemoRow, action: ActionDescriptorWire, ctx: SubmitContext = {}): DemoCommandResult {
   if (action.kind !== "command" || !action.command) {
@@ -339,6 +356,33 @@ export function submitDemoCommand(row: DemoRow, action: ActionDescriptorWire, ct
   }
 
   const copy = APPLIED_COPY[command](row);
+
+  // 3b. A save that says "saved" must have SAVED. Both arms carry the same
+  //     patch, so both land it in the checkpoint before the result is returned,
+  //     and both return the generation the server minted for it. Success copy
+  //     over an unchanged world is the same defect as a green tick over an
+  //     unverified write.
+  if (command === "edit-checkpoint" || command === "continue-with-data") {
+    const patch: Record<string, string> = {};
+    for (const [key, value] of Object.entries(payload ?? {})) {
+      if (key === "expectedGeneration") continue;
+      patch[key] = value;
+    }
+    // An INSTANT, not a formatted clock. `DemoCheckpoint.capturedAt` is fed to
+    // `checkpointAge` and `fmtClock`, both of which parse `<date>T<hh:mm:ss>`
+    // and THROW on anything else — so handing them `2:26:49` took the whole
+    // surface down the first time a save was applied. The demo's own fail-loud
+    // guard caught it, which is the argument for the guard: the alternative is
+    // a checkpoint quietly reporting an age of zero forever.
+    const applied = applyCheckpointCorrection(row, patch, agoSeconds(-(ctx.tick ?? 0)));
+    return {
+      ...base,
+      state: "applied",
+      headline: copy.headline,
+      detail: copy.detail,
+      checkpoint: { generation: applied.generation, corrected: Object.keys(patch) },
+    };
+  }
 
   // 4. Applied, but not finished: one absence observation is evidence, not
   //    authority. The row re-enters work until the fence is satisfied.
