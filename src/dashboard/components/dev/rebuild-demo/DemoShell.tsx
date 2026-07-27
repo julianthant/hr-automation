@@ -457,7 +457,10 @@ export function DemoWorkflowPanelToggle({
       type="button"
       aria-expanded={showing}
       aria-controls={mode === "floating" ? WORKFLOW_PANEL_ID : undefined}
-      aria-label={`Workflow Panel — ${active}${showing ? `, ${WORKFLOW_PANEL_MODE_LABEL[mode]}` : ", minimised"}`}
+      // The count goes in the LABEL, not only in the badge: an `aria-label`
+      // replaces a button's contents outright, so the badge's own number was
+      // being announced to nobody — the one number this control exists for.
+      aria-label={`Workflow Panel — ${active}${showing ? `, ${WORKFLOW_PANEL_MODE_LABEL[mode]}` : ", minimised"}, ${needsYou} waiting on you across every panel`}
       title={`Workflow Panel — ${active}\n${needsYou} row${needsYou === 1 ? "" : "s"} waiting on you across every panel\nw cycles floating · icon · sidebar`}
       onClick={() => onMode(showing ? "icon" : "floating")}
       className={cn(
@@ -474,8 +477,11 @@ export function DemoWorkflowPanelToggle({
       )}
       <span className={dsText.nums}>{code}</span>
       {/* The loudest badge in the system, and the one place it is right: a
-          `Waiting on you` count must survive the panel being closed. */}
-      <CountBadge value={needsYou} tone="attention" zeroStyle="hide" />
+          `Waiting on you` count must survive the panel being closed. It DIMS at
+          zero rather than vanishing — a badge that disappears reflows the whole
+          action bar under it every time the count crosses zero — and its tone
+          steps down to neutral there, because a zero is not a demand. */}
+      <CountBadge value={needsYou} tone={needsYou > 0 ? "attention" : "neutral"} zeroStyle="dim" />
     </button>
   );
 }

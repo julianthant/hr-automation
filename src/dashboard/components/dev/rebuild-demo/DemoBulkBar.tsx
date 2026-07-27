@@ -89,6 +89,10 @@ export const toolbarControl = (): string =>
     dsText.meta,
     dsFocus,
     dsMotion.fast,
+    // The same press the `Button` primitive gives, because `Start a run` sits a
+    // hairline from these two: one pressable that answers a press and one that
+    // does not, side by side, is exactly the difference you feel and cannot name.
+    "active:translate-y-px",
   );
 
 export function DemoQueueToolbar({
