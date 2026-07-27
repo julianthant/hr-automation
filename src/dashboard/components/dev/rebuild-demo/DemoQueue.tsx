@@ -13,6 +13,7 @@ import {
   Eye,
   FileText,
   GitBranch,
+  Info,
   RotateCcw,
   Search,
   SearchX,
@@ -23,10 +24,15 @@ import { cn } from "@/lib/utils";
 import { QueueRowCard } from "@/components/queue-panel/QueueRowCard";
 import { StatusCounts } from "@/components/queue-panel/StatusCounts";
 import { PROPOSED_STATUS, StatusBadge, statusText, type ProposedStatus } from "./demo-status";
+import { panelKindSpec, rowExplanationOf, rowVariantSpec } from "./demo-catalog";
 import {
   Button,
   IconButton,
   Kbd,
+  MetaLine,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   dsBorder,
   dsFocus,
   dsIcon,
@@ -57,8 +63,8 @@ import {
 
 /**
  * DEV-ONLY — the rebuild demo's queue panel. Attention bands, the three-rung
- * density ladder and the triage drill-in, rendered on
- * the REAL QueueRowCard/RowFooter/StatusCounts chrome.
+ * density ladder, the per-row ⓘ explanation, and the triage drill-in, rendered
+ * on the REAL QueueRowCard/RowFooter/StatusCounts chrome.
  *
  * The rows this panel receives are already scoped to the selected Workflow
  * Panel entry, and it filters them with the SAME predicate the Status Bar
@@ -324,6 +330,68 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): 
 }
 
 /**
+ * The ⓘ on every queue row.
+ *
+ * The operator's diagnosis, and it is the right one: *"i feel like we have too
+ * much clutter right now. maybe its because i dont understand what is being
+ * done."* Some of the felt clutter is UNEXPLAINED, not excessive — a row you
+ * cannot name reads as noise even when every element on it is earning its
+ * place. So each row can say what it is doing, what opening it will show, and
+ * why it exists as its own row.
+ *
+ * Three rules hold it to that:
+ *
+ *  - **It is derived, never authored.** The sentences come off `demo-catalog`'s
+ *    naming layer (row variant + panel kind), so a new fixture inherits a
+ *    correct explanation with nothing to write, and the copy cannot drift from
+ *    the row it describes.
+ *  - **It explains; it never HIDES.** Nothing in here is a fact about this run.
+ *    Status, gate age, counts, error, trace and every command stay on the row.
+ *  - **It is a Popover, not a tooltip.** DESIGN.md forbids reachable content
+ *    living behind hover alone — this opens on click, takes focus, returns it,
+ *    and is reachable by keyboard and touch. And the trigger itself is always
+ *    rendered rather than revealed on `:hover`, for the same reason. Quiet at
+ *    rest is not the same as absent.
+ */
+function RowInfo({ row }: { row: DemoRow }) {
+  const spec = rowVariantSpec(row);
+  const panel = panelKindSpec(row);
+  const ex = rowExplanationOf(row);
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <IconButton
+          size="xs"
+          label={`What is this row? — ${spec.name}`}
+          icon={<Info aria-hidden className={dsIcon.sm} />}
+          // Both stopped: the card root is itself a button, so without these a
+          // press on the ⓘ also selects the row underneath it.
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+          }}
+          // Quiet at rest, full contrast the moment it is hovered or focused —
+          // and it STAYS lit while its popover is open (Radix stamps the
+          // state), so the surface never floats free of the row that owns it.
+          className="text-[color:var(--ds-fg-faint)] hover:text-[color:var(--ds-fg)] data-[state=open]:text-[color:var(--ds-fg)]"
+        />
+      </PopoverTrigger>
+      {/* `md`, not `lg`: a 380px surface in a 380px queue column is
+          collision-shifted on every open, which moves the point the entrance
+          scales out of. 300px fits, so it always reads as coming from the ⓘ. */}
+      <PopoverContent title={spec.name} side="bottom" align="start" width="md">
+        <div className="flex flex-col gap-[var(--ds-space-base)]">
+          <p className={cn(dsText.body, "leading-relaxed text-[color:var(--ds-fg)]")}>{ex.doing}</p>
+          <p className={cn(dsText.body, "leading-relaxed text-[color:var(--ds-fg-secondary)]")}>{ex.panel}</p>
+          <p className={cn(dsText.body, "leading-relaxed text-[color:var(--ds-fg-secondary)]")}>{ex.why}</p>
+          <MetaLine items={[spec.rowType, panel.name, `${row.wfLabel} · ${row.trace}`]} tone="faint" />
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
  * The subline is TEXT ONLY. The button beside it is the row's own
  * `outcome`-placement descriptor (`OutcomeActionButton`), so the queue and the
  * log panel offer literally the same command with the same label — and a row
@@ -449,6 +517,9 @@ export function DemoRowCard({
                 more than one workflow, and the only thing that tells a packet
                 apart from the OCR review row that shares its filename */}
             <span className={rowChip("neutral", cn(dsText.caps, "tracking-[var(--ds-tracking-caps)]"))}>{row.wfLabel}</span>
+            {/* Sits on the chip line at the chip's own height, so explaining a
+                row costs the queue no vertical space at all. */}
+            <RowInfo row={row} />
           </div>
           <div className="flex shrink-0 items-center gap-1.5">{headerChips(row, state.checkedIds, state.tick)}</div>
         </div>
