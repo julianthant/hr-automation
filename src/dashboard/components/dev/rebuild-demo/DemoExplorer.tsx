@@ -9,6 +9,7 @@ import {
   CardBase,
   CardBody,
   Chip,
+  EmptyState,
   PageHeader,
   Panel,
   PanelBody,
@@ -30,16 +31,24 @@ import {
   dsText,
 } from "./demo-ui";
 import {
+  EXPLORER_GRAPHS,
+  graphFor,
   NODE_KIND_LABEL,
   overlayForRun,
-  SEPARATIONS_GRAPH,
+  type ExplorerGraph,
   type ExplorerNode,
   type OverlayNode,
   type OverlayState,
 } from "./demo-explorer-wire";
 import { allTopLevelRows } from "./demo-archive-wire";
 import { effectiveStatus, fmtElapsed, type DemoRow } from "./demo-data";
-import { DEMO_WORKFLOWS, fmtVersionTag } from "./demo-wire";
+import {
+  buildWorkflowCategoryGroups,
+  DEMO_WORKFLOW_LIST,
+  DEMO_WORKFLOWS,
+  fmtVersionTag,
+  type DemoWorkflowRef,
+} from "./demo-wire";
 
 /**
  * DEV-ONLY — the EXPLORER: a workflow's descriptor graph with a run laid over
@@ -76,20 +85,27 @@ const KIND_TONE: Record<ExplorerNode["kind"], "neutral" | "info" | "warning" | "
 };
 
 export function DemoExplorerPage({ onBack, onOpenSettings }: { onBack: () => void; onOpenSettings: () => void }) {
-  const graph = SEPARATIONS_GRAPH;
+  // THE THIRD PANEL. The Explorer was graph + node detail with the workflow
+  // effectively fixed — which is a page that can only ever explain the one
+  // workflow somebody wired into it. It is the same three-panel shape as the
+  // dashboard now: WHAT you are looking at · its SHAPE · the DETAIL of one part
+  // of that shape, grouped by each descriptor's own `category` exactly like the
+  // rail, so there is no second taxonomy to drift.
+  const [workflowId, setWorkflowId] = useState(EXPLORER_GRAPHS[0].workflowId);
+  const graph = graphFor(workflowId);
 
   // Every real run of this workflow the tracker holds — the run selector is not
   // a hand list, it is the corpus filtered to the graph's own workflow.
   const runs = useMemo(
-    () => allTopLevelRows().filter((row) => row.workflow.id === graph.workflowId && row.steps.length > 0),
-    [graph.workflowId],
+    () => (graph ? allTopLevelRows().filter((row) => row.workflow.id === graph.workflowId && row.steps.length > 0) : []),
+    [graph],
   );
-  const [runId, setRunId] = useState(runs[0]?.id ?? "");
+  const [runId, setRunId] = useState("");
   const run: DemoRow | undefined = runs.find((r) => r.id === runId) ?? runs[0];
-  const overlay = useMemo(() => (run ? overlayForRun(graph, run) : null), [graph, run]);
-  const [nodeId, setNodeId] = useState(graph.nodes[0].id);
-  const node = graph.nodes.find((n) => n.id === nodeId) ?? graph.nodes[0];
-  const nodeOverlay = overlay?.nodes.find((n) => n.nodeId === nodeId);
+  const overlay = useMemo(() => (graph && run ? overlayForRun(graph, run) : null), [graph, run]);
+  const [nodeId, setNodeId] = useState("");
+  const node = graph ? (graph.nodes.find((n) => n.id === nodeId) ?? graph.nodes[0]) : undefined;
+  const nodeOverlay = overlay?.nodes.find((n) => n.nodeId === node?.id);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -114,7 +130,36 @@ export function DemoExplorerPage({ onBack, onOpenSettings }: { onBack: () => voi
         }
       />
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-[var(--ds-space-base)] p-[var(--ds-space-cozy)] min-[1100px]:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
+      {/* THREE PANELS: what you are looking at · its shape · one part of that
+          shape in detail. The two thresholds are the same idea the detail
+          region uses — the list splits off first because it is the cheapest
+          column, and the node contract splits off second because it is the one
+          that needs width for a table. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-[var(--ds-space-base)] p-[var(--ds-space-cozy)] min-[900px]:grid-cols-[minmax(0,240px)_minmax(0,1fr)] min-[1280px]:grid-cols-[minmax(0,240px)_minmax(0,1fr)_minmax(0,400px)]">
+        <WorkflowListPanel
+          selected={workflowId}
+          onSelect={(id) => {
+            setWorkflowId(id);
+            // A new workflow is a new shape: the run and the node belonged to
+            // the old one, so they are dropped rather than carried onto a graph
+            // that has no such node. Both fall back to "the first one".
+            setRunId("");
+            setNodeId("");
+          }}
+        />
+
+        {!graph || !node ? (
+          <Panel className="min-h-0 min-[1280px]:col-span-2">
+            <PanelBody>
+              <EmptyState
+                icon={<Workflow aria-hidden className={dsIcon.lg} />}
+                title="No descriptor graph is served for this workflow"
+                description="The Explorer draws the graph a workflow's descriptor serves. This one serves none yet, so there is nothing to draw — it is listed rather than hidden, because a list that silently omits a workflow teaches you the product has never heard of it."
+              />
+            </PanelBody>
+          </Panel>
+        ) : (
+          <>
         {/* ---- the graph, with the run over it ---- */}
         <Panel className="min-h-0">
           <PanelHeader
@@ -139,7 +184,16 @@ export function DemoExplorerPage({ onBack, onOpenSettings }: { onBack: () => voi
                   <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
                     ran under {run.workflow.label} {fmtVersionTag({ major: run.workflowVersion, minor: run.workflowMinorVersion })}
                   </span>
-                  {run.dryRun && <Chip tone="info">dry run — stopped at the boundary</Chip>}
+                  {run.dryRun && graph.dryRunBoundaryNodeId && <Chip tone="info">dry run — stopped at the boundary</Chip>}
+                  {/* A FACT about this graph, not teaching: a workflow with
+                      nothing past the boundary has no boundary, and the absence
+                      of the dashed line has to be readable as an answer rather
+                      than as a rendering that did not happen. */}
+                  {!graph.dryRunBoundaryNodeId && (
+                    <Chip tone="info" label="writes">
+                      nothing — no dry-run boundary to draw
+                    </Chip>
+                  )}
                 </div>
 
                 {run.workflowVersion !== graph.version && (
@@ -152,7 +206,7 @@ export function DemoExplorerPage({ onBack, onOpenSettings }: { onBack: () => voi
                 <ol className="flex flex-col">
                   {graph.nodes.map((graphNode, index) => {
                     const state = overlay.nodes.find((n) => n.nodeId === graphNode.id);
-                    const boundaryStartsHere = graph.dryRunBoundaryNodeId === graphNode.id;
+                    const boundaryStartsHere = graph.dryRunBoundaryNodeId !== undefined && graph.dryRunBoundaryNodeId === graphNode.id;
                     return (
                       <li key={graphNode.id} className="flex flex-col">
                         {boundaryStartsHere && <DryRunBoundary />}
@@ -185,9 +239,97 @@ export function DemoExplorerPage({ onBack, onOpenSettings }: { onBack: () => voi
         </Panel>
 
         {/* ---- the node's contract ---- */}
-        <NodeDetail node={node} overlay={nodeOverlay} runTitle={overlay?.title} reuse={overlay?.reuse ?? []} />
+        <NodeDetail graph={graph} node={node} overlay={nodeOverlay} runTitle={overlay?.title} reuse={overlay?.reuse ?? []} />
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+/**
+ * PANEL ONE — every workflow the registry serves, grouped by its OWN category.
+ *
+ * The grouping is `buildWorkflowCategoryGroups`, the same projection the rail
+ * reads, so the Explorer cannot bin a workflow under a heading the product does
+ * not use. A workflow with no graph is listed and DISABLED with its reason,
+ * never omitted: the run modal made the same call about workflows that cannot
+ * be started, and for the same reason — a list that quietly drops things is a
+ * list that teaches the operator the product is smaller than it is.
+ */
+function WorkflowListPanel({
+  selected,
+  onSelect,
+}: {
+  selected: DemoWorkflowRef["id"];
+  onSelect: (id: DemoWorkflowRef["id"]) => void;
+}) {
+  const groups = useMemo(() => buildWorkflowCategoryGroups(), []);
+  const withGraph = EXPLORER_GRAPHS.length;
+  return (
+    <Panel className="min-h-0">
+      <PanelHeader title="Workflows" meta={`${withGraph} of ${DEMO_WORKFLOW_LIST.length} drawn`} />
+      <PanelBody>
+        {groups.map((group) => (
+          <div key={group.label} className="border-b border-[color:var(--ds-border-subtle)] last:border-b-0">
+            <SectionLabel className="block px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]">{group.label}</SectionLabel>
+            <ul>
+              {group.workflows.map((workflow) => {
+                const graph = graphFor(workflow.id);
+                const active = workflow.id === selected;
+                return (
+                  <li key={workflow.id}>
+                    <button
+                      type="button"
+                      disabled={!graph}
+                      aria-current={active ? "true" : undefined}
+                      onClick={() => onSelect(workflow.id)}
+                      title={
+                        graph
+                          ? `${workflow.label} ${fmtVersionTag({ major: graph.version, minor: graph.minorVersion })} — ${graph.nodes.length} nodes`
+                          : `${workflow.label} serves no descriptor graph yet, so there is nothing to draw.`
+                      }
+                      className={cn(
+                        "flex w-full min-w-0 items-center gap-[var(--ds-space-snug)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)] text-left",
+                        dsText.ui,
+                        dsFocus,
+                        dsMotion.base,
+                        graph ? "cursor-pointer" : "cursor-default",
+                        active
+                          ? "bg-[var(--ds-surface-selected)] font-semibold text-[color:var(--ds-fg)]"
+                          : graph
+                            ? "text-[color:var(--ds-fg-secondary)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]"
+                            : "text-[color:var(--ds-fg-faint)]",
+                      )}
+                    >
+                      <span className={cn(dsText.nums, dsText.micro, "shrink-0 text-[color:var(--ds-fg-muted)]")}>
+                        {workflow.code}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">{workflow.label}</span>
+                      {graph ? (
+                        <span className={cn(dsText.micro, dsText.nums, "shrink-0 text-[color:var(--ds-fg-muted)]")}>
+                          {graph.nodes.length}
+                        </span>
+                      ) : (
+                        <span className={cn(dsText.micro, "shrink-0 text-[color:var(--ds-fg-faint)]")}>—</span>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </PanelBody>
+      <PanelFooter>
+        {/* A fact about the registry, not a defence of it: a dash in the node
+            column is a workflow whose descriptor serves no graph, and the
+            operator should be able to tell that from "it is missing". */}
+        <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+          A dash means the descriptor serves no graph yet.
+        </span>
+      </PanelFooter>
+    </Panel>
   );
 }
 
@@ -204,7 +346,7 @@ function DryRunBoundary() {
   );
 }
 
-function Connector({ graph, fromId }: { graph: typeof SEPARATIONS_GRAPH; fromId: string }) {
+function Connector({ graph, fromId }: { graph: ExplorerGraph; fromId: string }) {
   const outs = graph.edges.filter((edge) => edge.from === fromId);
   const conditional = outs.filter((edge) => edge.condition);
   return (
@@ -285,11 +427,13 @@ function GraphNodeRow({
 }
 
 function NodeDetail({
+  graph,
   node,
   overlay,
   runTitle,
   reuse,
 }: {
+  graph: ExplorerGraph;
   node: ExplorerNode;
   overlay?: OverlayNode;
   runTitle?: string;
@@ -308,8 +452,8 @@ function NodeDetail({
 
         {node.afterDryRunBoundary && (
           <Banner tone="danger" title="Past the dry-run boundary">
-            This node can change a real HR system. A dry run of {SEPARATIONS_GRAPH.label} stops before it, which is the entire
-            safety boundary of a rehearsal — not gated access.
+            This node can change a real HR system. A dry run of {graph.label} stops before it, which is the entire safety
+            boundary of a rehearsal — not gated access.
           </Banner>
         )}
 

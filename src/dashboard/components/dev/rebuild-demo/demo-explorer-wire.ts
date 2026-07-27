@@ -82,8 +82,15 @@ export interface ExplorerGraph {
   version: number;
   /** the presentation half, so the graph prints the same two-part tag as the row */
   minorVersion: number;
-  /** the node the dry-run boundary sits in front of */
-  dryRunBoundaryNodeId: string;
+  /**
+   * The node the dry-run boundary sits in front of.
+   *
+   * ABSENT means the workflow writes NOTHING, anywhere — which is a fact worth
+   * drawing rather than an omission. A read-only workflow has no rehearsal
+   * because every run of it is one, and the graph says so instead of leaving
+   * the operator to notice that no line appeared.
+   */
+  dryRunBoundaryNodeId?: string;
   summary: string;
   nodes: ExplorerNode[];
   edges: ExplorerEdge[];
@@ -348,4 +355,109 @@ export function nodeById(graph: ExplorerGraph, id: string): ExplorerNode | undef
 
 export function edgesFrom(graph: ExplorerGraph, id: string): ExplorerEdge[] {
   return graph.edges.filter((edge) => edge.from === id);
+}
+
+/**
+ * Person Lookup v4 — the READ-ONLY graph.
+ *
+ * It is in the corpus for a reason beyond having a second workflow to switch
+ * to: this one has **no dry-run boundary at all**, because it writes nothing
+ * anywhere. Separations' graph teaches "here is the line a rehearsal stops at";
+ * this one teaches that some workflows have no line because there is nothing on
+ * the other side of it — and a graph that could only ever draw the first shape
+ * would be a graph that teaches the wrong lesson about the second.
+ *
+ * Node ids are exactly the step labels the person-lookup fixtures record
+ * (`pl-daniel` runs all four), so a real run lays over it the same way.
+ */
+export const PERSON_LOOKUP_GRAPH: ExplorerGraph = {
+  workflowId: "person-lookup",
+  label: "Person Lookup",
+  version: 4,
+  minorVersion: 0,
+  summary:
+    "Finds one person in UCPath, confirms they are the same person the CRM record describes, and reports what it found. It writes nothing, anywhere — so it has no dry-run boundary, because every run of it is already a rehearsal.",
+  nodes: [
+    {
+      id: "Searching",
+      kind: "task",
+      system: "ucpath",
+      purpose: "Search UCPath for the typed EID or name and narrow to a single active person.",
+      afterDryRunBoundary: false,
+      contract: {
+        reads: [
+          { field: "employeeId", system: "ucpath" },
+          { field: "name", system: "ucpath" },
+          { field: "department", system: "ucpath" },
+        ],
+        writes: [],
+        uiIds: ["ucpath.personSearch.form", "ucpath.personSearch.results"],
+        editableFields: [],
+      },
+    },
+    {
+      id: "Cross-verification",
+      kind: "task",
+      system: "crm",
+      purpose: "Match the UCPath person against the CRM onboarding record, so a name collision cannot resolve to the wrong person.",
+      afterDryRunBoundary: false,
+      when: "a CRM record exists for the search term",
+      contract: {
+        reads: [
+          { field: "startDate", system: "crm" },
+          { field: "campusEmail", system: "crm" },
+        ],
+        writes: [],
+        uiIds: ["crm.onboardingRecord.header"],
+        editableFields: [],
+      },
+    },
+    {
+      id: "Active status",
+      kind: "task",
+      system: "ucpath",
+      purpose: "Read the HR status. A separated person is a successful lookup with a negative answer, never a failure.",
+      afterDryRunBoundary: false,
+      contract: {
+        reads: [{ field: "hrStatus", system: "ucpath" }],
+        writes: [],
+        uiIds: ["ucpath.person.jobSummary"],
+        editableFields: [],
+      },
+    },
+    {
+      id: "CRM dates",
+      kind: "task",
+      system: "crm",
+      purpose: "Read the hire and appointment dates the caller asked for, and report them back.",
+      afterDryRunBoundary: false,
+      contract: {
+        reads: [
+          { field: "lastHireDate", system: "crm" },
+          { field: "appointmentEnd", system: "crm" },
+        ],
+        writes: [],
+        uiIds: ["crm.onboardingRecord.dates"],
+        editableFields: [],
+      },
+    },
+  ],
+  edges: [
+    { from: "Searching", to: "Cross-verification", condition: "a CRM record exists" },
+    { from: "Searching", to: "Active status", condition: "no CRM record — go straight to the status read" },
+    { from: "Cross-verification", to: "Active status" },
+    { from: "Active status", to: "CRM dates" },
+  ],
+};
+
+/**
+ * Every graph the Explorer serves, in registry order. A workflow with no graph
+ * is NOT hidden — the Explorer names it and says why, on the same reasoning as
+ * the run modal's "not startable" list: a list that silently omits things
+ * teaches the operator the product has never heard of them.
+ */
+export const EXPLORER_GRAPHS: ExplorerGraph[] = [SEPARATIONS_GRAPH, PERSON_LOOKUP_GRAPH];
+
+export function graphFor(workflowId: DemoWorkflowId): ExplorerGraph | undefined {
+  return EXPLORER_GRAPHS.find((graph) => graph.workflowId === workflowId);
 }
