@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -13,10 +13,13 @@ import {
   ChevronRight,
   CircleSlash,
   ClipboardList,
+  CornerDownRight,
   Eye,
   FileText,
   GitBranch,
+  ImageOff,
   Loader2,
+  Lock,
   Pause,
   Receipt,
   RotateCcw,
@@ -24,6 +27,7 @@ import {
   Search,
   ShieldCheck,
   TriangleAlert,
+  UserRoundSearch,
   Users,
   X,
   Zap,
@@ -34,13 +38,29 @@ import { StatusBadge, type ProposedStatus } from "./demo-status";
 import { panelKindOf, panelKindSpec, rowVariantSpec } from "./demo-catalog";
 import { BannerActions, OutcomeActionButton, ParkResolutions, type DemoActionHandler } from "./DemoActions";
 import { ContextRail, ContextRailSpine, useContextRail } from "./DemoContextRail";
-import { fmtClock, tabsFor as tabsForKind, type DemoTab } from "./demo-wire";
+import { CaptureLightbox, SystemChip } from "./DemoEvidence";
+import { candidateCaptureFor, type DemoCapture } from "./demo-evidence-wire";
 import {
+  actionsAt,
+  agoSeconds,
+  buildRecordCorrections,
+  fmtClock,
+  tabsFor as tabsForKind,
+  type ActionDescriptorWire,
+  type DemoTab,
+  type GateCandidateSpec,
+  type RecordCorrectionWire,
+} from "./demo-wire";
+import {
+  Badge,
   Button,
+  FloatingSurface,
+  IconButton,
   Kbd,
   dsBorder,
   dsFocus,
   dsIcon,
+  dsLayer,
   dsMotion,
   dsRadius,
   dsSize,
@@ -60,7 +80,6 @@ import {
   memberAttentionIds,
   orderedMemberIds,
   sharedMemberPipeline,
-  SYSTEM_ACCENT,
   type DemoDataPoint,
   type DemoLine,
   type DemoRecord,
@@ -69,7 +88,6 @@ import {
   type DemoRow,
   type DemoStep,
   type LineKind,
-  type SystemKey,
 } from "./demo-data";
 
 /**
@@ -135,14 +153,6 @@ export interface DemoLogPanelProps {
 // atoms
 // ---------------------------------------------------------------------------
 
-function SystemChip({ system }: { system: SystemKey }) {
-  return (
-    <span className={cn("mr-1.5 inline-block rounded px-1 align-[1px] text-[9px] font-bold tracking-wider", SYSTEM_ACCENT[system])}>
-      {system.toUpperCase()}
-    </span>
-  );
-}
-
 /**
  * The log stream is the noisiest surface in the product, so it is the one that
  * had to give colour back. `--log-*` are no longer four CATEGORICAL hues — each
@@ -198,55 +208,185 @@ function Pill({ dir, label, value }: { dir: "read" | "write"; label: string; val
   );
 }
 
-function GateCardView({ row, wide, onAction }: { row: DemoRow; wide?: boolean; onAction: DemoActionHandler }) {
-  const gate = row.gate;
-  if (!gate) return null;
-  const violet = gate.kind === "parked";
+/**
+ * ONE candidate on an identity gate, with the capture that proves it is a
+ * person rather than a string.
+ *
+ * The capture is fetched by id (`candidateCaptureFor`), so a candidate whose id
+ * resolves to nothing renders as a candidate with no capture and SAYS SO — it
+ * never borrows the neighbouring one, and it never draws a stand-in of a system
+ * page. Whether the bytes exist is a fact about the run, not a rendering
+ * problem to smooth over.
+ */
+function CandidateCard({
+  candidate,
+  onOpenCapture,
+}: {
+  candidate: GateCandidateSpec;
+  onOpenCapture: (capture: DemoCapture) => void;
+}) {
+  const capture = candidateCaptureFor(candidate.captureId);
   return (
     <div
       className={cn(
-        "rounded-lg border px-3 py-2.5 text-[12px]",
-        violet ? "border-log-violet/45 bg-log-violet/6" : "border-warning/45 bg-warning/6",
-        !wide && "mx-3 my-1.5 ml-11",
+        "flex min-w-0 flex-col gap-[var(--ds-space-hair)] border p-[var(--ds-space-base)]",
+        dsRadius.md,
+        "border-[color:var(--ds-border)] bg-[var(--ds-surface-1)]",
       )}
     >
-      <div className={cn("mb-1.5 text-[11.5px] font-semibold", violet ? "text-log-violet" : "text-warning")}>{gate.title}</div>
-      {gate.candidates && (
-        <div className="grid grid-cols-2 gap-2">
-          {gate.candidates.map((c) => (
-            <div key={c.heading} className="rounded-md border border-border/60 bg-card/60 px-2.5 py-1.5">
-              <div className="text-[9.5px] font-semibold uppercase tracking-wider text-muted-foreground">{c.heading}</div>
-              <div className="text-[12px] font-semibold text-foreground">{c.name}</div>
-              <div className="text-[10.5px] text-muted-foreground">{c.sub}</div>
-            </div>
-          ))}
-        </div>
+      <span className={cn(dsText.caps, "text-[color:var(--ds-fg-muted)]")}>{candidate.heading}</span>
+      <span className={cn(dsText.ui, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")} title={candidate.name}>
+        {candidate.name}
+      </span>
+      <span className={cn(dsText.meta, dsText.nums, "min-w-0 truncate text-[color:var(--ds-fg-secondary)]")} title={candidate.sub}>
+        {candidate.sub}
+      </span>
+      {candidate.matchedOn && (
+        <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>matched on {candidate.matchedOn}</span>
       )}
-      {gate.staged && (
-        <div className="rounded-md border border-border/60 bg-card/60 px-2.5 py-1.5">
-          {gate.staged.map((s) => (
-            <div key={s.field} className="flex items-center gap-2 py-[2px]">
-              <ArrowUpFromLine aria-hidden className="size-3 text-log-teal" />
-              <span className="w-32 shrink-0 text-[11px] text-muted-foreground">{s.field}</span>
-              <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">{s.value}</span>
-              <SystemChip system={s.system} />
-              {s.unconfirmed ? (
-                <span
-                  title="Sent to UCPath, but we never read the outcome back"
-                  className="shrink-0 rounded border border-log-violet/45 px-1 text-[9.5px] font-semibold text-log-violet"
-                >
-                  unconfirmed
-                </span>
-              ) : (
-                <span className="shrink-0 rounded border border-warning/40 px-1 text-[9.5px] font-semibold text-warning">staged</span>
-              )}
-            </div>
-          ))}
-        </div>
+      {capture ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="mt-[var(--ds-space-tight)] w-full"
+          onClick={() => onOpenCapture(capture)}
+          icon={<Camera aria-hidden className={dsIcon.sm} />}
+        >
+          See this candidate
+        </Button>
+      ) : (
+        <span
+          className={cn(
+            dsText.meta,
+            "mt-[var(--ds-space-tight)] inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-fg-faint)]",
+          )}
+        >
+          <ImageOff aria-hidden className={dsIcon.sm} />
+          No capture — this was never on a page
+        </span>
       )}
-      <ParkResolutions row={row} onAction={onAction} />
-      <BannerActions row={row} onAction={onAction} />
-      {wide && <div className="mt-2 border-t border-border/40 pt-2 text-[11px] leading-relaxed text-muted-foreground">{gate.note}</div>}
+    </div>
+  );
+}
+
+/**
+ * THE DECISION, in the stream, where the lines that led to it are.
+ *
+ * It used to be drawn twice: a tall banner pinned above the tabs AND this card
+ * at the moment the run stopped, with the same title, the same copy and the
+ * same buttons. The operator asked for the banner to go, and removing it
+ * removes a duplicate rather than a fact — the log lines above this card are
+ * the argument for the decision, so this is where the buttons belong. What the
+ * banner used to carry alone (the `note`, the age, the staged writes) now lands
+ * here, and the panel header's status pill plus the floating notice keep the
+ * decision reachable from anywhere else.
+ *
+ * It is the loudest element in the panel on purpose (DESIGN.md rule 1) and it
+ * is never behind a disclosure.
+ */
+function InlineDecision({
+  row,
+  tick,
+  onAction,
+  anchorRef,
+}: {
+  row: DemoRow;
+  tick: number;
+  onAction: DemoActionHandler;
+  anchorRef?: (node: HTMLElement | null) => void;
+}) {
+  const gate = row.gate;
+  const [capture, setCapture] = useState<DemoCapture | null>(null);
+  if (!gate) return null;
+
+  const parked = gate.kind === "parked";
+  const Icon = parked ? Pause : gate.kind === "identity" ? UserRoundSearch : ClipboardList;
+  const fg = parked ? "text-[color:var(--ds-status-parked-fg)]" : "text-[color:var(--ds-status-waiting-fg)]";
+  const staged = row.data.filter((d) => d.dir === "write" && d.staged).length;
+
+  return (
+    <div
+      ref={anchorRef}
+      tabIndex={-1}
+      data-demo-decision={gate.kind}
+      aria-label={`Decision — ${gate.title}`}
+      className={cn(
+        "mx-[var(--ds-space-cozy)] my-[var(--ds-space-base)] ml-5 border p-[var(--ds-space-cozy)]",
+        dsRadius.lg,
+        dsFocus,
+        "border-[length:var(--ds-border-w-rail)]",
+        parked
+          ? "border-[color:var(--ds-status-parked-border)] bg-[var(--ds-status-parked-bg)]"
+          : "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]",
+      )}
+    >
+      {/* icon 14 + gap 6 = 20px, which is exactly the hanging indent below */}
+      <div className="flex items-center gap-[var(--ds-space-snug)]">
+        <Icon aria-hidden className={cn(dsIcon.md, "shrink-0", fg)} />
+        <span className={cn(dsText.ui, "min-w-0 truncate font-semibold", fg)}>{gate.title}</span>
+        <span className={cn(dsText.meta, dsText.nums, "ml-auto shrink-0 whitespace-nowrap opacity-85", fg)}>
+          open {gateAge(row, tick)} · since {fmtClock(gate.openedAt)}
+        </span>
+      </div>
+
+      <p className={cn(dsText.body, "mt-[var(--ds-space-tight)] pl-5 leading-relaxed text-[color:var(--ds-fg-muted)]")}>
+        {gate.note}
+      </p>
+
+      <div className="flex flex-col gap-[var(--ds-space-base)] pl-5">
+        {gate.candidates && gate.candidates.length > 0 && (
+          <>
+            {/* A LIST, sized by how many there are — two is the common case,
+                never the contract. At a narrow centre column they stack, which
+                keeps a name and its EID on one line each. */}
+            <div className="mt-[var(--ds-space-base)] grid gap-[var(--ds-space-snug)] @min-[30rem]:grid-cols-2 @min-[52rem]:grid-cols-3">
+              {gate.candidates.map((c) => (
+                <CandidateCard key={c.heading} candidate={c} onOpenCapture={setCapture} />
+              ))}
+            </div>
+            {/* Says the quiet part: this run is STOPPED, and it is stopped
+                before the write rather than after it. */}
+            <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+              {staged > 0
+                ? `The run is held here. ${staged} write${staged === 1 ? "" : "s"} ${staged === 1 ? "is" : "are"} staged and ${staged === 1 ? "goes" : "go"} nowhere until you pick.`
+                : "The run is held here and has written nothing. It cannot go past this step until you pick."}
+            </span>
+          </>
+        )}
+
+        {gate.staged && (
+          <div
+            className={cn(
+              "mt-[var(--ds-space-base)] border p-[var(--ds-space-base)]",
+              dsRadius.md,
+              "border-[color:var(--ds-border)] bg-[var(--ds-surface-1)]",
+            )}
+          >
+            {gate.staged.map((s) => (
+              <div key={s.field} className="flex items-center gap-[var(--ds-space-snug)] py-[var(--ds-space-hair)]">
+                <ArrowUpFromLine aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+                <span className={cn(dsText.meta, "w-32 shrink-0 truncate text-[color:var(--ds-fg-muted)]")}>{s.field}</span>
+                <span className={cn(dsText.body, dsText.nums, "min-w-0 flex-1 truncate text-[color:var(--ds-fg)]")}>{s.value}</span>
+                <SystemChip system={s.system} />
+                {s.unconfirmed ? (
+                  <Badge tone="warning" title="Sent to UCPath, but we never read the outcome back">
+                    unconfirmed
+                  </Badge>
+                ) : (
+                  <Badge tone="warning">staged</Badge>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <ParkResolutions row={row} onAction={onAction} />
+        <BannerActions row={row} onAction={onAction} />
+      </div>
+
+      {capture && (
+        <CaptureLightbox captures={[capture]} index={0} onIndex={NOOP} onClose={() => setCapture(null)} row={row} />
+      )}
     </div>
   );
 }
@@ -487,64 +627,131 @@ function SharedPipelineStrip({ row }: { row: DemoRow }) {
 }
 
 /**
- * Gate banner — pinned above the tabs whenever the run is waiting on the
- * operator, so the decision is visible from EVERY tab instead of hiding behind
- * a Review tab that most rows should not have.
+ * The floating decision notice — the small, dismissable square that replaced
+ * the gate banner in the corner of the panel.
+ *
+ * It is a LOCATOR, not a second copy of the decision: it appears only while the
+ * inline decision is out of reach (a different tab, or scrolled past), it says
+ * what is waiting and how long it has waited, and pressing it takes you there.
+ * Dismissing it dismisses the reminder and nothing else — the decision keeps
+ * its status pill in the header, its line in the outcome bar and its card in
+ * the stream, and the notice comes back the moment the decision goes out of
+ * reach again.
+ *
+ * It deliberately sits at `dsLayer.sticky`, BELOW the toast layer: a `danger`
+ * toast never auto-dismisses, and a reminder must never cover a failure.
  */
-function GateBanner({ row, tick, onAction }: { row: DemoRow; tick: number; onAction: DemoActionHandler }) {
+function DecisionNotice({
+  row,
+  tick,
+  onGo,
+  onDismiss,
+}: {
+  row: DemoRow;
+  tick: number;
+  onGo: () => void;
+  onDismiss: () => void;
+}) {
   const gate = row.gate;
   if (!gate) return null;
-  // Parked is not a gate you answer with a click — it is an unknown you resolve
-  // by looking. It gets its own tone so the two never read as the same thing.
   const parked = gate.kind === "parked";
-  const Icon = parked ? Pause : ClipboardList;
+  const Icon = parked ? Pause : gate.kind === "identity" ? UserRoundSearch : ClipboardList;
+  const fg = parked ? "text-[color:var(--ds-status-parked-fg)]" : "text-[color:var(--ds-status-waiting-fg)]";
+
   return (
-    <div
+    // The status tint goes on an INNER layer, never on the floating surface
+    // itself: `--ds-status-*-bg` is a colour-mix against transparent, so
+    // painting it straight onto the floating element leaves the log stream
+    // legible THROUGH the notice. A floating thing has to be opaque or it reads
+    // as a rendering fault rather than as a surface.
+    <FloatingSurface
+      role="status"
       className={cn(
-        "border-b px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
-        parked
-          ? "border-[color:var(--ds-status-parked-border)] bg-[var(--ds-status-parked-bg)]"
-          : "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]",
+        "absolute right-[var(--ds-space-cozy)] top-[var(--ds-space-cozy)] overflow-hidden",
+        "w-[var(--ds-w-popover-sm)] max-w-[calc(100%-2*var(--ds-space-cozy))]",
+        dsLayer.sticky,
+        parked ? "border-[color:var(--ds-status-parked-border)]" : "border-[color:var(--ds-status-waiting-border)]",
       )}
     >
-      {/* icon 14 + gap 6 = 20px, which is exactly the hanging indent below.
-          At gap-2 the note sat 2px left of the title it belongs to. */}
-      <div className="flex items-center gap-[var(--ds-space-snug)]">
-        <Icon
-          aria-hidden
+      <div
+        className={cn(
+          "flex items-start gap-[var(--ds-space-tight)] p-[var(--ds-space-snug)]",
+          parked ? "bg-[var(--ds-status-parked-bg)]" : "bg-[var(--ds-status-waiting-bg)]",
+        )}
+      >
+        <button
+          type="button"
+          onClick={onGo}
           className={cn(
-            dsIcon.md,
-            "shrink-0",
-            parked ? "text-[color:var(--ds-status-parked-fg)]" : "text-[color:var(--ds-status-waiting-fg)]",
+            "flex min-w-0 flex-1 cursor-pointer flex-col gap-[var(--ds-space-hair)] p-[var(--ds-space-tight)] text-left",
+            dsRadius.sm,
+            dsFocus,
+            dsMotion.fast,
+            "active:translate-y-px hover:brightness-110",
           )}
+        >
+          <span className={cn(dsText.meta, "flex min-w-0 items-center gap-[var(--ds-space-tight)] font-semibold", fg)}>
+            <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
+            <span className="min-w-0 truncate">{gate.title}</span>
+          </span>
+          <span className={cn(dsText.micro, dsText.nums, "text-[color:var(--ds-fg-muted)]")}>
+            {`open ${gateAge(row, tick)} — the run is held here`}
+          </span>
+          <span className={cn(dsText.micro, "inline-flex items-center gap-[var(--ds-space-hair)] font-semibold", fg)}>
+            <CornerDownRight aria-hidden className={dsIcon.sm} />
+            Go to the decision
+          </span>
+        </button>
+        <IconButton
+          size="xs"
+          label="Dismiss this reminder — the decision stays open"
+          onClick={onDismiss}
+          icon={<X aria-hidden className={dsIcon.sm} />}
         />
-        <span
-          className={cn(
-            dsText.ui,
-            "min-w-0 truncate font-semibold",
-            parked ? "text-[color:var(--ds-status-parked-fg)]" : "text-[color:var(--ds-status-waiting-fg)]",
-          )}
-        >
-          {gate.title}
-        </span>
-        <span
-          className={cn(
-            dsText.meta,
-            dsText.nums,
-            "ml-auto shrink-0 whitespace-nowrap opacity-85",
-            parked ? "text-[color:var(--ds-status-parked-fg)]" : "text-[color:var(--ds-status-waiting-fg)]",
-          )}
-        >
-          open {gateAge(row, tick)} · since {fmtClock(gate.openedAt)}
-        </span>
       </div>
-      <p className={cn(dsText.body, "mt-[var(--ds-space-tight)] pl-5 leading-relaxed text-[color:var(--ds-fg-muted)]")}>{gate.note}</p>
-      <div className="pl-5">
-        <ParkResolutions row={row} onAction={onAction} />
-        <BannerActions row={row} onAction={onAction} />
-      </div>
-    </div>
+    </FloatingSurface>
   );
+}
+
+/**
+ * Where the decision is, and whether the operator can currently see it.
+ *
+ * The anchor is a CALLBACK ref because the element it points at unmounts every
+ * time the tab changes — a plain ref would hold a detached node and scroll to
+ * nothing. `inView` is what keeps the floating notice from being a second copy
+ * of a decision already on screen.
+ */
+function useDecisionAnchor(active: boolean) {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const [inView, setInView] = useState(false);
+
+  useEffect(() => {
+    if (!active || !node) {
+      setInView(false);
+      return;
+    }
+    if (typeof IntersectionObserver === "undefined") {
+      // No observer (old browser, test renderer): assume the decision is NOT
+      // visible, so the notice shows. Failing toward "reachable" is the only
+      // safe direction for something a run is blocked on.
+      setInView(false);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => setInView(entries.some((e) => e.isIntersecting)), {
+      threshold: 0.3,
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [active, node]);
+
+  const seek = useCallback(() => {
+    if (!node) return;
+    const reduced = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    node.scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
+    node.focus({ preventScroll: true });
+  }, [node]);
+
+  return { setNode, inView, seek, mounted: Boolean(node) };
 }
 
 // ---------------------------------------------------------------------------
@@ -556,11 +763,15 @@ function LogsTab({
   liveCount,
   onAction,
   onOpenFailure,
+  tick,
+  decisionRef,
 }: {
   row: DemoRow;
   liveCount: number;
   onAction: DemoActionHandler;
   onOpenFailure?: () => void;
+  tick: number;
+  decisionRef?: (node: HTMLElement | null) => void;
 }) {
   const [query, setQuery] = useState("");
   useEffect(() => setQuery(""), [row.id]);
@@ -608,7 +819,7 @@ function LogsTab({
                   {line.duration && <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">{line.duration}</span>}
                 </span>
               </div>
-              {line.card === "gate" && <GateCardView row={row} onAction={onAction} />}
+              {line.card === "gate" && <InlineDecision row={row} tick={tick} onAction={onAction} anchorRef={decisionRef} />}
               {line.card === "failure" && <FailureCardView row={row} onOpenFailure={onOpenFailure} />}
             </div>
           );
@@ -670,6 +881,16 @@ const SOURCE_CHIP: Record<DemoRecordField["source"], { label: string; cls: strin
   paper: { label: "paper", cls: "border-[color:var(--ds-border-loud)] text-[color:var(--ds-fg)]" },
   roster: { label: "roster", cls: "border-[color:var(--ds-border)] text-[color:var(--ds-fg-secondary)]" },
   ucpath: { label: "UCPath", cls: "border-[color:var(--ds-border)] text-[color:var(--ds-fg-muted)]" },
+  /**
+   * The one provenance the operator creates. It is amber, not neutral, because
+   * it is the only value on the surface that no machine ever observed: a
+   * corrected field must never keep reading as a 0.97 paper read after a human
+   * typed over it.
+   */
+  operator: {
+    label: "you",
+    cls: "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
+  },
 };
 
 const CHECK_ICON: Record<DemoRecordCheck["state"], { icon: typeof Check; cls: string }> = {
@@ -678,8 +899,21 @@ const CHECK_ICON: Record<DemoRecordCheck["state"], { icon: typeof Check; cls: st
   fail: { icon: X, cls: "text-destructive" },
 };
 
-function ReviewTab({ row }: { row: DemoRow }) {
-  const records = row.records ?? [];
+function ReviewTab({
+  row,
+  tick,
+  onAction,
+  decisionRef,
+}: {
+  row: DemoRow;
+  tick: number;
+  onAction: DemoActionHandler;
+  decisionRef?: (node: HTMLElement | null) => void;
+}) {
+  // Memoised because the corrections memo below depends on it: `?? []` mints a
+  // fresh array every render, which would re-derive every correction on every
+  // tick of the demo clock.
+  const records = useMemo(() => row.records ?? [], [row.records]);
   const [idx, setIdx] = useState(0);
   const [reviewed, setReviewed] = useState<ReadonlySet<string>>(new Set());
   const [approved, setApproved] = useState<ReadonlySet<string>>(new Set());
@@ -690,6 +924,26 @@ function ReviewTab({ row }: { row: DemoRow }) {
     setApproved(new Set());
     setEdits({});
   }, [row.id]);
+
+  /**
+   * Every correction the operator has made across the whole packet, minted by
+   * the ONE builder in the wire module — so the number on the approve bar and
+   * the list the approve command carries are the same derivation, and a
+   * correction cannot be shown but not sent.
+   */
+  const corrections = useMemo<RecordCorrectionWire[]>(
+    () => records.flatMap((r) => buildRecordCorrections(r.id, r.fields, edits, agoSeconds(-tick))),
+    [records, edits, tick],
+  );
+  const correctionsFor = useCallback(
+    (recordId: string) => corrections.filter((c) => c.recordId === recordId),
+    [corrections],
+  );
+  /** the gate's own approve descriptor — the client never invents this button */
+  const approveAction = useMemo<ActionDescriptorWire | undefined>(
+    () => actionsAt(row.actions, "banner").find((a) => a.resolution?.startsWith("approve:")),
+    [row.actions],
+  );
 
   if (records.length === 0) {
     return row.status === "failed" ? (
@@ -725,8 +979,15 @@ function ReviewTab({ row }: { row: DemoRow }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* approve bar — the gate on the whole set */}
-      <div className="flex items-center gap-2 border-b border-border/60 bg-secondary/20 px-3 py-1.5">
+      {/* approve bar — the gate on the whole set, and the review row's own
+          decision anchor: this is what the floating notice jumps to on a panel
+          whose decision surface is Review rather than the log stream. */}
+      <div
+        ref={row.gate ? decisionRef : undefined}
+        tabIndex={row.gate ? -1 : undefined}
+        data-demo-decision={row.gate ? row.gate.kind : undefined}
+        className={cn("flex flex-wrap items-center gap-2 border-b border-border/60 bg-secondary/20 px-3 py-1.5", dsFocus)}
+      >
         <span aria-live="polite" className="font-mono text-[11px] tabular-nums text-foreground">
           {reviewed.size}/{records.length} reviewed
         </span>
@@ -739,10 +1000,18 @@ function ReviewTab({ row }: { row: DemoRow }) {
             ? `${gaps} completeness ${gaps === 1 ? "gap" : "gaps"} across ${records.length} people`
             : `${approved.size} approved · ${blocked > 0 ? `${blocked} blocked` : "none blocked"}`}
         </span>
+        {/* Corrections are counted here, on the control that sends them, so the
+            operator can see that approving carries their typing and not the
+            machine's reading. */}
+        {corrections.length > 0 && (
+          <Badge tone="warning" title={corrections.map((c) => `${c.field}: ${c.from} → ${c.to}`).join(" · ")}>
+            {`${corrections.length} correction${corrections.length === 1 ? "" : "s"}`}
+          </Badge>
+        )}
         {/* No approve control exists on a standalone run — it is not disabled,
             it is absent, because the contract sends no approval gate for a run
             with nothing downstream. */}
-        {readOnly ? (
+        {readOnly || !approveAction ? (
           <span className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
             <Eye aria-hidden className="size-3" />
             Read-only report — nothing to approve
@@ -750,13 +1019,23 @@ function ReviewTab({ row }: { row: DemoRow }) {
         ) : (
           <button
             type="button"
-            onClick={NOOP}
+            onClick={() =>
+              onAction(row, {
+                ...approveAction,
+                payload: {
+                  approved: String(approvable.length),
+                  corrections: String(corrections.length),
+                  correctionsJson: JSON.stringify(corrections),
+                },
+              })
+            }
             disabled={reviewed.size < records.length}
-            title={reviewed.size < records.length ? "Look at every person first" : undefined}
+            title={reviewed.size < records.length ? "Look at every person first" : approveAction.detail}
             className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-success/50 bg-success/15 px-2.5 py-1 text-[11px] font-semibold text-success outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
           >
             <CheckCircle2 aria-hidden className="size-3" />
             Approve {approvable.length} of {records.length}
+            {corrections.length > 0 && ` with ${corrections.length} correction${corrections.length === 1 ? "" : "s"}`}
           </button>
         )}
       </div>
@@ -823,7 +1102,16 @@ function ReviewTab({ row }: { row: DemoRow }) {
           {rec.fields.map((f) => {
             const key = `${rec.id}:${f.label}`;
             const value = edits[key] ?? f.value;
-            const dirty = value !== f.value;
+            const corrected = value !== f.value;
+            /**
+             * THE HONEST BIT. A field the operator has typed over is no longer a
+             * paper read: its provenance becomes `operator`, and the model
+             * confidence that belonged to the value it replaced is DROPPED
+             * rather than inherited. The machine's reading is not lost — it is
+             * on the correction, and it is one hover away here.
+             */
+            const source: DemoRecordField["source"] = corrected ? "operator" : f.source;
+            const chip = SOURCE_CHIP[source];
             return (
               <div key={f.label} className="flex items-baseline gap-2 border-b border-border/40 py-[5px] text-[12px] last:border-b-0">
                 {/* 96px, not 112: the four things on this line are the label,
@@ -832,41 +1120,72 @@ function ReviewTab({ row }: { row: DemoRow }) {
                     gives up the width. */}
                 <span className="flex w-24 shrink-0 items-center gap-1.5 text-muted-foreground">
                   {f.label}
-                  {dirty && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warning" />}
+                  {corrected && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warning" />}
                 </span>
                 {/* A value may only change with its page on screen — which is
                     why the packet row offers bulk approve but never an edit,
                     and why the input lives beside the scan rather than in a
                     form somewhere else. */}
-                {f.editable ? (
+                {f.editable && !readOnly ? (
                   <input
-                    aria-label={`${f.label} — correct against the page shown beside it`}
+                    aria-label={`${f.label} — correct against the page shown beside it${corrected ? `. Corrected by you; read from the page as ${f.value}` : ""}`}
                     value={value}
                     onChange={(e) => setEdits((prev) => ({ ...prev, [key]: e.target.value }))}
                     className={cn(
                       "min-w-0 flex-1 rounded border bg-transparent px-1.5 py-0.5 font-mono text-[11.5px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      dirty ? "border-warning/50 bg-warning/5 text-warning" : "border-transparent text-foreground hover:border-border focus:border-border",
+                      corrected
+                        ? "border-warning/50 bg-warning/5 text-warning"
+                        : "border-transparent text-foreground hover:border-border focus:border-border",
                     )}
                   />
                 ) : (
-                  <span className={cn("min-w-0 flex-1 font-mono text-[11.5px]", f.warn ? "text-warning" : "text-foreground")}>{f.value}</span>
-                )}
-                <span className={cn("shrink-0 rounded border px-1 text-[9px] font-semibold uppercase", SOURCE_CHIP[f.source].cls)}>
-                  {SOURCE_CHIP[f.source].label}
-                </span>
-                {f.confidence !== undefined && (
                   <span
+                    title={
+                      readOnly
+                        ? "A read-only report records what was read; there is nothing downstream for a correction to reach."
+                        : "Looked up in a system of record — not read off this page, so there is nothing here to correct."
+                    }
                     className={cn(
-                      "w-8 shrink-0 text-right font-mono text-[10px] tabular-nums",
-                      f.confidence < 0.6 ? "text-warning" : "text-muted-foreground",
+                      "flex min-w-0 flex-1 items-center gap-1.5 font-mono text-[11.5px]",
+                      f.warn ? "text-warning" : "text-foreground",
                     )}
                   >
-                    {f.confidence.toFixed(2)}
+                    <Lock aria-hidden className="size-3 shrink-0 text-muted-foreground/70" />
+                    <span className="min-w-0 flex-1 truncate">{f.value}</span>
+                  </span>
+                )}
+                <span
+                  title={corrected ? `You typed this. The page was read as “${f.value}”.` : undefined}
+                  className={cn("shrink-0 rounded border px-1 text-[9px] font-semibold uppercase", chip.cls)}
+                >
+                  {chip.label}
+                </span>
+                {/* The confidence slot never collapses: a corrected value keeps
+                    the column but prints an em dash, so the eye can see that the
+                    number is GONE rather than that the row lost a cell. */}
+                {(f.confidence !== undefined || corrected) && (
+                  <span
+                    title={corrected && f.confidence !== undefined ? `The machine read that value at ${f.confidence.toFixed(2)}; yours has no model confidence.` : undefined}
+                    className={cn(
+                      "w-8 shrink-0 text-right font-mono text-[10px] tabular-nums",
+                      corrected
+                        ? "text-muted-foreground"
+                        : (f.confidence ?? 1) < 0.6
+                          ? "text-warning"
+                          : "text-muted-foreground",
+                    )}
+                  >
+                    {corrected ? "—" : f.confidence?.toFixed(2)}
                   </span>
                 )}
               </div>
             );
           })}
+          {correctionsFor(rec.id).length > 0 && (
+            <p className="mt-1.5 text-[11px] leading-relaxed text-warning">
+              {`${correctionsFor(rec.id).length} value${correctionsFor(rec.id).length === 1 ? "" : "s"} corrected by you. Approving files ${correctionsFor(rec.id).length === 1 ? "it" : "them"} as ${correctionsFor(rec.id).length === 1 ? "an operator correction" : "operator corrections"} in this run's evidence, beside what the page was read as.`}
+            </p>
+          )}
           {rec.fields.some((f) => f.warn) && (
             <p className="mt-1.5 text-[11px] leading-relaxed text-warning">{rec.fields.find((f) => f.warn)?.warn}</p>
           )}
@@ -967,7 +1286,11 @@ function ReviewTab({ row }: { row: DemoRow }) {
           Skip for now
         </button>
         <span className="ml-auto text-[10.5px] text-muted-foreground">
-          {rec.state === "blocked" ? "Blocked records are excluded from Approve." : "Approve releases only this person's work."}
+          {rec.state === "blocked"
+            ? "Blocked records are excluded from Approve."
+            : correctionsFor(rec.id).length > 0
+              ? `Approve releases only this person's work — with your ${correctionsFor(rec.id).length} correction${correctionsFor(rec.id).length === 1 ? "" : "s"}, not the machine's reading.`
+              : "Approve releases only this person's work."}
         </span>
           </>
         )}
@@ -1425,7 +1748,7 @@ function PanelRegion({
   isMember: boolean;
   children: ReactNode;
 }) {
-  const { collapsed, setOpen: setRailOpen } = useContextRail();
+  const { collapsed, setOpen: setRailOpen, dataExpanded, setDataExpanded } = useContextRail();
   const hasShape = row.steps.length > 0 || Boolean(sharedMemberPipeline(row));
 
   return (
@@ -1438,7 +1761,12 @@ function PanelRegion({
         "min-[1280px]:grid-rows-[auto_minmax(0,1fr)]",
         collapsed
           ? "min-[1280px]:grid-cols-[minmax(0,1fr)_var(--ds-w-context-spine)]"
-          : "min-[1280px]:grid-cols-[minmax(0,1fr)_var(--ds-w-context-rail)]",
+          : // Expanding Data borrows from the centre column and gives it back.
+            // It is a deliberate, reversible trade the operator makes with one
+            // press, not a layout the panel settles into.
+            dataExpanded
+            ? "min-[1280px]:grid-cols-[minmax(0,1fr)_var(--ds-w-context-rail-wide)]"
+            : "min-[1280px]:grid-cols-[minmax(0,1fr)_var(--ds-w-context-rail)]",
       )}
     >
       {hasShape && (
@@ -1494,6 +1822,8 @@ function PanelRegion({
           onOpenPanel={onOpenPanel}
           onAction={onAction}
           onClose={() => setRailOpen(false)}
+          dataExpanded={dataExpanded}
+          onDataExpandedChange={setDataExpanded}
           className={cn(
             "shrink-0",
             "min-[1280px]:col-start-2 min-[1280px]:row-start-2 min-[1280px]:shrink",
@@ -1524,6 +1854,40 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
 
   const failure = failureRecordFor(row);
 
+  const available = tabsFor(row);
+  const fallback = defaultTabFor(row);
+  const effectiveTab = tab && available.includes(tab) ? tab : fallback;
+
+  /**
+   * THE DECISION, and how to get to it from anywhere.
+   *
+   * The gate banner is gone: it drew the decision a second time, above the
+   * tabs, with the same words and the same buttons as the card already in the
+   * stream. What replaces it is not a smaller banner but a different KIND of
+   * thing — the header keeps the status pill (so the state is never invisible),
+   * the outcome bar keeps its one-line verdict and its jump, and a small
+   * dismissable notice appears in the corner whenever the decision itself is
+   * out of reach. A decision a run is blocked on may never become unreachable;
+   * it may only stop being drawn twice.
+   */
+  const decisionTab: DemoTab = panelKindOf(row) === "review" ? "review" : "logs";
+  const anchor = useDecisionAnchor(Boolean(row.gate));
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
+  const [seekNonce, setSeekNonce] = useState(0);
+  useEffect(() => setNoticeDismissed(false), [row.id, effectiveTab]);
+  // Scrolling is deferred to an effect rather than done in the click handler
+  // because the anchor may not exist yet: pressing the notice from the Receipt
+  // tab switches tabs first, and the decision only mounts on the next commit.
+  useEffect(() => {
+    if (seekNonce === 0) return;
+    anchor.seek();
+  }, [seekNonce, anchor]);
+  const goToDecision = () => {
+    if (effectiveTab !== decisionTab) onTab(decisionTab);
+    setSeekNonce((n) => n + 1);
+  };
+  const noticeShown = Boolean(row.gate) && !noticeDismissed && !anchor.inView;
+
   const handleAction: DemoActionHandler = (target, action) => {
     if (action.kind === "command" && isParkResolution(action)) {
       setParkPending({ row: target, action });
@@ -1536,12 +1900,15 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
       setFailureOpen(true);
       return;
     }
+    // Likewise the outcome bar's `Review` / `Resolve`: with no banner above the
+    // tabs, this is the persistent, undismissable route to the decision, so it
+    // has to actually travel there rather than post a result nobody asked for.
+    if (action.kind === "navigation" && (action.key === "open-gate" || action.key === "open-park") && row.gate) {
+      goToDecision();
+      return;
+    }
     return onAction(target, action);
   };
-
-  const available = tabsFor(row);
-  const fallback = defaultTabFor(row);
-  const effectiveTab = tab && available.includes(tab) ? tab : fallback;
   const panel = panelKindSpec(row);
   const variant = rowVariantSpec(row);
   const isMember = row.rowType === "member";
@@ -1549,15 +1916,6 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
   const tone = OUTCOME_TONE[row.outcome.tone];
   const elapsed = row.elapsedSec !== undefined ? fmtElapsed(row.elapsedSec + tick) : undefined;
   const attentionMember = isMember && (status === "failed" || status === "waiting" || status === "doneWarnings");
-  /**
-   * The gate banner and the outcome line were saying the same sentence twice —
-   * "Waiting on you — approve 5 of 6 people, or open the review" one band above
-   * a banner that says it at length and carries the buttons. Where the banner
-   * renders, the banner wins; the outcome line keeps its real job, which is the
-   * runs that have NO gate and would otherwise state their result nowhere but a
-   * status chip.
-   */
-  const gateBannerShown = Boolean(row.gate) && panelKindOf(row) !== "review";
 
   return (
     <PanelRegion row={row} tick={tick} onOpenPanel={onOpenPanel} onAction={handleAction} isMember={isMember}>
@@ -1605,23 +1963,22 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
         </div>
       )}
 
-      {/* The outcome line — one sentence of "so what". It is suppressed when the
-          gate banner below is already carrying that sentence AND the buttons
-          that answer it; two bands saying the same thing is how a dense panel
-          teaches an operator to skim past both. */}
-      {!gateBannerShown && (
-        <div
-          className={cn(
-            "flex items-center border-b",
-            "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
-            tone.bar,
-          )}
-        >
-          <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
-          <span className={cn(dsText.body, "min-w-0 truncate")}>{row.outcome.text}</span>
-          <OutcomeActionButton row={row} onAction={handleAction} className="ml-auto" />
-        </div>
-      )}
+      {/* The outcome line — one sentence of "so what", and, on a gated row, the
+          one route to the decision that can never be dismissed. It used to be
+          suppressed wherever the gate banner repeated it; with the banner gone
+          there is nothing to duplicate, and this line becomes the persistent
+          top-of-panel statement the operator asked to keep BRIEF. */}
+      <div
+        className={cn(
+          "flex items-center border-b",
+          "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
+          tone.bar,
+        )}
+      >
+        <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
+        <span className={cn(dsText.body, "min-w-0 truncate")}>{row.outcome.text}</span>
+        <OutcomeActionButton row={row} onAction={handleAction} className="ml-auto" />
+      </div>
 
       {/* Requeue-while-settling: an absence observation was accepted, the row
           went back into work to earn the second one, and it is neither finished
@@ -1632,13 +1989,7 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
         </div>
       )}
 
-      {/* the gate is pinned above the tabs — visible from every tab, on every
-          panel kind, instead of hiding inside a Review tab most rows lack. It
-          NEVER moves to the rail and is never behind a disclosure: a decision
-          the run is blocked on has to be the loudest thing in the panel. */}
-      {gateBannerShown && <GateBanner row={row} tick={tick} onAction={handleAction} />}
-
-      {/* the failure record is pinned in the same slot as the gate, for the same
+      {/* the failure record is pinned above the tabs, because what broke, what
           reason: what broke, what is half-done and what is safe to retry must be
           readable from every tab — not just from the one the logs are on */}
       {failure && (
@@ -1699,17 +2050,31 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
         </span>
       </div>
 
-      {effectiveTab === "logs" && (
-        <LogsTab
-          row={row}
-          liveCount={liveCount}
-          onAction={handleAction}
-          onOpenFailure={failure ? () => setFailureOpen(true) : undefined}
-        />
-      )}
-      {effectiveTab === "review" && <ReviewTab row={row} />}
-      {effectiveTab === "people" && <PeopleTab row={row} onSelect={onSelect} onOpenPanel={onOpenPanel} checkedIds={checkedIds} />}
-      {effectiveTab === "receipt" && <ReceiptTab row={row} />}
+      {/* The tab body, and the positioning context for the floating notice. The
+          notice belongs to the BODY rather than to the whole panel so it can
+          never sit over the header, the outcome line or the tab bar — the three
+          bands that are already telling the operator the same thing. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {effectiveTab === "logs" && (
+          <LogsTab
+            row={row}
+            liveCount={liveCount}
+            onAction={handleAction}
+            onOpenFailure={failure ? () => setFailureOpen(true) : undefined}
+            tick={tick}
+            decisionRef={anchor.setNode}
+          />
+        )}
+        {effectiveTab === "review" && (
+          <ReviewTab row={row} tick={tick} onAction={handleAction} decisionRef={anchor.setNode} />
+        )}
+        {effectiveTab === "people" && <PeopleTab row={row} onSelect={onSelect} onOpenPanel={onOpenPanel} checkedIds={checkedIds} />}
+        {effectiveTab === "receipt" && <ReceiptTab row={row} />}
+
+        {noticeShown && (
+          <DecisionNotice row={row} tick={tick} onGo={goToDecision} onDismiss={() => setNoticeDismissed(true)} />
+        )}
+      </div>
 
       {/* member action bar — a rejected row gets none of it: there is no task
           behind it to retry, so the buttons are structurally absent, not

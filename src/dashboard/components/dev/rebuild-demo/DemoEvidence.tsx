@@ -19,7 +19,7 @@ import {
   useToasts,
 } from "./demo-ui";
 import { fmtClock, type SystemKey } from "./demo-wire";
-import type { DemoRow } from "./demo-data";
+import { SYSTEM_ACCENT, type DemoRow } from "./demo-data";
 import {
   CAPTURE_KIND_LABEL,
   capturesFor,
@@ -43,6 +43,27 @@ import {
 // ---------------------------------------------------------------------------
 // small shared parts
 // ---------------------------------------------------------------------------
+
+/**
+ * The dense system marker used inside a stream or a ledger row — the same atom
+ * on the log line and on the Data row, so a `UCPATH` beside a value in the rail
+ * and a `UCPATH` beside a line in the stream read as one thing. It lives here
+ * with the other shared atoms because this is the file both surfaces already
+ * depend on; forking a second copy is how the two drifted before.
+ */
+export function SystemChip({ system, className }: { system: SystemKey; className?: string }) {
+  return (
+    <span
+      className={cn(
+        "mr-1.5 inline-block rounded px-1 align-[1px] text-[9px] font-bold tracking-wider",
+        SYSTEM_ACCENT[system],
+        className,
+      )}
+    >
+      {system.toUpperCase()}
+    </span>
+  );
+}
 
 /** the system a fact came from, with the `test` instance called out loud */
 export function SystemTag({ system, instance }: { system?: SystemKey; instance?: "prod" | "test" }) {
@@ -107,7 +128,14 @@ function CaptureFrame({ capture, className }: { capture: DemoCapture; className?
   );
 }
 
-function CaptureLightbox({
+/**
+ * Exported because the identity gate needs the SAME viewer for its per-candidate
+ * captures. A candidate capture opened from a decision and a step capture opened
+ * from the rail are the same artefact seen from two places — giving the gate its
+ * own smaller viewer would have meant a second set of honesty copy to keep in
+ * step with this one.
+ */
+export function CaptureLightbox({
   captures,
   index,
   onIndex,
