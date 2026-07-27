@@ -19,7 +19,7 @@ import {
   submitVersionBump,
   type ArchiveQuery,
 } from "@/components/dev/rebuild-demo/demo-archive-wire";
-import type { DemoWorkflowId } from "@/components/dev/rebuild-demo/demo-wire";
+import { fmtClock, type DemoWorkflowId } from "@/components/dev/rebuild-demo/demo-wire";
 
 const q = (patch: Partial<ArchiveQuery>): ArchiveQuery => ({ ...EMPTY_ARCHIVE_QUERY, ...patch });
 
@@ -131,6 +131,12 @@ test("an evidence pointer says whether the bytes survived, and never invents an 
     assert.ok(item.ref.startsWith("sha256:"), "an evidence pointer is content-addressed");
     assert.ok(item.retentionAt.length > 0, "a pointer with no retention state is a link you cannot tell from a dead one");
   }
+  // A demo INSTANT, never a formatted clock: the viewer parses it with
+  // `fmtClock`, which throws on anything else — a fixture holding "8:14 AM"
+  // crashed the lightbox and only booting it caught that.
+  for (const item of DEMO_ARCHIVE.flatMap((r) => r.evidence)) {
+    if (item.capturedAt) assert.doesNotThrow(() => fmtClock(item.capturedAt!), `${item.id} stores a display clock, not an instant`);
+  }
   const capture = archivedCapture(purged[0]);
   assert.equal(capture.kind, purged[0].kind);
   assert.match(capture.note ?? "", /The image itself is gone/);
@@ -158,7 +164,9 @@ test("the relaunch plan names what the archived run already filed", () => {
   const plan = deriveRelaunchPlan(run("arch-ec-noor-v3"));
   assert.equal(plan.alreadyFiled.length, 1);
   assert.equal(plan.alreadyFiled[0].confirmation, "UCP-2026-0722-44119");
-  assert.ok(plan.cautions.some((c) => /second time/.test(c)), "a production write must be called out before a relaunch");
+  // The duplicate-write risk is rendered LOUD from `alreadyFiled`; the caution
+  // list deliberately does not restate it.
+  assert.equal(plan.cautions.some((c) => /second time/.test(c)), false);
   assert.equal(plan.versionTag, "v4.0");
   assert.equal(plan.archivedVersionTag, "v3.1");
 });

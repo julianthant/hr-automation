@@ -261,6 +261,12 @@ export interface ArchivedEvidenceWire {
   ref: string;
   step?: string;
   system?: SystemKey;
+  /**
+   * A demo INSTANT (`2026-07-22T08:14:00`), never a formatted clock. The viewer
+   * parses it with `fmtClock`, which throws on anything else — that fail-loud
+   * parse is what caught a fixture holding `"8:14 AM"` and crashing the
+   * lightbox, so do not soften it into a display string.
+   */
   capturedAt?: string;
   screen?: string;
   pageState?: string;
@@ -451,7 +457,7 @@ export const DEMO_ARCHIVE: ArchivedRunWire[] = [
         ref: "sha256:9f2c…a41",
         step: "Navigation",
         system: "ucpath",
-        capturedAt: "9:14 AM",
+        capturedAt: "2026-07-22T09:14:00",
         screen: "UCPath — Employee Actions",
         size: VIEWPORT,
         ...RETAINED("purges Oct 22, 2026"),
@@ -541,7 +547,7 @@ export const DEMO_ARCHIVE: ArchivedRunWire[] = [
         ref: "sha256:1b70…c02",
         step: "Read back",
         system: "ucpath",
-        capturedAt: "8:14 AM",
+        capturedAt: "2026-07-22T08:14:00",
         screen: "UCPath — Emergency Contact saved",
         pageState: "Confirmation banner visible, transaction id in frame",
         size: VIEWPORT,
@@ -554,7 +560,7 @@ export const DEMO_ARCHIVE: ArchivedRunWire[] = [
         label: "Contact form page 2",
         ref: "sha256:4ae1…9dd",
         step: "Read the form",
-        capturedAt: "8:11 AM",
+        capturedAt: "2026-07-22T08:11:00",
         ...PURGED("purged Jul 25, 2026 — 3-day form-image retention"),
       },
     ],
@@ -640,7 +646,7 @@ export const DEMO_ARCHIVE: ArchivedRunWire[] = [
         ref: "sha256:77ea…31f",
         step: "Read back",
         system: "ucpath",
-        capturedAt: "8:20 AM",
+        capturedAt: "2026-07-22T08:20:00",
         screen: "UCPath — Emergency Contact saved",
         size: VIEWPORT,
         ...RETAINED("purges Oct 20, 2026"),
@@ -741,7 +747,7 @@ export const DEMO_ARCHIVE: ArchivedRunWire[] = [
         ref: "sha256:0c31…88a",
         step: "Submit",
         system: "ucpath",
-        capturedAt: "10:26 AM",
+        capturedAt: "2026-07-19T10:26:00",
         screen: "UCPath — Smart HR Transaction submitted",
         pageState: "Transaction id in frame beside the effective date",
         size: VIEWPORT,
@@ -754,7 +760,7 @@ export const DEMO_ARCHIVE: ArchivedRunWire[] = [
         ref: "sha256:b402…7e1",
         step: "Finalize Kuali",
         system: "kuali",
-        capturedAt: "10:30 AM",
+        capturedAt: "2026-07-19T10:30:00",
         ...RETAINED("purges Oct 17, 2026"),
       },
     ],
@@ -853,7 +859,7 @@ export const DEMO_ARCHIVE: ArchivedRunWire[] = [
         ref: "sha256:aa19…b30",
         step: "File the ticket",
         system: "servicenow",
-        capturedAt: "2:29 PM",
+        capturedAt: "2026-07-19T14:29:00",
         screen: "ServiceNow — INC0448120 created",
         size: VIEWPORT,
         ...RETAINED("purges Oct 17, 2026"),
@@ -954,7 +960,7 @@ export const DEMO_ARCHIVE: ArchivedRunWire[] = [
         ref: "sha256:5fd2…104",
         step: "Update awards",
         system: "ucpath",
-        capturedAt: "9:41 AM",
+        capturedAt: "2026-07-19T09:41:00",
         screen: "UCPath — Person Search, 0 results for 10559002",
         pageState: "Search returned no rows; the EID box holds the searched value",
         size: VIEWPORT,
@@ -1061,7 +1067,7 @@ export const DEMO_ARCHIVE: ArchivedRunWire[] = [
         ref: "sha256:c110…2fa",
         step: "I-9 section 2",
         system: "i9",
-        capturedAt: "11:26 AM",
+        capturedAt: "2026-07-19T11:26:00",
         screen: "I-9 — Section 2, document rejected",
         pageState: "Rejection banner in frame with the expiry date",
         size: VIEWPORT,
@@ -1155,7 +1161,7 @@ export const DEMO_ARCHIVE: ArchivedRunWire[] = [
         ref: "sha256:e441…70b",
         step: "Search",
         system: "ucpath",
-        capturedAt: "7:45 AM",
+        capturedAt: "2026-06-30T07:45:00",
         ...PURGED("purged Sep 28, 2026 — 90-day evidence retention"),
       },
     ],
@@ -1540,7 +1546,12 @@ export interface RelaunchPlanWire {
   systems: SystemKey[];
   /** what the ARCHIVED run already filed — the duplicate-write question, named */
   alreadyFiled: { system: string; action: string; confirmation: string }[];
-  /** anything about this relaunch the operator should decide on, not discover */
+  /**
+   * Anything about this relaunch the operator should decide on rather than
+   * discover. Deliberately does NOT restate `alreadyFiled` — that is rendered
+   * loud from the ledger itself, and a bullet repeating it is the second band
+   * saying what the first one said.
+   */
   cautions: string[];
 }
 
@@ -1548,11 +1559,6 @@ export function deriveRelaunchPlan(run: ArchivedRunWire): RelaunchPlanWire {
   const workflow = DEMO_WORKFLOWS[run.workflowId];
   const cautions: string[] = [];
 
-  if (run.ledger.length > 0) {
-    cautions.push(
-      `This run already filed ${run.ledger.length} record${run.ledger.length === 1 ? "" : "s"} in a real system. A relaunch does NOT know about them — if the work still stands, relaunching files it a second time.`,
-    );
-  }
   if (run.dryRun) {
     cautions.push("The archived run was a DRY RUN. The new one is not — it will write for real unless you start it as a dry run from the run modal.");
   }
