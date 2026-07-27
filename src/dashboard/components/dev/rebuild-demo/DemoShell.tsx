@@ -515,10 +515,12 @@ export function DemoWorkflowPanelToggle({
       <span className={dsText.nums}>{code}</span>
       {/* The rule is what stops `on 6` reading as one fact. Left of it is the
           panel you are in; right of it is a count that belongs to no single
-          workflow. Same hairline the Status Bar puts between its two composite
-          pills and the eight statuses, and for the same reason — it separates
-          two KINDS of thing, not two things of one kind. */}
-      <span aria-hidden className={cn("mx-[var(--ds-space-hair)] h-4 w-px shrink-0", "bg-[var(--ds-border)]")} />
+          workflow. Same job as the hairline the Status Bar puts between its two
+          composite pills and the eight statuses — it separates two KINDS of
+          thing, not two things of one kind — but a step louder, because that
+          one sits on the page and this one sits on the control's OWN surface,
+          where `--ds-border` against a white card is not a line anybody sees. */}
+      <span aria-hidden className={cn("mx-[var(--ds-space-hair)] h-4 w-px shrink-0", "bg-[var(--ds-border-loud)]")} />
       {/* The `Needs you` composite's own glyph. Colour is never the only
           encoding, and here it is not even the first one: the icon says which
           quantity this is, the tone says whether it is a demand. */}
