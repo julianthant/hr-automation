@@ -120,6 +120,33 @@ test("a member that has not finished looking carries NO outcome", () => {
   }
 });
 
+test("where a vocabulary exists, the detail column carries DETAIL — never a second telling of the outcome", () => {
+  const members = orderedMemberIds("i9-batch").map((id) => DEMO_ROWS[id]);
+  const outcomeWords = new Set(I9_VOCABULARY.flatMap((o) => o.label.toLowerCase().split(/\s+/)));
+
+  for (const m of members) {
+    if (!m.memberOutcomeSpec || !m.memberFact) continue;
+    // A detail that restates the outcome spends the column twice and is exactly
+    // how `S1 + S2 · retain 3y` came to be — two axes and the evidence crammed
+    // into one string, in a fixed 104px cell, one click from the queue that
+    // already said `Found`. The outcome word is the queue's; the detail's job
+    // is the one fact the word cannot carry (which page, which roster row, how
+    // many candidates, how long to retain).
+    assert.notEqual(
+      m.memberFact.toLowerCase(),
+      m.memberOutcomeSpec.label.toLowerCase(),
+      `${m.id} repeats its own outcome in the detail column`,
+    );
+    for (const word of m.memberFact.toLowerCase().split(/[^a-z0-9]+/)) {
+      if (word.length < 4) continue;
+      assert.ok(
+        !outcomeWords.has(word),
+        `${m.id}'s detail "${m.memberFact}" borrows the outcome word "${word}" — say the other fact instead`,
+      );
+    }
+  }
+});
+
 test("a workflow with no vocabulary keeps its members' free-text detail", () => {
   const members = orderedMemberIds("ec-packet").map((id) => DEMO_ROWS[id]);
   assert.ok(members.length > 0);

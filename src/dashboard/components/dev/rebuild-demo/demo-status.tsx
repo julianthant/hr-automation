@@ -1,6 +1,9 @@
 import type { ComponentType, SVGProps } from "react";
 import { cn } from "@/lib/utils";
-import { DS_STATUS, StatusPill, dsStatusText, type DsStatus } from "./demo-ui";
+import { DS_STATUS, StatusPill, dsStatusText, dsText, type DsStatus } from "./demo-ui";
+// TYPE-ONLY: `demo-wire` imports `ProposedStatus` from this file, so a value
+// import here would close a runtime cycle. This one is erased at compile.
+import type { MemberOutcomeSpec } from "./demo-wire";
 
 /**
  * DEV-ONLY — the eight ratified queue statuses, as the shell consumes them.
@@ -78,4 +81,54 @@ export function StatusBadge({
   hideIcon?: boolean;
 }) {
   return <StatusPill status={status} label={label} age={age} size="sm" hideIcon={hideIcon} />;
+}
+
+/**
+ * A member's OUTCOME — what its run found — as a word in a column.
+ *
+ * Status and outcome are orthogonal axes and this is the component that keeps
+ * them apart. A member can be `Verified done` with the outcome `Not found`,
+ * because looking and finding nothing is a successful run with a negative
+ * answer, so an outcome is deliberately NEVER a `StatusPill`: putting a
+ * negative answer in status chrome is exactly how `Verified done · Not found`
+ * comes to read as a failure. It is a word, the word is always the
+ * differentiator, and the tone only decides how loudly it is said.
+ *
+ * It lives here rather than in either consumer because BOTH the queue's member
+ * lines and the Log Panel's People tab render it, and the People tab spent a
+ * wave rendering the old free-text `memberFact` instead — which is how the
+ * crammed `S1 + S2 · retain 3y` strings survived the vocabulary that replaced
+ * them. One renderer, one place to change the ladder.
+ */
+const MEMBER_OUTCOME_TONE: Record<MemberOutcomeSpec["tone"], string> = {
+  danger: "font-medium text-[color:var(--ds-status-failed-fg)]",
+  warn: "font-medium text-[color:var(--ds-status-waiting-fg)]",
+  neutral: "text-[color:var(--ds-fg-secondary)]",
+  quiet: "text-[color:var(--ds-fg-muted)]",
+};
+
+export function MemberOutcomeWord({
+  outcome,
+  className,
+}: {
+  outcome: MemberOutcomeSpec;
+  className?: string;
+}) {
+  return (
+    <span title={outcome.meaning} className={cn(dsText.meta, "min-w-0 truncate", MEMBER_OUTCOME_TONE[outcome.tone], className)}>
+      {outcome.label}
+    </span>
+  );
+}
+
+/**
+ * The em dash a member shows in the outcome column before it has answered.
+ *
+ * A blank cell reads as a value that failed to render; an em dash reads as
+ * "nothing yet". The free-text detail is deliberately NOT dropped in here — a
+ * column headed `Outcome` holding `person-lookup…` is the two-axes-in-one-column
+ * defect the vocabulary exists to end.
+ */
+export function MemberOutcomePending({ className }: { className?: string }) {
+  return <span className={cn(dsText.meta, dsText.nums, "text-[color:var(--ds-fg-faint)]", className)}>—</span>;
 }
