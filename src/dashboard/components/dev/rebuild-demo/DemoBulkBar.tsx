@@ -76,8 +76,12 @@ export function runBulkCommand(rows: DemoRow[], command: DemoCommandKey, label: 
   return { command, label, results, notOffered };
 }
 
-/** the one toggle shape on this bar — the same height as the Status Bar pills */
-const toolbarControl = (): string =>
+/**
+ * The one toggle shape on this bar — the same height as the Status Bar pills.
+ * Exported because the shell's Workflow Panel toggle sits in the `leading` slot
+ * of this same row, and two toggles a hairline apart must not drift.
+ */
+export const toolbarControl = (): string =>
   cn(
     "inline-flex shrink-0 cursor-pointer items-center border",
     "h-[var(--ds-h-sm)] gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
