@@ -125,6 +125,11 @@ export {
   DrawerTrigger,
   DrawerClose,
   DrawerContent,
+  Popover,
+  PopoverTrigger,
+  PopoverAnchor,
+  PopoverClose,
+  PopoverContent,
   Tooltip,
   TooltipProvider,
   ToastProvider,
@@ -134,6 +139,8 @@ export {
 export type {
   DsDialogSize,
   DsDrawerSide,
+  DsPopoverSide,
+  DsPopoverWidth,
   DsToast,
   DsToastTone,
 } from "./ds/primitives-overlay";

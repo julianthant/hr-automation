@@ -10,14 +10,16 @@ import {
   type ReactNode,
 } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
+import * as PopoverPrimitive from "@radix-ui/react-popover";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { ChevronDown, ChevronUp, CircleAlert, Info, TriangleAlert, X, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { dsElev, dsFocus, dsIcon, dsLayer, dsMotion, dsRadius, dsText } from "./tokens";
 import { IconButton } from "./primitives-core";
+import { FloatingSurface } from "./primitives-layout";
 
 /**
- * DEV-ONLY — floating surfaces: Dialog, Drawer, Tooltip, Toast.
+ * DEV-ONLY — floating surfaces: Dialog, Drawer, Popover, Tooltip, Toast.
  *
  * Everything here is built on Radix where a focus trap or an escape hatch is
  * involved, because focus management is not something to re-implement in a
@@ -460,6 +462,196 @@ export function Tooltip({
         </TooltipPrimitive.Content>
       </TooltipPrimitive.Portal>
     </TooltipPrimitive.Root>
+  );
+}
+
+/* =========================================================================
+ * Popover
+ *
+ * The Tooltip's counterpart, and the reason both exist: a tooltip is a HINT
+ * (hover-only, invisible to touch and to anyone who never tabs there), so
+ * DESIGN.md forbids load-bearing information from living in one. A Popover is
+ * where that information goes instead — it OPENS ON CLICK, so it is reachable
+ * by pointer, touch and keyboard alike.
+ *
+ * Radix owns the parts that are not worth re-implementing in a tool that files
+ * real HR transactions: anchoring with a flip when it would overflow the
+ * viewport, Escape and outside-click to dismiss, focus moved into the surface
+ * on open and RESTORED to the trigger on close, and the `aria-haspopup` /
+ * `aria-expanded` / `aria-controls` wiring on the trigger.
+ *
+ * It is deliberately NON-modal: an explanation should not lock the page behind
+ * it. That is also why it is not a Dialog — nothing here is a decision.
+ * ====================================================================== */
+
+export const Popover = PopoverPrimitive.Root;
+export const PopoverTrigger = PopoverPrimitive.Trigger;
+export const PopoverAnchor = PopoverPrimitive.Anchor;
+export const PopoverClose = PopoverPrimitive.Close;
+
+export type DsPopoverSide = "top" | "right" | "bottom" | "left";
+export type DsPopoverWidth = "sm" | "md" | "lg";
+
+const POPOVER_WIDTH: Record<DsPopoverWidth, string> = {
+  sm: "w-[var(--ds-w-popover-sm)]",
+  md: "w-[var(--ds-w-popover-md)]",
+  lg: "w-[var(--ds-w-popover-lg)]",
+};
+
+/**
+ * Entry motion is ORIGIN-AWARE: the surface travels the last 3px out of the
+ * side it is actually anchored to, so it reads as coming FROM the trigger
+ * rather than fading in from nowhere. Transform and opacity only, on the
+ * `--ds-dur-3` token, which `prefers-reduced-motion` zeroes with everything
+ * else.
+ *
+ * It keys off Radix's own `data-side`, not the `side` PROP, because the prop is
+ * a request: a popover near the bottom of the viewport flips, and a flipped
+ * surface that still travelled downward would be moving away from its trigger.
+ */
+const POPOVER_ORIGIN = cn(
+  "data-[side=bottom]:-translate-y-[3px]",
+  "data-[side=top]:translate-y-[3px]",
+  "data-[side=left]:translate-x-[3px]",
+  "data-[side=right]:-translate-x-[3px]",
+);
+
+/**
+ * ```tsx
+ * <Popover>
+ *   <PopoverTrigger asChild>
+ *     <IconButton label="Why is this parked?" icon={<Info aria-hidden />} />
+ *   </PopoverTrigger>
+ *   <PopoverContent title="Why is this parked?">
+ *     <BulletList items={…} />
+ *   </PopoverContent>
+ * </Popover>
+ * ```
+ *
+ * `title` is REQUIRED and becomes the surface's accessible name. Pass
+ * `hideTitle` when the content is self-explanatory on screen — the name still
+ * exists for a screen reader, it just does not take a line.
+ */
+export function PopoverContent({
+  title,
+  description,
+  side = "bottom",
+  align = "start",
+  width = "md",
+  hideTitle,
+  hideClose,
+  className,
+  children,
+}: {
+  title: string;
+  description?: ReactNode;
+  side?: DsPopoverSide;
+  align?: "start" | "center" | "end";
+  width?: DsPopoverWidth;
+  /** keep the accessible name, drop the visible heading row */
+  hideTitle?: boolean;
+  hideClose?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <PopoverPrimitive.Portal>
+      <PopoverSurface
+        title={title}
+        description={description}
+        side={side}
+        align={align}
+        width={width}
+        hideTitle={hideTitle}
+        hideClose={hideClose}
+        className={className}
+      >
+        {children}
+      </PopoverSurface>
+    </PopoverPrimitive.Portal>
+  );
+}
+
+/**
+ * Mounts only while the popover is open — which is what lets it both read as
+ * arriving AND register itself in the modal-presence registry.
+ *
+ * WHY IT REGISTERS. The toast viewport is `fixed bottom-right` at the toast
+ * layer and a `danger` toast never auto-dismisses, so a persistent failure
+ * toast can sit on top of any dismissable layer below it and eat the click —
+ * the exact defect the registry was built for. A popover anchored to a row
+ * near the bottom of the queue lands in the same corner, so it opts in on the
+ * same terms as Dialog and Drawer: while it is open the viewport steps aside
+ * and its cards go inert.
+ */
+function PopoverSurface({
+  title,
+  description,
+  side,
+  align,
+  width,
+  hideTitle,
+  hideClose,
+  className,
+  children,
+}: {
+  title: string;
+  description?: ReactNode;
+  side: DsPopoverSide;
+  align: "start" | "center" | "end";
+  width: DsPopoverWidth;
+  hideTitle?: boolean;
+  hideClose?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  const entered = useEntered();
+  useRegisterModal();
+  const showHeader = !hideTitle;
+  return (
+    <PopoverPrimitive.Content
+      asChild
+      side={side}
+      align={align}
+      sideOffset={6}
+      collisionPadding={8}
+      aria-label={title}
+    >
+      <FloatingSurface
+        className={cn(
+          POPOVER_WIDTH[width],
+          "max-w-[calc(100vw-var(--ds-space-section))] outline-none",
+          dsLayer.menu,
+          dsMotion.enter,
+          entered ? "opacity-100 translate-x-0 translate-y-0" : cn("opacity-0", POPOVER_ORIGIN),
+          className,
+        )}
+      >
+        {showHeader && (
+          <header
+            className={cn(
+              "flex items-start gap-[var(--ds-space-base)] border-b px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
+              "border-[color:var(--ds-border-subtle)]",
+            )}
+          >
+            <div className="min-w-0 flex-1">
+              <p className={cn(dsText.ui, "truncate font-semibold text-[color:var(--ds-fg)]")}>{title}</p>
+              {description && (
+                <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>{description}</p>
+              )}
+            </div>
+            {!hideClose && (
+              <PopoverPrimitive.Close asChild>
+                <IconButton label="Close" size="sm" icon={<X aria-hidden className={dsIcon.md} />} />
+              </PopoverPrimitive.Close>
+            )}
+          </header>
+        )}
+        <div className={cn(dsText.body, "px-[var(--ds-space-cozy)] py-[var(--ds-space-base)] text-[color:var(--ds-fg-secondary)]")}>
+          {children}
+        </div>
+      </FloatingSurface>
+    </PopoverPrimitive.Content>
   );
 }
 
