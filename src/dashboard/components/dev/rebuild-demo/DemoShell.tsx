@@ -24,6 +24,7 @@ import { DEMO_WORKFLOW_LIST, type DemoWorkflowCategory } from "./demo-wire";
 import { DEMO_DAY, topLevelRowsForDay } from "./demo-days";
 import { DemoDateNav, DemoNotificationBell, DemoSearchControl, type DemoNavigateTo } from "./DemoTopBarSurfaces";
 import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
+import { DS_STATUS } from "./demo-ui";
 
 /**
  * DEV-ONLY — the replica shell around the rebuild demo.
@@ -359,16 +360,13 @@ const STATUS_PILL_ORDER: ProposedStatus[] = [
   "cancelled",
 ];
 
-const STATUS_PILL_TONE: Record<ProposedStatus, string> = {
-  queued: "text-warning",
-  running: "text-primary",
-  waiting: "text-warning",
-  parked: "text-log-violet",
-  verifiedDone: "text-success",
-  doneWarnings: "text-warning",
-  failed: "text-destructive",
-  cancelled: "text-warning",
-};
+/**
+ * The pill's icon tone. Read from the ONE status table rather than restated
+ * here — this map used to say `queued: amber`, `cancelled: amber` and
+ * `running: primary`, which put four of the eight pills in the same amber and
+ * disagreed with the chip on the row each pill filters to.
+ */
+const statusPillTone = (s: ProposedStatus): string => DS_STATUS[s].soloTone;
 
 export function DemoStatusBar({
   counts,
@@ -415,7 +413,7 @@ export function DemoStatusBar({
       {pill("needsYou", "Needs you", Eye, "text-warning", "Waiting on you + Write parked — the two states that are stuck on a decision from you")}
       <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-border" />
       {STATUS_PILL_ORDER.map((s) =>
-        pill(s, PROPOSED_STATUS[s].label, PROPOSED_STATUS[s].icon, STATUS_PILL_TONE[s], PROPOSED_STATUS[s].meaning, s === "running"),
+        pill(s, PROPOSED_STATUS[s].label, PROPOSED_STATUS[s].icon, statusPillTone(s), PROPOSED_STATUS[s].meaning, s === "running"),
       )}
     </div>
   );

@@ -1,9 +1,9 @@
 import type { ComponentType, SVGProps } from "react";
-import { AlertTriangle, Ban, CheckCircle2, Clock, Loader2, PauseCircle, UserRoundSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DS_STATUS, StatusPill, dsStatusText, type DsStatus } from "./demo-ui";
 
 /**
- * DEV-ONLY — the eight ratified queue statuses and their chip.
+ * DEV-ONLY — the eight ratified queue statuses, as the shell consumes them.
  *
  * This is the whole status vocabulary of the rebuild. It replaces today's
  * six near-identical status→icon/tone maps and the three resolvers that decode
@@ -11,87 +11,45 @@ import { cn } from "@/lib/utils";
  * `running` + `step:"awaiting-approval"` = needs review, and so on). Here a
  * status is a value, not something inferred.
  *
- * Moved out of the retired `dev/proposals/` folder — the demo is the surface
- * of record now.
+ * It is now an ADAPTER, not a second opinion. Until 2026-07-26 this file
+ * carried its own hue/icon table, and it had drifted from the ratified one in
+ * `ds/primitives-status.tsx` (DESIGN.md's table) on three of the eight:
+ * Queued and Cancelled were amber, and Running was the near-white primary.
+ * The result on screen was four statuses — Waiting on you, Queued, Done with
+ * warnings and Cancelled — wearing one indistinguishable amber tint, which is
+ * exactly the failure the four-channel separation exists to prevent. Every
+ * name below now resolves through `DS_STATUS`, so the queue chip, the Status
+ * Bar pill, the rail and the catalog cannot disagree about what a status is.
  */
 
-export type ProposedStatus =
-  | "queued"
-  | "running"
-  | "waiting"
-  | "parked"
-  | "verifiedDone"
-  | "doneWarnings"
-  | "failed"
-  | "cancelled";
+export type ProposedStatus = DsStatus;
 
 interface ProposedStatusSpec {
   label: string;
-  badge: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
+  /**
+   * The icon's class when it is rendered ALONE on a panel surface (a row's
+   * leading glyph), spin included. Not the in-chip tone — see `soloTone`.
+   */
   iconClass: string;
   /** what this status means for the operator — shown in the gallery */
   meaning: string;
 }
 
-export const PROPOSED_STATUS: Record<ProposedStatus, ProposedStatusSpec> = {
-  queued: {
-    label: "Queued",
-    badge: "bg-warning/12 text-warning border border-warning/30",
-    icon: Clock,
-    iconClass: "text-warning",
-    meaning: "Accepted, nothing has run. Can be bumped or cancelled.",
-  },
-  running: {
-    label: "Running",
-    badge: "bg-primary/15 text-primary border border-primary/30",
-    icon: Loader2,
-    iconClass: "text-primary animate-spin motion-reduce:animate-none",
-    meaning: "A worker owns it right now. Only cancel is offered.",
-  },
-  waiting: {
-    label: "Waiting on you",
-    badge: "bg-warning/12 text-warning border border-warning/40",
-    icon: UserRoundSearch,
-    iconClass: "text-warning",
-    meaning: "Stopped at a gate for a decision. Nothing is written until you answer.",
-  },
-  parked: {
-    label: "Write parked",
-    badge: "bg-log-violet/12 text-log-violet border border-log-violet/35",
-    icon: PauseCircle,
-    iconClass: "text-log-violet",
-    meaning: "A write may or may not have landed. Never auto-retried — you resolve present or absent.",
-  },
-  verifiedDone: {
-    label: "Verified done",
-    badge: "bg-success/12 text-success border border-success/30",
-    icon: CheckCircle2,
-    iconClass: "text-success",
-    meaning: "Finished AND read back from the system. The receipt carries the proof.",
-  },
-  doneWarnings: {
-    label: "Done with warnings",
-    badge: "bg-warning/12 text-warning border border-warning/40",
-    icon: CheckCircle2,
-    iconClass: "text-warning",
-    meaning: "Finished, but something needs your eyes — a fallback, a gap, a rejected page.",
-  },
-  failed: {
-    label: "Failed",
-    badge: "bg-destructive/12 text-destructive border border-destructive/30",
-    icon: AlertTriangle,
-    iconClass: "text-destructive",
-    meaning: "Stopped on an error. Retry replays the same input.",
-  },
-  cancelled: {
-    label: "Cancelled",
-    badge: "bg-warning/12 text-warning border border-warning/40",
-    icon: Ban,
-    iconClass: "text-warning",
-    meaning: "You stopped it. Amber, not red — a deliberate act is not a failure.",
-  },
-};
+export const PROPOSED_STATUS: Record<ProposedStatus, ProposedStatusSpec> = Object.fromEntries(
+  (Object.keys(DS_STATUS) as ProposedStatus[]).map((status) => {
+    const spec = DS_STATUS[status];
+    return [
+      status,
+      {
+        label: spec.label,
+        icon: spec.icon,
+        iconClass: cn(spec.soloTone, spec.spin && "animate-spin motion-reduce:animate-none"),
+        meaning: spec.meaning,
+      },
+    ];
+  }),
+) as Record<ProposedStatus, ProposedStatusSpec>;
 
 /**
  * A collapsed row must say how OLD the decision is, not just that there is one.
@@ -99,15 +57,25 @@ export const PROPOSED_STATUS: Record<ProposedStatus, ProposedStatusSpec> = {
  * difference between a queue you scan and a queue you triage.
  */
 export function statusText(status: ProposedStatus, age?: string): string {
-  const base = PROPOSED_STATUS[status].label;
-  return age ? `${base} · ${age}` : base;
+  return dsStatusText(status, age);
 }
 
-export function StatusBadge({ status, label, age }: { status: ProposedStatus; label?: string; age?: string }) {
-  const spec = PROPOSED_STATUS[status];
-  return (
-    <span className={cn("shrink-0 rounded-md px-2 py-0.5 font-sans text-[10px] font-medium tracking-wide", spec.badge)}>
-      {label ?? statusText(status, age)}
-    </span>
-  );
+/**
+ * The row-level status chip. A thin wrapper over the one ratified `StatusPill`
+ * so a status can never be rendered two ways: `hideIcon` is for the places that
+ * already lead with this exact glyph, and `label` is only ever "Rejected" — a
+ * record that never became work and therefore has no status of its own.
+ */
+export function StatusBadge({
+  status,
+  label,
+  age,
+  hideIcon,
+}: {
+  status: ProposedStatus;
+  label?: string;
+  age?: string;
+  hideIcon?: boolean;
+}) {
+  return <StatusPill status={status} label={label} age={age} size="sm" hideIcon={hideIcon} />;
 }

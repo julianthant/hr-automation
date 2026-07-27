@@ -4,19 +4,15 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
-  Ban,
   Camera,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   ClipboardList,
-  Clock,
   CornerDownRight,
   Eye,
   FileText,
   GitBranch,
-  Loader2,
-  PauseCircle,
   RotateCcw,
   Search,
   SearchX,
@@ -175,26 +171,34 @@ function MicroSteps({ row }: { row: DemoRow }) {
   );
 }
 
-const MEMBER_STATUS_ICON: Record<ProposedStatus, { icon: typeof CheckCircle2; cls: string }> = {
-  verifiedDone: { icon: CheckCircle2, cls: "text-success" },
-  doneWarnings: { icon: CheckCircle2, cls: "text-warning" },
-  running: { icon: Loader2, cls: "text-primary animate-spin motion-reduce:animate-none" },
-  queued: { icon: Clock, cls: "text-warning" },
-  failed: { icon: AlertTriangle, cls: "text-destructive" },
-  waiting: { icon: Eye, cls: "text-warning" },
-  parked: { icon: PauseCircle, cls: "text-log-violet" },
-  cancelled: { icon: Ban, cls: "text-warning" },
-};
+/**
+ * A member line's leading glyph. Derived from the ONE status table, never a
+ * second opinion about which icon or hue a status wears — that private copy is
+ * how Queued and Cancelled came to be amber here while the design system called
+ * them slate and neutral.
+ */
+const MEMBER_STATUS_ICON: Record<ProposedStatus, { icon: typeof CheckCircle2; cls: string }> = Object.fromEntries(
+  (Object.keys(PROPOSED_STATUS) as ProposedStatus[]).map((s) => [
+    s,
+    { icon: PROPOSED_STATUS[s].icon, cls: PROPOSED_STATUS[s].iconClass },
+  ]),
+) as Record<ProposedStatus, { icon: typeof CheckCircle2; cls: string }>;
 
+/**
+ * A 41+ matrix cell. Same hues as everywhere else (the status's own `dot`
+ * fill), with the emphasis TIER carried as opacity so the two loud statuses
+ * stay the brightest cells in the grid and the finished ones recede. Each cell
+ * also names its status in `title`/`aria-label`, so colour is not alone.
+ */
 const MATRIX_CELL: Record<ProposedStatus, string> = {
-  verifiedDone: "bg-success/75",
-  doneWarnings: "bg-warning/80",
-  running: "bg-primary/80 animate-pulse motion-reduce:animate-none",
-  queued: "bg-secondary",
-  failed: "bg-destructive",
-  waiting: "bg-warning",
-  parked: "bg-log-violet",
-  cancelled: "bg-warning/60",
+  verifiedDone: "bg-[var(--ds-status-verified-done-fg)] opacity-55",
+  doneWarnings: "bg-[var(--ds-status-done-warnings-fg)] opacity-80",
+  running: "bg-[var(--ds-status-running-fg)] opacity-90",
+  queued: "bg-[var(--ds-status-queued-fg)] opacity-55",
+  failed: "bg-[var(--ds-status-failed-fg)]",
+  waiting: "bg-[var(--ds-status-waiting-fg)]",
+  parked: "bg-[var(--ds-status-parked-fg)] opacity-90",
+  cancelled: "bg-[var(--ds-status-cancelled-fg)] opacity-55",
 };
 
 function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): ReactNode {
@@ -287,8 +291,10 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): 
       )}
       {status === "running" && row.rowType !== "group" && <MicroSteps row={row} />}
       {/* A collapsed row says how OLD the decision is, not only that there is
-          one. Age is the whole triage signal. */}
-      <StatusBadge status={status} age={gateAge(row, tick)} />
+          one. Age is the whole triage signal. The icon is dropped here alone:
+          the row already opens with this exact glyph beside the title, and one
+          status wearing its icon twice on one line is noise, not a channel. */}
+      <StatusBadge status={status} age={gateAge(row, tick)} hideIcon />
     </>
   );
 }
