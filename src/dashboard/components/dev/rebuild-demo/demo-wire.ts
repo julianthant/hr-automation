@@ -183,7 +183,15 @@ export const DEMO_WORKFLOW_LIST: DemoWorkflowRef[] = Object.values(DEMO_WORKFLOW
 // Detail routing — capability-driven tabs
 // ---------------------------------------------------------------------------
 
-export type DemoTab = "logs" | "data" | "review" | "receipt" | "people";
+/**
+ * `data` is NOT a tab. The merged Data surface (D19c) lives in the run's
+ * CONTEXT RAIL, beside the log stream rather than instead of it — the operator
+ * has to watch the stream and read what the run touched at the same time, and
+ * two mutually-exclusive tabs made that impossible. The surface itself is
+ * unchanged: reads are still editable (through `Edit & re-run`), writes are
+ * still shown and never editable, staged is still staged.
+ */
+export type DemoTab = "logs" | "review" | "receipt" | "people";
 
 export type PanelKind = "run" | "review" | "group" | "member";
 
@@ -198,14 +206,15 @@ export function panelKindOf(row: Pick<DemoRow, "rowType" | "records">): PanelKin
  * Tabs are a CAPABILITY of the panel kind, not a fixed five.
  *  - Review exists only on the row that owns records.
  *  - People exists only on a Group Row.
- *  - Screenshots is not a tab at all — evidence rides a bar above the tabs (D19).
- *  - Data and Edit Data are ONE surface (D19).
+ *  - Screenshots is not a tab at all — evidence is a rail SECTION (D19b).
+ *  - Data and Edit Data are ONE surface (D19c) — and that one surface is the
+ *    rail's, not a tab's, so it can be read WHILE the stream runs.
  */
 export function tabsFor(row: Pick<DemoRow, "rowType" | "records">): DemoTab[] {
   const kind = panelKindOf(row);
-  if (kind === "review") return ["review", "logs", "data", "receipt"];
-  if (kind === "group") return ["people", "logs", "data", "receipt"];
-  return ["logs", "data", "receipt"];
+  if (kind === "review") return ["review", "logs", "receipt"];
+  if (kind === "group") return ["people", "logs", "receipt"];
+  return ["logs", "receipt"];
 }
 
 // ---------------------------------------------------------------------------
