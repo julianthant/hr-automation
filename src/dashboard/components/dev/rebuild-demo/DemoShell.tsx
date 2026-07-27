@@ -8,8 +8,10 @@ import {
   ChevronUp,
   CircleHelp,
   Eye,
+  FlaskConical,
   Gauge,
   Hourglass,
+  ListChecks,
   LayoutDashboard,
   Minus,
   PanelLeft,
@@ -22,11 +24,27 @@ import {
   Moon,
   Settings,
   ShieldCheck,
+  Stethoscope,
   Sun,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { effectiveStatus, fmtElapsed, type DemoRow } from "./demo-data";
-import { buildWorkflowCategoryGroups, DEMO_WORKFLOW_LIST, DEMO_WORKFLOWS, type DemoWorkflowCategory } from "./demo-wire";
+import {
+  agoSeconds,
+  buildWorkflowCategoryGroups,
+  DEMO_WORKFLOW_LIST,
+  DEMO_WORKFLOWS,
+  fmtClockSec,
+  type DemoWorkflowCategory,
+} from "./demo-wire";
+import {
+  DEMO_PREFLIGHT,
+  PREFLIGHT_ADVISORY_NOTE,
+  preflightVerdict,
+  runPreflight,
+  type PreflightVerdict,
+  type StorageMode,
+} from "./demo-settings-wire";
 import { DEMO_DAY, topLevelRowsForDay } from "./demo-days";
 import {
   DemoDateNav,
@@ -45,6 +63,9 @@ import {
   DEMO_THEME_LABEL,
   DS_STATUS,
   IconButton,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   type DemoTheme,
   dsBorder,
   dsElev,
@@ -196,21 +217,198 @@ export function countRows(rows: DemoRow[]): Record<StatusBucket, number> {
 // ---------------------------------------------------------------------------
 
 /**
- * The demo's top-level views. The first three are the switcher in the Top Bar
- * (the app, the specimen catalog, the kit); the rest are FULL-PAGE TAKEOVERS
- * reached from the gear — Settings, and the three pages Settings launches into.
- * A seven-entry segmented control in a 44px bar would be unreadable, and these
- * four are not places the operator toggles between while triaging.
+ * The demo's top-level views.
+ *
+ * The switcher used to hold `Dashboard · Row & panel catalog · Design system` —
+ * one product page and two pieces of demo scaffolding — while the Archive, the
+ * Explorer and the activity report were launched from a "Full-page views" group
+ * inside **Settings**. That put three destinations behind a gear, which is how
+ * Settings ended up being where you go to archive production runs.
+ *
+ * They are separated now: the switcher is the PRODUCT's page switcher, and the
+ * demo's own surfaces (the catalog, the design-system kit, and the storage
+ * fixture switch) live behind the "rebuild demo" badge that already declares
+ * this is synthetic. `settings` stays a takeover behind the gear, because it is
+ * a place you go and come back from rather than one you toggle between.
  */
 export type DemoShellView = "queue" | "catalog" | "kit" | "settings" | "archive" | "explorer" | "report";
 
-const SWITCHER_VIEWS = ["queue", "catalog", "kit"] as const;
+const SWITCHER_VIEWS = ["queue", "archive", "explorer", "report"] as const;
 
 const SHELL_VIEW_LABEL: Record<(typeof SWITCHER_VIEWS)[number], string> = {
   queue: "Dashboard",
-  catalog: "Row & panel catalog",
-  kit: "Design system",
+  archive: "Archive",
+  explorer: "Explorer",
+  report: "Activity",
 };
+
+const DEMO_SURFACES: { key: DemoShellView; label: string; note: string }[] = [
+  { key: "catalog", label: "Row & panel catalog", note: "every row variant and panel kind, named" },
+  { key: "kit", label: "Design system", note: "every primitive in every state" },
+];
+
+/**
+ * The doctor, as a standing indicator rather than a Settings section.
+ *
+ * It was a read-only panel plus a "Run doctor again" button with no `onClick`,
+ * filed under a page of preferences — so the one thing it is for (knowing what
+ * will fail BEFORE you spend a Duo prompt finding out) was three clicks away
+ * from where a run is started. Here it is always on screen, it carries its own
+ * verdict, and re-running it is a real command with a real answer.
+ */
+function DemoDoctorPopover({ tick }: { tick: number }) {
+  const [checks, setChecks] = useState(DEMO_PREFLIGHT);
+  const verdict = preflightVerdict(checks);
+  const failing = checks.filter((c) => c.verdict === "fail").length;
+  const warning = checks.filter((c) => c.verdict === "warning").length;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <IconButton
+          size="sm"
+          label={
+            verdict === "pass"
+              ? "Preflight — every check passes"
+              : `Preflight — ${failing} failing, ${warning} warning`
+          }
+          icon={<Stethoscope aria-hidden className={dsIcon.md} />}
+          className={cn(
+            verdict === "fail" && "text-[color:var(--ds-danger)]",
+            verdict === "warning" && "text-[color:var(--ds-status-waiting-fg)]",
+          )}
+        />
+      </PopoverTrigger>
+      <PopoverContent title="Preflight" description={PREFLIGHT_ADVISORY_NOTE} width="lg" side="bottom" align="end">
+        <div className="flex flex-col gap-[var(--ds-space-base)]">
+          {checks.map((check) => (
+            <div key={check.id} className="flex min-w-0 flex-col gap-[var(--ds-space-hair)]">
+              <div className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
+                <Badge tone={PREFLIGHT_TONE[check.verdict]}>{check.verdict}</Badge>
+                <span className={cn(dsText.ui, "min-w-0 truncate font-medium text-[color:var(--ds-fg)]")}>{check.label}</span>
+                <span className={cn(dsText.micro, dsText.nums, "ml-auto shrink-0 text-[color:var(--ds-fg-faint)]")}>
+                  {check.checkedAt}
+                </span>
+              </div>
+              <span className={cn(dsText.body, "text-[color:var(--ds-fg-muted)]")}>{check.detail}</span>
+              {check.blocks.length > 0 && (
+                <span className={cn(dsText.meta, "text-[color:var(--ds-status-waiting-fg)]")}>
+                  Blocks: {check.blocks.join(" · ")}
+                </span>
+              )}
+              {check.remediation && (
+                <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>Fix: {check.remediation}</span>
+              )}
+            </div>
+          ))}
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<ListChecks aria-hidden className={dsIcon.md} />}
+            onClick={() => setChecks(runPreflight(fmtClockSec(agoSeconds(-tick))))}
+          >
+            Run doctor again
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+const PREFLIGHT_TONE: Record<PreflightVerdict, "success" | "warning" | "danger"> = {
+  pass: "success",
+  warning: "warning",
+  fail: "danger",
+};
+
+/**
+ * The demo's own scaffolding, behind the badge that already says this is
+ * synthetic. The storage fixture switch was shipped in the Settings page footer
+ * labelled "Demo control", where it sat one keystroke from real settings — a
+ * demo switch inside a product surface is a demo switch somebody will one day
+ * mistake for a product one.
+ */
+function DemoSurfacesPopover({
+  view,
+  onView,
+  storage,
+  onStorage,
+}: {
+  view: DemoShellView;
+  onView: (v: DemoShellView) => void;
+  storage: StorageMode;
+  onStorage: (mode: StorageMode) => void;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "inline-flex shrink-0 cursor-pointer items-center gap-[var(--ds-space-tight)] border px-[var(--ds-space-base)]",
+            "h-[var(--ds-h-sm)] border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)]",
+            dsRadius.pill,
+            dsText.caps,
+            dsFocus,
+            dsMotion.fast,
+            "text-[color:var(--ds-info-fg)]",
+          )}
+        >
+          <FlaskConical aria-hidden className={dsIcon.sm} />
+          rebuild demo · synthetic data
+        </button>
+      </PopoverTrigger>
+      <PopoverContent title="Demo surfaces" width="md" side="bottom" align="start">
+        <div className="flex flex-col gap-[var(--ds-space-base)]">
+          <div className="flex flex-col gap-[var(--ds-space-hair)]">
+            {DEMO_SURFACES.map((surface) => (
+              <button
+                key={surface.key}
+                type="button"
+                aria-current={view === surface.key ? "page" : undefined}
+                onClick={() => onView(surface.key)}
+                className={cn(
+                  "flex min-w-0 flex-col rounded-[var(--ds-radius-md)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)] text-left",
+                  dsFocus,
+                  dsMotion.fast,
+                  view === surface.key
+                    ? "bg-[var(--ds-surface-selected)] text-[color:var(--ds-fg)]"
+                    : "text-[color:var(--ds-fg-secondary)] hover:bg-[var(--ds-surface-3)]",
+                )}
+              >
+                <span className={cn(dsText.ui, "font-medium")}>{surface.label}</span>
+                <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>{surface.note}</span>
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-col gap-[var(--ds-space-snug)] border-t border-[color:var(--ds-border-subtle)] pt-[var(--ds-space-base)]">
+            <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+              Which storage snapshot the mock server returns.
+            </span>
+            <span className="flex items-center gap-[var(--ds-space-tight)]">
+              <Button
+                size="sm"
+                variant={storage === "read-write" ? "primary" : "outline"}
+                aria-pressed={storage === "read-write"}
+                onClick={() => onStorage("read-write")}
+              >
+                Healthy
+              </Button>
+              <Button
+                size="sm"
+                variant={storage === "read-only-degraded" ? "danger" : "outline"}
+                aria-pressed={storage === "read-only-degraded"}
+                onClick={() => onStorage("read-only-degraded")}
+              >
+                Degraded
+              </Button>
+            </span>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export function DemoTopBar({
   view,
@@ -221,6 +419,8 @@ export function DemoTopBar({
   tick,
   theme,
   onToggleTheme,
+  storage,
+  onStorage,
 }: {
   view: DemoShellView;
   onView: (v: DemoShellView) => void;
@@ -233,6 +433,9 @@ export function DemoTopBar({
   /** the demo's theme pair — see `ds/theme.ts` */
   theme: DemoTheme;
   onToggleTheme: () => void;
+  /** the demo's own fixture switch, behind the demo badge — never a product control */
+  storage: StorageMode;
+  onStorage: (mode: StorageMode) => void;
 }) {
   return (
     <header
@@ -259,10 +462,10 @@ export function DemoTopBar({
       </div>
       {/* A standing environment marker, not news. It has to be unmissable when
           you look at it and invisible when you are not — the loud tier belongs
-          to `Waiting on you` and `Failed`, and nothing else may take it. */}
-      <Badge tone="infoOutline" className={cn(dsRadius.pill, dsText.caps, "shrink-0")}>
-        rebuild demo · synthetic data
-      </Badge>
+          to `Waiting on you` and `Failed`, and nothing else may take it. It is
+          also the door to the demo's own scaffolding, so nothing that only
+          exists because this is a demo sits inside a product surface. */}
+      <DemoSurfacesPopover view={view} onView={onView} storage={storage} onStorage={onStorage} />
 
       <div
         className={cn(
@@ -302,6 +505,9 @@ export function DemoTopBar({
       <DemoDateNav day={day} onDay={onDay} />
 
       <span className="flex shrink-0 items-center gap-[var(--ds-space-hair)]">
+        {/* Preflight, on screen at all times rather than three clicks inside a
+            page of preferences. Its glyph carries the worst verdict. */}
+        <DemoDoctorPopover tick={tick} />
         <DemoNotificationBell onNavigate={onNavigate} tick={tick} />
         {/* The keyboard legend lives HERE now, behind the control that used to
             do nothing — it was a permanent 36px strip across the top of the
@@ -322,9 +528,8 @@ export function DemoTopBar({
             )
           }
         />
-        {/* The gear opens the real Settings surface (provenance, System URLs,
-            budgets, doctor, storage health, version registry) and is the door
-            to the Archive / Explorer / Activity report takeovers. */}
+        {/* The gear opens Settings — eight editable leaves and the read-only
+            Status group. It is no longer a door to anywhere else. */}
         <IconButton
           size="sm"
           label="Settings"
