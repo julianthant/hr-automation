@@ -1404,9 +1404,6 @@ function ExtractedPeoplePreview({ row, onOpenPanel }: { row: DemoRow; onOpenPane
           <Users aria-hidden className="size-3 text-muted-foreground" />
           {records.length} people extracted
         </span>
-        <span className="text-muted-foreground">
-          Member rows do not exist yet — approving is what creates them, one run per approved person.
-        </span>
         {reviewRow && (
           <button
             type="button"
@@ -2218,7 +2215,11 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
           );
         })}
         <span className={cn(dsText.caps, "ml-auto min-w-0 truncate pl-[var(--ds-space-base)] text-[color:var(--ds-fg-faint)]")}>
-          {tab && available.includes(tab) ? panel.name : `${panel.name} · state default`}
+          {/* The panel's NAME, and nothing else. It used to append
+              `· state default` when the operator had not picked a tab, which
+              is the UI narrating its own tab-selection rule to the person
+              standing in it — a fact about the product, not about this run. */}
+          {panel.name}
         </span>
       </div>
 

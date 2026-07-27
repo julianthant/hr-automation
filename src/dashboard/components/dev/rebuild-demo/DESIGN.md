@@ -23,6 +23,53 @@ Consequences of that one line, in order of authority:
    its own `start` capability. A surface that branches on a workflow id to
    decide what to draw is a surface that cannot serve the next workflow — and a
    workflow that declares nothing of a kind draws nothing of it.
+6. **A professional dashboard does not explain itself.** Explanatory prose is a
+   defect unless it lives inside an **ⓘ**. See the next section — it is binding.
+
+---
+
+## The product does not explain itself
+
+> **A professional dashboard does not explain itself. Explanatory prose is a
+> defect unless it lives inside an ⓘ.**
+
+The operator, verbatim: *"i feel like the dashboard right now is bloated with
+extra information like explanations and descriptions that we dont need… explaining
+what a button do with a description or things like that will bloat the frontend."*
+
+**A sentence on a surface must be a fact about the RUN in front of you.** A
+sentence that would be equally true of every run in the product is a rule of the
+product, and a rule of the product is not information — it is teaching, and it
+costs the same pixels every time it is drawn whether or not anyone needed it.
+
+Deleted on sight, wherever they appear:
+
+- a description under or beside a control saying what pressing it does
+  (`member rows appear when you approve`, `Save records these values as a
+  correction`) — the control's own label says it, and its `title` carries the
+  descriptor's `detail`;
+- a caption beside an icon that repeats the icon (`✕ Cancel group`);
+- the UI describing its own mechanics to the operator standing in it
+  (`13+ members · opened in place`, `a panel that vanishes when idle is a panel
+  you stop trusting`);
+- the product asserting its own correctness (`badges and pills all go through one
+  counting path — they cannot disagree`). If it is true, hold it with a test; if
+  it is not, the sentence is a lie in the UI.
+
+**Where it goes instead: the ⓘ.** The `Popover` behind an `IconButton size="xs"`
+(wave 4, on every queue row) is the sanctioned home for anything the demo needs
+to teach — reachable by pointer, touch and keyboard, quiet at rest, and costing
+the surface nothing until it is asked for. Put the rule there, in full.
+
+**Two exemptions, and only two.** Neither is explanation:
+
+- a **`Refusal`** — it must say what was *not* done and why, or the operator
+  cannot act on it;
+- a genuine **hazard** about this run — a stale checkpoint, a staged write, an
+  unresolved park. These are outcomes, not teaching.
+
+An **empty state** still owes three things and no more: what would be here, why
+it is not, and what to do. It does not owe a defence of the design.
 
 ---
 
@@ -222,6 +269,8 @@ the component; do not re-draw the pattern.
 | **A group heading** | `SectionLabel` | Never hand-roll `cn(dsText.caps, dsFg.muted)`. |
 | **A card's bottom edge** — what must land on ONE line across a row of cards | `CardBody grow` + `CardBase` | Sibling cards in a grid stretch to the tallest, so a card whose description wraps one line further pushes its trailing control a line below its neighbour's. `CardBody grow` makes the body claim the row's slack; `CardBase` (`mt-auto`) is what actually sits on the bottom edge. Never fix this with a fixed `mt-*` on the trailing element — that is the bug, not the fix. The slack lands ABOVE the base and is left empty on purpose: a card with less to say has less to say. |
 | **A sub-selection** — a choice that shapes a run before it starts | `StartChoiceControl` | Rendered from what the workflow's descriptor DECLARES (`DemoWorkflowRef.start`), never from what a component knows about that workflow. A choice the target fixes is a `LockedValue` with its reason, not a one-option select. An option that exists in the target system but is not wired is offered **disabled with its reason** — hiding it teaches the operator the product has never heard of it. A workflow that declares none shows none: no empty scaffolding. |
+| **A wrapping row of peer facts** | `ChipRow` | Chips are of wildly unequal width, so a `flex-wrap` row ends each line wherever its last chip stopped and orphans one on line two — four facts then read as three-plus-one. `ChipRow` lays them on a `--ds-w-chip-cell` track, so every line ends on the SAME edge and the wrap reads as a second row of a table. A row mixing a chip with a sentence or a button is not this. |
+| **An object's own commands** | `ContextMenu` | Right-click the object; never a `⋯`, which is a control whose only job is to admit there are more controls and which costs a slot on every row. The items come from the object's served `actions[]` at the `menu` placement, so a command the surface did not send is unreachable rather than hidden. **Keyboard parity is not optional**: the platform's Menu / Shift+F10 key opens it (the browser dispatches `contextmenu` on the focused element), and a shell binds one shortcut through `openContextMenuFor()` — in this demo that is `m`, registered in `DEMO_SHORTCUTS`. |
 | **A recorded value** — something the run OBSERVED | `ValueField` / `LockedValue` | A value the operator may correct is drawn as a **field at rest** (control border, inset surface, pencil) — never a bare `<input>` with a transparent border, which is invisible until hovered or already edited. One the operator may **not** correct is flat text with a lock and no box: the pair is told apart by SHAPE, not by a badge and never by colour. Do not make everything look like a field to be consistent — "you may change this" against "you may not" is load-bearing. Dirty is a fill and a border, never ink, and is always paired with a word. |
 
 A dialog's quiet left-hand note goes in `DialogFooter`'s `meta` slot, not a
@@ -278,6 +327,21 @@ Two things this rule does **not** license:
   element held down by a fixed `mt-*` will sit a line low the moment a sibling
   wraps.
 - Rows are `--ds-h-row` (32px). Do not invent a row height.
+- **A queue row's rhythm is ONE grid and ONE gap.** Its body is
+  `grid-cols-[var(--ds-w-row-indent)_minmax(0,1fr)]` with a single `gap-y`: the
+  status tick sits in the leading track and every line under the title hangs off
+  the same edge because the edge is a column, not an `ml-5` retyped on each of
+  the six things that can appear there. Never add a `mt-*` to space one of them.
+- **A row footer's facts WRAP; they never truncate.** `time · #run · trace ·
+  timing` is a wrapping provenance line with the controls as a sibling pinned
+  top-right — so a run with a queue note takes a second line instead of cutting
+  its trace id to `1…`. A row with little to say stays one line high.
+- **Toolbars group by what a control DOES**, and the groups are separated by a
+  hairline, not by uniform gaps: where you are and what you start, then what you
+  are looking at, then how you are looking at it (right-aligned). A MODE (bulk
+  select) earns its own band while it is on rather than six more controls in the
+  bar. A filter at zero keeps its slot and its click target and gives up its
+  border, its fill and its label — an empty bucket must not look like a full one.
 - Truncate with `truncate` + `min-w-0` on the flex child; never wrap a person's
   name onto two lines in a dense list.
 - Empty is a **state**: say what would be here, why it is not, and what to do —
@@ -365,6 +429,12 @@ This demo is asserted through the accessibility tree, so a missing label is a
 - ❌ Fork a primitive to add a variant. Add the variant to the primitive.
 - ❌ Introduce a new font, a brand colour, an illustration, or an emoji as an
   icon. Icons are lucide, and only lucide.
+- ❌ Print a sentence that explains a control, restates a rule of the product, or
+  defends the design. It goes in the ⓘ or it goes.
+- ❌ Caption an icon with the word the icon already means.
+- ❌ Hang a `⋯` off a row. The object's commands go on the object, by
+  right-click, with a keyboard route registered in `DEMO_SHORTCUTS`.
+- ❌ Wrap a set of peer chips on a bare `flex-wrap`. Use `ChipRow`.
 
 ---
 
@@ -377,9 +447,9 @@ This demo is asserted through the accessibility tree, so a missing label is a
 | `ds/theme.ts` | `useDemoTheme()` — the dark/light pair and where it is stamped |
 | `ds/primitives-core.tsx` | Button, IconButton, Badge, CountBadge, Chip, Kbd, Spinner, Skeleton, Separator |
 | `ds/primitives-status.tsx` | the eight statuses + StatusPill / StatusDot / StatusIcon |
-| `ds/primitives-layout.tsx` | Panel, Card, **CardBody `grow`**, **CardBase**, Banner, **Refusal**, **MetaLine**, **BulletList**, EmptyState, Tabs, Well, FloatingSurface |
+| `ds/primitives-layout.tsx` | Panel, Card, **CardBody `grow`**, **CardBase**, Banner, **Refusal**, **MetaLine**, **BulletList**, **ChipRow**, EmptyState, Tabs, Well, FloatingSurface |
 | `ds/primitives-form.tsx` | Field, Input, Textarea, Select, Checkbox, RadioGroup, Switch, SearchInput, **ValueField**, **LockedValue** |
-| `ds/primitives-overlay.tsx` | Dialog, Drawer, **Popover**, Tooltip, Toast |
+| `ds/primitives-overlay.tsx` | Dialog, Drawer, **Popover**, **ContextMenu** (+ `openContextMenuFor`), Tooltip, Toast |
 | `ds/primitives-data.tsx` | Table, ProgressBar, TimelineSteps, KeyValueList |
 | `demo-ui.tsx` | **the barrel — import from here** |
 | `DemoUiKit.tsx` | the specimen page: every primitive, every state |
