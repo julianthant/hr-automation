@@ -15,8 +15,10 @@ import {
   Pause,
   Plus,
   RotateCw,
+  Moon,
   Settings,
   ShieldCheck,
+  Sun,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { effectiveStatus, fmtElapsed, type DemoRow } from "./demo-data";
@@ -27,8 +29,10 @@ import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
 import {
   Badge,
   Button,
+  DEMO_THEME_LABEL,
   DS_STATUS,
   IconButton,
+  type DemoTheme,
   dsBorder,
   dsElev,
   dsFocus,
@@ -146,6 +150,8 @@ export function DemoTopBar({
   onDay,
   onNavigate,
   tick,
+  theme,
+  onToggleTheme,
 }: {
   view: DemoShellView;
   onView: (v: DemoShellView) => void;
@@ -155,6 +161,9 @@ export function DemoTopBar({
   /** jump to a row from search or a notification link — panel + row + its day */
   onNavigate: DemoNavigateTo;
   tick: number;
+  /** the demo's theme pair — see `ds/theme.ts` */
+  theme: DemoTheme;
+  onToggleTheme: () => void;
 }) {
   return (
     <header
@@ -171,7 +180,7 @@ export function DemoTopBar({
           aria-hidden
           className={cn("flex items-center justify-center", dsRadius.md, "size-[var(--ds-h-sm)] bg-[var(--ds-accent-quiet)]")}
         >
-          <ShieldCheck className={cn(dsIcon.md, "text-[color:var(--ds-accent)]")} />
+          <ShieldCheck className={cn(dsIcon.md, "text-[color:var(--ds-accent-mark)]")} />
         </span>
         <span className={cn(dsText.ui, "font-semibold text-[color:var(--ds-fg)]")}>HR Automation</span>
       </span>
@@ -222,6 +231,21 @@ export function DemoTopBar({
       <span className="flex shrink-0 items-center gap-[var(--ds-space-hair)]">
         <DemoNotificationBell onNavigate={onNavigate} tick={tick} />
         <IconButton size="sm" label="Shortcuts" onClick={NOOP} icon={<HelpCircle aria-hidden className={dsIcon.md} />} />
+        {/* The theme pair. One control, and its LABEL names the destination
+            ("Switch to Paper Ink"), because a lone sun/moon glyph never says
+            which of the two states it is reporting. */}
+        <IconButton
+          size="sm"
+          label={`Switch to ${DEMO_THEME_LABEL[theme === "dark" ? "light" : "dark"]}`}
+          onClick={onToggleTheme}
+          icon={
+            theme === "dark" ? (
+              <Sun aria-hidden className={dsIcon.md} />
+            ) : (
+              <Moon aria-hidden className={dsIcon.md} />
+            )
+          }
+        />
         {/* The gear opens the real Settings surface (provenance, System URLs,
             budgets, doctor, storage health, version registry) and is the door
             to the Archive / Explorer / Activity report takeovers. */}

@@ -42,24 +42,40 @@ import {
 export type { SystemKey } from "./demo-wire";
 export { fmtElapsed } from "./demo-wire";
 
+/**
+ * A system chip is NEUTRAL, in every system.
+ *
+ * Seven systems used to be painted with four categorical hues, on top of the
+ * four status hues already in play — and the chip says the system's NAME, so
+ * the colour was carrying nothing the label did not. One treatment, and the
+ * live palette gets four hues back.
+ */
+export const SYSTEM_CHIP = "bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-secondary)]";
+
 export const SYSTEM_ACCENT: Record<SystemKey, string> = {
-  kuali: "bg-log-violet/15 text-log-violet",
-  ucpath: "bg-log-cyan/15 text-log-cyan",
-  kronos: "bg-log-teal/15 text-log-teal",
-  crm: "bg-log-slate/15 text-log-slate",
-  servicenow: "bg-log-violet/15 text-log-violet",
-  onbase: "bg-log-teal/15 text-log-teal",
-  i9: "bg-log-cyan/15 text-log-cyan",
+  kuali: SYSTEM_CHIP,
+  ucpath: SYSTEM_CHIP,
+  kronos: SYSTEM_CHIP,
+  crm: SYSTEM_CHIP,
+  servicenow: SYSTEM_CHIP,
+  onbase: SYSTEM_CHIP,
+  i9: SYSTEM_CHIP,
 };
 
+/**
+ * The waterfall is the one place a per-system difference has to survive
+ * WITHOUT a label — two touching segments must be tellable apart. So this is a
+ * neutral ink RAMP, not a set of hues: adjacent systems get different weights,
+ * which reads at 4px and costs the palette nothing.
+ */
 export const WATERFALL_ACCENT: Record<SystemKey, string> = {
-  kuali: "bg-log-violet/70",
-  ucpath: "bg-log-cyan/70",
-  kronos: "bg-log-teal/70",
-  crm: "bg-log-slate/70",
-  servicenow: "bg-log-violet/50",
-  onbase: "bg-log-teal/50",
-  i9: "bg-log-cyan/50",
+  kuali: "bg-foreground/70",
+  ucpath: "bg-foreground/45",
+  kronos: "bg-foreground/28",
+  crm: "bg-foreground/58",
+  servicenow: "bg-foreground/36",
+  onbase: "bg-foreground/64",
+  i9: "bg-foreground/22",
 };
 
 export type StepState = "done" | "current" | "waiting" | "pending" | "failed" | "cancelled";

@@ -161,6 +161,16 @@ function SystemChip({ system }: { system: SystemKey }) {
   );
 }
 
+/**
+ * The log stream is the noisiest surface in the product, so it is the one that
+ * had to give colour back. `--log-*` are no longer four CATEGORICAL hues — each
+ * now resolves to a step on a neutral ink ramp (see `ds/tokens.css`), except
+ * `--log-violet`, which resolves to the warning amber because "unconfirmed
+ * write" was never a category in the first place. Direction is carried by the
+ * arrow icon and by weight: a WRITE (`log-teal` → the base foreground) is the
+ * load-bearing one, a READ (`log-cyan`) sits a step back, and navigation
+ * (`log-slate`) is quieter still. Do not re-introduce a hue here.
+ */
 const LINE_ICON: Record<LineKind, { icon: typeof Check; cls: string }> = {
   nav: { icon: ArrowRight, cls: "text-log-slate" },
   search: { icon: Search, cls: "text-log-slate" },
@@ -170,7 +180,7 @@ const LINE_ICON: Record<LineKind, { icon: typeof Check; cls: string }> = {
   error: { icon: X, cls: "text-destructive" },
   warn: { icon: TriangleAlert, cls: "text-warning" },
   pause: { icon: Pause, cls: "text-warning" },
-  event: { icon: Zap, cls: "text-log-violet" },
+  event: { icon: Zap, cls: "text-[color:var(--ds-fg-muted)]" },
 };
 
 const MEMBER_ROW_ICON: Record<ProposedStatus, { icon: typeof Check; cls: string }> = {
@@ -1047,10 +1057,16 @@ const RECORD_STATE: Record<DemoRecord["state"], { label: string; cls: string }> 
   blocked: { label: "Blocked", cls: "border-destructive/45 bg-destructive/12 text-destructive" },
 };
 
+/**
+ * Provenance is NEUTRAL. Three sources used to be three hues, in a panel that
+ * already spends its colour on status — and the chip spells the source out, so
+ * the hue was decoration. They stay apart by weight: paper is what a human
+ * wrote, so it reads strongest; a system read is quieter.
+ */
 const SOURCE_CHIP: Record<DemoRecordField["source"], { label: string; cls: string }> = {
-  paper: { label: "paper", cls: "border-log-violet/35 text-log-violet" },
-  roster: { label: "roster", cls: "border-log-teal/35 text-log-teal" },
-  ucpath: { label: "UCPath", cls: "border-log-cyan/35 text-log-cyan" },
+  paper: { label: "paper", cls: "border-[color:var(--ds-border-loud)] text-[color:var(--ds-fg)]" },
+  roster: { label: "roster", cls: "border-[color:var(--ds-border)] text-[color:var(--ds-fg-secondary)]" },
+  ucpath: { label: "UCPath", cls: "border-[color:var(--ds-border)] text-[color:var(--ds-fg-muted)]" },
 };
 
 const CHECK_ICON: Record<DemoRecordCheck["state"], { icon: typeof Check; cls: string }> = {

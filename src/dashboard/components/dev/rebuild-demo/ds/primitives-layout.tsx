@@ -168,7 +168,7 @@ export function Card({
         dsMotion.base,
         "border-[color:var(--ds-border)]",
         tone === "attention" &&
-          "border-l-[length:var(--ds-border-w-rail)] border-l-[color:var(--ds-status-waiting-fg)]",
+          "border-l-[length:var(--ds-border-w-rail)] border-l-[color:var(--ds-status-waiting-mark)]",
         tone === "danger" &&
           "border-l-[length:var(--ds-border-w-rail)] border-l-[color:var(--ds-status-failed-fg)]",
         interactive && cn("cursor-pointer hover:border-[color:var(--ds-border-strong)] hover:bg-[var(--ds-surface-2)]"),

@@ -38,7 +38,7 @@ import {
 // Row lookups go through the ALL-DAYS map: a row selected from a prior day must
 // open exactly like a row from today.
 import { ALL_DEMO_ROWS as DEMO_ROWS, DEMO_DAY } from "./demo-days";
-import { Kbd, ToastProvider, dsBorder, dsIcon, dsSize, dsText } from "./demo-ui";
+import { Kbd, ToastProvider, dsBorder, dsIcon, dsSize, dsText, useDemoTheme } from "./demo-ui";
 import { cn } from "@/lib/utils";
 import {
   ATTENTION_STATUSES,
@@ -66,6 +66,9 @@ import {
  */
 
 export function RebuildDemo() {
+  // Graphite Warm / Paper Ink — one product, two compositions. Owned here
+  // because the attribute belongs on the demo's root, not on a leaf.
+  const { theme, toggleTheme } = useDemoTheme();
   const [selectedId, setSelectedId] = useState("oath-summer");
   const [shellView, setShellView] = useState<DemoShellView>("queue");
   const [activeWorkflow, setActiveWorkflow] = useState(ALL_WORKFLOWS);
@@ -365,8 +368,20 @@ export function RebuildDemo() {
 
   return (
     <ToastProvider>
-    <div className="flex h-screen flex-col bg-background text-foreground">
-      <DemoTopBar view={shellView} onView={setShellView} day={day} onDay={changeDay} onNavigate={navigateTo} tick={tick} />
+    {/* The theme attribute rides the demo's own root so the DOM says which of
+        the pair is showing; `useDemoTheme` has already stamped <html> and
+        <body> for the portalled overlays (see `ds/theme.ts`). */}
+    <div data-demo-theme={theme} className="flex h-screen flex-col bg-background text-foreground">
+      <DemoTopBar
+        view={shellView}
+        onView={setShellView}
+        day={day}
+        onDay={changeDay}
+        onNavigate={navigateTo}
+        tick={tick}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+      />
 
       {/* A degraded dashboard says so on every view, not only on the page that
           explains it — the operator has to know before they click, not after. */}
