@@ -40,6 +40,7 @@ import { toolbarControl } from "./DemoBulkBar";
 import {
   Badge,
   Button,
+  ChipRow,
   CountBadge,
   DEMO_THEME_LABEL,
   DS_STATUS,
@@ -118,6 +119,54 @@ export function rowInBucket(row: DemoRow, bucket: StatusBucket): boolean {
   const s = effectiveStatus(row);
   if (bucket === "needsYou") return s === "waiting" || s === "parked";
   return s === bucket;
+}
+
+/**
+ * Every workflow's counts, off the SAME path, in one pass.
+ *
+ * This exists because of a real disagreement the operator caught: the collapsed
+ * launcher read `👁 6` while the rail's own badges summed to 4. Neither number
+ * was stale — they were counting different things. The launcher counted the
+ * day's `Needs you` (waiting + parked) across every panel, which is 6; the rail
+ * was showing each workflow's QUEUED count in an unlabelled numeric chip, which
+ * is 4. Two quantities, two badges, no nouns on either, and nothing on screen
+ * that added up to anything.
+ *
+ * The fix is structural rather than cosmetic: there is now ONE derivation of
+ * per-workflow attention, the rail badge and the launcher both read it, and the
+ * launcher is scoped to the panels the rail is not showing you — so the two
+ * numbers beside each other are disjoint and additive by construction, not by
+ * a comment asking you to trust them. Pinned by
+ * `tests/unit/dashboard/rebuild-demo-attention-counts.test.ts`.
+ */
+export function countRowsByWorkflow(rows: DemoRow[]): Map<string, Record<StatusBucket, number>> {
+  const out = new Map<string, Record<StatusBucket, number>>();
+  for (const row of rows) {
+    let counts = out.get(row.wfLabel);
+    if (!counts) {
+      counts = countRows([]);
+      out.set(row.wfLabel, counts);
+    }
+    const s = effectiveStatus(row);
+    counts.all += 1;
+    counts[s] += 1;
+    if (s === "waiting" || s === "parked") counts.needsYou += 1;
+  }
+  return out;
+}
+
+/**
+ * The day's `Needs you` in every panel EXCEPT the one on screen.
+ *
+ * The launcher sits inches from the Status Bar's `Needs you N`, wearing the
+ * same eye. Read as the same quantity, a global 6 beside a scoped 1 is a
+ * contradiction; scoped to ELSEWHERE, the pair reads `1 here, 5 elsewhere` and
+ * sums to the 6 the day actually holds. It stays a cross-panel signal — which
+ * is the whole point of a control that survives the panel being minimised — and
+ * stops being a second opinion about the panel you are already looking at.
+ */
+export function needsYouElsewhere(rows: DemoRow[], activeWorkflow: string): number {
+  return countRows(rows).needsYou - (countRowsByWorkflow(rows).get(activeWorkflow)?.needsYou ?? 0);
 }
 
 export function countRows(rows: DemoRow[]): Record<StatusBucket, number> {
@@ -449,29 +498,23 @@ function WorkflowPanelControls({ mode, onMode }: PanelModeProps) {
 /**
  * The launcher, and the one control present in all three modes.
  *
- * It carries TWO facts, and the whole design problem is that they are about
- * different things:
+ * WHAT WENT WRONG, because it was a counting bug and not a labelling one. This
+ * control rendered the day's `Needs you` across EVERY panel — 6 — while the
+ * rail beside it showed each workflow's QUEUED count in an unlabelled numeric
+ * chip, and those summed to 4. The operator read the chips as attention badges,
+ * added them up, and correctly reported that the shell disagreed with itself.
+ * Wave 9 had already relabelled the launcher's number and it did not help,
+ * because relabelling one of two incompatible quantities does not make them
+ * compatible.
  *
- *  - the current workflow's 2-char code — the same code that prefixes every one
- *    of its trace ids — so the control is never an anonymous glyph;
- *  - the day's whole `Needs you` count across EVERY panel, because the number
- *    you must not be able to miss is the one in a panel you are not looking at.
+ * Both ends are fixed, at the counting layer. The rail's badge IS attention now
+ * (`countRowsByWorkflow`), so the numbers are the same KIND of thing; and this
+ * one is scoped to the panels the rail is NOT showing you, so the launcher plus
+ * the Status Bar's `Needs you` for the current panel is the whole day, with no
+ * overlap. `1 here, 5 elsewhere` cannot be misread as `1 here, 6 here`.
  *
- * It used to render them as `on 6`, and the operator asked what the 6 was for —
- * which is the bug report. Read as one fact, `on 6` says "Onboarding has 6",
- * and Onboarding does not have 6; `os`, `ic` and `oc` all read 6 beside panels
- * holding 8, 1 and 4. Worse, it quietly broke the invariant the rest of the
- * shell holds to: rail badges, the Status Bar and the queue header all go
- * through `countRows` and always agree, and this was a different quantity
- * wearing the same clothes.
- *
- * The fix is not to delete the number and it is not to quietly make it
- * per-workflow — with the panel collapsed there are no per-workflow badges on
- * screen, so a global attention signal is the entire point of the control.
- * It is to make it read as ATTENTION, EVERYWHERE: a rule separates the two
- * facts, and the count wears the `Needs you` composite's own `Eye` — the same
- * glyph as the Status Bar pill, which is on screen at all times, so the
- * association is available rather than remembered.
+ * It still carries the workflow's 2-char code — the prefix of every one of its
+ * trace ids — so the control is never an anonymous glyph.
  */
 export function DemoWorkflowPanelToggle({
   mode,
@@ -483,7 +526,7 @@ export function DemoWorkflowPanelToggle({
   /** the day's corpus — every panel's rows, not the active panel's */
   rows: DemoRow[];
 }) {
-  const needsYou = useMemo(() => countRows(rows).needsYou, [rows]);
+  const elsewhere = useMemo(() => needsYouElsewhere(rows, active), [rows, active]);
   const showing = mode !== "icon";
   const code = WORKFLOW_CODE[active] ?? "";
   return (
@@ -495,10 +538,8 @@ export function DemoWorkflowPanelToggle({
       // The count goes in the LABEL, not only in the badge: an `aria-label`
       // replaces a button's contents outright, so the badge's own number was
       // being announced to nobody — the one number this control exists for.
-      // It also names WHAT it counts, for the same reason the rule and the eye
-      // exist visually: "6" beside "on" is not a fact anybody can act on.
-      aria-label={`Workflow Panel — ${active}${showing ? `, ${WORKFLOW_PANEL_MODE_LABEL[mode]}` : ", minimised"}. Needs you across every panel: ${needsYou}`}
-      title={`Workflow Panel — ${active} (${code})\nNeeds you: ${needsYou} row${needsYou === 1 ? "" : "s"} across EVERY panel, not just this one\nw cycles floating · icon · sidebar`}
+      aria-label={`Workflow Panel — ${active}${showing ? `, ${WORKFLOW_PANEL_MODE_LABEL[mode]}` : ", minimised"}. Needs you in other panels: ${elsewhere}`}
+      title={`Workflow Panel — ${active} (${code})\n${elsewhere} row${elsewhere === 1 ? "" : "s"} need you in OTHER panels · this panel's own count is the Needs you pill\nw cycles floating · icon · sidebar`}
       onClick={() => onMode(showing ? "icon" : "floating")}
       className={cn(
         toolbarControl(),
@@ -513,31 +554,26 @@ export function DemoWorkflowPanelToggle({
         <PanelLeftOpen aria-hidden className={dsIcon.sm} />
       )}
       <span className={dsText.nums}>{code}</span>
-      {/* The rule is what stops `on 6` reading as one fact. Left of it is the
-          panel you are in; right of it is a count that belongs to no single
-          workflow. Same job as the hairline the Status Bar puts between its two
-          composite pills and the eight statuses — it separates two KINDS of
-          thing, not two things of one kind — but a step louder, because that
-          one sits on the page and this one sits on the control's OWN surface,
-          where `--ds-border` against a white card is not a line anybody sees. */}
+      {/* The rule separates the panel you are IN from a count that belongs to
+          the panels you are not. It sits on the control's OWN surface, where
+          `--ds-border` against a white card is not a line anybody sees. */}
       <span aria-hidden className={cn("mx-[var(--ds-space-hair)] h-4 w-px shrink-0", "bg-[var(--ds-border-loud)]")} />
-      {/* The `Needs you` composite's own glyph. Colour is never the only
-          encoding, and here it is not even the first one: the icon says which
-          quantity this is, the tone says whether it is a demand. */}
       <Eye
         aria-hidden
         className={cn(
           dsIcon.sm,
           "shrink-0",
-          needsYou > 0 ? "text-[color:var(--ds-status-waiting-fg)]" : "text-[color:var(--ds-fg-faint)]",
+          elsewhere > 0 ? "text-[color:var(--ds-status-waiting-fg)]" : "text-[color:var(--ds-fg-faint)]",
         )}
       />
-      {/* The loudest badge in the system, and the one place it is right: a
-          `Waiting on you` count must survive the panel being closed. It DIMS at
-          zero rather than vanishing — a badge that disappears reflows the whole
-          action bar under it every time the count crosses zero — and its tone
-          steps down to neutral there, because a zero is not a demand. */}
-      <CountBadge value={needsYou} tone={needsYou > 0 ? "attention" : "neutral"} zeroStyle="dim" />
+      {/* It DIMS at zero rather than vanishing — a badge that disappears
+          reflows the whole bar under it every time the count crosses zero — and
+          its tone steps down to neutral there, because a zero is not a demand. */}
+      <CountBadge value={elsewhere} tone={elsewhere > 0 ? "attention" : "neutral"} zeroStyle="dim" />
+      {/* The one word that makes this number a different quantity from the pill
+          two controls away. It is SCOPE, not an explanation: without it the two
+          eyes read as one count rendered twice. */}
+      <span className={cn(dsText.micro, "shrink-0 text-[color:var(--ds-fg-muted)]")}>elsewhere</span>
     </button>
   );
 }
@@ -552,21 +588,12 @@ function WorkflowEntryList({
   /** the day's corpus — the SAME array the Status Bar and the queue read */
   rows: DemoRow[];
 }) {
-  // Same counting path as the Status Bar and the queue, over the same rows.
-  // Not a second tally, and not a second corpus.
-  const counts = useMemo(() => {
-    const map = new Map<string, { total: number; queued: number }>();
-    for (const g of RAIL_GROUPS) {
-      for (const e of g.entries) {
-        const c = countRows(rowsForWorkflow(rows, e.label));
-        map.set(e.label, { total: c.all, queued: c.queued });
-      }
-    }
-    return map;
-  }, [rows]);
+  // Same counting path as the Status Bar, the launcher and the queue, over the
+  // same rows. Not a second tally, and not a second corpus.
+  const counts = useMemo(() => countRowsByWorkflow(rows), [rows]);
 
   /** Every rail entry is the same object; the label IS what it filters by. */
-  const entry = (label: string, total: number, queued: number, on: boolean, note?: string) => (
+  const entry = (label: string, total: number, needsYou: number, on: boolean, note?: string) => (
     <button
       type="button"
       aria-current={on ? "page" : undefined}
@@ -604,27 +631,31 @@ function WorkflowEntryList({
         </span>
       </span>
       <span className="flex shrink-0 items-center gap-[var(--ds-space-tight)]">
-        {/* Queued wears its own hue here too — outline slate, never amber.
-            Nothing has happened to these rows yet; they are not a warning. */}
-        {queued > 0 && (
+        {/* THE ATTENTION BADGE. It used to be a QUEUED count here — an
+            unlabelled number in an outline chip, which the operator reasonably
+            read as "this workflow needs you N times" and summed against the
+            launcher's global 6. Two different quantities in two anonymous
+            numeric badges is the whole bug; there is one quantity now, it wears
+            the `Needs you` composite's own eye, and the launcher aggregates
+            exactly this number over the panels the rail is not showing. Queued
+            is still one press away, on the Status Bar pill that filters to it. */}
+        {needsYou > 0 && (
           <span
-            title={`${queued} queued`}
+            title={`${needsYou} waiting on you or write parked in ${label}`}
             className={cn(
-              "inline-flex items-center border px-[var(--ds-space-tight)]",
+              "inline-flex items-center gap-[var(--ds-space-hair)] border px-[var(--ds-space-tight)]",
               "h-[var(--ds-h-xs)]",
               dsRadius.sm,
               dsText.micro,
-              dsText.nums,
-              "border-[color:var(--ds-status-queued-border)] text-[color:var(--ds-status-queued-fg)]",
+              "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
             )}
           >
-            {queued}
+            <Eye aria-hidden className="size-2.5 shrink-0" />
+            <span className={dsText.nums}>{needsYou}</span>
           </span>
         )}
         {/* A count that hits zero DIMS, it does not disappear — the eye must
-            not have to re-scan the rail to find out a panel is idle. It names
-            itself on hover for the same reason the launcher's count now does:
-            a bare number beside another bare number is two facts and no nouns. */}
+            not have to re-scan the rail to find out a panel is idle. */}
         <span
           title={`${total} row${total === 1 ? "" : "s"} in ${label}`}
           className={cn(
@@ -658,20 +689,18 @@ function WorkflowEntryList({
               const c = counts.get(e.label);
               // Rows are deliberately icon-free — the workflow icons live on
               // Session Cards and the add-worker picker, not here.
-              return <li key={e.label}>{entry(e.label, c?.total ?? 0, c?.queued ?? 0, active === e.label, e.note)}</li>;
+              return <li key={e.label}>{entry(e.label, c?.all ?? 0, c?.needsYou ?? 0, active === e.label, e.note)}</li>;
             })}
           </ul>
         </div>
       ))}
-
-      <p
-        className={cn(
-          dsText.micro,
-          "mt-auto px-[var(--ds-space-loose)] pt-[var(--ds-space-cozy)] leading-relaxed text-[color:var(--ds-fg-muted)]",
-        )}
-      >
-        Badges, Status Bar pills and the queue all go through one counting path — they cannot disagree.
-      </p>
+      {/* The standing note that used to close this list ("Badges, Status Bar
+          pills and the queue all go through one counting path — they cannot
+          disagree") is gone. It was the product asserting its own correctness
+          to the operator, in a panel with no room to spare — and the operator
+          had just caught two of those numbers disagreeing, which is precisely
+          what a claim like that costs when it is only a sentence. The invariant
+          is now held by `countRowsByWorkflow` and a unit test. */}
     </div>
   );
 }
@@ -859,7 +888,29 @@ const STATUS_PILL_ORDER: ProposedStatus[] = [
  */
 const statusPillTone = (s: ProposedStatus): string => DS_STATUS[s].soloTone;
 
-export function DemoStatusBar({
+/**
+ * The queue's status filters — one GROUP inside the composed action bar, not a
+ * band of its own.
+ *
+ * WHAT WAS WRONG WITH IT, in the operator's words: *"just sloppy work rn"*.
+ * Ten pills at identical visual weight, five of them zero, so `Cancelled 0` had
+ * the same border, fill and footprint as `Failed 1`; and `All` and `Needs you`
+ * — which are COMPOSITES over the other eight — sat in the same row in the same
+ * shape as primitives like `Queued`, so the bar read as ten peers when it holds
+ * two of one kind and eight of another.
+ *
+ * Two changes, both structural:
+ *
+ *  - **The composites are a segmented control.** One bordered container with
+ *    two segments, exactly like the Top Bar's view switcher. A different SHAPE
+ *    for a different kind of thing beats a hairline asking the eye to infer it.
+ *  - **A zero genuinely recedes** — it drops its border, its fill AND its
+ *    label, down to an icon and a `0` at `--ds-fg-faint`. It is still there, it
+ *    is still clickable, it still carries its full name to a screen reader, and
+ *    it stops spending the width of a word on a status that is not happening.
+ *    (`Done with warnings` is 130px of bar at rest; at zero it is 34px.)
+ */
+export function DemoStatusFilters({
   counts,
   active,
   onSelect,
@@ -868,16 +919,9 @@ export function DemoStatusBar({
   active: StatusBucket;
   onSelect: (b: StatusBucket) => void;
 }) {
-  const pill = (
-    key: StatusBucket,
-    label: string,
-    Icon: ComponentType<SVGProps<SVGSVGElement>>,
-    tone: string,
-    title?: string,
-    spin?: boolean,
-  ) => {
+  /** the two composites — one control, two segments */
+  const scope = (key: StatusBucket, label: string, Icon: ComponentType<SVGProps<SVGSVGElement>>, tone: string, title: string) => {
     const on = active === key;
-    const n = counts[key];
     return (
       <button
         key={key}
@@ -886,63 +930,97 @@ export function DemoStatusBar({
         title={title}
         onClick={() => onSelect(on ? "all" : key)}
         className={cn(
+          "inline-flex shrink-0 cursor-pointer items-center",
+          "h-[var(--ds-h-sm)] gap-[var(--ds-space-tight)] px-[var(--ds-space-base)]",
+          dsRadius.sm,
+          dsText.meta,
+          dsFocus,
+          dsMotion.fast,
+          on
+            ? "bg-[var(--ds-surface-3)] font-semibold text-[color:var(--ds-fg)]"
+            : "font-medium text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
+        )}
+      >
+        <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0", tone)} />
+        {label}
+        <span className={dsText.nums}>{counts[key]}</span>
+      </button>
+    );
+  };
+
+  /** one of the eight — a primitive status, and a chip rather than a segment */
+  const statusPill = (s: ProposedStatus) => {
+    const on = active === s;
+    const n = counts[s];
+    const empty = n === 0 && !on;
+    const spec = PROPOSED_STATUS[s];
+    const Icon = spec.icon;
+    return (
+      <button
+        key={s}
+        type="button"
+        aria-pressed={on}
+        aria-label={`${spec.label} — ${n}`}
+        title={spec.meaning}
+        onClick={() => onSelect(on ? "all" : s)}
+        className={cn(
           "inline-flex shrink-0 cursor-pointer items-center border",
-          "h-[var(--ds-h-sm)] gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
+          "h-[var(--ds-h-sm)] gap-[var(--ds-space-snug)]",
+          empty ? "border-transparent px-[var(--ds-space-tight)]" : "px-[var(--ds-space-base)]",
           dsRadius.md,
           dsText.meta,
           dsFocus,
           dsMotion.fast,
           on
             ? cn(dsBorder.loud, "bg-[var(--ds-surface-selected)] font-semibold text-[color:var(--ds-fg)]")
-            : cn(dsBorder.base, dsSurface.card, "text-[color:var(--ds-fg-muted)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]"),
-          // A zero DIMS, it never disappears: a status you cannot see is a
-          // status you cannot rule out.
-          n === 0 && !on && "opacity-45",
+            : empty
+              ? "text-[color:var(--ds-fg-faint)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg-muted)]"
+              : cn(dsBorder.base, dsSurface.card, "text-[color:var(--ds-fg-muted)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]"),
         )}
       >
-        <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0", tone, spin && n > 0 && "animate-spin motion-reduce:animate-none")} />
-        {label}
+        <Icon
+          aria-hidden
+          className={cn(
+            dsIcon.sm,
+            "shrink-0",
+            empty ? "text-[color:var(--ds-fg-faint)]" : statusPillTone(s),
+            s === "running" && n > 0 && "animate-spin motion-reduce:animate-none",
+          )}
+        />
+        {/* A status that is not happening spends an icon and a digit, not a
+            word. The word is still its accessible name. */}
+        {!empty && spec.label}
         <span className={dsText.nums}>{n}</span>
       </button>
     );
   };
 
   return (
-    // The pills never collapse into an overflow menu — a status you cannot
-    // click is a status you cannot triage — so at a narrow window the row
-    // scrolls. The right edge fades into the page so a clipped pill reads as
-    // "there is more", not as a pill that happens to end there. Over empty
-    // space the fade is the page colour and therefore invisible.
-    <div className="relative shrink-0">
+    // A status is never hidden behind an overflow menu — one you cannot click
+    // is one you cannot triage — so at a narrow window the group scrolls.
+    <div
+      role="group"
+      aria-label="Filter the queue by status"
+      className="flex min-w-0 items-center gap-[var(--ds-space-tight)] overflow-x-auto"
+    >
       <div
-        role="group"
-        aria-label="Status Bar"
         className={cn(
-          "flex items-center overflow-x-auto border-b",
-          dsSize.hBar,
-          dsBorder.subtle,
-          "gap-[var(--ds-space-tight)] px-[var(--ds-space-base)]",
+          "inline-flex shrink-0 border p-[var(--ds-space-hair)]",
+          dsRadius.md,
+          dsBorder.base,
+          "bg-[var(--ds-surface-2)]",
         )}
       >
-        {pill("all", "All", LayoutDashboard, "text-[color:var(--ds-fg-muted)]", "Every row in this view")}
-        {pill(
+        {scope("all", "All", LayoutDashboard, "text-[color:var(--ds-fg-muted)]", "Every row in this view")}
+        {scope(
           "needsYou",
           "Needs you",
           Eye,
           "text-[color:var(--ds-status-waiting-fg)]",
           "Waiting on you + Write parked — the two states that are stuck on a decision from you",
         )}
-        {/* The two composites, then the eight. The rule is on the left of the
-            statuses because it separates two KINDS of pill, not two statuses. */}
-        <span aria-hidden className={cn("mx-[var(--ds-space-hair)] h-4 w-px shrink-0", "bg-[var(--ds-border)]")} />
-        {STATUS_PILL_ORDER.map((s) =>
-          pill(s, PROPOSED_STATUS[s].label, PROPOSED_STATUS[s].icon, statusPillTone(s), PROPOSED_STATUS[s].meaning, s === "running"),
-        )}
       </div>
-      <span
-        aria-hidden
-        className="pointer-events-none absolute inset-y-0 right-0 w-[var(--ds-space-section)] bg-gradient-to-l from-[var(--ds-surface-page)] to-transparent"
-      />
+      {STATUS_PILL_ORDER.map(statusPill)}
     </div>
   );
 }
@@ -1337,7 +1415,7 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
           without opening anything. A slot at its cap is amber — that is the
           number that explains a stalled queue. */}
       {(s.lanes || s.budgets) && (
-        <div className="flex flex-wrap items-center gap-[var(--ds-space-tight)]">
+        <ChipRow cell="var(--ds-w-capacity-cell)">
           {s.lanes && (
             <span title={`${s.lanes.inUse} of ${s.lanes.cap} lanes in use — a lane is one item in flight`} className={capacityChip(atCap(s.lanes))}>
               <Gauge aria-hidden className="size-2.5 shrink-0" />
@@ -1359,7 +1437,7 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
               </span>
             </span>
           ))}
-        </div>
+        </ChipRow>
       )}
 
       {/* WHY nothing is progressing. Named lease, named holder, ticking age —
