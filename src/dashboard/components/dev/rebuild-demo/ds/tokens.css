@@ -253,6 +253,12 @@
   --ds-h-bar: 36px; /* status bar, panel toolbar */
   --ds-h-topbar: 44px; /* the app top bar */
   --ds-w-rail: 200px; /* the workflow rail */
+  /* The run's CONTEXT RAIL — the third column of the detail region, where the
+     Data ledger, the evidence and the run's provenance live so the log stream
+     keeps its height. `spine` is the collapsed width: a label and a chevron,
+     never zero, so the operator can always see where it went. */
+  --ds-w-context-rail: 348px;
+  --ds-w-context-spine: 34px;
   /* Popover widths. A popover explains ONE thing; if it needs to be wider than
      `lg` it is a Dialog or a panel section, not a popover. */
   --ds-w-popover-sm: 240px;
