@@ -18,6 +18,11 @@ Consequences of that one line, in order of authority:
 4. **Parity is ratified.** The rebuilt dashboard must still read as the same
    product to the operator who uses it daily (`docs/rebuild/reviews/second-look-2026-07-22.md`
    §6.6). Raise quality *within* the existing language; never introduce a new one.
+5. **A surface renders what the descriptor SERVES.** Grouping comes from a
+   workflow's own `category`; what a start accepts, offers and flags comes from
+   its own `start` capability. A surface that branches on a workflow id to
+   decide what to draw is a surface that cannot serve the next workflow — and a
+   workflow that declares nothing of a kind draws nothing of it.
 
 ---
 
@@ -152,6 +157,10 @@ cozy/loose. Between page sections: section/page.
   `4 260ms` drawer. Easings `--ds-ease-out / -in / -standard`.
 - Layering (`dsLayer`): `sticky z-10 · menu z-20 · drawer z-30 · modal z-40 ·
   toast z-50`. Arbitrary z-index is banned by the architecture guard.
+  **A `Popover` cannot be opened from inside a `Dialog`** — it portals at
+  `menu` (z-20) and the dialog is z-40, so it opens *behind* it: the
+  accessibility tree says it opened and the screen says nothing happened.
+  Anything disclosed from inside a dialog is disclosed **inside** the dialog.
 
 ---
 
@@ -212,6 +221,7 @@ the component; do not re-draw the pattern.
 | **A provenance line** — where this came from | `MetaLine` | ids, codes, clocks, actors, hashes — `dsText.meta` + `dsText.nums`, segments joined with ` · `, empty segments dropped. **Never `font-mono`**: that loses the tabular figures that stop a clock from jittering. |
 | **A group heading** | `SectionLabel` | Never hand-roll `cn(dsText.caps, dsFg.muted)`. |
 | **A card's bottom edge** — what must land on ONE line across a row of cards | `CardBody grow` + `CardBase` | Sibling cards in a grid stretch to the tallest, so a card whose description wraps one line further pushes its trailing control a line below its neighbour's. `CardBody grow` makes the body claim the row's slack; `CardBase` (`mt-auto`) is what actually sits on the bottom edge. Never fix this with a fixed `mt-*` on the trailing element — that is the bug, not the fix. The slack lands ABOVE the base and is left empty on purpose: a card with less to say has less to say. |
+| **A sub-selection** — a choice that shapes a run before it starts | `StartChoiceControl` | Rendered from what the workflow's descriptor DECLARES (`DemoWorkflowRef.start`), never from what a component knows about that workflow. A choice the target fixes is a `LockedValue` with its reason, not a one-option select. An option that exists in the target system but is not wired is offered **disabled with its reason** — hiding it teaches the operator the product has never heard of it. A workflow that declares none shows none: no empty scaffolding. |
 | **A recorded value** — something the run OBSERVED | `ValueField` / `LockedValue` | A value the operator may correct is drawn as a **field at rest** (control border, inset surface, pencil) — never a bare `<input>` with a transparent border, which is invisible until hovered or already edited. One the operator may **not** correct is flat text with a lock and no box: the pair is told apart by SHAPE, not by a badge and never by colour. Do not make everything look like a field to be consistent — "you may change this" against "you may not" is load-bearing. Dirty is a fill and a border, never ink, and is always paired with a word. |
 
 A dialog's quiet left-hand note goes in `DialogFooter`'s `meta` slot, not a
