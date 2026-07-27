@@ -18,6 +18,7 @@ import {
   BulletList,
   Button,
   Card,
+  CardBase,
   CardBody,
   CardFooter,
   CardHeader,
@@ -546,6 +547,39 @@ function ContainersSection() {
               ]}
             />
           </Well>
+        </div>
+      </div>
+
+      {/* CardBody grow + CardBase — the sibling-alignment pair.
+          The three descriptions are deliberately one, two and three lines long:
+          without `grow` on the body nothing claims the row's slack, and without
+          `CardBase` the button hangs off the end of each card's own text, so
+          the middle card's control sits a line below its neighbours'. */}
+      <div className="flex flex-col gap-[var(--ds-space-snug)]">
+        <SectionLabel>CardBase — a trailing control on the row&apos;s bottom edge, not on its own card&apos;s</SectionLabel>
+        <div className="grid grid-cols-3 gap-[var(--ds-space-cozy)]">
+          {[
+            { name: "Marisol Alvarez", sub: "On the input record", detail: "Read off the separation document." },
+            {
+              name: "Marisol Alvarez-Ruiz",
+              sub: "Name match (proposed)",
+              detail: "Resolved in UCPath on last name plus department, which is a different person than the document names.",
+            },
+            { name: "Typed by you", sub: "Manual entry", detail: "Not on any page." },
+          ].map((c) => (
+            <Card key={c.sub}>
+              <CardBody grow className="flex flex-col gap-[var(--ds-space-hair)]">
+                <SectionLabel>{c.sub}</SectionLabel>
+                <span className={cn(dsText.ui, "font-semibold text-[color:var(--ds-fg)]")}>{c.name}</span>
+                <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>{c.detail}</span>
+                <CardBase className="pt-[var(--ds-space-tight)]">
+                  <Button size="sm" variant="outline" icon={<Camera aria-hidden className={dsIcon.sm} />}>
+                    See this candidate
+                  </Button>
+                </CardBase>
+              </CardBody>
+            </Card>
+          ))}
         </div>
       </div>
 

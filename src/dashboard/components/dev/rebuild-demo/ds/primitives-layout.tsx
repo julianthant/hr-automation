@@ -191,8 +191,66 @@ export function CardHeader({ className, children }: { className?: string; childr
   );
 }
 
-export function CardBody({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cn("px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]", className)}>{children}</div>;
+/**
+ * A card's content.
+ *
+ * `grow` is what makes a card in a GRID behave. Sibling cards in a grid row all
+ * stretch to the tallest one, but a body that does not claim the slack leaves
+ * it below itself — so the card's border sits at the row's height while its
+ * content stops wherever it happened to end, and `CardFooter` / `CardBase`
+ * cannot pin to the bottom because there is nothing pushing them there.
+ *
+ * It sets `flex-grow`, never `flex-1`: the body absorbs the extra space without
+ * having its basis reset, so nothing inside is squeezed to make it fit.
+ *
+ * Pass it whenever the card is one of several in a row. It costs nothing on a
+ * card that stands alone.
+ */
+export function CardBody({
+  grow,
+  className,
+  children,
+}: {
+  /** claim the card's leftover height — required for anything to sit on the bottom edge */
+  grow?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={cn("px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]", grow && "grow", className)}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The card's BASE — whatever must sit on the bottom edge of the row rather than
+ * at the end of this card's own content.
+ *
+ * The defect it exists to kill: a card is a flex column that stretches to its
+ * grid row's height, its trailing element is separated by a fixed `mt-*`, and
+ * so a card whose description wraps to two lines pushes its button a line lower
+ * than the sibling beside it. Every such card was fixing it locally, or not at
+ * all — `DemoShell`'s Session Cards got it right inline and nothing else could
+ * reuse that.
+ *
+ * ```tsx
+ * <Card>
+ *   <CardBody grow className="flex flex-col gap-[var(--ds-space-snug)]">
+ *     <p>…description of any length…</p>
+ *     <CardBase><Button>See this candidate</Button></CardBase>
+ *   </CardBody>
+ * </Card>
+ * ```
+ *
+ * **It must sit inside a flex column** (a `CardBody`/card that is
+ * `flex flex-col`) — `mt-auto` is a flexbox mechanism and does nothing in a
+ * block container. The slack lands ABOVE it, and is left empty on purpose: a
+ * card with less to say genuinely has less to say, and padding it out dresses
+ * it up as fuller than it is.
+ */
+export function CardBase({ className, children }: { className?: string; children: ReactNode }) {
+  return <div className={cn("mt-auto flex min-w-0 flex-col", className)}>{children}</div>;
 }
 
 export function CardFooter({ className, children }: { className?: string; children: ReactNode }) {

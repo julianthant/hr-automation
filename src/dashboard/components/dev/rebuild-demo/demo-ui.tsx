@@ -85,6 +85,13 @@ export {
   Card,
   CardHeader,
   CardBody,
+  /**
+   * The bottom edge of a card. Reach for it whenever cards sit side by side and
+   * something trailing — a button, a caveat, a pair of compared facts — has to
+   * land on ONE line across the row instead of wherever each card's own content
+   * happened to stop. Needs `<CardBody grow>` (or a flex-column card) above it.
+   */
+  CardBase,
   CardFooter,
   SectionLabel,
   PageHeader,
