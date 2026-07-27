@@ -36,7 +36,7 @@
 import type { ProposedStatus } from "./demo-status";
 import type { DemoCommandResultState } from "./demo-commands";
 import type { DemoRow } from "./demo-data";
-import { effectiveStatus } from "./demo-data";
+import { effectiveStatus, isTerminal } from "./demo-data";
 import { DEMO_DAYS, topLevelRowsForDay } from "./demo-days";
 import type { DemoCapture } from "./demo-evidence-wire";
 import {
@@ -54,11 +54,11 @@ import {
 // Terminality — the whole safety carve-out turns on this one predicate
 // ---------------------------------------------------------------------------
 
-export const TERMINAL_STATUSES: ProposedStatus[] = ["verifiedDone", "doneWarnings", "failed", "cancelled"];
-
-export function isTerminal(status: ProposedStatus): boolean {
-  return TERMINAL_STATUSES.includes(status);
-}
+// Terminality lives in `demo-data.ts` — the lowest layer that knows what a
+// status is — and is re-exported here because the archive is where it is
+// load-bearing (a bump may not archive a non-terminal run). One definition, so
+// the bump's refusal and the queue's own settlement can never disagree.
+export { TERMINAL_STATUSES, isTerminal } from "./demo-data";
 
 /**
  * What a non-terminal run has to become before a MAJOR bump may archive it.

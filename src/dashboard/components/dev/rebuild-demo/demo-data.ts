@@ -20,6 +20,7 @@ import {
   agoSeconds,
   at,
   DEMO_APP_VERSION,
+  demoNowMs,
   DEMO_OPERATOR,
   DEMO_WORKFLOWS,
   deriveActions,
@@ -240,6 +241,27 @@ export interface DemoRecord {
   note?: string;
   /** depth-2 delegated person lookup for this record — review row only */
   lookup?: DemoRecordLookup;
+  /**
+   * WHEN THE EXTRACTION EMITTED THIS RECORD.
+   *
+   * The count chip (`12 lookups`) only ever meant something once the whole
+   * document had been read, so a fifteen-minute extraction showed a number and
+   * nothing else until it finished. The operator: *"the 12 should also appear
+   * like [a member list] as they get read. so i can see in the queue panel as
+   * well in the ocr."*
+   *
+   * **This is a wire change, not a UI trick.** The run reports each person AS IT
+   * READS THEM — one record, one instant — instead of batching the set at
+   * completion, and the surface renders whatever has arrived. Nothing is
+   * animated and nothing is predicted: a record with no instant yet is a person
+   * the run has not read, and the row says so with a count rather than drawing
+   * a placeholder for somebody who may turn out not to be on the page.
+   *
+   * Absent means "already here" — every archived and completed run in the
+   * corpus predates the stream and arrived whole. A run that is STILL READING
+   * must stamp every record, which `rebuild-demo-record-stream.test.ts` pins.
+   */
+  readAt?: string;
 }
 
 /**
@@ -2158,6 +2180,95 @@ const ocrSpring: DemoRowSpec = {
 };
 
 // ===========================================================================
+// An OCR run MID-READ — the streaming-records fixture.
+//
+// Every other OCR row in the corpus is terminal, which is why the count chip
+// looked fine: on a finished run `12 lookups` and a list of twelve say the same
+// thing. The defect only exists while the document is being read, so the demo
+// has to hold a run that is being read.
+//
+// Each record carries its own `readAt`, staggered around the demo clock, so the
+// queue row genuinely fills in on the shell's heartbeat: at the fixed demo NOW
+// five of nine have arrived and four have not. Nothing is animated — the four
+// are simply people the extraction has not reported yet, and the row says how
+// many rather than drawing a placeholder for somebody who may not be there.
+// ===========================================================================
+
+const FALL_PEOPLE: { name: string; eid: string; readOffset: number }[] = [
+  { name: "Amara Osei", eid: "10620114", readOffset: -212 },
+  { name: "Bruno Kessler", eid: "10620558", readOffset: -168 },
+  { name: "Cheng Wei", eid: "10621007", readOffset: -121 },
+  { name: "Dalia Haddad", eid: "10621442", readOffset: -74 },
+  { name: "Ewan Doyle", eid: "10621890", readOffset: -19 },
+  // …and the four the run has not reached. Their instants are in the future of
+  // the demo clock, so they arrive as the shell ticks.
+  { name: "Farrah Nabil", eid: "10622335", readOffset: 26 },
+  { name: "Gustav Lind", eid: "10622781", readOffset: 71 },
+  { name: "Hana Ito", eid: "10623220", readOffset: 118 },
+  { name: "Idris Balogun", eid: "10623664", readOffset: 165 },
+];
+
+function fallRecord(i: number): DemoRecord {
+  const p = FALL_PEOPLE[i];
+  return {
+    id: `frec-${i}`,
+    name: p.name,
+    eid: p.eid,
+    page: i + 1,
+    pageNote: `page ${i + 1} of 9 · oath form`,
+    state: "ready",
+    readAt: agoSeconds(-p.readOffset),
+    fields: [
+      { label: "Printed name", value: p.name, source: "paper", confidence: 0.96, editable: true },
+      { label: "Employee ID", value: p.eid, source: "roster", editable: true },
+    ],
+    checks: [
+      { label: "Roster match", state: "ok", value: `matched row ${i + 1}` },
+      { label: "Employee signed", state: "ok", value: "yes — on paper" },
+    ],
+    lookup: { trace: `pl-1425${pad(10 + i, 2)}-${pad(i, 2)}f4`, status: "verifiedDone", note: `resolved ${p.eid} from the printed name` },
+  };
+}
+
+const ocrFall: DemoRowSpec = {
+  id: "ocr-fall",
+  rowType: "run",
+  subjectKind: "file",
+  workflowId: "ocr",
+  title: "Oath_Packet_Fall.pdf",
+  runId4: "7d31",
+  status: "running",
+  run: 9,
+  version: 11,
+  enqueuedAt: at("14:21:40"),
+  startedAt: at("14:21:48"),
+  liveText: "Reading forms — 5 of 9 people read",
+  evidence: { confidence: "unknown" },
+  records: Array.from({ length: FALL_PEOPLE.length }, (_, i) => fallRecord(i)),
+  outcome: { tone: "info", text: "Reading — each person appears on the row as the extraction reports them" },
+  steps: [
+    { label: "Split pages", state: "done", system: "i9", durationSec: 9, keyLines: ["9 pages · 9 carry a readable oath form"] },
+    { label: "Read forms", state: "current", system: "i9", keyLines: ["tier-1 model · 5 of 9 reported"] },
+    { label: "Roster match", state: "pending", system: "i9" },
+    { label: "Person lookup", state: "pending", system: "ucpath" },
+    { label: "Your review", state: "pending" },
+  ],
+  lines: [
+    { ts: "2:21:57", kind: "event", system: "i9", text: "Split 9 pages · 9 carry a readable oath form", step: "Split pages" },
+    { ts: fmtClockSec(agoSeconds(212)), kind: "read", system: "i9", pills: [{ dir: "read", label: "record 1", value: "Amara Osei" }], step: "Read forms" },
+    { ts: fmtClockSec(agoSeconds(74)), kind: "read", system: "i9", pills: [{ dir: "read", label: "record 4", value: "Dalia Haddad" }], step: "Read forms" },
+    { ts: fmtClockSec(agoSeconds(19)), kind: "read", system: "i9", pills: [{ dir: "read", label: "record 5", value: "Ewan Doyle" }], step: "Read forms" },
+  ],
+  data: [{ step: "Read forms", dir: "read", field: "Records reported", value: "5 of 9", system: "i9", ts: fmtClockSec(agoSeconds(19)) }],
+  receipt: {
+    tone: "muted",
+    headline: "Receipt — pending",
+    note: "The run is still reading. A receipt is written when there is an outcome to record, not before.",
+  },
+  shots: [{ label: "Page 1 · Osei", kind: "form" }],
+};
+
+// ===========================================================================
 // Oath Upload — ONE Run Row, not a group.
 //
 // The document files ONE ServiceNow ticket, so the row is the document. Its
@@ -3596,6 +3707,7 @@ const RAW_ROWS: DemoRowSpec[] = [
     spMorning,
     oathBatch,
     ocrSpring,
+    ocrFall,
     ecPacket,
     ecSingle,
     obPacket,
@@ -3683,6 +3795,63 @@ export function bandsFor(rows: DemoRow[]): { key: BandKey; label: string; rows: 
     label: BAND_LABEL[key],
     rows: rows.filter((r) => bandOf(r) === key),
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Terminality — the predicate the archive, the bump and the queue all share
+// ---------------------------------------------------------------------------
+
+export const TERMINAL_STATUSES: ProposedStatus[] = ["verifiedDone", "doneWarnings", "failed", "cancelled"];
+
+export function isTerminal(status: ProposedStatus): boolean {
+  return TERMINAL_STATUSES.includes(status);
+}
+
+// ---------------------------------------------------------------------------
+// Streaming records — a count that fills in as the document is read
+// ---------------------------------------------------------------------------
+
+export interface RecordStream {
+  /** the records the run has actually emitted, in the order it read them */
+  read: DemoRecord[];
+  /** how many the run says the document holds */
+  total: number;
+  /** true while the run is non-terminal and has records it has not emitted yet */
+  streaming: boolean;
+}
+
+/**
+ * WHAT THE RUN HAS READ SO FAR.
+ *
+ * The count chip said `12 lookups` and nothing else until the whole document
+ * was through, which on a fifteen-minute extraction is fifteen minutes of a
+ * number that could not be acted on. The operator: *"the 12 should also appear
+ * like [a member list] as they get read."*
+ *
+ * A record is on screen when its own `readAt` instant has passed — the run
+ * reports each person as it reads them, and the surface renders what has
+ * arrived. There is deliberately NO placeholder for the ones that have not:
+ * drawing a row for somebody the extraction may yet find is not on the page
+ * would be exactly the fabrication the count was hiding behind. The remainder
+ * is a number, because a number is all the run actually knows.
+ *
+ * A record with no instant is one that arrived before this view opened — every
+ * completed run in the corpus predates the stream. A run that is STILL READING
+ * must stamp every record; `rebuild-demo-record-stream.test.ts` pins that, so
+ * "unstamped" can never quietly mean "already read" on a live run.
+ */
+export function recordStream(row: DemoRow, tick = 0): RecordStream {
+  const records = row.records ?? [];
+  if (records.length === 0) return { read: [], total: 0, streaming: false };
+  // ONLY a `running` run is still reading. `Waiting on you` and `Write parked`
+  // are non-terminal too, and both of them happen AFTER the document is
+  // through — a row parked at review that renders a partial list is claiming
+  // the extraction is still going, which is the opposite lie to the one this
+  // was built to fix.
+  const reading = effectiveStatus(row) === "running";
+  const now = demoNowMs(tick);
+  const read = reading ? records.filter((r) => r.readAt === undefined || Date.parse(r.readAt) <= now) : records;
+  return { read, total: records.length, streaming: reading && read.length < records.length };
 }
 
 // ---------------------------------------------------------------------------
