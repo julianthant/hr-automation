@@ -38,6 +38,7 @@ import { panelKindOf, panelKindSpec, rowVariantSpec } from "./demo-catalog";
 import { BannerActions, OutcomeActionButton, ParkResolutions, type DemoActionHandler } from "./DemoActions";
 import { ContextRail, ContextRailSpine, useContextRail } from "./DemoContextRail";
 import { CaptureLightbox, SystemChip } from "./DemoEvidence";
+import { RunProvenanceBar } from "./DemoRunIdentity";
 import { candidateCaptureFor, type DemoCapture, type DemoFailureRecord } from "./demo-evidence-wire";
 import {
   actionsAt,
@@ -912,6 +913,12 @@ function LogsTab({
           <span className="inline-flex items-center gap-0.5 rounded-md border border-border px-1.5 py-0.5">
             System <ChevronDown aria-hidden className="size-3" />
           </span>
+          {/* The run's PROVENANCE sits on the bar under its own stream: the
+              workflow version qualifies every line above it, so it belongs on
+              the same surface rather than in a rail section three columns away
+              that repeated it beside five facts that never change. */}
+          <span aria-hidden className="h-[var(--ds-h-xs)] w-px shrink-0 bg-[var(--ds-border)]" />
+          <RunProvenanceBar row={row} />
           <span aria-hidden className={cn("size-1.5 rounded-full", row.status === "running" ? "bg-success" : "bg-muted-foreground/40")} />
         </span>
       </div>
@@ -1879,14 +1886,12 @@ function PanelRegion({
   tick,
   onOpenPanel,
   onAction,
-  isMember,
   children,
 }: {
   row: DemoRow;
   tick: number;
   onOpenPanel: (workflow: string, id: string) => void;
   onAction: DemoActionHandler;
-  isMember: boolean;
   children: ReactNode;
 }) {
   const { collapsed, setOpen: setRailOpen, dataExpanded, setDataExpanded } = useContextRail();
@@ -1959,7 +1964,6 @@ function PanelRegion({
         <ContextRail
           row={row}
           tick={tick}
-          isMember={isMember}
           onOpenPanel={onOpenPanel}
           onAction={onAction}
           onClose={() => setRailOpen(false)}
@@ -2090,7 +2094,7 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
   const attentionMember = isMember && (status === "failed" || status === "waiting" || status === "doneWarnings");
 
   return (
-    <PanelRegion row={row} tick={tick} onOpenPanel={onOpenPanel} onAction={handleAction} isMember={isMember}>
+    <PanelRegion row={row} tick={tick} onOpenPanel={onOpenPanel} onAction={handleAction}>
       {isMember ? (
         <>
           <ConveyorHeader row={row} onSelect={onSelect} checkedIds={checkedIds} />

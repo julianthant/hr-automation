@@ -7,7 +7,6 @@ import {
   Database,
   History,
   Info,
-  Lock,
   Maximize2,
   Minimize2,
   PanelRightClose,
@@ -33,7 +32,7 @@ import {
   Field,
   IconButton,
   LockedValue,
-  MetaLine,
+  KeyValueList,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -50,7 +49,7 @@ import {
   useToasts,
 } from "./demo-ui";
 import { EvidenceSection, SystemChip } from "./DemoEvidence";
-import { RunIdentityStrip, RunSelector } from "./DemoRunIdentity";
+import { RunSelector } from "./DemoRunIdentity";
 import { actionsAt, fmtClock, type ActionDescriptorWire } from "./demo-wire";
 import {
   appliedCorrectionsFor,
@@ -512,10 +511,6 @@ function DataSection({
     cp.correctedValues[point.field] === undefined ? undefined : (applied?.observed[point.field] ?? point.value);
 
   const changed = reads.filter((d) => edits[d.field] !== undefined && edits[d.field] !== baseValue(d));
-  // Why the values cannot be touched, in one sentence, so a locked ledger never
-  // reads as a broken one. Writes are locked BY CONTRACT, so they never count.
-  const locked = reads.length > 0 && reads.every((d) => !editPolicyFor(row, d).editable);
-  const lockReason = locked ? editPolicyFor(row, reads[0]) : null;
 
   /**
    * The save, and the three answers it can come back with.
@@ -610,16 +605,33 @@ function DataSection({
             />
           </PopoverTrigger>
           <PopoverContent title="Data" side="bottom" align="start" width="lg">
-            <BulletList
-              items={[
-                "Reads are correctable in place. Writes are shown and never edited — they are the record of what happened.",
-                `Values were captured ${checkpointAge(cp, tick)} ago. The ${cp.consumingNode} node accepts reads up to ${cp.maxAgeMin} minutes old; reusing older ones takes a reason that goes on the receipt.`,
-                continues
-                  ? "Saving continues THIS run from where it stopped — same run id, same receipt."
-                  : "Saving records a correction on this run. Nothing runs.",
-                "Starting a new run leaves this one exactly as it is, with its own trace and its own receipt.",
-              ]}
-            />
+            <div className="flex flex-col gap-[var(--ds-space-base)]">
+              {/* The CHECKPOINT's own provenance. It used to be a `MetaLine`
+                  under the ledger reading `gen 4 · captured 6m ago` — a fact
+                  about the run, but one the operator has never had to act on
+                  and one that took a band under every ledger to say. It sits
+                  with the freshness rule it qualifies now. The STALE case is
+                  different and stays on the surface: that is a hazard, not
+                  provenance, and a hazard is never disclosed. */}
+              <KeyValueList
+                items={[
+                  { key: "Generation", value: String(held) },
+                  { key: "Captured", value: `${checkpointAge(cp, tick)} ago` },
+                  { key: "Accepted age", value: `${cp.maxAgeMin} min at ${cp.consumingNode}` },
+                ]}
+              />
+              <BulletList
+                items={[
+                  "Reads are correctable in place. Writes are shown and never edited — they are the record of what happened.",
+                  `Reusing reads older than ${cp.maxAgeMin} minutes takes a reason, and the reason goes on the receipt.`,
+                  continues
+                    ? "Saving continues THIS run from where it stopped — same run id, same receipt."
+                    : "Saving records a correction on this run. Nothing runs.",
+                  "Starting a new run leaves this one exactly as it is, with its own trace and its own receipt.",
+                  ...(editPolicySummary(row) ? [editPolicySummary(row)] : []),
+                ]}
+              />
+            </div>
           </PopoverContent>
         </Popover>
         {/* The expand affordance, not a modal: 348px is tight for typing a date
@@ -663,12 +675,6 @@ function DataSection({
 
               Do not reintroduce a count here. A ledger that restates itself in
               a header is the clutter the operator asked us to remove. */}
-
-          {locked && lockReason && !lockReason.editable && (
-            <Banner tone="info" title="These values cannot be edited right now" icon={<Lock aria-hidden className={dsIcon.md} />}>
-              {lockReason.reason}
-            </Banner>
-          )}
 
           {/* A refused save. The patch is still on screen above it — this says
               WHY it is still there, in the server's own words and with its code. */}
@@ -780,34 +786,22 @@ function DataSection({
             ))}
           </div>
 
-          {/* The only sentence left on this surface, and it is emitted only
-              when there IS one: a value the operator cannot correct RIGHT NOW
-              because of this run's own state. That is a fact about this run,
-              not a rule of the product — the rules moved into the ⓘ above. */}
-          {(() => {
-            const note = locked && lockReason && !lockReason.editable ? lockReason.reason : editPolicySummary(row);
-            return note ? <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>{note}</p> : null;
-          })()}
+          {/* WHAT IS LEFT ON THIS SURFACE: the hazard, and nothing else.
+              The blue "These values cannot be edited right now" banner and the
+              paragraph under the ledger that repeated its sentence are both
+              GONE — every locked value already draws a lock and prints its own
+              reason on its own row, which is where the fact belongs, and the
+              two bands said it twice more for the whole list. `gen · captured`
+              went into the ⓘ beside the freshness rule it qualifies.
 
-          {/* The checkpoint's PROVENANCE — which generation these values are and
-              how old they are. Two facts about THIS run, and nothing else: the
-              trailing `· <node> accepts reads up to 60m old` clause was the
-              freshness RULE, which is the same on every run and is now in the ⓘ.
-              A stale checkpoint is different and stays — that is a hazard about
-              this run, not an explanation of the product.
-
-              It sits OUTSIDE the save block on purpose. A run with no save arm
-              — a live one, a parked one — still has a checkpoint and still has
-              to answer "how old is this?"; scoping the line to the buttons
-              would make the generation vanish on exactly the rows whose data
-              the operator is most likely to be squinting at. */}
-          <MetaLine
-            items={[
-              `gen ${held}`,
-              `captured ${checkpointAge(cp, tick)} ago`,
-              fresh.stale ? `older than the ${fresh.maxAgeMin}m limit — reusing them takes an override` : null,
-            ]}
-          />
+              A STALE checkpoint does not go with them. It is an outcome about
+              this run — reusing these values takes an override that lands on
+              the receipt — and an outcome is never disclosed. */}
+          {fresh.stale && (
+            <p className={cn(dsText.meta, "text-[color:var(--ds-status-waiting-fg)]")}>
+              Captured {checkpointAge(cp, tick)} ago — older than the {fresh.maxAgeMin}m limit. Reusing them takes an override.
+            </p>
+          )}
 
           {/* The two outcomes. They are DESCRIPTORS (`actions[]` at the `data`
               placement) — a row whose checkpoint may not be saved is simply not
@@ -1065,7 +1059,6 @@ export function ContextRail({
   onAction,
   onClose,
   tick,
-  isMember,
   dataExpanded,
   onDataExpandedChange,
   className,
@@ -1075,8 +1068,6 @@ export function ContextRail({
   onAction: DemoActionHandler;
   onClose: () => void;
   tick: number;
-  /** a member inherits its identity from its group, so that strip stays off it */
-  isMember: boolean;
   /** the Data surface has the rail to itself, to be edited in */
   dataExpanded: boolean;
   onDataExpandedChange: (expanded: boolean) => void;
@@ -1085,6 +1076,10 @@ export function ContextRail({
   const sections = useMemo(
     () => ({
       hasDelegation: Boolean(row.reviewRunId ?? row.reviewOf ?? row.linkedParentId) || Boolean(linkedGroupSummary(row)),
+      // `RunSelector` renders nothing below two attempts, so the heading is
+      // gated on the same fact rather than on the component returning null —
+      // a labelled section with nothing under it reads as a failed render.
+      hasAttempts: (row.lineage?.attempts.length ?? 1) > 1,
     }),
     [row],
   );
@@ -1122,14 +1117,23 @@ export function ContextRail({
 
       <div className="flex min-h-0 flex-1 flex-col gap-[var(--ds-space-cozy)] overflow-y-auto px-[var(--ds-space-cozy)] py-[var(--ds-space-cozy)]">
         {/**
-         * ORDER: Evidence · Data · Provenance · Delegation.
+         * ORDER: Evidence · Data · Attempts · Delegation.
          *
          * Evidence first on the operator's own instruction, and it holds up on
          * its own terms: it is the shortest section and the one most often
          * reached for mid-read, so putting the long editable ledger above it
          * meant scrolling past a form to look at a screenshot.
          *
-         * Expanding Data hides PROVENANCE AND DELEGATION only. Evidence stays
+         * **Provenance is no longer a section here.** It was seven chips on
+         * every run, five of which said the same words on all of them; the one
+         * that changes what a row MEANS — the workflow version — went to the Log
+         * Panel's bottom bar beside the stream it qualifies, the app build went
+         * to the Sessions bar because it is a property of the dashboard rather
+         * than of a run, and the rest is behind that bar's ⓘ. What is left here
+         * is the ATTEMPT selector, which was never provenance: it changes which
+         * run you are reading.
+         *
+         * Expanding Data hides ATTEMPTS AND DELEGATION only. Evidence stays
          * where it is on purpose, and not just because the order was asked for:
          * the expand control lives in the Data section's own header, and
          * folding the section above it would teleport that control to the top
@@ -1151,12 +1155,15 @@ export function ContextRail({
 
         {!dataExpanded && (
           <>
-            <Separator />
-            <section aria-label="Provenance" className="flex flex-col gap-[var(--ds-space-snug)]">
-              <SectionLabel>Provenance</SectionLabel>
-              {!isMember && <RunIdentityStrip row={row} />}
-              <RunSelector row={row} />
-            </section>
+            {sections.hasAttempts && (
+              <>
+                <Separator />
+                <section aria-label="Attempts" className="flex flex-col gap-[var(--ds-space-snug)]">
+                  <SectionLabel>Attempts</SectionLabel>
+                  <RunSelector row={row} />
+                </section>
+              </>
+            )}
             {sections.hasDelegation && (
               <>
                 <Separator />
@@ -1168,7 +1175,7 @@ export function ContextRail({
 
         {dataExpanded && (
           <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
-            Provenance and delegation are hidden while you edit — narrow the surface to bring them back.
+            Attempts and delegation are hidden while you edit — narrow the surface to bring them back.
           </p>
         )}
       </div>
