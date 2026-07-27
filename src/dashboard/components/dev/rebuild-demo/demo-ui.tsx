@@ -84,6 +84,7 @@ export {
   CardBody,
   CardFooter,
   SectionLabel,
+  PageHeader,
   Banner,
   MetaLine,
   Refusal,
