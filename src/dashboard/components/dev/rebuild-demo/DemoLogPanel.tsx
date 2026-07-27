@@ -53,6 +53,7 @@ import {
 import {
   Badge,
   Button,
+  CardBase,
   FloatingSurface,
   IconButton,
   Kbd,
@@ -252,27 +253,35 @@ function CandidateCard({
       {candidate.matchedOn && (
         <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>matched on {candidate.matchedOn}</span>
       )}
-      {capture ? (
-        <Button
-          size="sm"
-          variant="outline"
-          className="mt-[var(--ds-space-tight)] w-full"
-          onClick={() => onOpenCapture(capture)}
-          icon={<Camera aria-hidden className={dsIcon.sm} />}
-        >
-          See this candidate
-        </Button>
-      ) : (
-        <span
-          className={cn(
-            dsText.meta,
-            "mt-[var(--ds-space-tight)] inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-fg-faint)]",
-          )}
-        >
-          <ImageOff aria-hidden className={dsIcon.sm} />
-          No capture — this was never on a page
-        </span>
-      )}
+      {/* The way to the proof sits on the ROW's bottom edge, not on this card's.
+          One candidate's description wraps to two lines and its neighbour's does
+          not, so a fixed `mt-*` put one button a line below the other — on the
+          one surface where the operator is comparing two people side by side.
+          BOTH branches are pinned: a candidate with no capture is a shorter card
+          still, and leaving that branch unpinned just moves the ragged edge. */}
+      <CardBase className="pt-[var(--ds-space-tight)]">
+        {capture ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-full"
+            onClick={() => onOpenCapture(capture)}
+            icon={<Camera aria-hidden className={dsIcon.sm} />}
+          >
+            See this candidate
+          </Button>
+        ) : (
+          <span
+            className={cn(
+              dsText.meta,
+              "inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-fg-faint)]",
+            )}
+          >
+            <ImageOff aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
+            No capture — this was never on a page
+          </span>
+        )}
+      </CardBase>
     </div>
   );
 }

@@ -375,22 +375,27 @@ function DisplaySection() {
           <CardHeader>
             <span className={cn(dsText.title, "font-semibold")}>Progress</span>
           </CardHeader>
-          <CardBody className="flex flex-col gap-[var(--ds-space-cozy)]">
+          <CardBody grow className="flex flex-col gap-[var(--ds-space-cozy)]">
             <ProgressBar label="Records approved" value={64} showValue />
             <ProgressBar label="Pages verified" value={100} tone="success" showValue />
             <ProgressBar label="Retries used" value={80} tone="warning" showValue />
             <ProgressBar label="Failed writes" value={22} tone="danger" showValue />
             <ProgressBar label="Waiting on UCPath" />
-            <span className={cn(dsText.meta, "text-[color:var(--ds-fg-faint)]")}>
-              The last bar is indeterminate — never fake a denominator you do not have.
-            </span>
+            {/* The caveat belongs to the CARD, so it sits on the card's bottom
+                edge rather than floating in the middle of it beside a taller
+                neighbour. */}
+            <CardBase>
+              <span className={cn(dsText.meta, "text-[color:var(--ds-fg-faint)]")}>
+                The last bar is indeterminate — never fake a denominator you do not have.
+              </span>
+            </CardBase>
           </CardBody>
         </Card>
         <Card>
           <CardHeader>
             <span className={cn(dsText.title, "font-semibold")}>Timeline</span>
           </CardHeader>
-          <CardBody className="flex flex-col gap-[var(--ds-space-cozy)]">
+          <CardBody grow className="flex flex-col gap-[var(--ds-space-cozy)]">
             <TimelineSteps steps={SAMPLE_STEPS} variant="compact" />
             <Separator />
             <TimelineSteps steps={SAMPLE_STEPS} variant="full" />

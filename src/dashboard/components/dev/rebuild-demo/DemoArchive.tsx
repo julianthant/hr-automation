@@ -6,6 +6,7 @@ import {
   Banner,
   Button,
   Card,
+  CardBase,
   CardBody,
   Chip,
   EmptyState,
@@ -314,7 +315,7 @@ function ArchivedRunDetail({
 
         <div className="grid grid-cols-1 gap-[var(--ds-space-base)] min-[900px]:grid-cols-2">
           <Card>
-            <CardBody className="flex flex-col gap-[var(--ds-space-snug)]">
+            <CardBody grow className="flex flex-col gap-[var(--ds-space-snug)]">
               <SectionLabel>Evidence pointers</SectionLabel>
               {run.evidence.length === 0 ? (
                 <p className={cn(dsText.body, "text-[color:var(--ds-fg-muted)]")}>
@@ -333,14 +334,19 @@ function ArchivedRunDetail({
                   </div>
                 ))
               )}
-              <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
-                Content-addressed. The archive stores the pointer; the image lives in the evidence store until it is purged.
-              </p>
+              {/* A standing note about the whole card. Pinned, so it lands on
+                  the card's bottom edge instead of floating wherever the
+                  pointer list happened to stop beside a taller sibling. */}
+              <CardBase className="pt-[var(--ds-space-snug)]">
+                <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+                  Content-addressed. The archive stores the pointer; the image lives in the evidence store until it is purged.
+                </p>
+              </CardBase>
             </CardBody>
           </Card>
 
           <Card>
-            <CardBody className="flex flex-col gap-[var(--ds-space-snug)]">
+            <CardBody grow className="flex flex-col gap-[var(--ds-space-snug)]">
               <SectionLabel>Immutable input — what a relaunch replays</SectionLabel>
               {run.input.map((item) => (
                 <div key={item.label} className="flex min-w-0 items-baseline gap-[var(--ds-space-snug)]">

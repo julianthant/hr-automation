@@ -333,7 +333,18 @@ export function DemoRunModal({
                     <option value="bulk">bulk</option>
                   </Select>
                 </Field>
-                <div className="flex items-end pb-[var(--ds-space-tight)]">
+                {/* The switch pairs with the Selects beside it, so it lines up
+                    with the CONTROL row — not with the bottom of a cell that a
+                    neighbour's description line made taller, which is what
+                    `items-end` was doing and why it read as dropped. It mirrors
+                    `Field`'s label row as an aria-hidden spacer in the same type
+                    class, so the reservation is exact instead of a guessed
+                    height; the switch's own label then lands on the Selects'
+                    line and its description on theirs. */}
+                <div className="flex flex-col gap-[var(--ds-space-tight)]">
+                  <span aria-hidden className={cn(dsText.meta, "invisible font-medium")}>
+                    Dry run
+                  </span>
                   <Switch
                     checked={dryRun}
                     onCheckedChange={(next) => { setDryRun(next); setResult(null); }}

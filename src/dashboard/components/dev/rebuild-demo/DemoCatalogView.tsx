@@ -1,9 +1,9 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { ArrowRight, Layers, LayoutList, Link2, PanelRight, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CONTAINMENT_KINDS, DENSITY_LADDER, PANEL_KINDS, ROLLUP_STEPS, ROW_VARIANTS, type RowVariantSpec } from "./demo-catalog";
 import { DEMO_ROWS } from "./demo-data";
-import { Button, dsBorder, dsIcon, dsRadius, dsSurface, dsText } from "./demo-ui";
+import { Button, CardBase, dsBorder, dsIcon, dsRadius, dsSurface, dsText } from "./demo-ui";
 
 /**
  * DEV-ONLY — the catalog view of `?view=rebuild-demo`.
@@ -28,8 +28,32 @@ const TYPE_TONE: Record<RowVariantSpec["rowType"], string> = {
   "Member Row": "border-[color:var(--ds-border-subtle)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)]",
 };
 
-/** one specimen card — every section builds the same object */
+/**
+ * One specimen card — every section builds the same object.
+ *
+ * It is a flex COLUMN because the cards sit in grids and stretch to their row's
+ * tallest sibling; whatever must land on the row's bottom edge goes in a
+ * `CardBase` inside it. Without that, a specimen whose prose ran a line longer
+ * than its neighbour's pushed its own trailing block a line lower, and a page
+ * whose whole job is to be compared across cannot be read across.
+ */
 const specimenCard = cn("flex flex-col border p-[var(--ds-space-cozy)]", dsRadius.lg, dsBorder.base, dsSurface.card);
+
+/**
+ * `Lives` and `Counts` are the two facts an operator reads STRAIGHT ACROSS the
+ * three containment kinds — "where does this child render" against "does it
+ * count". They were two prose paragraphs with the label inlined and a different
+ * `mt-*` on each, so neither the labels nor the values lined up with anything.
+ * One row shape, one label column, so the pair reads as a matched pair.
+ */
+function FactRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className={cn(dsText.meta, "flex min-w-0 gap-[var(--ds-space-base)] leading-relaxed")}>
+      <span className="w-11 shrink-0 text-[color:var(--ds-fg-secondary)]">{label}</span>
+      <span className="min-w-0 flex-1 text-[color:var(--ds-fg-muted)]">{children}</span>
+    </div>
+  );
+}
 
 /** the neutral fact chip this page uses everywhere a code or a step is named */
 const catalogChip = cn(
@@ -134,25 +158,31 @@ export function DemoCatalogView({ onOpenExample }: { onOpenExample: (id: string)
                   ))}
                 </ul>
 
-                <p
-                  className={cn(
-                    dsText.meta,
-                    "mt-[var(--ds-space-base)] border px-[var(--ds-space-base)] py-[var(--ds-space-snug)] leading-relaxed",
-                    dsRadius.md,
-                    "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
-                  )}
-                >
-                  {v.gotcha}
-                </p>
+                {/* The gotcha and the workflows that hit it are ONE trailing
+                    block on the card's bottom edge: they are the two things
+                    read across the pair of cards, and the `carries` list above
+                    them is a different length in every variant. */}
+                <CardBase className="gap-[var(--ds-space-base)] pt-[var(--ds-space-base)]">
+                  <p
+                    className={cn(
+                      dsText.meta,
+                      "border px-[var(--ds-space-base)] py-[var(--ds-space-snug)] leading-relaxed",
+                      dsRadius.md,
+                      "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
+                    )}
+                  >
+                    {v.gotcha}
+                  </p>
 
-                <div className="mt-[var(--ds-space-base)] flex flex-wrap gap-[var(--ds-space-tight)]">
-                  {v.workflows.map((w) => (
-                    <span key={w.code} title={w.note} className={catalogChip}>
-                      <span className={cn(dsText.nums, "text-[color:var(--ds-fg-muted)]")}>{w.code}</span>
-                      {w.label}
-                    </span>
-                  ))}
-                </div>
+                  <div className="flex flex-wrap gap-[var(--ds-space-tight)]">
+                    {v.workflows.map((w) => (
+                      <span key={w.code} title={w.note} className={catalogChip}>
+                        <span className={cn(dsText.nums, "text-[color:var(--ds-fg-muted)]")}>{w.code}</span>
+                        {w.label}
+                      </span>
+                    ))}
+                  </div>
+                </CardBase>
               </article>
             ))}
           </div>
@@ -173,20 +203,28 @@ export function DemoCatalogView({ onOpenExample }: { onOpenExample: (id: string)
                   <span className={cn(dsText.micro, dsText.nums, "text-[color:var(--ds-fg-muted)]")}>{c.key}</span>
                 </div>
                 <p className={cn(dsText.body, "mt-[var(--ds-space-snug)] leading-relaxed text-[color:var(--ds-fg-secondary)]")}>{c.rule}</p>
-                <p className={cn(dsText.meta, "mt-[var(--ds-space-snug)] leading-relaxed text-[color:var(--ds-fg-muted)]")}>
-                  <span className="text-[color:var(--ds-fg-secondary)]">Lives:</span> {c.lives}
-                </p>
-                <p className={cn(dsText.meta, "mt-[var(--ds-space-tight)] leading-relaxed text-[color:var(--ds-fg-muted)]")}>
-                  <span className="text-[color:var(--ds-fg-secondary)]">Counts:</span> {c.counts}
-                </p>
-                <ul className="mt-[var(--ds-space-base)] flex flex-col gap-[var(--ds-space-hair)]">
-                  {c.examples.map((e) => (
-                    <li key={e} className={cn(dsText.meta, "flex gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
-                      <span aria-hidden className={cn(specBullet, "bg-[var(--ds-fg-faint)]")} />
-                      <span className="min-w-0">{e}</span>
-                    </li>
-                  ))}
-                </ul>
+                {/* The comparable pair, kept directly under the rule rather
+                    than pushed to the base: the three `rule` paragraphs differ
+                    by at most one line, so this is where the two facts land
+                    closest to level across the three cards. Pinning them to the
+                    bottom instead would hang them off `examples` lists of three,
+                    two and two items — a much larger drift. */}
+                <div className="mt-[var(--ds-space-snug)] flex flex-col gap-[var(--ds-space-tight)]">
+                  <FactRow label="Lives">{c.lives}</FactRow>
+                  <FactRow label="Counts">{c.counts}</FactRow>
+                </div>
+                {/* Examples are the trailing block, so the three cards end on
+                    one line however many each kind has. */}
+                <CardBase className="pt-[var(--ds-space-base)]">
+                  <ul className="flex flex-col gap-[var(--ds-space-hair)]">
+                    {c.examples.map((e) => (
+                      <li key={e} className={cn(dsText.meta, "flex gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
+                        <span aria-hidden className={cn(specBullet, "bg-[var(--ds-fg-faint)]")} />
+                        <span className="min-w-0">{e}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CardBase>
               </article>
             ))}
           </div>
@@ -262,29 +300,37 @@ export function DemoCatalogView({ onOpenExample }: { onOpenExample: (id: string)
                     </span>
                   ))}
                 </div>
-                <p className={cn(dsText.meta, "mt-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
-                  <span className="text-[color:var(--ds-fg-secondary)]">Opens on:</span> {p.defaultTab}
-                </p>
+                {/* Everything below the tab specimen is ONE trailing block on
+                    the row's bottom edge — what the panel opens on, what is
+                    always visible, and what is specific to it. The tab strip
+                    above wraps to two rows on the four-tab kinds and not on the
+                    two-tab ones, which is exactly what used to shove these
+                    three facts out of step between neighbouring cards. */}
+                <CardBase className="gap-[var(--ds-space-tight)] pt-[var(--ds-space-snug)]">
+                  <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+                    <span className="text-[color:var(--ds-fg-secondary)]">Opens on:</span> {p.defaultTab}
+                  </p>
 
-                <span className={cn(dsText.caps, "mt-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]")}>Always visible</span>
-                <ul className="mt-[var(--ds-space-tight)] flex flex-col gap-[var(--ds-space-hair)]">
-                  {p.pinned.map((c) => (
-                    <li key={c} className={cn(dsText.meta, "flex gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
-                      <span aria-hidden className={cn(specBullet, "bg-[var(--ds-info-fg)] opacity-60")} />
-                      <span className="min-w-0">{c}</span>
-                    </li>
-                  ))}
-                </ul>
+                  <span className={cn(dsText.caps, "mt-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>Always visible</span>
+                  <ul className="flex flex-col gap-[var(--ds-space-hair)]">
+                    {p.pinned.map((c) => (
+                      <li key={c} className={cn(dsText.meta, "flex gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
+                        <span aria-hidden className={cn(specBullet, "bg-[var(--ds-info-fg)] opacity-60")} />
+                        <span className="min-w-0">{c}</span>
+                      </li>
+                    ))}
+                  </ul>
 
-                <span className={cn(dsText.caps, "mt-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]")}>Specifics</span>
-                <ul className="mt-[var(--ds-space-tight)] flex flex-col gap-[var(--ds-space-hair)]">
-                  {p.specifics.map((c) => (
-                    <li key={c} className={cn(dsText.meta, "flex gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-secondary)]")}>
-                      <span aria-hidden className={cn(specBullet, "bg-[var(--ds-fg-faint)]")} />
-                      <span className="min-w-0">{c}</span>
-                    </li>
-                  ))}
-                </ul>
+                  <span className={cn(dsText.caps, "mt-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>Specifics</span>
+                  <ul className="flex flex-col gap-[var(--ds-space-hair)]">
+                    {p.specifics.map((c) => (
+                      <li key={c} className={cn(dsText.meta, "flex gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-secondary)]")}>
+                        <span aria-hidden className={cn(specBullet, "bg-[var(--ds-fg-faint)]")} />
+                        <span className="min-w-0">{c}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CardBase>
               </article>
             ))}
           </div>
