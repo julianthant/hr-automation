@@ -11,7 +11,7 @@ import {
 } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
-import { CircleAlert, Info, TriangleAlert, X, CheckCircle2 } from "lucide-react";
+import { ChevronDown, ChevronUp, CircleAlert, Info, TriangleAlert, X, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { dsElev, dsFocus, dsIcon, dsLayer, dsMotion, dsRadius, dsText } from "./tokens";
 import { IconButton } from "./primitives-core";
@@ -494,6 +494,9 @@ const ToastContext = createContext<ToastContextValue | null>(null);
  * Rules: a toast reports something that ALREADY happened. It never asks a
  * question, never holds the only copy of information, and a `danger` toast
  * never disappears on its own — a failed write must be dismissed by a human.
+ * It does RECEDE to a one-line chip once it has been readable for a while, so
+ * "never dismisses" cannot mean "permanently covers the panel underneath" —
+ * see `TOAST_COLLAPSE_MS`.
  */
 export function useToasts(): ToastContextValue {
   const ctx = useContext(ToastContext);
@@ -585,6 +588,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
  * of a dialog's footer and swallowed every click on its primary button, with no
  * visible reason — the operator could see the button, press it, and have nothing
  * happen.
+ *
+ * The viewport aligns its cards to the anchored edge (`items-end` / `items-start`)
+ * so a RECEDED card — see `ToastCard` — can hug its own text instead of holding
+ * the full 360px column.
  */
 function ToastViewport({ toasts, onDismiss }: { toasts: DsToast[]; onDismiss: (id: string) => void }) {
   const modalOpen = useModalOpen();
@@ -596,7 +603,7 @@ function ToastViewport({ toasts, onDismiss }: { toasts: DsToast[]; onDismiss: (i
       data-ds-toast-viewport={modalOpen ? "aside" : "default"}
       className={cn(
         "pointer-events-none fixed bottom-[var(--ds-space-loose)]",
-        modalOpen ? "left-[var(--ds-space-loose)]" : "right-[var(--ds-space-loose)]",
+        modalOpen ? "left-[var(--ds-space-loose)] items-start" : "right-[var(--ds-space-loose)] items-end",
         "flex w-[360px] max-w-[calc(100vw-var(--ds-space-section))] flex-col gap-[var(--ds-space-base)]",
         dsLayer.toast,
       )}
@@ -608,6 +615,44 @@ function ToastViewport({ toasts, onDismiss }: { toasts: DsToast[]; onDismiss: (i
   );
 }
 
+/**
+ * How long a persistent (`danger`) toast holds its full card before it recedes
+ * to a one-line chip.
+ *
+ * WHY IT RECEDES AT ALL: a `danger` toast never auto-dismisses — a failed write
+ * is acknowledged by a human, not by a timer — but the viewport is `fixed`
+ * bottom-right at a fixed width, so "never dismisses" also meant "permanently
+ * covers the lower-right of whatever panel is underneath". The alert was
+ * correct and the screen was unreadable, which is a failure of its own: a
+ * notification that hides the data you are reading has traded one loss for
+ * another. So the ALERT persists and its PRESENTATION recedes. Nothing is lost
+ * by making the floating card transient — the durable copy is the notification
+ * inbox behind the bell, and the chip itself still names the failure, still
+ * carries the danger tint and icon, and is still one hover (or one keypress)
+ * from the full text and its action.
+ */
+const TOAST_COLLAPSE_MS = 6000;
+
+/**
+ * One toast. A `danger` toast is PERSISTENT: it has no dismiss timer, and after
+ * `TOAST_COLLAPSE_MS` it collapses to a one-line chip that stays until the
+ * operator dismisses it.
+ *
+ * Three ways back to the full card, so it can never become a dead end:
+ *  - **hover** the chip — a peek that recedes again when the pointer leaves;
+ *  - **press** the chip — an explicit expand that STAYS until collapsed again
+ *    (an operator choice is never undone by a timer);
+ *  - the auto-collapse never fires while the pointer is over the card or focus
+ *    is inside it, so it cannot close under someone reading or using it.
+ *
+ * `data-ds-toast-state="full" | "chip"` is the hook a headless check asserts on.
+ *
+ * A11y: `role="alert"` is unchanged for `danger` and lives on the SAME element
+ * across both states (React reuses the node, so the alert is announced once, on
+ * arrival). `aria-atomic="false"` overrides the role's implicit `true` so the
+ * collapse — which only REMOVES nodes — is silent rather than re-announcing the
+ * whole alert six seconds later.
+ */
 function ToastCard({
   toast,
   onDismiss,
@@ -620,19 +665,106 @@ function ToastCard({
   const entered = useEntered();
   const spec = TOAST_TONE[toast.tone];
   const Icon = spec.icon;
+
+  // Only a persistent toast recedes — a self-dismissing one is already gone.
+  const persistent = toast.tone === "danger";
+  const [collapsed, setCollapsed] = useState(false);
+  const [hovering, setHovering] = useState(false);
+  const [focusWithin, setFocusWithin] = useState(false);
+  /** The operator has chosen a state; the timer stops second-guessing them. */
+  const [pinned, setPinned] = useState(false);
+
+  const engaged = hovering || focusWithin;
+  useEffect(() => {
+    if (!persistent || collapsed || pinned || engaged) return;
+    const timer = setTimeout(() => setCollapsed(true), TOAST_COLLAPSE_MS);
+    return () => clearTimeout(timer);
+  }, [persistent, collapsed, pinned, engaged]);
+
+  // Pressing a toggle unmounts it and mounts its counterpart, which would drop
+  // a keyboard user on `<body>`. Hand focus to whichever toggle took its place.
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef(false);
+  useEffect(() => {
+    if (!restoreFocus.current) return;
+    restoreFocus.current = false;
+    toggleRef.current?.focus();
+  }, [collapsed]);
+
+  const setCollapsedByOperator = (next: boolean) => {
+    restoreFocus.current = true;
+    setPinned(true);
+    setCollapsed(next);
+  };
+
+  /** A hover peek expands without un-collapsing — leaving recedes it again. */
+  const expanded = !collapsed || hovering;
+
+  const shell = cn(
+    inert ? "pointer-events-none" : "pointer-events-auto",
+    "border border-l-[length:var(--ds-border-w-rail)]",
+    "border-[color:var(--ds-border-strong)] bg-[var(--ds-surface-overlay)]",
+    spec.tint,
+    dsRadius.md,
+    dsElev.mid,
+    dsMotion.enter,
+    entered ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0",
+  );
+
+  const surfaceProps = {
+    role: persistent ? ("alert" as const) : ("status" as const),
+    "aria-atomic": false,
+    "data-ds-toast-state": expanded ? "full" : "chip",
+    onMouseEnter: () => setHovering(true),
+    onMouseLeave: () => setHovering(false),
+    onFocus: () => setFocusWithin(true),
+    onBlur: () => setFocusWithin(false),
+  };
+
+  if (!expanded) {
+    return (
+      <div
+        {...surfaceProps}
+        className={cn(
+          shell,
+          "flex w-fit max-w-full items-center gap-[var(--ds-space-tight)]",
+          "py-[var(--ds-space-tight)] pl-[var(--ds-space-base)] pr-[var(--ds-space-hair)]",
+        )}
+      >
+        <button
+          ref={toggleRef}
+          type="button"
+          disabled={inert}
+          aria-expanded={false}
+          title={inert ? "Show the full alert — available once the dialog is closed" : "Show the full alert"}
+          onClick={() => setCollapsedByOperator(false)}
+          className={cn(
+            "flex min-w-0 flex-1 cursor-pointer items-center gap-[var(--ds-space-tight)]",
+            "disabled:cursor-default",
+            dsRadius.sm,
+            dsFocus,
+          )}
+        >
+          <Icon aria-hidden className={cn(dsIcon.md, "shrink-0", spec.accent)} />
+          <span className={cn(dsText.ui, "truncate font-medium text-[color:var(--ds-fg)]")}>{toast.title}</span>
+          <ChevronUp aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+        </button>
+        <IconButton
+          label="Dismiss"
+          size="sm"
+          disabled={inert}
+          title={inert ? "Dismiss — available once the dialog is closed" : "Dismiss"}
+          icon={<X aria-hidden className={dsIcon.md} />}
+          onClick={() => onDismiss(toast.id)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
-      role={toast.tone === "danger" ? "alert" : "status"}
-      className={cn(
-        inert ? "pointer-events-none" : "pointer-events-auto",
-        "flex items-start gap-[var(--ds-space-base)] border border-l-[length:var(--ds-border-w-rail)] p-[var(--ds-space-cozy)]",
-        "border-[color:var(--ds-border-strong)] bg-[var(--ds-surface-overlay)]",
-        spec.tint,
-        dsRadius.md,
-        dsElev.mid,
-        dsMotion.enter,
-        entered ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0",
-      )}
+      {...surfaceProps}
+      className={cn(shell, "flex w-full items-start gap-[var(--ds-space-base)] p-[var(--ds-space-cozy)]")}
     >
       <Icon aria-hidden className={cn(dsIcon.lg, "mt-px shrink-0", spec.accent)} />
       <div className="flex min-w-0 flex-1 flex-col gap-[var(--ds-space-hair)]">
@@ -660,14 +792,37 @@ function ToastCard({
           </button>
         )}
       </div>
-      <IconButton
-        label="Dismiss"
-        size="sm"
-        disabled={inert}
-        title={inert ? "Dismiss — available once the dialog is closed" : "Dismiss"}
-        icon={<X aria-hidden className={dsIcon.md} />}
-        onClick={() => onDismiss(toast.id)}
-      />
+      <div className="flex shrink-0 items-center gap-[var(--ds-space-hair)]">
+        {/*
+          Only offered on a genuinely expanded card — while it is a hover PEEK
+          the pointer leaving is already the way back, and a button that could
+          not change the state it names would be a lie.
+        */}
+        {persistent && !collapsed && (
+          <IconButton
+            ref={toggleRef}
+            label="Collapse this alert to one line"
+            size="sm"
+            disabled={inert}
+            aria-expanded
+            title={
+              inert
+                ? "Collapse to one line — available once the dialog is closed"
+                : "Collapse to one line — the alert stays until you dismiss it"
+            }
+            icon={<ChevronDown aria-hidden className={dsIcon.md} />}
+            onClick={() => setCollapsedByOperator(true)}
+          />
+        )}
+        <IconButton
+          label="Dismiss"
+          size="sm"
+          disabled={inert}
+          title={inert ? "Dismiss — available once the dialog is closed" : "Dismiss"}
+          icon={<X aria-hidden className={dsIcon.md} />}
+          onClick={() => onDismiss(toast.id)}
+        />
+      </div>
     </div>
   );
 }
