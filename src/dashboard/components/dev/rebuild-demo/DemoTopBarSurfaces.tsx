@@ -98,6 +98,7 @@ export interface DemoNavigateTo {
  * tooltip DESIGN.md forbids for anything load-bearing.
  */
 const DEMO_SHORTCUTS: { keys: string[]; join?: string; what: string }[] = [
+  { keys: ["r"], what: "start a run — any workflow, from any view" },
   { keys: ["j", "k"], what: "move down / up the queue" },
   { keys: ["n"], what: "jump to the next row waiting on you" },
   { keys: ["Enter"], what: "open the selected group" },

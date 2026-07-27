@@ -4,10 +4,13 @@ import { computeVisibleIds, DemoQueue, type DemoFilter, type DemoQueueState, typ
 import { DemoCatalogView } from "./DemoCatalogView";
 import { DemoUiKit } from "./DemoUiKit";
 import { CommandResultFeed, ConfirmCommandDialog, type PendingCommand } from "./DemoActions";
-/* Tier 3a: the run-START surfaces (Run Modal · Input Run Panel · spreadsheet
-   intake). Self-contained — everything it needs lives in DemoRunStart*.tsx,
-   demo-runstart-wire.ts and demo-data-intake.ts. */
-import { DemoRunStartControls } from "./DemoRunStart";
+/* The run-START half: ONE Run Modal for every workflow, plus the spreadsheet
+   intake it hands off to. It is mounted at the SHELL ROOT rather than in the
+   queue toolbar, because "start any workflow from anywhere" has to hold on the
+   Settings / Archive / Explorer / Report takeovers too — none of which draw a
+   toolbar. Everything the modal renders comes off the workflow descriptor's own
+   `start` capability (`demo-wire.ts`). */
+import { DemoRunStartButton, DemoRunStartSurfaces } from "./DemoRunStart";
 import { RenameRunDialog, type PendingRename } from "./DemoRunIdentity";
 import { submitDemoCommand, type DemoCommandResult } from "./demo-commands";
 import type { ActionDescriptorWire } from "./demo-wire";
@@ -40,7 +43,7 @@ import {
 // Row lookups go through the ALL-DAYS map: a row selected from a prior day must
 // open exactly like a row from today.
 import { ALL_DEMO_ROWS as DEMO_ROWS, DEMO_DAY } from "./demo-days";
-import { ToastProvider, useDemoTheme } from "./demo-ui";
+import { ToastProvider, useDemoTheme, useDsModalOpen } from "./demo-ui";
 import {
   ATTENTION_STATUSES,
   type DemoRow,
@@ -101,6 +104,13 @@ export function RebuildDemo() {
      server's refusal of every settings write. Switched from Settings →
      Storage health. */
   const [storage, setStorage] = useState<StorageMode>("read-write");
+  /* The one Run Modal. Shell-owned so `r` reaches it from every view, and so it
+     always opens on the panel the operator is standing in. */
+  const [runStartOpen, setRunStartOpen] = useState(false);
+  /* Radix traps FOCUS while a dialog is open, but a window keydown listener
+     still fires — so j/k kept moving the queue selection behind an open modal
+     and the operator came back to a different row than the one they left. */
+  const modalOpen = useDsModalOpen();
 
   // ---- sort + bulk selection --------------------------------------------
   const [sort, setSort] = useState<DemoSortKey>("attention");
@@ -310,6 +320,15 @@ export function RebuildDemo() {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // A dialog owns the keyboard while it is open — including Escape, which
+      // Radix answers itself. Nothing behind it may move.
+      if (modalOpen) return;
+
+      if (e.key === "r") {
+        e.preventDefault();
+        setRunStartOpen(true);
+        return;
+      }
 
       const visible = computeVisibleIds(scopedRows, { view, filter, expandedGroups, sort });
       const idx = visible.indexOf(selectedId);
@@ -369,7 +388,7 @@ export function RebuildDemo() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view, filter, expandedGroups, sort, selectedId, select, toggleChecked, scopedRows, panelMode, setPanelMode, cyclePanelMode]);
+  }, [view, filter, expandedGroups, sort, selectedId, select, toggleChecked, scopedRows, panelMode, setPanelMode, cyclePanelMode, modalOpen]);
 
   // keep the selected row visible when keyboard-navigating
   useEffect(() => {
@@ -482,7 +501,7 @@ export function RebuildDemo() {
               leading={
                 <DemoWorkflowPanelToggle mode={panelMode} onMode={setPanelMode} active={activeWorkflow} rows={dayRows} />
               }
-              runStart={<DemoRunStartControls />}
+              runStart={<DemoRunStartButton onOpen={() => setRunStartOpen(true)} />}
             />
 
             {/* applied · conflict · rejected — all three, side by side, never
@@ -563,6 +582,11 @@ export function RebuildDemo() {
       )}
 
       <DemoSessionPanel tick={tick} />
+
+      {/* ONE Run Modal, at the root, defaulting to the panel you are standing
+          in. Reachable by the toolbar's primary control and by `r` from every
+          view — including the takeovers, which have no toolbar at all. */}
+      <DemoRunStartSurfaces open={runStartOpen} onOpenChange={setRunStartOpen} panelWorkflowLabel={activeWorkflow} />
 
       {/* Destructive commands ask first — with the SERVER's own description of
           the blast radius. Group cancel is deliberately not in this flow. */}
