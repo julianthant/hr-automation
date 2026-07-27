@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Clock,
   Inbox,
+  Keyboard,
   Mail,
   MailOpen,
   Search,
@@ -27,6 +28,9 @@ import {
   EmptyState,
   IconButton,
   Kbd,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   SearchInput,
   MetaLine,
   Refusal,
@@ -62,18 +66,80 @@ import {
 } from "./demo-flows-wire";
 
 /**
- * DEV-ONLY — the three Top Bar surfaces that were dead: SEARCH, the DATE
- * navigator, and the notification BELL.
+ * DEV-ONLY — the Top Bar surfaces that were dead: SEARCH, the DATE navigator,
+ * the notification BELL, and the SHORTCUTS button.
  *
  * Each was a control with no behaviour behind it, which is worse than absent:
- * the date pill said one day while the queue held another, and the bell showed
- * a badge that opened nothing. What they have in common is that all three
- * change WHICH ROWS the operator is looking at, so all three are built here
- * against the same corpus functions the queue uses.
+ * the date pill said one day while the queue held another, the bell showed a
+ * badge that opened nothing, and the help button did nothing at all while the
+ * keyboard legend it should have held took a 36px band of its own across the
+ * top of the queue. The first three have one thing in common — all change
+ * WHICH ROWS the operator is looking at, so all three are built here against
+ * the same corpus functions the queue uses.
  */
 
 export interface DemoNavigateTo {
   (workflow: string, runId: string, day: string): void;
+}
+
+// ===========================================================================
+// Keyboard shortcuts
+// ===========================================================================
+
+/**
+ * The demo's whole keyboard flow, in the one control that was already sitting
+ * in the Top Bar doing nothing.
+ *
+ * It used to be a permanent legend strip beside the view title — five key
+ * groups the operator reads once and then scrolls past every day, holding a
+ * row that the queue and the log panel both wanted. A Popover is the sanctioned
+ * home for something that has to be REACHABLE rather than visible: it opens on
+ * click, so pointer, touch and keyboard all get to it, unlike the hover-only
+ * tooltip DESIGN.md forbids for anything load-bearing.
+ */
+const DEMO_SHORTCUTS: { keys: string[]; join?: string; what: string }[] = [
+  { keys: ["j", "k"], what: "move down / up the queue" },
+  { keys: ["n"], what: "jump to the next row waiting on you" },
+  { keys: ["Enter"], what: "open the selected group" },
+  { keys: ["Esc"], what: "back out of a group" },
+  { keys: ["c"], what: "mark the selected member checked" },
+  { keys: ["1", "4"], join: "–", what: "switch the detail panel's tab" },
+];
+
+export function DemoShortcutsPopover() {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <IconButton size="sm" label="Keyboard shortcuts" icon={<Keyboard aria-hidden className={dsIcon.md} />} />
+      </PopoverTrigger>
+      <PopoverContent
+        title="Keyboard"
+        description="Nothing here fires while the caret is in a field."
+        width="lg"
+        align="end"
+      >
+        <dl className="flex flex-col gap-[var(--ds-space-snug)]">
+          {DEMO_SHORTCUTS.map((s) => (
+            <div key={s.what} className="flex items-baseline gap-[var(--ds-space-base)]">
+              <dt className="flex shrink-0 items-center gap-[var(--ds-space-tight)]">
+                {s.keys.map((k, i) => (
+                  <span key={k} className="inline-flex items-center gap-[var(--ds-space-tight)]">
+                    {i > 0 && s.join && (
+                      <span aria-hidden className={cn(dsText.meta, "text-[color:var(--ds-fg-faint)]")}>
+                        {s.join}
+                      </span>
+                    )}
+                    <Kbd>{k}</Kbd>
+                  </span>
+                ))}
+              </dt>
+              <dd className={cn(dsText.body, "min-w-0 text-[color:var(--ds-fg-secondary)]")}>{s.what}</dd>
+            </div>
+          ))}
+        </dl>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 // ===========================================================================

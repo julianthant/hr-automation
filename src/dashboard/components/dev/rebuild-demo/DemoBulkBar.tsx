@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { AlertTriangle, ArrowUpDown, Ban, CheckCircle2, CheckSquare, ChevronsUp, RotateCcw, Square, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { submitDemoCommand, type DemoCommandResult } from "./demo-commands";
@@ -7,7 +7,20 @@ import { DEMO_SORTS, type DemoRow, type DemoSortKey } from "./demo-data";
 import { Button, IconButton, dsBorder, dsFocus, dsIcon, dsMotion, dsRadius, dsSize, dsText } from "./demo-ui";
 
 /**
- * DEV-ONLY — the Status Bar's second row: SORT, SELECT, and BULK COMMANDS.
+ * DEV-ONLY — the queue's ACTION BAR: what goes into the queue, and what you do
+ * to what is already in it — panel toggle, run starters, sort, select, bulk.
+ *
+ * It carried only the second half of that until the shell's chrome was
+ * measured: a run-start band sat directly above it, so two 36px rows, one
+ * hairline apart, split a single idea — the things you do TO this queue — in
+ * half. They are one row now; the `leading` and `runStart` slots are where the
+ * shell hands over the controls it owns (the Workflow Panel toggle, the three
+ * start surfaces) so this file still owns nothing but sort/select/bulk.
+ *
+ * The row never wraps: a fixed `--ds-h-bar` with `flex-wrap` silently CLIPS the
+ * second line, so with select mode on and four bulk commands out, the bar
+ * scrolls sideways the way the Status Bar does. A control you cannot reach is
+ * worse than one you have to scroll to.
  *
  * The interesting part of a bulk command is not the happy path, it is the
  * partial one. Retrying four rows can come back "2 applied · 1 conflict ·
@@ -87,6 +100,8 @@ export function DemoQueueToolbar({
   outcome,
   onDismissOutcome,
   onSelectRow,
+  leading,
+  runStart,
 }: {
   sort: DemoSortKey;
   onSort: (k: DemoSortKey) => void;
@@ -101,6 +116,10 @@ export function DemoQueueToolbar({
   outcome: BulkOutcome | null;
   onDismissOutcome: () => void;
   onSelectRow: (id: string) => void;
+  /** shell-owned, far left: the Workflow Panel toggle, where its column began */
+  leading?: ReactNode;
+  /** shell-owned: the three run-start surfaces, folded in from their own band */
+  runStart?: ReactNode;
 }) {
   const selectedCount = selectedIds.size;
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
@@ -117,12 +136,17 @@ export function DemoQueueToolbar({
     <div className={cn("flex shrink-0 flex-col border-b", dsBorder.subtle)}>
       <div
         className={cn(
-          "flex flex-wrap items-center",
+          "flex items-center overflow-x-auto",
           dsSize.hBar,
           "gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
         )}
       >
-        <label className={cn(dsText.meta, "inline-flex items-center gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
+        {leading}
+        {leading && <span aria-hidden className="h-4 w-px shrink-0 bg-[var(--ds-border)]" />}
+        {runStart}
+        {runStart && <span aria-hidden className="h-4 w-px shrink-0 bg-[var(--ds-border)]" />}
+
+        <label className={cn(dsText.meta, "inline-flex shrink-0 items-center gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
           <ArrowUpDown aria-hidden className={dsIcon.sm} />
           <span className="sr-only">Sort the queue</span>
           <select

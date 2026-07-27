@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { FileSpreadsheet, FileText, Keyboard, Play, Upload } from "lucide-react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { ChevronDown, FileSpreadsheet, FileText, Keyboard, Play, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Badge,
@@ -14,13 +14,19 @@ import {
   EmptyState,
   Field,
   MetaLine,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   SectionLabel,
   Select,
   Switch,
   Textarea,
   Well,
   dsFg,
+  dsFocus,
   dsIcon,
+  dsMotion,
+  dsRadius,
   dsText,
 } from "./demo-ui";
 import { DEMO_WORKFLOWS, type DemoWorkflowId } from "./demo-wire";
@@ -71,35 +77,106 @@ const NO_FILE = "";
 // Launcher — the operator's way into all three start surfaces
 // ---------------------------------------------------------------------------
 
-export function DemoRunStartBar() {
+/** One door in the menu: what it starts, and what kind of input it takes. */
+function StartRunOption({
+  icon,
+  label,
+  note,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  note: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex w-full cursor-pointer flex-col items-start text-left",
+        "gap-[var(--ds-space-hair)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]",
+        dsRadius.md,
+        dsFocus,
+        dsMotion.fast,
+        "hover:bg-[var(--ds-surface-3)]",
+      )}
+    >
+      <span className={cn(dsText.ui, "inline-flex items-center gap-[var(--ds-space-snug)] font-semibold text-[color:var(--ds-fg)]")}>
+        {icon}
+        {label}
+      </span>
+      <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>{note}</span>
+    </button>
+  );
+}
+
+/**
+ * ONE primary control, three doors behind it.
+ *
+ * This used to be a band of its own: a caps "START A RUN" label, three
+ * `…`-suffixed buttons and a faint sentence promising the plan comes first —
+ * 37px of vertical, every row of it, for something an operator touches a
+ * handful of times a day. The three doors are all still here, each named and
+ * each explaining what it takes; the promise moved into the menu, where it is
+ * read at the moment it matters rather than skimmed past forever.
+ */
+export function DemoRunStartControls() {
   const [surface, setSurface] = useState<"none" | "upload" | "input" | "intake">("none");
   const [intakeSheetId, setIntakeSheetId] = useState<string | null>(null);
+  const [menu, setMenu] = useState(false);
 
   const openIntake = useCallback((sheetId: string | null) => {
+    setMenu(false);
     setIntakeSheetId(sheetId);
     setSurface("intake");
   }, []);
+  const open = useCallback((next: "upload" | "input") => {
+    setMenu(false);
+    setSurface(next);
+  }, []);
 
   return (
-    <div className="flex flex-wrap items-center gap-[var(--ds-space-base)] border-b border-[color:var(--ds-border)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]">
-      <SectionLabel>Start a run</SectionLabel>
-      <Button size="sm" variant="primary" icon={<Upload aria-hidden className={dsIcon.md} />} onClick={() => setSurface("upload")}>
-        Upload a document…
-      </Button>
-      <Button size="sm" variant="secondary" icon={<Keyboard aria-hidden className={dsIcon.md} />} onClick={() => setSurface("input")}>
-        Type a list…
-      </Button>
-      <Button
-        size="sm"
-        variant="secondary"
-        icon={<FileSpreadsheet aria-hidden className={dsIcon.md} />}
-        onClick={() => openIntake(null)}
-      >
-        Import a spreadsheet…
-      </Button>
-      <span className={cn(dsText.meta, dsFg.faint, "ml-auto hidden min-[900px]:inline")}>
-        every start shows what it will create before it commits
-      </span>
+    <>
+      <Popover open={menu} onOpenChange={setMenu}>
+        <PopoverTrigger asChild>
+          <Button
+            size="sm"
+            variant="primary"
+            icon={<Play aria-hidden className={dsIcon.sm} />}
+            iconAfter={<ChevronDown aria-hidden className={dsIcon.sm} />}
+          >
+            Start a run
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          title="Start a run"
+          description="Every start shows what it will create before it commits."
+          width="lg"
+          align="start"
+        >
+          <div className="flex flex-col gap-[var(--ds-space-hair)]">
+            <StartRunOption
+              icon={<Upload aria-hidden className={dsIcon.md} />}
+              label="Upload a document…"
+              note="A PDF packet or a single form. The plan names every row it will create."
+              onClick={() => open("upload")}
+            />
+            <StartRunOption
+              icon={<Keyboard aria-hidden className={dsIcon.md} />}
+              label="Type a list…"
+              note="Names or EIDs, one per line. Each line is validated on its own."
+              onClick={() => open("input")}
+            />
+            <StartRunOption
+              icon={<FileSpreadsheet aria-hidden className={dsIcon.md} />}
+              label="Import a spreadsheet…"
+              note="Bind the columns once, then read every rejected cell before anything runs."
+              onClick={() => openIntake(null)}
+            />
+          </div>
+        </PopoverContent>
+      </Popover>
 
       <DemoRunModal open={surface === "upload"} onOpenChange={(o) => setSurface(o ? "upload" : "none")} onOpenIntake={openIntake} />
       <DemoInputRunPanel open={surface === "input"} onOpenChange={(o) => setSurface(o ? "input" : "none")} />
@@ -108,7 +185,7 @@ export function DemoRunStartBar() {
         initialSheetId={intakeSheetId}
         onOpenChange={(o) => setSurface(o ? "intake" : "none")}
       />
-    </div>
+    </>
   );
 }
 

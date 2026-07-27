@@ -9,7 +9,6 @@ import {
   CircleHelp,
   Eye,
   Gauge,
-  HelpCircle,
   Hourglass,
   LayoutDashboard,
   Pause,
@@ -24,7 +23,13 @@ import { cn } from "@/lib/utils";
 import { effectiveStatus, fmtElapsed, type DemoRow } from "./demo-data";
 import { DEMO_WORKFLOW_LIST, DEMO_WORKFLOWS, type DemoWorkflowCategory } from "./demo-wire";
 import { DEMO_DAY, topLevelRowsForDay } from "./demo-days";
-import { DemoDateNav, DemoNotificationBell, DemoSearchControl, type DemoNavigateTo } from "./DemoTopBarSurfaces";
+import {
+  DemoDateNav,
+  DemoNotificationBell,
+  DemoSearchControl,
+  DemoShortcutsPopover,
+  type DemoNavigateTo,
+} from "./DemoTopBarSurfaces";
 import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
 import {
   Badge,
@@ -238,7 +243,10 @@ export function DemoTopBar({
 
       <span className="flex shrink-0 items-center gap-[var(--ds-space-hair)]">
         <DemoNotificationBell onNavigate={onNavigate} tick={tick} />
-        <IconButton size="sm" label="Shortcuts" onClick={NOOP} icon={<HelpCircle aria-hidden className={dsIcon.md} />} />
+        {/* The keyboard legend lives HERE now, behind the control that used to
+            do nothing — it was a permanent 36px strip across the top of the
+            queue, which is a row the panels wanted more than the legend did. */}
+        <DemoShortcutsPopover />
         {/* The theme pair. One control, and its LABEL names the destination
             ("Switch to Paper Ink"), because a lone sun/moon glyph never says
             which of the two states it is reporting. */}
