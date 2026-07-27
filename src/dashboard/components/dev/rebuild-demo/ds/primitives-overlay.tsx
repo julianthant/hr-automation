@@ -102,6 +102,18 @@ export function useDsModalPresence(): void {
   useRegisterModal();
 }
 
+/**
+ * Is any Dialog or Drawer open right now?
+ *
+ * Exported because a keyboard-first shell has to stop listening while one is:
+ * Radix traps FOCUS, but a `window` keydown listener still fires, so `j`/`k`
+ * kept moving the queue selection behind an open modal and the operator came
+ * back to a different row than the one they left.
+ */
+export function useDsModalOpen(): boolean {
+  return useModalOpen();
+}
+
 /** Is any Dialog or Drawer open right now? */
 function useModalOpen(): boolean {
   return useSyncExternalStore(

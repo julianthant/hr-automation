@@ -150,6 +150,7 @@ export {
   ToastProvider,
   useToasts,
   useDsModalPresence,
+  useDsModalOpen,
 } from "./ds/primitives-overlay";
 export type {
   DsDialogSize,
