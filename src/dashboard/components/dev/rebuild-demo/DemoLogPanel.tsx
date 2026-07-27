@@ -49,9 +49,15 @@ import {
   DialogContent,
   DialogFooter,
   Field,
+  Kbd,
   Textarea,
   Well,
+  dsBorder,
   dsFocus,
+  dsIcon,
+  dsMotion,
+  dsRadius,
+  dsSize,
   dsText,
   useToasts,
 } from "./demo-ui";
@@ -446,10 +452,15 @@ function SharedPipelineStrip({ row }: { row: DemoRow }) {
   const fills = sharedMemberPipeline(row);
   if (!fills) return null;
   return (
-    <div className="border-b border-border/60 px-3 py-2">
-      <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+    <div className={cn("border-b px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]", dsBorder.subtle)}>
+      <div
+        className={cn(
+          dsText.caps,
+          "mb-[var(--ds-space-snug)] flex items-center gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]",
+        )}
+      >
         Shared member pipeline
-        <span className="font-mono normal-case tracking-normal">{fills[0].total} people · identical steps</span>
+        <span className={cn(dsText.nums, "normal-case tracking-normal")}>{fills[0].total} people · identical steps</span>
       </div>
       <div className="flex items-stretch gap-[3px]">
         {fills.map((f) => (
@@ -457,19 +468,19 @@ function SharedPipelineStrip({ row }: { row: DemoRow }) {
             {/* the count hugs its own label — floated right it reads as the
                 NEXT segment's count, which is the kind of small lie a dense
                 strip makes very easy */}
-            <div className="flex min-w-0 items-baseline gap-1">
-              <span className="shrink-0 font-mono text-[9.5px] tabular-nums text-muted-foreground">
+            <div className="flex min-w-0 items-baseline gap-[var(--ds-space-tight)]">
+              <span className={cn(dsText.micro, dsText.nums, "shrink-0 text-[color:var(--ds-fg-muted)]")}>
                 {f.done}/{f.total}
               </span>
-              <span className="min-w-0 truncate text-[10.5px] text-secondary-foreground">{f.label}</span>
+              <span className={cn(dsText.meta, "min-w-0 truncate text-[color:var(--ds-fg-secondary)]")}>{f.label}</span>
             </div>
             <span
               aria-label={`${f.label} — ${f.done} of ${f.total} done${f.attention > 0 ? `, ${f.attention} needing you` : ""}`}
-              className="mt-1 flex h-2 w-full overflow-hidden rounded-[3px] bg-secondary"
+              className={cn("mt-[var(--ds-space-tight)] flex h-2 w-full overflow-hidden bg-[var(--ds-surface-2)]", dsRadius.xs)}
             >
-              <span className="bg-success/75" style={{ flexGrow: Math.max(f.done, 0.001) }} />
-              <span className="bg-warning" style={{ flexGrow: Math.max(f.attention, 0.001) }} />
-              <span className="bg-primary/70" style={{ flexGrow: Math.max(f.running, 0.001) }} />
+              <span className="bg-[var(--ds-success-fg)] opacity-75" style={{ flexGrow: Math.max(f.done, 0.001) }} />
+              <span className="bg-[var(--ds-status-waiting-fg)]" style={{ flexGrow: Math.max(f.attention, 0.001) }} />
+              <span className="bg-[var(--ds-status-running-fg)] opacity-80" style={{ flexGrow: Math.max(f.running, 0.001) }} />
               <span className="bg-transparent" style={{ flexGrow: Math.max(f.total - f.done - f.attention - f.running, 0.001) }} />
             </span>
           </div>
@@ -492,15 +503,46 @@ function GateBanner({ row, tick, onAction }: { row: DemoRow; tick: number; onAct
   const parked = gate.kind === "parked";
   const Icon = parked ? Pause : ClipboardList;
   return (
-    <div className={cn("border-b px-3 py-2", parked ? "border-log-violet/30 bg-log-violet/8" : "border-warning/30 bg-warning/8")}>
-      <div className="flex items-center gap-2">
-        <Icon aria-hidden className={cn("size-3.5 shrink-0", parked ? "text-log-violet" : "text-warning")} />
-        <span className={cn("min-w-0 truncate text-[12px] font-semibold", parked ? "text-log-violet" : "text-warning")}>{gate.title}</span>
-        <span className={cn("ml-auto shrink-0 font-mono text-[10px]", parked ? "text-log-violet/80" : "text-warning/80")}>
+    <div
+      className={cn(
+        "border-b px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
+        parked
+          ? "border-[color:var(--ds-status-parked-border)] bg-[var(--ds-status-parked-bg)]"
+          : "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]",
+      )}
+    >
+      {/* icon 14 + gap 6 = 20px, which is exactly the hanging indent below.
+          At gap-2 the note sat 2px left of the title it belongs to. */}
+      <div className="flex items-center gap-[var(--ds-space-snug)]">
+        <Icon
+          aria-hidden
+          className={cn(
+            dsIcon.md,
+            "shrink-0",
+            parked ? "text-[color:var(--ds-status-parked-fg)]" : "text-[color:var(--ds-status-waiting-fg)]",
+          )}
+        />
+        <span
+          className={cn(
+            dsText.ui,
+            "min-w-0 truncate font-semibold",
+            parked ? "text-[color:var(--ds-status-parked-fg)]" : "text-[color:var(--ds-status-waiting-fg)]",
+          )}
+        >
+          {gate.title}
+        </span>
+        <span
+          className={cn(
+            dsText.meta,
+            dsText.nums,
+            "ml-auto shrink-0 whitespace-nowrap opacity-85",
+            parked ? "text-[color:var(--ds-status-parked-fg)]" : "text-[color:var(--ds-status-waiting-fg)]",
+          )}
+        >
           open {gateAge(row, tick)} · since {fmtClock(gate.openedAt)}
         </span>
       </div>
-      <p className="mt-1 pl-5 text-[11px] leading-relaxed text-muted-foreground">{gate.note}</p>
+      <p className={cn(dsText.body, "mt-[var(--ds-space-tight)] pl-5 leading-relaxed text-[color:var(--ds-fg-muted)]")}>{gate.note}</p>
       <div className="pl-5">
         <ParkResolutions row={row} onAction={onAction} />
         <BannerActions row={row} onAction={onAction} />
@@ -1765,17 +1807,40 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
           <MemberSourceBlock row={row} onSelect={onSelect} />
         </>
       ) : (
-        <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2.5">
-          <span className="min-w-0 truncate text-[13.5px] font-semibold text-foreground">{row.title}</span>
+        <div
+          className={cn(
+            "flex items-center border-b",
+            dsBorder.subtle,
+            "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
+          )}
+        >
+          <span className={cn(dsText.title, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>{row.title}</span>
           <StatusBadge status={status} age={gateAge(row)} />
-          {elapsed && <span className="font-mono text-[10.5px] text-primary/85 tabular-nums">{elapsed}</span>}
+          {/* A ticking duration may never wrap: at a narrow window "5m 48s"
+              was breaking across two lines and shoving the header off its
+              baseline every time the panel got tight. */}
+          {elapsed && (
+            <span className={cn(dsText.meta, dsText.nums, "shrink-0 whitespace-nowrap text-[color:var(--ds-fg-secondary)]")}>
+              {elapsed}
+            </span>
+          )}
           <span
             title={`${variant.name} → ${panel.name}`}
-            className="ml-auto shrink-0 rounded border border-border px-1.5 py-px text-[9.5px] uppercase tracking-wider text-muted-foreground"
+            className={cn(
+              // The narrow-width casualty, on purpose. The panel kind is also
+              // named on the tab bar below, and the row's own title is worth
+              // more than a second copy of it — without this the title was
+              // truncating to a single letter at 1180px.
+              "ml-auto hidden shrink-0 border px-[var(--ds-space-snug)] min-[1400px]:inline-flex",
+              dsRadius.sm,
+              dsText.caps,
+              dsBorder.base,
+              "text-[color:var(--ds-fg-muted)]",
+            )}
           >
             {panel.name}
           </span>
-          <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">{row.trace}</span>
+          <span className={cn(dsText.meta, dsText.nums, "shrink-0 text-[color:var(--ds-fg-muted)]")}>{row.trace}</span>
         </div>
       )}
 
@@ -1786,7 +1851,15 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
         <button
           type="button"
           onClick={() => onOpenPanel(DEMO_ROWS[linkedTarget].wfLabel, linkedTarget)}
-          className="flex items-center gap-2 border-b border-info/25 bg-info/6 px-3 py-1.5 text-left text-[11.5px] text-info outline-none hover:bg-info/10 focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn(
+            "flex w-full cursor-pointer items-center border-b text-left",
+            "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
+            dsText.body,
+            dsFocus,
+            dsMotion.fast,
+            "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
+            "hover:brightness-125",
+          )}
         >
           <ClipboardList aria-hidden className="size-3.5 shrink-0" />
           <span className="min-w-0 truncate">
@@ -1807,7 +1880,15 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
         <button
           type="button"
           onClick={() => onOpenPanel(linked.panel, linked.targetId)}
-          className="flex items-center gap-2 border-b border-info/25 bg-info/6 px-3 py-1.5 text-left text-[11.5px] text-info outline-none hover:bg-info/10 focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn(
+            "flex w-full cursor-pointer items-center border-b text-left",
+            "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
+            dsText.body,
+            dsFocus,
+            dsMotion.fast,
+            "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
+            "hover:brightness-125",
+          )}
         >
           <Users aria-hidden className="size-3.5 shrink-0" />
           <span className="min-w-0 truncate">
@@ -1818,9 +1899,15 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
       )}
 
       {/* pinned outcome bar */}
-      <div className={cn("flex items-center gap-2 border-b px-3 py-1.5", tone.bar)}>
+      <div
+        className={cn(
+          "flex items-center border-b",
+          "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
+          tone.bar,
+        )}
+      >
         <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
-        <span className="min-w-0 truncate text-[11.5px]">{row.outcome.text}</span>
+        <span className={cn(dsText.body, "min-w-0 truncate")}>{row.outcome.text}</span>
         <OutcomeActionButton row={row} onAction={handleAction} className="ml-auto" />
       </div>
 
@@ -1855,7 +1942,19 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
       <EvidenceBar row={row} />
 
       {/* tabs — derived from the panel kind, never a fixed five */}
-      <div role="tablist" className="flex items-center gap-0.5 border-b border-border/60 px-2.5 py-1.5 text-[12px]">
+      {/* The ratified tab treatment: a 2px underline on the active tab, not a
+          filled pill — same as `Tab` in the kit, so the panel's tabs and every
+          other tab set in the product read as one control. */}
+      <div
+        role="tablist"
+        aria-label="Run detail sections"
+        className={cn(
+          "flex shrink-0 items-center border-b",
+          dsSize.hBar,
+          dsBorder.base,
+          "gap-[var(--ds-space-tight)] px-[var(--ds-space-base)]",
+        )}
+      >
         {available.map((key, i) => {
           const active = effectiveTab === key;
           const meta = TAB_META[key];
@@ -1870,17 +1969,28 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
               onClick={() => onTab(key)}
               title={`${meta.label} — press ${i + 1}`}
               className={cn(
-                "relative inline-flex items-center gap-1.5 rounded-md px-2.5 py-0.5 outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                active ? "bg-accent font-semibold text-foreground" : "text-muted-foreground hover:text-foreground",
+                "relative -mb-px inline-flex cursor-pointer items-center border-b-2 border-transparent",
+                "h-[var(--ds-h-bar)] gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
+                dsText.ui,
+                dsFocus,
+                dsMotion.base,
+                active
+                  ? "border-b-[color:var(--ds-accent)] font-semibold text-[color:var(--ds-fg)]"
+                  : "text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
               )}
             >
-              <Icon aria-hidden className="size-3" />
+              <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
               {meta.label}
-              {dot && <span aria-hidden className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-warning" />}
+              {dot && (
+                <span
+                  aria-hidden
+                  className="absolute right-[var(--ds-space-hair)] top-[var(--ds-space-snug)] size-1.5 rounded-full bg-[var(--ds-status-waiting-fg)]"
+                />
+              )}
             </button>
           );
         })}
-        <span className="ml-auto text-[9.5px] uppercase tracking-wider text-muted-foreground/70">
+        <span className={cn(dsText.caps, "ml-auto min-w-0 truncate pl-[var(--ds-space-base)] text-[color:var(--ds-fg-faint)]")}>
           {tab && available.includes(tab) ? panel.name : `${panel.name} · state default`}
         </span>
       </div>
@@ -1902,44 +2012,43 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
           behind it to retry, so the buttons are structurally absent, not
           disabled. Delete lives on the row footer. */}
       {isMember && row.containment !== "rejected" && (
-        <div className="mt-auto flex items-center gap-1.5 border-t border-border/60 bg-secondary/20 px-3 py-2">
-          {(status === "failed" || status === "doneWarnings") && (
-            <button
-              type="button"
-              onClick={NOOP}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <RotateCcw aria-hidden className="size-3" />
-              Retry
-            </button>
+        <div
+          className={cn(
+            "mt-auto flex items-center border-t bg-[var(--ds-surface-2)]",
+            dsBorder.subtle,
+            "gap-[var(--ds-space-snug)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
           )}
-          <button
-            type="button"
+        >
+          {(status === "failed" || status === "doneWarnings") && (
+            <Button size="sm" variant="secondary" onClick={NOOP} icon={<RotateCcw aria-hidden className={dsIcon.sm} />}>
+              Retry
+            </Button>
+          )}
+          {/* The one affirmative action on this bar, so it is the one primary.
+              Its pressed state is carried by the icon AND the word, not by the
+              fill alone. */}
+          <Button
+            size="sm"
+            variant={checkedIds.has(row.id) ? "primary" : "secondary"}
             onClick={() => onToggleChecked(row.id)}
             aria-pressed={checkedIds.has(row.id)}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              checkedIds.has(row.id)
-                ? "border-success/60 bg-success/20 text-success"
-                : "border-success/45 bg-success/10 text-success",
-            )}
+            icon={
+              checkedIds.has(row.id) ? (
+                <CheckCircle2 aria-hidden className={dsIcon.sm} />
+              ) : (
+                <Check aria-hidden className={cn(dsIcon.sm, "text-[color:var(--ds-success-fg)]")} />
+              )
+            }
           >
-            {checkedIds.has(row.id) ? <CheckCircle2 aria-hidden className="size-3" /> : <Check aria-hidden className="size-3" />}
             {checkedIds.has(row.id) ? "Checked" : "Mark checked"}
-          </button>
+          </Button>
           {attentionMember && (
-            <button
-              type="button"
-              onClick={NOOP}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <Ban aria-hidden className="size-3" />
+            <Button size="sm" variant="outline" onClick={NOOP} icon={<Ban aria-hidden className={dsIcon.sm} />}>
               Skip
-            </button>
+            </Button>
           )}
-          <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-            <kbd className="rounded border border-border bg-card px-1">c</kbd> checks ·{" "}
-            <kbd className="rounded border border-border bg-card px-1">n</kbd> next attention
+          <span className={cn(dsText.meta, "ml-auto inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-fg-muted)]")}>
+            <Kbd>c</Kbd> checks · <Kbd>n</Kbd> next attention
           </span>
         </div>
       )}

@@ -38,7 +38,8 @@ import {
 // Row lookups go through the ALL-DAYS map: a row selected from a prior day must
 // open exactly like a row from today.
 import { ALL_DEMO_ROWS as DEMO_ROWS, DEMO_DAY } from "./demo-days";
-import { ToastProvider } from "./demo-ui";
+import { Kbd, ToastProvider, dsBorder, dsIcon, dsSize, dsText } from "./demo-ui";
+import { cn } from "@/lib/utils";
 import {
   ATTENTION_STATUSES,
   type DemoRow,
@@ -397,27 +398,46 @@ export function RebuildDemo() {
           <DemoWorkflowPanel active={activeWorkflow} onActive={changeWorkflow} rows={dayRows} />
 
           <main className="flex min-h-0 flex-1 flex-col">
-            <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1">
-              <span className="text-[12.5px] font-semibold text-foreground">
+            {/* The view's own name and size. It is a HEADING, not another bar:
+                the panel title is the largest thing in this stack, and the
+                keyboard legend beside it is the quietest. */}
+            <div
+              className={cn(
+                "flex shrink-0 items-center border-b",
+                dsSize.hBar,
+                dsBorder.subtle,
+                "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)]",
+              )}
+            >
+              <h1 className={cn(dsText.title, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>
                 {activeWorkflow === ALL_WORKFLOWS ? "All workflows" : activeWorkflow}
+              </h1>
+              <span className={cn(dsText.meta, "shrink-0 text-[color:var(--ds-fg-muted)]")}>
+                <span className={dsText.nums}>{counts.all}</span> {counts.all === 1 ? "row" : "rows"}
               </span>
-              <span className="font-mono text-[10.5px] text-muted-foreground tabular-nums">{counts.all} rows</span>
-              <span className="ml-auto hidden items-center gap-2 font-mono text-[10px] text-muted-foreground min-[1000px]:flex">
-                <Keyboard aria-hidden className="size-3.5" />
-                <span>
-                  <kbd className="rounded border border-border bg-card px-1">j</kbd>/<kbd className="rounded border border-border bg-card px-1">k</kbd> move
+              <span
+                className={cn(
+                  dsText.meta,
+                  "ml-auto hidden shrink-0 items-center gap-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)] min-[1000px]:flex",
+                )}
+              >
+                <Keyboard aria-hidden className={cn(dsIcon.md, "text-[color:var(--ds-fg-faint)]")} />
+                <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+                  <Kbd>j</Kbd>
+                  <Kbd>k</Kbd>
+                  move
                 </span>
-                <span>
-                  <kbd className="rounded border border-border bg-card px-1">n</kbd> next attention
+                <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+                  <Kbd>n</Kbd> next attention
                 </span>
-                <span>
-                  <kbd className="rounded border border-border bg-card px-1">Enter</kbd> open group
+                <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+                  <Kbd>Enter</Kbd> open group
                 </span>
-                <span>
-                  <kbd className="rounded border border-border bg-card px-1">c</kbd> check
+                <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+                  <Kbd>c</Kbd> check
                 </span>
-                <span>
-                  <kbd className="rounded border border-border bg-card px-1">1</kbd>–<kbd className="rounded border border-border bg-card px-1">4</kbd> tabs
+                <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+                  <Kbd>1</Kbd>–<Kbd>4</Kbd> tabs
                 </span>
               </span>
             </div>
