@@ -266,10 +266,13 @@
      They are fixed so the names down the left and the EIDs down the right land
      on the same edge in every group — a member list whose third column sizes
      itself to its content puts every EID in a different place and makes a
-     50-person roster unreadable. 132px is the widest OUTCOME word the demo's
-     vocabularies hold ("Not searchable" at 11px) plus its marker, with room for
-     the free-text detail a workflow that declares no vocabulary still sends. */
-  --ds-w-member-detail: 132px;
+     50-person roster unreadable. 104px is the widest OUTCOME word the demo's
+     vocabularies hold ("Not searchable" at 11px) with room to spare, and no
+     wider — every pixel here comes off the NAME column, which at a 400px queue
+     is the one thing on the line that cannot be recovered from elsewhere. A
+     workflow that declares no vocabulary puts its free-text detail in the same
+     column and truncates there, which it did before at any width. */
+  --ds-w-member-detail: 104px;
   --ds-w-member-eid: 64px;
   --ds-w-rail: 200px; /* the workflow rail */
   /* The run's CONTEXT RAIL — the third column of the detail region, where the
