@@ -12,9 +12,9 @@ import {
   DialogFooter,
   KeyValueList,
   SectionLabel,
-  Separator,
   dsFocus,
   dsIcon,
+  dsMotion,
   dsText,
   useToasts,
 } from "./demo-ui";
@@ -30,14 +30,14 @@ import {
 } from "./demo-evidence-wire";
 
 /**
- * DEV-ONLY — the evidence bar and its capture lightbox (D19b: evidence is a
- * BAR pinned above the tabs, never a tab of its own), plus the run export the
- * legacy Screenshots tab carried and the operator kept.
+ * DEV-ONLY — the evidence section and its capture lightbox (D19b: evidence is
+ * never a tab of its own), plus the run export the legacy Screenshots tab
+ * carried and the operator kept.
  *
- * The bar is built from the row's own `shots`, so the strip and the lightbox
- * can never show different sets, and a failure capture carries a red frame in
- * both. The two shared atoms the receipt and failure surfaces also need live
- * here, because this file is the one they both already depend on.
+ * It is built from the row's own `shots`, so the section and the lightbox can
+ * never show different sets, and a failure capture carries a red frame in both.
+ * The two shared atoms the receipt and failure surfaces also need live here,
+ * because this file is the one they both already depend on.
  */
 
 // ---------------------------------------------------------------------------
@@ -239,12 +239,18 @@ function CaptureLightbox({
 }
 
 /**
- * The evidence bar — D19b: images sit ABOVE the tabs, with no count label, and a
- * failure capture carries a red frame. The filter chips and the export menu are
- * the two affordances the legacy Screenshots tab had that the operator kept
- * (`legacy-keep-ditch` §4.20).
+ * The evidence SECTION — D19b's "evidence is not a tab", now given the room it
+ * was always short of. It used to be a 52px strip wedged between the timeline
+ * and the tabs, where a capture got a 76×40 chip and its label truncated to
+ * three characters. In the context rail each capture is a real tile: kind,
+ * label, the step it was taken on and the clock, so the operator can tell two
+ * captures apart without opening either.
+ *
+ * The filter chips and the export menu are the two affordances the legacy
+ * Screenshots tab had that the operator kept (`legacy-keep-ditch` §4.20), and
+ * both carried over unchanged.
  */
-export function EvidenceBar({ row }: { row: DemoRow }) {
+export function EvidenceSection({ row }: { row: DemoRow }) {
   const captures = useMemo(() => capturesFor(row), [row]);
   const [kind, setKind] = useState<DemoCaptureKind | "all">("all");
   const [open, setOpen] = useState<number | null>(null);
@@ -273,113 +279,136 @@ export function EvidenceBar({ row }: { row: DemoRow }) {
   };
 
   return (
-    <div className="flex items-center gap-[var(--ds-space-base)] border-b border-[color:var(--ds-border-subtle)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]">
-      <div className="flex min-w-0 flex-1 items-center gap-[var(--ds-space-snug)] overflow-x-auto">
-        {present.length > 1 && (
-          <>
-            <Chip label="show" selected={active === "all"} onSelect={() => setKind("all")}>
-              {`All ${captures.length}`}
-            </Chip>
-            {present.map((k) => (
-              <Chip
-                key={k}
-                tone={k === "error" ? "danger" : "neutral"}
-                selected={active === k}
-                onSelect={() => setKind(k)}
-              >
-                {`${CAPTURE_KIND_LABEL[k]} ${captures.filter((c) => c.kind === k).length}`}
-              </Chip>
-            ))}
-            <Separator orientation="vertical" className="mx-[var(--ds-space-hair)] h-[var(--ds-h-xs)]" />
-          </>
-        )}
+    <section aria-label="Evidence" className="flex flex-col gap-[var(--ds-space-snug)]">
+      <div className="flex items-center gap-[var(--ds-space-snug)]">
+        <SectionLabel className="min-w-0 truncate">Evidence</SectionLabel>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="Export this run"
+              className={cn(
+                "ml-auto inline-flex shrink-0 items-center gap-[var(--ds-space-tight)] border px-[var(--ds-space-base)]",
+                "h-[var(--ds-h-sm)] rounded-[var(--ds-radius-md)] border-[color:var(--ds-border)] bg-[var(--ds-surface-1)]",
+                dsText.meta,
+                dsFocus,
+                "text-[color:var(--ds-fg-secondary)]",
+              )}
+            >
+              <Download aria-hidden className={dsIcon.sm} />
+              Export
+              <ChevronDown aria-hidden className={dsIcon.sm} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[240px]">
+            <DropdownMenuItem
+              className={dsText.body}
+              onSelect={() => {
+                downloadDemoFile(`${row.trace}-logs.txt`, exportRunLogsText(row), "text/plain");
+                toast({ tone: "success", title: "Logs exported", description: `${row.trace}-logs.txt — the run's own lines, nothing added.` });
+              }}
+            >
+              <FileText aria-hidden className={cn("mr-2", dsIcon.md)} />
+              Logs as .txt
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className={dsText.body}
+              onSelect={() => {
+                downloadDemoFile(`${row.trace}-run.json`, exportRunJson(row), "application/json");
+                toast({
+                  tone: "success",
+                  title: "Run exported",
+                  description: `${row.trace}-run.json — the served row, its receipt, its failure record and its captures.`,
+                });
+              }}
+            >
+              <FileJson aria-hidden className={cn("mr-2", dsIcon.md)} />
+              Run as .json
+            </DropdownMenuItem>
+            <DropdownMenuItem className={dsText.body} onSelect={copyTrace}>
+              <Copy aria-hidden className={cn("mr-2", dsIcon.md)} />
+              Copy the trace id
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
-        {shown.length === 0 ? (
-          <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
-            {captures.length === 0
-              ? "No captures — this run has not reached a step that takes one."
-              : "No captures of that kind on this run."}
-          </span>
-        ) : (
-          shown.map((c) => (
+      {present.length > 1 && (
+        <div className="flex flex-wrap items-center gap-[var(--ds-space-tight)]">
+          <Chip label="show" selected={active === "all"} onSelect={() => setKind("all")}>
+            {`All ${captures.length}`}
+          </Chip>
+          {present.map((k) => (
+            <Chip
+              key={k}
+              tone={k === "error" ? "danger" : "neutral"}
+              selected={active === k}
+              onSelect={() => setKind(k)}
+            >
+              {`${CAPTURE_KIND_LABEL[k]} ${captures.filter((c) => c.kind === k).length}`}
+            </Chip>
+          ))}
+        </div>
+      )}
+
+      {shown.length === 0 ? (
+        <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+          {captures.length === 0
+            ? "No captures — this run has not reached a step that takes one."
+            : "No captures of that kind on this run."}
+        </p>
+      ) : (
+        <div className="grid grid-cols-2 gap-[var(--ds-space-snug)]">
+          {shown.map((c) => (
             <button
               key={c.id}
               type="button"
               onClick={() => setOpen(captures.indexOf(c))}
               aria-label={`Open capture — ${c.label}${c.failure ? " (failure capture)" : ""}`}
-              title={`${c.label}${c.capturedAt ? ` · ${fmtClock(c.capturedAt)}` : ""}`}
               className={cn(
-                "flex h-10 w-[4.75rem] shrink-0 flex-col items-center justify-center gap-0.5 border bg-[var(--ds-surface-2)]",
-                "rounded-[var(--ds-radius-md)]",
+                "flex min-w-0 flex-col items-start gap-[var(--ds-space-hair)] border bg-[var(--ds-surface-2)] text-left",
+                "px-[var(--ds-space-snug)] py-[var(--ds-space-snug)] rounded-[var(--ds-radius-md)]",
                 dsFocus,
+                dsMotion.fast,
+                // it opens the lightbox — a real command, so it dips like every
+                // other pressable in the system
+                "active:translate-y-px",
                 c.failure
                   ? "border-[length:var(--ds-border-w-rail)] border-[color:var(--ds-danger)]"
-                  : "border-[color:var(--ds-border)] hover:border-[color:var(--ds-border-loud)]",
+                  : "border-[color:var(--ds-border)] hover:border-[color:var(--ds-border-loud)] hover:bg-[var(--ds-surface-3)]",
               )}
             >
-              <Camera
+              <span
                 aria-hidden
-                className={cn(dsIcon.sm, c.failure ? "text-[color:var(--ds-danger)]" : "text-[color:var(--ds-fg-muted)]")}
-              />
-              <span className={cn("max-w-full truncate px-1", dsText.micro, "text-[color:var(--ds-fg-muted)]")}>{c.label}</span>
+                className={cn(
+                  "flex h-9 w-full items-center justify-center border bg-[var(--ds-surface-1)] rounded-[var(--ds-radius-sm)]",
+                  c.failure ? "border-[color:var(--ds-danger-border)]" : "border-[color:var(--ds-border-subtle)]",
+                )}
+              >
+                <Camera
+                  className={cn(dsIcon.md, c.failure ? "text-[color:var(--ds-danger)]" : "text-[color:var(--ds-fg-muted)]")}
+                />
+              </span>
+              <span
+                className={cn(
+                  "w-full truncate",
+                  dsText.meta,
+                  c.failure ? "text-[color:var(--ds-danger)]" : "text-[color:var(--ds-fg-secondary)]",
+                )}
+              >
+                {c.label}
+              </span>
+              <span className={cn("w-full truncate", dsText.micro, "text-[color:var(--ds-fg-muted)]")}>
+                {[CAPTURE_KIND_LABEL[c.kind], c.step, c.capturedAt && fmtClock(c.capturedAt)].filter(Boolean).join(" · ")}
+              </span>
             </button>
-          ))
-        )}
-      </div>
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            aria-label="Export this run"
-            className={cn(
-              "inline-flex shrink-0 items-center gap-[var(--ds-space-tight)] border px-[var(--ds-space-base)]",
-              "h-[var(--ds-h-sm)] rounded-[var(--ds-radius-md)] border-[color:var(--ds-border)] bg-[var(--ds-surface-1)]",
-              dsText.meta,
-              dsFocus,
-              "text-[color:var(--ds-fg-secondary)]",
-            )}
-          >
-            <Download aria-hidden className={dsIcon.sm} />
-            Export
-            <ChevronDown aria-hidden className={dsIcon.sm} />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-[240px]">
-          <DropdownMenuItem
-            className={dsText.body}
-            onSelect={() => {
-              downloadDemoFile(`${row.trace}-logs.txt`, exportRunLogsText(row), "text/plain");
-              toast({ tone: "success", title: "Logs exported", description: `${row.trace}-logs.txt — the run's own lines, nothing added.` });
-            }}
-          >
-            <FileText aria-hidden className={cn("mr-2", dsIcon.md)} />
-            Logs as .txt
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            className={dsText.body}
-            onSelect={() => {
-              downloadDemoFile(`${row.trace}-run.json`, exportRunJson(row), "application/json");
-              toast({
-                tone: "success",
-                title: "Run exported",
-                description: `${row.trace}-run.json — the served row, its receipt, its failure record and its captures.`,
-              });
-            }}
-          >
-            <FileJson aria-hidden className={cn("mr-2", dsIcon.md)} />
-            Run as .json
-          </DropdownMenuItem>
-          <DropdownMenuItem className={dsText.body} onSelect={copyTrace}>
-            <Copy aria-hidden className={cn("mr-2", dsIcon.md)} />
-            Copy the trace id
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          ))}
+        </div>
+      )}
 
       {open !== null && (
         <CaptureLightbox captures={captures} index={open} onIndex={setOpen} onClose={() => setOpen(null)} row={row} />
       )}
-    </div>
+    </section>
   );
 }
