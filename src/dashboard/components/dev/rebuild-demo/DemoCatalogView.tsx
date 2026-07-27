@@ -3,6 +3,7 @@ import { ArrowRight, Layers, LayoutList, Link2, PanelRight, Workflow } from "luc
 import { cn } from "@/lib/utils";
 import { CONTAINMENT_KINDS, DENSITY_LADDER, PANEL_KINDS, ROLLUP_STEPS, ROW_VARIANTS, type RowVariantSpec } from "./demo-catalog";
 import { DEMO_ROWS } from "./demo-data";
+import { Button, dsBorder, dsIcon, dsRadius, dsSurface, dsText } from "./demo-ui";
 
 /**
  * DEV-ONLY — the catalog view of `?view=rebuild-demo`.
@@ -16,22 +17,60 @@ import { DEMO_ROWS } from "./demo-data";
  */
 
 const TYPE_TONE: Record<RowVariantSpec["rowType"], string> = {
-  "Run Row": "border-info/40 bg-info/10 text-info",
-  "Group Row": "border-log-violet/40 bg-log-violet/10 text-log-violet",
+  "Run Row": "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
+  "Group Row":
+    "border-[color:var(--ds-status-parked-border)] bg-[var(--ds-status-parked-bg)] text-[color:var(--ds-status-parked-fg)]",
   "Member Row": "border-log-teal/40 bg-log-teal/10 text-log-teal",
 };
 
+/** one specimen card — every section builds the same object */
+const specimenCard = cn("flex flex-col border p-[var(--ds-space-cozy)]", dsRadius.lg, dsBorder.base, dsSurface.card);
+
+/** the neutral fact chip this page uses everywhere a code or a step is named */
+const catalogChip = cn(
+  "inline-flex items-center border",
+  "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
+  dsRadius.sm,
+  dsText.micro,
+  "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-secondary)]",
+);
+
+/** the bullet a spec list hangs on — 6px down so it sits on the x-height */
+const specBullet = "mt-[var(--ds-space-snug)] size-1 shrink-0 rounded-full";
+
 function SectionHead({ icon: Icon, title, blurb }: { icon: typeof LayoutList; title: string; blurb: string }) {
   return (
-    <div className="mb-3 flex items-start gap-2.5">
-      <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-secondary/40">
-        <Icon aria-hidden className="size-3.5 text-muted-foreground" />
+    <div className="mb-[var(--ds-space-cozy)] flex items-start gap-[var(--ds-space-cozy)]">
+      <span
+        className={cn(
+          "mt-px flex size-7 shrink-0 items-center justify-center border",
+          dsRadius.md,
+          dsBorder.base,
+          "bg-[var(--ds-surface-2)]",
+        )}
+      >
+        <Icon aria-hidden className={cn(dsIcon.md, "text-[color:var(--ds-fg-muted)]")} />
       </span>
       <div className="min-w-0">
-        <h2 className="text-[14px] font-semibold text-foreground">{title}</h2>
-        <p className="text-[11.5px] leading-relaxed text-muted-foreground">{blurb}</p>
+        <h2 className={cn(dsText.section, "font-semibold text-[color:var(--ds-fg)]")}>{title}</h2>
+        <p className={cn(dsText.body, "leading-relaxed text-[color:var(--ds-fg-muted)]")}>{blurb}</p>
       </div>
     </div>
+  );
+}
+
+/** the "See <a live row> →" jump. It was three copies of one button. */
+function ExampleButton({ id, label, onOpen }: { id: string; label?: string; onOpen: (id: string) => void }) {
+  return (
+    <Button
+      size="sm"
+      variant="secondary"
+      onClick={() => onOpen(id)}
+      className="ml-auto"
+      iconAfter={<ArrowRight aria-hidden className={dsIcon.sm} />}
+    >
+      {label ?? `See ${DEMO_ROWS[id]?.title.slice(0, 22) ?? "example"}`}
+    </Button>
   );
 }
 
@@ -52,7 +91,7 @@ export function DemoCatalogView({ onOpenExample }: { onOpenExample: (id: string)
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-5">
+      <div className="mx-auto flex max-w-6xl flex-col gap-[var(--ds-space-page)] px-[var(--ds-space-section)] py-[var(--ds-space-section)]">
         {/* ---- row variants ---- */}
         <section>
           <SectionHead
@@ -60,49 +99,51 @@ export function DemoCatalogView({ onOpenExample }: { onOpenExample: (id: string)
             title="Queue Rows — 8 named variants over the 3 ratified types"
             blurb="The row TYPE is structural (Run / Group / Member). The variant is what it is about, and it decides the title rule, what the row body carries, and which Log Panel you land in."
           />
-          <div className="grid gap-2.5 min-[1100px]:grid-cols-2">
+          <div className="grid gap-[var(--ds-space-cozy)] min-[1100px]:grid-cols-2">
             {ROW_VARIANTS.map((v) => (
-              <article key={v.key} className="flex flex-col rounded-lg border border-border bg-card p-3">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-[13px] font-semibold text-foreground">{v.name}</h3>
-                  <span className={cn("rounded border px-1.5 py-px text-[9.5px] font-semibold uppercase tracking-wider", TYPE_TONE[v.rowType])}>
+              <article key={v.key} className={specimenCard}>
+                <div className="flex items-center gap-[var(--ds-space-base)]">
+                  <h3 className={cn(dsText.title, "font-semibold text-[color:var(--ds-fg)]")}>{v.name}</h3>
+                  <span
+                    className={cn(
+                      "inline-flex shrink-0 items-center border px-[var(--ds-space-snug)]",
+                      "h-[var(--ds-h-xs)]",
+                      dsRadius.sm,
+                      dsText.caps,
+                      TYPE_TONE[v.rowType],
+                    )}
+                  >
                     {v.rowType}
                   </span>
-                  {v.exampleId && (
-                    <button
-                      type="button"
-                      onClick={() => onOpenExample(v.exampleId as string)}
-                      className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-primary/45 bg-primary/12 px-2 py-0.5 text-[10.5px] font-semibold text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      See {DEMO_ROWS[v.exampleId]?.title.slice(0, 22) ?? "example"}
-                      <ArrowRight aria-hidden className="size-3" />
-                    </button>
-                  )}
+                  {v.exampleId && <ExampleButton id={v.exampleId} onOpen={onOpenExample} />}
                 </div>
-                <p className="mt-1.5 text-[11.5px] leading-relaxed text-secondary-foreground">{v.subject}</p>
-                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{v.titleRule}</p>
+                <p className={cn(dsText.body, "mt-[var(--ds-space-snug)] leading-relaxed text-[color:var(--ds-fg-secondary)]")}>{v.subject}</p>
+                <p className={cn(dsText.meta, "mt-[var(--ds-space-tight)] leading-relaxed text-[color:var(--ds-fg-muted)]")}>{v.titleRule}</p>
 
-                <ul className="mt-2 flex flex-col gap-0.5">
+                <ul className="mt-[var(--ds-space-base)] flex flex-col gap-[var(--ds-space-hair)]">
                   {v.carries.map((c) => (
-                    <li key={c} className="flex gap-1.5 text-[11px] text-muted-foreground">
-                      <span aria-hidden className="mt-[6px] size-1 shrink-0 rounded-full bg-muted-foreground/60" />
+                    <li key={c} className={cn(dsText.meta, "flex gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
+                      <span aria-hidden className={cn(specBullet, "bg-[var(--ds-fg-faint)]")} />
                       <span className="min-w-0">{c}</span>
                     </li>
                   ))}
                 </ul>
 
-                <p className="mt-2 rounded-md border border-warning/30 bg-warning/6 px-2.5 py-1.5 text-[11px] leading-relaxed text-warning">
+                <p
+                  className={cn(
+                    dsText.meta,
+                    "mt-[var(--ds-space-base)] border px-[var(--ds-space-base)] py-[var(--ds-space-snug)] leading-relaxed",
+                    dsRadius.md,
+                    "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
+                  )}
+                >
                   {v.gotcha}
                 </p>
 
-                <div className="mt-2 flex flex-wrap gap-1">
+                <div className="mt-[var(--ds-space-base)] flex flex-wrap gap-[var(--ds-space-tight)]">
                   {v.workflows.map((w) => (
-                    <span
-                      key={w.code}
-                      title={w.note}
-                      className="inline-flex items-center gap-1 rounded border border-border bg-secondary/40 px-1.5 py-px text-[10px] text-secondary-foreground"
-                    >
-                      <span className="font-mono text-muted-foreground">{w.code}</span>
+                    <span key={w.code} title={w.note} className={catalogChip}>
+                      <span className={cn(dsText.nums, "text-[color:var(--ds-fg-muted)]")}>{w.code}</span>
                       {w.label}
                     </span>
                   ))}
@@ -119,24 +160,24 @@ export function DemoCatalogView({ onOpenExample }: { onOpenExample: (id: string)
             title="Containment — the one field that decides where a child lives"
             blurb="Not every child of a row is a member. Getting this wrong is what makes the same run appear in two panels and the badges disagree with the rows."
           />
-          <div className="grid gap-2.5 min-[1100px]:grid-cols-3">
+          <div className="grid gap-[var(--ds-space-cozy)] min-[1100px]:grid-cols-3">
             {CONTAINMENT_KINDS.map((c) => (
-              <article key={c.key} className="flex flex-col rounded-lg border border-border bg-card p-3">
-                <div className="flex items-baseline gap-2">
-                  <h3 className="text-[13px] font-semibold text-foreground">{c.name}</h3>
-                  <span className="font-mono text-[10px] text-muted-foreground">{c.key}</span>
+              <article key={c.key} className={specimenCard}>
+                <div className="flex items-baseline gap-[var(--ds-space-base)]">
+                  <h3 className={cn(dsText.title, "font-semibold text-[color:var(--ds-fg)]")}>{c.name}</h3>
+                  <span className={cn(dsText.micro, dsText.nums, "text-[color:var(--ds-fg-muted)]")}>{c.key}</span>
                 </div>
-                <p className="mt-1.5 text-[11.5px] leading-relaxed text-secondary-foreground">{c.rule}</p>
-                <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-                  <span className="text-secondary-foreground">Lives:</span> {c.lives}
+                <p className={cn(dsText.body, "mt-[var(--ds-space-snug)] leading-relaxed text-[color:var(--ds-fg-secondary)]")}>{c.rule}</p>
+                <p className={cn(dsText.meta, "mt-[var(--ds-space-snug)] leading-relaxed text-[color:var(--ds-fg-muted)]")}>
+                  <span className="text-[color:var(--ds-fg-secondary)]">Lives:</span> {c.lives}
                 </p>
-                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                  <span className="text-secondary-foreground">Counts:</span> {c.counts}
+                <p className={cn(dsText.meta, "mt-[var(--ds-space-tight)] leading-relaxed text-[color:var(--ds-fg-muted)]")}>
+                  <span className="text-[color:var(--ds-fg-secondary)]">Counts:</span> {c.counts}
                 </p>
-                <ul className="mt-2 flex flex-col gap-0.5">
+                <ul className="mt-[var(--ds-space-base)] flex flex-col gap-[var(--ds-space-hair)]">
                   {c.examples.map((e) => (
-                    <li key={e} className="flex gap-1.5 text-[11px] text-muted-foreground">
-                      <span aria-hidden className="mt-[6px] size-1 shrink-0 rounded-full bg-muted-foreground/60" />
+                    <li key={e} className={cn(dsText.meta, "flex gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
+                      <span aria-hidden className={cn(specBullet, "bg-[var(--ds-fg-faint)]")} />
                       <span className="min-w-0">{e}</span>
                     </li>
                   ))}
@@ -153,36 +194,29 @@ export function DemoCatalogView({ onOpenExample }: { onOpenExample: (id: string)
             title="Rollup precedence and the density ladder"
             blurb="A group's status is never authored — it is rolled up from its members through one shared function. Its shape is never a new row type — it is a rung on a ladder driven by member count."
           />
-          <div className="rounded-lg border border-border bg-card p-3">
-            <div className="text-[11.5px] font-semibold text-foreground">Rollup precedence</div>
-            <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+          <div className={specimenCard}>
+            <div className={cn(dsText.ui, "font-semibold text-[color:var(--ds-fg)]")}>Rollup precedence</div>
+            <p className={cn(dsText.meta, "mt-[var(--ds-space-tight)] leading-relaxed text-[color:var(--ds-fg-muted)]")}>
               First match wins. A rejected member is excluded entirely — but an otherwise-verified group holding one drops to Done with warnings, so a
               packet with an unreadable page can never read as clean.
             </p>
-            <div className="mt-2 flex flex-wrap items-center gap-1">
+            <div className="mt-[var(--ds-space-base)] flex flex-wrap items-center gap-[var(--ds-space-tight)]">
               {ROLLUP_STEPS.map((s, i) => (
-                <span key={s} className="inline-flex items-center gap-1">
-                  {i > 0 && <ArrowRight aria-hidden className="size-3 text-muted-foreground/60" />}
-                  <span className="rounded-md border border-border bg-secondary/40 px-2 py-0.5 text-[11px] text-secondary-foreground">{s}</span>
+                <span key={s} className="inline-flex items-center gap-[var(--ds-space-tight)]">
+                  {i > 0 && <ArrowRight aria-hidden className={cn(dsIcon.sm, "text-[color:var(--ds-fg-faint)]")} />}
+                  <span className={catalogChip}>{s}</span>
                 </span>
               ))}
             </div>
           </div>
-          <div className="mt-2.5 grid gap-2.5 min-[1100px]:grid-cols-2">
+          <div className="mt-[var(--ds-space-cozy)] grid gap-[var(--ds-space-cozy)] min-[1100px]:grid-cols-2">
             {DENSITY_LADDER.map((d) => (
-              <article key={d.key} className="flex flex-col rounded-lg border border-border bg-card p-3">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-[13px] font-semibold text-foreground">{d.range}</h3>
-                  <button
-                    type="button"
-                    onClick={() => onOpenExample(d.exampleId)}
-                    className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-primary/45 bg-primary/12 px-2 py-0.5 text-[10.5px] font-semibold text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    See {DEMO_ROWS[d.exampleId]?.title.slice(0, 22) ?? "example"}
-                    <ArrowRight aria-hidden className="size-3" />
-                  </button>
+              <article key={d.key} className={specimenCard}>
+                <div className="flex items-center gap-[var(--ds-space-base)]">
+                  <h3 className={cn(dsText.title, "font-semibold text-[color:var(--ds-fg)]")}>{d.range}</h3>
+                  <ExampleButton id={d.exampleId} onOpen={onOpenExample} />
                 </div>
-                <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">{d.what}</p>
+                <p className={cn(dsText.body, "mt-[var(--ds-space-snug)] leading-relaxed text-[color:var(--ds-fg-muted)]")}>{d.what}</p>
               </article>
             ))}
           </div>
@@ -197,54 +231,51 @@ export function DemoCatalogView({ onOpenExample }: { onOpenExample: (id: string)
           />
           <div className="grid gap-2.5 min-[1100px]:grid-cols-2">
             {PANEL_KINDS.map((p) => (
-              <article key={p.key} className="flex flex-col rounded-lg border border-border bg-card p-3">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-[13px] font-semibold text-foreground">{p.name}</h3>
-                  {p.exampleId && (
-                    <button
-                      type="button"
-                      onClick={() => onOpenExample(p.exampleId as string)}
-                      className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-primary/45 bg-primary/12 px-2 py-0.5 text-[10.5px] font-semibold text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      Open it
-                      <ArrowRight aria-hidden className="size-3" />
-                    </button>
-                  )}
+              <article key={p.key} className={specimenCard}>
+                <div className="flex items-center gap-[var(--ds-space-base)]">
+                  <h3 className={cn(dsText.title, "font-semibold text-[color:var(--ds-fg)]")}>{p.name}</h3>
+                  {p.exampleId && <ExampleButton id={p.exampleId} label="Open it" onOpen={onOpenExample} />}
                 </div>
-                <p className="mt-1 text-[11px] text-muted-foreground">{p.forRows}</p>
+                <p className={cn(dsText.meta, "mt-[var(--ds-space-tight)] text-[color:var(--ds-fg-muted)]")}>{p.forRows}</p>
 
-                <div className="mt-2 flex flex-wrap items-center gap-1">
+                {/* The SAME tab treatment the real panel uses — an underline on
+                    the default tab, not a filled pill. A specimen that shows a
+                    control the product does not have teaches the wrong thing. */}
+                <div className={cn("mt-[var(--ds-space-base)] flex flex-wrap items-center border-b", dsBorder.subtle)}>
                   {p.tabs.map((t, i) => (
                     <span
                       key={t}
                       className={cn(
-                        "rounded-md px-2 py-0.5 text-[11px]",
-                        i === 0 ? "bg-accent font-semibold text-foreground" : "border border-border text-muted-foreground",
+                        "-mb-px inline-flex items-center border-b-2 border-transparent px-[var(--ds-space-base)] py-[var(--ds-space-tight)]",
+                        dsText.meta,
+                        i === 0
+                          ? "border-b-[color:var(--ds-accent)] font-semibold text-[color:var(--ds-fg)]"
+                          : "text-[color:var(--ds-fg-muted)]",
                       )}
                     >
                       {t}
                     </span>
                   ))}
                 </div>
-                <p className="mt-1.5 text-[11px] text-muted-foreground">
-                  <span className="text-secondary-foreground">Opens on:</span> {p.defaultTab}
+                <p className={cn(dsText.meta, "mt-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
+                  <span className="text-[color:var(--ds-fg-secondary)]">Opens on:</span> {p.defaultTab}
                 </p>
 
-                <span className="mt-2 text-[10px] uppercase tracking-wider text-muted-foreground">Always visible</span>
-                <ul className="mt-0.5 flex flex-col gap-0.5">
+                <span className={cn(dsText.caps, "mt-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]")}>Always visible</span>
+                <ul className="mt-[var(--ds-space-tight)] flex flex-col gap-[var(--ds-space-hair)]">
                   {p.pinned.map((c) => (
-                    <li key={c} className="flex gap-1.5 text-[11px] text-muted-foreground">
-                      <span aria-hidden className="mt-[6px] size-1 shrink-0 rounded-full bg-info/60" />
+                    <li key={c} className={cn(dsText.meta, "flex gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
+                      <span aria-hidden className={cn(specBullet, "bg-[var(--ds-info-fg)] opacity-60")} />
                       <span className="min-w-0">{c}</span>
                     </li>
                   ))}
                 </ul>
 
-                <span className="mt-2 text-[10px] uppercase tracking-wider text-muted-foreground">Specifics</span>
-                <ul className="mt-0.5 flex flex-col gap-0.5">
+                <span className={cn(dsText.caps, "mt-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]")}>Specifics</span>
+                <ul className="mt-[var(--ds-space-tight)] flex flex-col gap-[var(--ds-space-hair)]">
                   {p.specifics.map((c) => (
-                    <li key={c} className="flex gap-1.5 text-[11px] text-secondary-foreground">
-                      <span aria-hidden className="mt-[6px] size-1 shrink-0 rounded-full bg-muted-foreground/60" />
+                    <li key={c} className={cn(dsText.meta, "flex gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-secondary)]")}>
+                      <span aria-hidden className={cn(specBullet, "bg-[var(--ds-fg-faint)]")} />
                       <span className="min-w-0">{c}</span>
                     </li>
                   ))}
@@ -261,18 +292,24 @@ export function DemoCatalogView({ onOpenExample }: { onOpenExample: (id: string)
             title="Every workflow, and the rows it produces"
             blurb="The same table read the other way — pick your workflow, see which row variants it puts in the queue and what is specific about each."
           />
-          <div className="overflow-hidden rounded-lg border border-border">
+          <div className={cn("overflow-hidden border", dsRadius.lg, dsBorder.base)}>
             {byWorkflow.map((w, i) => (
-              <div key={w.code} className={cn("flex gap-3 px-3 py-2", i > 0 && "border-t border-border/60")}>
-                <span className="flex w-40 shrink-0 items-baseline gap-1.5">
-                  <span className="font-mono text-[10.5px] text-muted-foreground">{w.code}</span>
-                  <span className="text-[12.5px] font-medium text-foreground">{w.label}</span>
+              <div
+                key={w.code}
+                className={cn(
+                  "flex gap-[var(--ds-space-cozy)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
+                  i > 0 && cn("border-t", dsBorder.subtle),
+                )}
+              >
+                <span className="flex w-40 shrink-0 items-baseline gap-[var(--ds-space-snug)]">
+                  <span className={cn(dsText.meta, dsText.nums, "text-[color:var(--ds-fg-muted)]")}>{w.code}</span>
+                  <span className={cn(dsText.ui, "font-medium text-[color:var(--ds-fg)]")}>{w.label}</span>
                 </span>
-                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <div className="flex min-w-0 flex-1 flex-col gap-[var(--ds-space-tight)]">
                   {w.uses.map((u) => (
-                    <div key={u.variant} className="flex min-w-0 gap-2 text-[11.5px]">
-                      <span className="w-40 shrink-0 text-secondary-foreground">{u.variant}</span>
-                      <span className="min-w-0 flex-1 text-muted-foreground">{u.note}</span>
+                    <div key={u.variant} className={cn(dsText.body, "flex min-w-0 gap-[var(--ds-space-base)]")}>
+                      <span className="w-40 shrink-0 text-[color:var(--ds-fg-secondary)]">{u.variant}</span>
+                      <span className="min-w-0 flex-1 text-[color:var(--ds-fg-muted)]">{u.note}</span>
                     </div>
                   ))}
                 </div>
