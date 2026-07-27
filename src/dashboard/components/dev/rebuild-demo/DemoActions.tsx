@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { actionsAt, type ActionDescriptorWire, type ActionIconKey, type ActionIntent } from "./demo-wire";
-import { Button, IconButton, dsBorder, dsFocus, dsIcon, dsMotion, dsRadius, dsText } from "./demo-ui";
+import { Button, IconButton, dsBorder, dsFocus, dsIcon, dsMotion, dsRadius, dsText, useDsModalPresence } from "./demo-ui";
 import type { DemoRow } from "./demo-data";
 import type { DemoCommandResult } from "./demo-commands";
 
@@ -343,45 +343,66 @@ export function ConfirmCommandDialog({
   return (
     <Dialog open={Boolean(pending && confirm)} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent size="sm">
-        <DialogHeader>
+        {pending && confirm && <ConfirmBody pending={pending} confirm={confirm} onCancel={onCancel} onConfirm={onConfirm} />}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * The body is its own component so it mounts ONLY while the dialog is open —
+ * which is what lets it register modal presence. This is the app's dialog
+ * (`@/components/ui/dialog`), not the `ds` one, so nothing registers on its
+ * behalf: without this, a persistent `danger` toast stays live in the corner
+ * and can intercept a click meant for the confirm button.
+ */
+function ConfirmBody({
+  pending,
+  confirm,
+  onCancel,
+  onConfirm,
+}: {
+  pending: PendingCommand;
+  confirm: NonNullable<ActionDescriptorWire["confirm"]>;
+  onCancel: () => void;
+  onConfirm: (pending: PendingCommand) => void;
+}) {
+  useDsModalPresence();
+  return (
+    <>
+      <DialogHeader>
           <DialogTitle className={cn(dsText.title, "flex items-center gap-[var(--ds-space-base)]")}>
             <AlertTriangle
               aria-hidden
               className={cn(
                 dsIcon.lg,
                 "shrink-0",
-                confirm?.tone === "destructive"
+                confirm.tone === "destructive"
                   ? "text-[color:var(--ds-danger)]"
                   : "text-[color:var(--ds-status-waiting-fg)]",
               )}
             />
-            {confirm?.title}
+            {confirm.title}
           </DialogTitle>
           {/* The blast radius, in the operator's terms. This copy is served with
               the descriptor — the client never writes a confirmation message,
               because only the server knows how many rows are involved. */}
-          <DialogDescription className={cn(dsText.body, "leading-relaxed")}>{confirm?.body}</DialogDescription>
+          <DialogDescription className={cn(dsText.body, "leading-relaxed")}>{confirm.body}</DialogDescription>
         </DialogHeader>
-        {pending && (
-          <div className={cn(dsText.meta, dsText.nums, "px-1 text-[color:var(--ds-fg-muted)]")}>
-            {pending.row.workflow.label} · {pending.row.trace} · version {pending.action.expectedVersion ?? pending.row.version}
-          </div>
-        )}
+        <div className={cn(dsText.meta, dsText.nums, "px-1 text-[color:var(--ds-fg-muted)]")}>
+          {pending.row.workflow.label} · {pending.row.trace} · version {pending.action.expectedVersion ?? pending.row.version}
+        </div>
         <DialogFooter>
           {/* The safe exit is `secondary` and it comes FIRST; the surface's one
               committing action is last, so the eye ends on the verb. */}
-          <Button variant="secondary" onClick={onCancel}>
-            Keep it as it is
-          </Button>
-          <Button
-            variant={confirm?.tone === "destructive" ? "danger" : "primary"}
-            onClick={() => pending && onConfirm(pending)}
-          >
-            {confirm?.confirmLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <Button variant="secondary" onClick={onCancel}>
+          Keep it as it is
+        </Button>
+        <Button variant={confirm.tone === "destructive" ? "danger" : "primary"} onClick={() => onConfirm(pending)}>
+          {confirm.confirmLabel}
+        </Button>
+      </DialogFooter>
+    </>
   );
 }
 
