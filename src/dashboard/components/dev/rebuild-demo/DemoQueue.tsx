@@ -238,17 +238,19 @@ function MemberDetailCell({ row }: { row: DemoRow }) {
   const outcome = row.memberOutcomeSpec;
   if (outcome) {
     return (
-      <span
-        title={outcome.meaning}
-        className={cn(dsText.meta, "min-w-0 truncate", OUTCOME_TONE[outcome.tone])}
-      >
+      <span title={outcome.meaning} className={cn(dsText.meta, "min-w-0 truncate", OUTCOME_TONE[outcome.tone])}>
         {outcome.label}
       </span>
     );
   }
-  // No vocabulary declared, and nothing found yet, both read as "—" rather than
-  // as an empty cell: a blank column in a list of filled ones reads as a value
-  // that failed to load.
+  if (row.workflow.memberOutcomes) {
+    // The workflow HAS a vocabulary and this member has not answered yet. The
+    // column holds outcomes and only outcomes — dropping its free-text fact in
+    // here would put `person-lookup…` under a heading that reads `Outcome`, and
+    // the whole complaint was two axes sharing one column. An em dash rather
+    // than an empty cell, so a blank does not read as a value that failed.
+    return <span className={cn(dsText.meta, dsText.nums, "text-[color:var(--ds-fg-faint)]")}>—</span>;
+  }
   return (
     <span
       className={cn(
@@ -833,45 +835,45 @@ function PacketBeforeFanout({ row, handlers }: { row: DemoRow; handlers: DemoQue
           <Users aria-hidden className={cn(dsIcon.sm, "text-[color:var(--ds-fg-muted)]")} />
           {row.extractedCount} people
         </span>
-        <span className="text-[color:var(--ds-fg-muted)]">extracted — no member rows yet, they are created when you approve</span>
+        <span className="text-[color:var(--ds-fg-muted)]">member rows appear when you approve</span>
       </div>
       {bulk && (
         <div
           className={cn(
-            "flex min-w-0 items-center border",
+            "flex min-w-0 flex-col border",
             "gap-[var(--ds-space-snug)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]",
             dsRadius.md,
             "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]",
           )}
         >
-          <Button
-            size="sm"
-            variant="primary"
-            onClick={(e) => e.stopPropagation()}
-            icon={<CheckCircle2 aria-hidden className={dsIcon.sm} />}
-            className="shrink-0"
-          >
-            Approve {bulk.approvable} of {bulk.total}
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (row.reviewRunId) handlers.onOpenPanel(DEMO_ROWS[row.reviewRunId].wfLabel, row.reviewRunId);
-            }}
-            iconAfter={<ArrowUpRight aria-hidden className={dsIcon.sm} />}
-            className="shrink-0"
-          >
-            Open review
-          </Button>
-          {bulk.excluded && (
-            <span
-              // The full sentence stays reachable without hover: it is the gate
-              // note the panel renders, one press away on the same row.
-              title={`${bulk.excluded.count} of ${bulk.total} cannot be approved — ${bulk.excluded.reason}. Open the review for the rest.`}
-              className={cn(dsText.meta, "ml-auto min-w-0 truncate text-[color:var(--ds-status-waiting-fg)]")}
+          <div className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={(e) => e.stopPropagation()}
+              icon={<CheckCircle2 aria-hidden className={dsIcon.sm} />}
+              className="shrink-0"
             >
+              Approve {bulk.approvable} of {bulk.total}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (row.reviewRunId) handlers.onOpenPanel(DEMO_ROWS[row.reviewRunId].wfLabel, row.reviewRunId);
+              }}
+              iconAfter={<ArrowUpRight aria-hidden className={dsIcon.sm} />}
+              className="shrink-0"
+            >
+              Open review
+            </Button>
+          </div>
+          {bulk.excluded && (
+            // Its OWN line, because the leftover gutter beside two buttons in a
+            // 400px column is ~110px and cut the one fact this line carries to
+            // `1 excluded — Die…`. One line at full width holds it whole.
+            <span className={cn(dsText.meta, "min-w-0 truncate text-[color:var(--ds-status-waiting-fg)]")}>
               <span className={dsText.nums}>{bulk.excluded.count}</span> excluded — {bulk.excluded.reason}
             </span>
           )}
@@ -1048,8 +1050,10 @@ function GroupMemberList({
  * The drill-in's columns. The detail and EID widths are the SAME tokens the
  * well uses, so a member says the same thing in the same place at both rungs.
  */
-const DRILL_GRID =
-  "grid grid-cols-[1rem_minmax(110px,1fr)_var(--ds-w-member-eid)_var(--ds-w-member-detail)_3rem]";
+// The name column takes `minmax(0,…)`, not a 110px floor: a floor plus four
+// fixed columns overflowed the 400px queue and clipped the duration off the
+// right edge, which is how a table ends up saying `41` where it means `41s`.
+const DRILL_GRID = "grid grid-cols-[1rem_minmax(0,1fr)_var(--ds-w-member-eid)_var(--ds-w-member-detail)_2.5rem]";
 
 /** the drill-in header's three summary chips — one shape, two loudness levels */
 const drillChip = (warn: boolean): string =>
@@ -1133,7 +1137,7 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
           dsText.caps,
           "shrink-0 items-center border-b bg-[var(--ds-surface-2)]",
           dsBorder.subtle,
-          "h-[var(--ds-h-xs)] gap-x-[var(--ds-space-cozy)] px-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]",
+          "h-[var(--ds-h-xs)] gap-x-[var(--ds-space-base)] px-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]",
         )}
       >
         <span />
@@ -1160,7 +1164,7 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
               className={cn(
                 DRILL_GRID,
                 "w-full cursor-pointer items-center text-left",
-                "h-[var(--ds-h-row)] gap-x-[var(--ds-space-cozy)] px-[var(--ds-space-cozy)]",
+                "h-[var(--ds-h-row)] gap-x-[var(--ds-space-base)] px-[var(--ds-space-cozy)]",
                 dsText.body,
                 dsFocus,
                 dsMotion.fast,
