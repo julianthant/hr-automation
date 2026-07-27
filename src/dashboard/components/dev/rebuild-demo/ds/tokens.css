@@ -201,6 +201,44 @@
   --ds-success-border: color-mix(in srgb, var(--success) 38%, transparent);
 
   /* ---------------------------------------------------------------------
+     DIRECTION — which way a value moved. ONE axis, TWO tones.
+
+     This is a deliberate, narrow exception to the "one accent + four semantic
+     hues" budget, and the case for it is that direction is INFORMATION, not
+     decoration: the log stream and the Data ledger both interleave values the
+     run READ with values it WROTE, and a write is the one that changed the
+     world. Telling them apart is the first thing an operator does on either
+     surface, and the arrow alone was carrying it at 12px.
+
+     It is NOT the old categorical `--log-*` set coming back. That was four
+     hues for four categories (nav / search / read / write) painted on top of
+     four status hues. This is two tones of one axis, and it is used for the
+     direction of a value and nothing else — never a heading, a chip, a status
+     or a section label.
+
+     Why these two hues:
+       · READ is BLUE because that is the colour the operator asks for it by,
+         and because receiving is the passive half of the pair.
+       · WRITE is PURPLE. Teal was rejected: held to 4.5:1 on paper it collapses
+         toward the success green, and a write must never borrow the colour of
+         "verified". Amber was rejected: it is reserved for "a human is
+         involved", and every write would then shout at gate volume.
+
+     Same `-fg` / `-mark` contract as every other hue, and here the split is
+     load-bearing rather than incidental: on Paper Ink the swatch that reads as
+     a 2px rail fails as 11px text, so ICONS AND TEXT read `-fg` (they carry
+     meaning and are held to 4.5:1) and rails / fills read `-mark`.
+     --------------------------------------------------------------------- */
+  --ds-read-fg: #38bdf8;
+  --ds-read-mark: #38bdf8;
+  --ds-read-bg: color-mix(in srgb, #38bdf8 12%, transparent);
+  --ds-read-border: color-mix(in srgb, #38bdf8 36%, transparent);
+  --ds-write-fg: #c4b5fd;
+  --ds-write-mark: #a78bfa;
+  --ds-write-bg: color-mix(in srgb, #a78bfa 14%, transparent);
+  --ds-write-border: color-mix(in srgb, #a78bfa 40%, transparent);
+
+  /* ---------------------------------------------------------------------
      TYPE — a seven-step scale. The demo previously used eleven ad-hoc sizes
      (9.5 / 10 / 10.5 / 11 / 11.5 / 12 / 12.5 / 13 …); half-pixel drift is
      what makes twenty surfaces built by twenty agents look like twenty
@@ -528,6 +566,19 @@ body[data-demo-theme="dark"] {
   --ds-success-bg: color-mix(in srgb, #12b76a 12%, transparent);
   --ds-success-border: color-mix(in srgb, #12b76a 38%, transparent);
 
+  /* --- direction (read / write) ------------------------------------------
+     Measured on the card plane (#18181b): read text 8.1:1, write text 10.0:1,
+     read mark 8.1:1, write mark 6.4:1. Both clear the 4.5:1 text floor, so on
+     this theme `-fg` and `-mark` differ only in weight, not in legibility. */
+  --ds-read-fg: #38bdf8;
+  --ds-read-mark: #38bdf8;
+  --ds-read-bg: color-mix(in srgb, #38bdf8 12%, transparent);
+  --ds-read-border: color-mix(in srgb, #38bdf8 36%, transparent);
+  --ds-write-fg: #c4b5fd;
+  --ds-write-mark: #a78bfa;
+  --ds-write-bg: color-mix(in srgb, #a78bfa 14%, transparent);
+  --ds-write-border: color-mix(in srgb, #a78bfa 40%, transparent);
+
   /* --- focus + elevation ------------------------------------------------ */
   --ds-focus-ring: color-mix(in srgb, #fafafa 85%, transparent);
   --ds-elev-1: 0 1px 2px hsl(0 0% 0% / 0.35);
@@ -694,6 +745,22 @@ body[data-demo-theme="light"] {
   --ds-success-mark: #059669;
   --ds-success-bg: color-mix(in srgb, #059669 12%, transparent);
   --ds-success-border: color-mix(in srgb, #065f46 38%, transparent);
+
+  /* --- direction (read / write) ------------------------------------------
+     This is the theme the `-fg` / `-mark` split exists for. Sky-600 (#0284c7)
+     reads as a rail at 4.1:1 on white but only 2.8:1 as text, so the text step
+     drops to #075985 (7.6:1 on white, 6.5:1 on its own rendered tint). Write
+     is purple rather than indigo on purpose: Paper Ink's accent IS indigo, and
+     a write must not read as "the primary action". Purple text #6b21a8 is
+     8.8:1 on white and 7.6:1 on its own tint; the #9333ea mark is 5.4:1. */
+  --ds-read-fg: #075985;
+  --ds-read-mark: #0284c7;
+  --ds-read-bg: color-mix(in srgb, #0284c7 10%, transparent);
+  --ds-read-border: color-mix(in srgb, #075985 34%, transparent);
+  --ds-write-fg: #6b21a8;
+  --ds-write-mark: #9333ea;
+  --ds-write-bg: color-mix(in srgb, #9333ea 10%, transparent);
+  --ds-write-border: color-mix(in srgb, #6b21a8 34%, transparent);
 
   /* --- focus + elevation ------------------------------------------------ */
   --ds-focus-ring: color-mix(in srgb, #0b0f19 85%, transparent);

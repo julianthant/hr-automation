@@ -88,6 +88,28 @@ paint four categorical hues on top of four status hues now paints one.
 Differentiate a category by **icon, label, type weight or a single subtle
 tint** — never by giving it a hue.
 
+#### The one exception: direction
+
+`--ds-read-*` (blue) and `--ds-write-*` (purple) colour **which way a value
+moved**, and nothing else. This is one semantic axis with two tones, not a
+category palette, and it is justified because direction is *information*: both
+the log stream and the Data ledger interleave what a run read with what it
+wrote, and the write is the line that changed the world.
+
+The rules that keep it narrow:
+
+- Used for a value's direction **only** — never a heading, a chip, a status or
+  a section label.
+- Both surfaces use the same pair, so blue means the same thing in the Data
+  ledger as in the log stream.
+- The **arrow icons stay**. Colour is never the only encoding.
+- Text and meaningful icons read `-fg` (4.5:1); rails and fills read `-mark`.
+
+Teal was rejected for writes: at 4.5:1 on Paper Ink it collapses toward the
+success green, and a write must never borrow the colour of *verified*. Amber
+was rejected: it is reserved for "a human is involved", so every write would
+shout at gate volume.
+
 **The accent is not automatically the action.** `--ds-accent` is the primary
 button's fill and `--ds-accent-mark` is the identity note. On Paper Ink they are
 the same indigo. On Graphite Warm they are NOT: its accent is amber, the same
