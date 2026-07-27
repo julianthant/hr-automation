@@ -318,50 +318,46 @@ const STEP_TONE: Record<DemoStep["state"], { bar: string; text: string; dot: str
   pending: { bar: "bg-border", text: "text-muted-foreground", dot: "bg-border" },
 };
 
-/** a step with no recorded time still needs a visible slot — this is its floor */
-const MIN_SLOT_SEC = 8;
-
 function Timeline({ row, tick }: { row: DemoRow; tick: number }) {
   const steps = row.steps;
   if (steps.length === 0) return null;
 
   const active = steps.reduce((a, s) => a + (s.durationSec ?? 0), 0);
   // The wait is as long as the wait REALLY is: now minus the instant the gate
-  // opened. It used to be `max(active, 90)` — a fabricated width that made
-  // every gate look like the whole run whether it was 2 minutes or 2 hours old.
+  // opened. It is no longer a width — it is the number printed under the
+  // hatched segment, which is the only place it was ever unambiguous.
   const gateSec = gateWaitSec(row, tick) ?? 0;
-  const slot = (s: DemoStep) => Math.max(s.durationSec ?? 0, MIN_SLOT_SEC);
-  const stepTotal = steps.reduce((a, s) => a + slot(s), 0);
-  // A 34-minute wait beside 3 minutes of work is a TRUE 91% of the track — and
-  // at 91% the step labels shrink to "3.¹2 4..". So the wedge is drawn clamped
-  // (never more than 3/5 of the track) while its LABEL still reads the real
-  // age. Clamping a bar and printing the true number is a chart convention;
-  // inventing the number was the bug this replaced.
-  const gateSlot = Math.min(gateSec, stepTotal * 1.5);
-  const gateClamped = gateSlot < gateSec;
-  const total = stepTotal + gateSlot;
+  const total = steps.length + (row.gate ? 1 : 0);
 
   return (
-    <div className="border-b border-border/60 px-3 py-2">
-      <div className="flex items-stretch gap-[3px]">
-        {steps.map((s) => {
+    <div className="px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]">
+      <div className="flex items-stretch gap-[var(--ds-space-hair)]">
+        {steps.map((s, i) => {
           const tone = STEP_TONE[s.state];
-          const width = `${(slot(s) / total) * 100}%`;
           const timed = s.durationSec !== undefined;
+          // The hover card is 240px wide in a segment that may be 60px wide, so
+          // it anchors to whichever edge keeps it on screen.
+          const anchorRight = total > 2 && i >= total - 2;
           return (
-            <div key={s.label} className="group relative min-w-0" style={{ width }}>
+            <div key={s.label} className="group relative min-w-0 flex-1 basis-0">
               {/* label rail — truncates hard; the hover card carries the detail */}
               <div className="flex min-w-0 items-center gap-1">
                 <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot, s.state === "current" && "animate-pulse motion-reduce:animate-none")} />
                 <span className={cn("min-w-0 truncate text-[10.5px]", s.state === "pending" ? "text-muted-foreground" : tone.text)}>{s.label}</span>
               </div>
-              {/* the track segment — width IS the duration */}
+              {/* the track segment — one step, one slot, every time */}
               <button
                 type="button"
                 onClick={NOOP}
                 aria-label={`${s.label} — ${s.state}${timed ? `, ${fmtElapsed(s.durationSec ?? 0)}` : ""}`}
                 className={cn(
+                  // A hover tint, and deliberately NO press dip: this segment is
+                  // a disclosure trigger, not a command. Without the tint nobody
+                  // discovers the detail card; with a dip it would promise a
+                  // commit that never happens.
                   "mt-1 block h-2 w-full rounded-[3px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  dsMotion.fast,
+                  "hover:brightness-125",
                   tone.bar,
                   !timed && s.state !== "pending" && "opacity-70",
                   s.state === "pending" && "border border-dashed border-border bg-transparent",
@@ -373,7 +369,12 @@ function Timeline({ row, tick }: { row: DemoRow; tick: number }) {
               </div>
 
               {(s.keyLines || timed) && (
-                <span className="absolute left-0 top-full z-50 mt-1 hidden w-60 rounded-lg border border-border bg-popover p-2.5 text-left shadow-lg group-hover:block group-focus-within:block">
+                <span
+                  className={cn(
+                    "absolute top-full z-50 mt-1 hidden w-60 rounded-lg border border-border bg-popover p-2.5 text-left shadow-lg group-hover:block group-focus-within:block",
+                    anchorRight ? "right-0" : "left-0",
+                  )}
+                >
                   <span className="mb-1 block text-[11.5px] font-semibold text-foreground">{s.label}</span>
                   <span className="flex items-center justify-between text-[10.5px]">
                     <span className="text-muted-foreground">Status</span>
@@ -411,20 +412,17 @@ function Timeline({ row, tick }: { row: DemoRow; tick: number }) {
           );
         })}
 
-        {/* the wait is part of the run's time, so it is part of the timeline */}
+        {/* the wait is part of the run's time, so it is part of the timeline —
+            one segment like any other, with the TRUE age printed under it */}
         {row.gate && (
-          <div className="group relative min-w-0" style={{ width: `${(gateSlot / total) * 100}%` }}>
+          <div className="group relative min-w-0 flex-1 basis-0">
             <div className="flex min-w-0 items-center gap-1">
               <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warning animate-pulse motion-reduce:animate-none" />
               <span className="min-w-0 truncate text-[10.5px] text-warning">Waiting on you</span>
             </div>
             <span
               aria-hidden
-              title={
-                gateClamped
-                  ? `Waiting ${fmtElapsed(gateSec)} — drawn shortened so the step labels stay readable`
-                  : `Waiting ${fmtElapsed(gateSec)}`
-              }
+              title={`Waiting ${fmtElapsed(gateSec)}`}
               className="mt-1 block h-2 w-full rounded-[3px] bg-[repeating-linear-gradient(45deg,var(--color-warning)_0_4px,transparent_4px_8px)] opacity-70"
             />
             <span className="mt-0.5 block truncate font-mono text-[9.5px] tabular-nums text-warning">{gateAge(row, tick)}</span>
@@ -432,7 +430,9 @@ function Timeline({ row, tick }: { row: DemoRow; tick: number }) {
         )}
       </div>
 
-      {/* axis — when it started, how long it has been, where the time went */}
+      {/* axis — when it started, how long it has been, where the time went.
+          With equal segments this line is where duration lives, so it names
+          both halves rather than only the total. */}
       <div className="mt-1.5 flex items-baseline gap-2 border-t border-border/40 pt-1 font-mono text-[9.5px] text-muted-foreground">
         <span>{row.time}</span>
         <span aria-hidden className="h-px flex-1 bg-border/50" />
