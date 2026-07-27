@@ -102,6 +102,11 @@ const DEMO_SHORTCUTS: { keys: string[]; join?: string; what: string }[] = [
   { keys: ["j", "k"], what: "move down / up the queue" },
   { keys: ["n"], what: "jump to the next row waiting on you" },
   { keys: ["Enter"], what: "open the selected group" },
+  // The keyboard route to the row context menu. Right-click and the platform's
+  // own Menu / Shift+F10 key open the same menu; this one does not depend on
+  // the operator's keyboard having that key, and it works from the SELECTION
+  // rather than from focus.
+  { keys: ["m"], what: "every command on the selected row" },
   { keys: ["Esc"], what: "back out of a group" },
   { keys: ["c"], what: "mark the selected member checked" },
   { keys: ["1", "4"], join: "–", what: "switch the detail panel's tab" },

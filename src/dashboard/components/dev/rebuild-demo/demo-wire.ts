@@ -1588,7 +1588,7 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
       label: "Delete",
       intent: "destructive",
       icon: "delete",
-      placement: ["footer"],
+      placement: ["footer", "menu"],
       expectedVersion: v,
       confirm: HIDE_CONFIRM(`“${ctx.title}” never became a run — no task exists for it.`),
     });
@@ -1603,7 +1603,7 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
     label: "Cancel group and everything under it",
     intent: "neutral",
     icon: "cancel",
-    placement: ["footer"],
+    placement: ["footer", "menu"],
     expectedVersion: v,
     // D16: cancelling a group cancels the whole tree, with NO confirmation and
     // NO undo. Deliberately no `confirm` block — the tooltip carries the warning.
@@ -1615,7 +1615,7 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
     label: "Cancel",
     intent: "neutral",
     icon: "cancel",
-    placement: ["footer"],
+    placement: ["footer", "menu"],
     expectedVersion: v,
     confirm: {
       title: `Cancel ${ctx.title}?`,
@@ -1634,7 +1634,7 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
     label: "Retry",
     intent: "primary",
     icon: "retry",
-    placement: ["footer"],
+    placement: ["footer", "menu"],
     expectedVersion: v,
   };
   const hide: ActionDescriptorWire = {
@@ -1644,7 +1644,7 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
     label: "Delete",
     intent: "destructive",
     icon: "delete",
-    placement: ["footer"],
+    placement: ["footer", "menu"],
     expectedVersion: v,
     confirm: HIDE_CONFIRM(
       isGroup
@@ -1662,7 +1662,7 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
         label: "Bump",
         intent: "primary",
         icon: "bump",
-        placement: ["footer"],
+        placement: ["footer", "menu"],
         expectedVersion: v,
       });
       out.push(isGroup ? cancelTree : cancelRun);
@@ -1711,7 +1711,7 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
             key: "continue-with-data",
             kind: "command",
             command: "continue-with-data",
-            label: "Continue this run with these values",
+            label: "Save & continue",
             detail:
               "Saves your corrections to this run's checkpoint and releases the SAME run to carry on from the step it stopped at. It keeps its run id, its attempt history and its receipt.",
             intent: "primary",
@@ -1736,7 +1736,7 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
       key: "rerun-existing",
       kind: "command",
       command: "rerun-with-existing-data",
-      label: "Start a new run with these values",
+      label: "Start a new run",
       detail:
         "Enqueues a FRESH run on the current workflow version using these values. This row keeps its own history; the two are separate runs with separate receipts.",
       intent: resumable ? "neutral" : "primary",
@@ -1752,6 +1752,12 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
   if (outcomeAction) out.push(outcomeAction);
 
   // 5. Menu-only commands.
+  //
+  //    `menu` is the row's FULL command set, not a leftovers bin: every footer
+  //    and outcome descriptor above also carries the `menu` placement, so the
+  //    right-click menu on a row is served exactly what that row may do, and a
+  //    command the surface never sent is unreachable from it. The footer stays
+  //    the frequent subset; nothing lives ONLY in the footer.
   if (spec.rowType !== "member") {
     out.push({
       key: "rename",
@@ -1783,7 +1789,7 @@ function deriveOutcomeAction(spec: DemoRowSpec, ctx: ActionPolicyContext): Actio
           label: "Re-upload",
           intent: "destructive",
           icon: "retry",
-          placement: ["outcome"],
+          placement: ["outcome", "menu"],
           expectedVersion: ctx.projectedVersion,
           confirm: {
             title: "Start a new run from a different file?",
@@ -1799,7 +1805,7 @@ function deriveOutcomeAction(spec: DemoRowSpec, ctx: ActionPolicyContext): Actio
           label: "Retry the lookup",
           intent: "destructive",
           icon: "retry",
-          placement: ["outcome"],
+          placement: ["outcome", "menu"],
           expectedVersion: ctx.projectedVersion,
           confirm: {
             title: "Replay the delegated lookup?",
@@ -1811,9 +1817,9 @@ function deriveOutcomeAction(spec: DemoRowSpec, ctx: ActionPolicyContext): Actio
   }
   switch (ctx.status) {
     case "waiting":
-      return { key: "open-gate", kind: "navigation", label: "Review", intent: "info", icon: "review", placement: ["outcome"], navigate: { kind: "self" } };
+      return { key: "open-gate", kind: "navigation", label: "Review", intent: "info", icon: "review", placement: ["outcome", "menu"], navigate: { kind: "self" } };
     case "parked":
-      return { key: "open-park", kind: "navigation", label: "Resolve", intent: "violet", icon: "resolve", placement: ["outcome"], navigate: { kind: "self" } };
+      return { key: "open-park", kind: "navigation", label: "Resolve", intent: "violet", icon: "resolve", placement: ["outcome", "menu"], navigate: { kind: "self" } };
     case "failed":
       return {
         key: "open-failure",
@@ -1821,12 +1827,12 @@ function deriveOutcomeAction(spec: DemoRowSpec, ctx: ActionPolicyContext): Actio
         label: "Open failure",
         intent: "destructive",
         icon: "external",
-        placement: ["outcome"],
+        placement: ["outcome", "menu"],
         navigate: { kind: "self" },
       };
     case "running":
       return ctx.memberCount >= 41
-        ? { key: "drill-in", kind: "navigation", label: "Start review", intent: "info", icon: "drill", placement: ["outcome"], navigate: { kind: "drill" } }
+        ? { key: "drill-in", kind: "navigation", label: "Start review", intent: "info", icon: "drill", placement: ["outcome", "menu"], navigate: { kind: "drill" } }
         : null;
     default:
       return null;

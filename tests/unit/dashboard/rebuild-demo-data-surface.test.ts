@@ -87,8 +87,12 @@ test("a stopped run is offered BOTH outcomes, and continuing it is the primary o
     );
     // The labels are the operator-facing difference between the two outcomes;
     // if they ever read the same the surface has stopped keeping them apart.
-    assert.match(actions[0].label, /continue this run/i);
+    // They are SHORT (wave 11) because they share one action row inside a
+    // 348px rail — the long form lives on each descriptor's `detail`, which the
+    // button carries as its title.
+    assert.match(actions[0].label, /continue/i);
     assert.match(actions[1].label, /new run/i);
+    assert.match(actions[0].detail ?? "", /releases the SAME run/i);
   }
 });
 

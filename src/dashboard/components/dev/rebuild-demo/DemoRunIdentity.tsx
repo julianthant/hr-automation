@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Badge,
+  ChipRow,
   Button,
   Chip,
   Field,
@@ -67,7 +68,10 @@ export function RunIdentityStrip({ row }: { row: DemoRow }) {
 
   return (
     <div className="flex flex-col gap-[var(--ds-space-tight)]">
-      <div className="flex flex-wrap items-center gap-[var(--ds-space-tight)]">
+      {/* A set of PEER facts, so it lays on the shared chip track — every line
+          ends on the same edge instead of leaving whichever chip wrapped last
+          hanging alone under a full line. */}
+      <ChipRow>
         {row.displayName && (
           <Chip
             label="named"
@@ -138,7 +142,7 @@ export function RunIdentityStrip({ row }: { row: DemoRow }) {
             {`${row.preset.name} +${row.preset.merged.length}`}
           </Chip>
         )}
-      </div>
+      </ChipRow>
 
       {row.preset && presetOpen && (
         <div className="flex flex-col gap-[var(--ds-space-tight)] rounded-[var(--ds-radius-md)] border border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]">

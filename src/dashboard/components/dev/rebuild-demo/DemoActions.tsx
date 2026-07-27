@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -7,7 +7,6 @@ import {
   ChevronsUp,
   CircleSlash,
   ClipboardList,
-  MoreHorizontal,
   PauseCircle,
   Pencil,
   RotateCcw,
@@ -25,9 +24,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { actionsAt, type ActionDescriptorWire, type ActionIconKey, type ActionIntent } from "./demo-wire";
-import { Button, IconButton, dsBorder, dsFocus, dsIcon, dsMotion, dsRadius, dsText, useDsModalPresence } from "./demo-ui";
+import {
+  Button,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+  IconButton,
+  dsBorder,
+  dsFocus,
+  dsIcon,
+  dsMotion,
+  dsRadius,
+  dsText,
+  useDsModalPresence,
+} from "./demo-ui";
 import type { DemoRow } from "./demo-data";
 import type { DemoCommandResult } from "./demo-commands";
 
@@ -133,16 +146,14 @@ const INTENT_TONE: Record<ActionIntent, "destructive" | "warning" | "primary" | 
 export function FooterActions({ row, onAction = NOOP_ACTION }: { row: DemoRow; onAction?: DemoActionHandler }) {
   const actions = actionsAt(row.actions, "footer");
   if (actions.length === 0) return null;
-  // D16: a group's cancel takes the whole tree down with no confirm and no
-  // undo, so it says so in words as well as in the tooltip.
-  const tree = actions.find((a) => a.command === "cancel-tree");
+  // The `Cancel group` caption beside the ✕ is GONE. An icon that already means
+  // cancel, captioned "cancel", is the same word twice — and it was the only
+  // label in the footer's action cluster, so it made one row's buttons a
+  // different shape from every other row's. D16's warning did not live in that
+  // caption: it is the ✕'s own `title` below, and the right-click menu carries
+  // the descriptor's full sentence ("Cancel group and everything under it").
   return (
-    <span className="flex items-center gap-1">
-      {tree && (
-        <span className={cn(dsText.micro, "mr-[var(--ds-space-tight)] hidden font-sans text-[color:var(--ds-fg-muted)] min-[400px]:inline")}>
-          Cancel group
-        </span>
-      )}
+    <span className="flex items-center gap-[var(--ds-space-hair)]">
       {actions.map((a) => (
         <IconActionButton
           key={a.key}
@@ -294,35 +305,67 @@ export function OutcomeActionButton({
 }
 
 // ---------------------------------------------------------------------------
-// Menu — the commands that do not earn a footer slot
+// The row's own commands, on the row — right-click, not a `⋯`
 // ---------------------------------------------------------------------------
 
-export function RowActionMenu({ row, onAction = NOOP_ACTION }: { row: DemoRow; onAction?: DemoActionHandler }) {
+/**
+ * Wraps a row so right-clicking it opens its full command set.
+ *
+ * WHY THIS REPLACED THE `⋯`. The overflow button was a control whose only job
+ * was to admit there were more controls: it took a slot in every footer in the
+ * queue, it named nothing, and it put the row's commands behind a 24px target.
+ * Production already does this properly for Session Panel browser tiles — a
+ * right-click opens their recovery menu — so this is that established pattern,
+ * promoted to a `ds` primitive rather than hand-rolled a second time.
+ *
+ * WHAT IS IN IT is not a client decision. The items are `actions[]` at the
+ * `menu` placement, and the server sends every footer and outcome descriptor
+ * with that placement too — so the menu is the row's FULL set, the footer is
+ * the frequent subset of the same list, and a command the surface never sent is
+ * structurally unreachable from either.
+ *
+ * The order is by KIND, which is the only grouping that survives a new
+ * descriptor: go-somewhere first, do-something next, the one irreversible
+ * command last behind a rule.
+ */
+export function RowContextMenu({
+  row,
+  onAction = NOOP_ACTION,
+  children,
+}: {
+  row: DemoRow;
+  onAction?: DemoActionHandler;
+  children: ReactNode;
+}) {
   const items = actionsAt(row.actions, "menu");
-  if (items.length === 0) return null;
+  if (items.length === 0) return <>{children}</>;
+  const navigate = items.filter((a) => a.kind === "navigation");
+  const commands = items.filter((a) => a.kind === "command" && a.intent !== "destructive");
+  const destructive = items.filter((a) => a.kind === "command" && a.intent === "destructive");
+  const groups = [navigate, commands, destructive].filter((g) => g.length > 0);
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <IconButton
-          size="sm"
-          label={`More actions for ${row.displayName ?? row.title}`}
-          onClick={(e) => e.stopPropagation()}
-          icon={<MoreHorizontal aria-hidden className={dsIcon.md} />}
-        />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[190px]">
-        {items.map((a) => (
-          <DropdownMenuItem
-            key={a.key}
-            onSelect={() => onAction(row, a)}
-            className={cn(dsText.body, a.intent === "destructive" && "text-destructive focus:text-destructive")}
-          >
-            <span className="mr-2 inline-flex">{ICONS[a.icon ?? "external"]}</span>
-            {a.label}
-          </DropdownMenuItem>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent label={`Commands for ${row.displayName ?? (row.title || row.trace)}`}>
+        {groups.map((group, i) => (
+          <Fragment key={i}>
+            {i > 0 && <ContextMenuSeparator className={cn("my-[var(--ds-space-tight)] h-px", dsBorder.subtle, "border-t")} />}
+            {group.map((a) => (
+              <ContextMenuItem
+                key={a.key}
+                icon={ICONS[a.icon ?? "external"]}
+                tone={a.intent === "destructive" ? "destructive" : "neutral"}
+                hint={a.confirm ? "asks first" : undefined}
+                onSelect={() => onAction(row, a)}
+              >
+                {a.label}
+              </ContextMenuItem>
+            ))}
+          </Fragment>
         ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
