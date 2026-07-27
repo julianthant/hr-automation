@@ -144,7 +144,7 @@ export const ROW_VARIANTS: RowVariantSpec[] = [
     carries: ["The selection size (7 of 34 reports) and the period it covers", "Per-file progress rather than per-person progress"],
     gotcha: "Do not force a person subtitle onto it. There is no EID, and showing a blank person field reads as broken.",
     workflows: [
-      { code: "kr", label: "Kronos Reports", note: "Multi-worker download of a report selection; the receipt lists every saved file." },
+      { code: "kr", label: "Old Kronos Reports", note: "Multi-worker download of a report selection; the receipt lists every saved file." },
       { code: "sp", label: "SharePoint Download", note: "Fetches the roster the other workflows match against." },
     ],
     exampleId: "kr-reports",
@@ -346,6 +346,17 @@ export interface RowExplanation {
   panel: string;
   /** why it is its own row instead of a line inside something else */
   why: string;
+  /**
+   * A RULE this row's controls obey — present only where the row offers a
+   * control whose limits are not visible from the control itself.
+   *
+   * It is still derived: the sentence is the PRODUCT's policy (identical for
+   * every packet), keyed on the row offering a bulk approval, not copy a
+   * fixture wrote. It lives here because the row used to print it as a
+   * five-line paragraph inside a 400px column, where a rule that never changes
+   * was costing the same space as the facts that do.
+   */
+  constraint?: string;
 }
 
 const VARIANT_EXPLANATION: Record<RowVariant, { doing: string; why: string }> = {
@@ -396,6 +407,13 @@ const PANEL_EXPLANATION: Record<PanelKindKey, string> = {
 const STANDALONE_REVIEW_WHY =
   "Nobody delegated it, so approving would release no work — this is a read of a document, not a gate in front of one.";
 
+/**
+ * D8, in one sentence. It is the same sentence on every packet in the product,
+ * which is exactly why it does not belong on the row.
+ */
+const BULK_APPROVE_CONSTRAINT =
+  "Approving is a decision about a list, so it can be made from here. Changing an extracted value is a claim about paper, so it opens the review — a value may only be edited with its scanned page on screen.";
+
 export function rowExplanationOf(row: DemoRow): RowExplanation {
   const variant = rowVariantOf(row);
   const base = VARIANT_EXPLANATION[variant];
@@ -404,6 +422,10 @@ export function rowExplanationOf(row: DemoRow): RowExplanation {
     doing: base.doing,
     panel: PANEL_EXPLANATION[panelKind(row)],
     why: standaloneReview ? STANDALONE_REVIEW_WHY : base.why,
+    // Spread rather than `constraint: … : undefined`, so a row with no rule to
+    // state carries no key at all — a present-but-undefined field is a field
+    // every consumer has to guard, and this one is iterated.
+    ...(row.bulkApprove ? { constraint: BULK_APPROVE_CONSTRAINT } : {}),
   };
 }
 

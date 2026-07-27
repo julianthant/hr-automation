@@ -27,6 +27,7 @@ import {
   fmtClockSec,
   fmtElapsed,
   plusSeconds,
+  resolveMemberOutcome,
   secondsBetween,
   secondsSince,
   tabsFor,
@@ -37,6 +38,7 @@ import {
   type DemoWorkflowRef,
   type GateCandidateSpec,
   type GateOptionSpec,
+  type MemberOutcomeSpec,
   type RecordFieldSource,
   type SystemKey,
 } from "./demo-wire";
@@ -418,8 +420,15 @@ export interface DemoRowSpec {
    * group only — bulk approval offered on the ROW itself, so a clean packet
    * never has to be opened. Editing an extracted value is deliberately NOT
    * offered here: a value may only change with its scanned page on screen.
+   *
+   * `excluded` is the ONE fact about this packet the row states — a count and a
+   * clause naming who and why, rendered as a single line. The paragraph that
+   * used to sit here explained the EDITING POLICY, which is identical for every
+   * packet in the product and therefore belongs in the row's ⓘ (where it is
+   * derived, not authored) and in the panel's decision, never wrapped into a
+   * five-line block inside a 400px column.
    */
-  bulkApprove?: { approvable: number; total: number; blockedNote?: string; editNote: string };
+  bulkApprove?: { approvable: number; total: number; excluded?: { count: number; reason: string } };
   /** group only — the delegated OCR Review Row that owns this packet's records */
   reviewRunId?: string;
   /** review run only — the records the operator works through, and the group they belong to */
@@ -439,6 +448,17 @@ export interface DemoRowSpec {
   /** member only */
   parentId?: string;
   memberFact?: string;
+  /**
+   * member only — WHAT THIS MEMBER FOUND, as a key in the vocabulary its
+   * workflow declares (`DemoWorkflowRef.memberOutcomes`).
+   *
+   * Orthogonal to `status`, which answers whether it RAN. A member is routinely
+   * `verifiedDone` with the outcome `not-found`; a member that has not finished
+   * looking (queued, running) carries no outcome at all, because it has not
+   * found anything yet and inventing one would be the loudest kind of lie a
+   * queue can tell.
+   */
+  memberOutcome?: string;
   /** member only — the OCR record this member was fanned out from */
   recordId?: string;
   displayOnly?: boolean;
@@ -478,6 +498,13 @@ export interface DemoRow extends DemoRowSpec {
   actions: ActionDescriptorWire[];
   /** capability-driven tabs for this row's panel kind */
   detailSurfaces: DemoTab[];
+
+  /**
+   * member only — the resolved outcome, looked up in the workflow's declared
+   * vocabulary at projection so no surface ever has to know a workflow's words.
+   * Absent when the member sent no outcome (it has not finished looking).
+   */
+  memberOutcomeSpec?: MemberOutcomeSpec;
 
   /** derived clock label of the moment the row became real */
   time: string;
@@ -612,6 +639,11 @@ export function projectRow(spec: DemoRowSpec, rawById: Map<string, DemoRowSpec>)
       stagedWrites,
     }),
     detailSurfaces: tabsFor(spec),
+
+    // The outcome is resolved HERE, against the workflow's own vocabulary, so a
+    // key no workflow declares throws at assembly rather than rendering as a
+    // silently blank column forty rows down a scroll well.
+    memberOutcomeSpec: spec.memberOutcome ? resolveMemberOutcome(workflow, spec.memberOutcome) : undefined,
 
     time: fmtClock(bornAt),
     duration: spec.startedAt && spec.endedAt ? fmtElapsed(secondsBetween(spec.startedAt, spec.endedAt)) : undefined,
@@ -1411,6 +1443,7 @@ function i9Member(i: number): DemoRowSpec {
       eid: undefined,
       displayOnly: true,
       memberFact: "no searchable name",
+      memberOutcome: "not-searchable",
       outcome: { tone: "muted", text: "Rejected page — no searchable name on the form. Display-only: no task exists, delete is the only action." },
       steps: [{ label: "OCR extraction", state: "failed", system: "i9", keyLines: ["page 31: no name field detected"] }],
       lines: [{ ts: "1:44:06", kind: "warn", system: "i9", text: "Page 31 — OCR found no searchable name; page cannot be checked", step: "OCR extraction" }],
@@ -1427,6 +1460,7 @@ function i9Member(i: number): DemoRowSpec {
       return {
         ...base,
         memberFact: "no UCPath match",
+        memberOutcome: "not-found",
         endedAt: plusSeconds(startedAt, 41),
         evidence: { failureId: `fail-ic-m${pad(i, 3)}`, confidence: "unknown" },
         error: `UCPath person search found no match for “${name}” or EID ${eid}`,
@@ -1447,6 +1481,7 @@ function i9Member(i: number): DemoRowSpec {
       return {
         ...base,
         memberFact: "3 name candidates",
+        memberOutcome: "unsure",
         outcome: { tone: "warning", text: "Three active UCPath people match this name — pick one" },
         steps: [
           { label: "Person match", state: "waiting", system: "ucpath", keyLines: ["3 active candidates share this name"] },
@@ -1515,6 +1550,7 @@ function i9Member(i: number): DemoRowSpec {
       return {
         ...base,
         memberFact: "S2 missing — flag",
+        memberOutcome: "incomplete",
         endedAt: plusSeconds(startedAt, 34 + (i % 5) * 7),
         evidence: { receiptId: `rcpt-ic-m${pad(i, 3)}`, confidence: "partial" },
         warnings: { count: 1, first: "Section 2 page not found in packet" },
@@ -1571,9 +1607,13 @@ function i9Member(i: number): DemoRowSpec {
         shots: [],
       };
     default:
+      // `running` and `queued` deliberately fall through WITHOUT an outcome:
+      // neither has finished looking, and a member that has not looked yet has
+      // not found anything.
       return {
         ...base,
         memberFact: "S1 + S2 · retain 3y",
+        memberOutcome: "found",
         endedAt: plusSeconds(startedAt, 34 + (i % 5) * 7),
         evidence: { receiptId: `rcpt-ic-m${pad(i, 3)}`, confidence: "verified" },
         facts: [
@@ -1788,8 +1828,10 @@ const oathSummer: DemoRowSpec = {
   bulkApprove: {
     approvable: 5,
     total: 6,
-    blockedNote: "Diego Diaz is blocked (inactive in UCPath) and is excluded.",
-    editNote: "Changing any extracted value opens the review — a value may only be edited with its scanned page on screen.",
+    // One clause, on one line. WHY an inactive employee cannot be signed, and
+    // the rule about editing a value with its page on screen, are both in the
+    // gate's own `note` below — the panel's decision renders that in full.
+    excluded: { count: 1, reason: "Diego Diaz is inactive in UCPath" },
   },
   reviewRunId: "ocr-summer",
   outcome: {
@@ -2185,7 +2227,7 @@ const krReports: DemoRowSpec = {
   id: "kr-reports",
   rowType: "run",
   subjectKind: "catalog",
-  workflowId: "kronos-reports",
+  workflowId: "old-kronos-reports",
   title: "Pay-period exception reports",
   // THE RENAMED SPECIMEN — the operator's own name rides the row and the
   // receipt; the trace id underneath is untouched, so history still matches.
@@ -3576,6 +3618,34 @@ export const DENSITY_RUNGS: { key: DensityRung; range: string; what: string; exa
   },
 ];
 
+/**
+ * Which of a group's members are actually ON SCREEN — and therefore which ones
+ * j/k should walk.
+ *
+ * Deriving traversal from the same rung that renders them is what keeps the
+ * keyboard and the eye in the same place. It lives beside the ladder (and
+ * beside `isSettledRow`, its other input) rather than in the component, because
+ * a second opinion about what is visible is a keyboard that walks into rows
+ * nobody can see.
+ */
+export function visibleMemberIds(row: DemoRow, expandedGroups: ReadonlySet<string>): string[] {
+  const ids = orderedMemberIds(row.id);
+  const rung = densityRung(ids.length);
+  // A settled group above the inline rung is SHUT, so it puts nothing on screen
+  // to walk. At 1–3 the group IS its members (D11), so it stays open whatever
+  // its status — shutting it would leave a row showing a count of one and
+  // nothing else.
+  if (rung !== "inline" && isSettledRow(row) && !expandedGroups.has(row.id)) return [];
+  switch (rung) {
+    case "inline":
+      return ids;
+    case "compact":
+      return expandedGroups.has(row.id) ? ids : ids.slice(0, 4);
+    case "well":
+      return ids;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Sort — applied WITHIN the attention bands, never across them
 // ---------------------------------------------------------------------------
@@ -3775,6 +3845,33 @@ export function groupCounts(groupId: string): GroupCounts {
     else if (r.status === "failed") out.failed += 1;
   }
   return out;
+}
+
+/**
+ * Is this row DONE, and quiet about it?
+ *
+ * This is the one predicate the queue's density policy turns on, so it lives
+ * here beside the rollup rather than inside a component — a second opinion
+ * about "is this row finished" is exactly how a row comes to show a settled
+ * status and an unsettled body.
+ *
+ * The operator: *"for some forms, having more detail in the queue row, makes it
+ * look worse and harder to read from."* A row still asking for something
+ * (`Waiting on you`, `Failed`, `Write parked`) or still moving (`Running`,
+ * `Queued`) keeps every band it has — each answers a live question. A row whose
+ * outcome is SETTLED has one job left, which is to report that outcome.
+ *
+ * A settled ROLLUP over a member that still wants something is NOT settled: the
+ * rollup precedence already surfaces those, and re-checking the member counts
+ * here means a future precedence change cannot quietly hush a group that is
+ * still blocking on somebody.
+ */
+export function isSettledRow(row: DemoRow): boolean {
+  const status = effectiveStatus(row);
+  if (status !== "verifiedDone" && status !== "doneWarnings" && status !== "cancelled") return false;
+  if (row.rowType !== "group") return true;
+  const counts = groupCounts(row.id);
+  return counts.waiting + counts.failed + counts.parked === 0;
 }
 
 
