@@ -38,7 +38,7 @@ import { panelKindOf, panelKindSpec, rowVariantSpec } from "./demo-catalog";
 import { BannerActions, OutcomeActionButton, ParkResolutions, type DemoActionHandler } from "./DemoActions";
 import { ContextRail, ContextRailSpine, useContextRail } from "./DemoContextRail";
 import { CaptureLightbox, SystemChip } from "./DemoEvidence";
-import { candidateCaptureFor, type DemoCapture } from "./demo-evidence-wire";
+import { candidateCaptureFor, type DemoCapture, type DemoFailureRecord } from "./demo-evidence-wire";
 import {
   actionsAt,
   agoSeconds,
@@ -69,7 +69,7 @@ import {
   dsText,
 } from "./demo-ui";
 import { ReceiptView, runReceiptFor } from "./DemoReceipt";
-import { FailureRecordBlock, failureRecordFor } from "./DemoFailure";
+import { InlineFailureRecord, failureRecordFor } from "./DemoFailure";
 import { ParkResolveDialog, SettlingPanel, isParkResolution, type ParkResolveState } from "./DemoParkResolve";
 import type { DemoCommandSettling } from "./demo-commands";
 import {
@@ -124,6 +124,13 @@ export function tabsFor(row: DemoRow): DemoTab[] {
 export function defaultTabFor(row: DemoRow): DemoTab {
   const kind = panelKindOf(row);
   const status = effectiveStatus(row);
+  // A failed run's record now lives in the STREAM, at the line it died on — so
+  // the panel opens there, ahead of every other default. Without this, moving
+  // the record off the panel top would have hidden it behind a tab, which is
+  // the one thing that must never happen to a failure. It outranks the review
+  // default too: a review run that failed has nothing to approve, and its
+  // empty Review tab is not where "what did this leave behind" is answered.
+  if (status === "failed" && failureRecordFor(row)) return "logs";
   if (kind === "review") return "review";
   if (kind === "group") {
     const attention = (row.memberIds ?? []).some((id) => {
@@ -409,25 +416,17 @@ function InlineDecision({
 }
 
 /**
- * The in-stream failure marker. It stays SHORT — the full `FailureRecord` is
- * pinned above the tabs, where it is visible from every one of them, so this
- * card's job is to mark the line the run died on and point at it.
+ * The in-stream failure MARKER, for a step that broke and was retried — a run
+ * that ended is served a real `FailureRecord` and renders `InlineFailureRecord`
+ * here instead. This one has no record behind it and nothing to open, so it is
+ * exactly what it looks like: a note on the line where something went wrong.
  */
-function FailureCardView({ row, onOpenFailure }: { row: DemoRow; onOpenFailure?: () => void }) {
+function FailureCardView({ row }: { row: DemoRow }) {
   if (!row.failCard) return null;
   return (
     <div className="mx-3 my-1.5 ml-11 rounded-lg border border-destructive/40 bg-destructive/6 px-3 py-2 text-[12px]">
       <div className="mb-0.5 text-[11.5px] font-semibold text-destructive">{row.failCard.title}</div>
       <div className="text-[11px] text-muted-foreground">{row.failCard.meta}</div>
-      {onOpenFailure && (
-        <button
-          type="button"
-          onClick={onOpenFailure}
-          className="mt-1 rounded-md border border-destructive/45 px-2 py-0.5 text-[10.5px] font-semibold text-destructive outline-none hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          Open the full failure record
-        </button>
-      )}
     </div>
   );
 }
@@ -731,14 +730,16 @@ function DecisionNotice({
 }
 
 /**
- * Where the decision is, and whether the operator can currently see it.
+ * Where a pinned-in-the-stream surface is, and whether the operator can
+ * currently see it. Used twice: by the decision, and by the failure record that
+ * moved into the stream beside it.
  *
  * The anchor is a CALLBACK ref because the element it points at unmounts every
  * time the tab changes — a plain ref would hold a detached node and scroll to
  * nothing. `inView` is what keeps the floating notice from being a second copy
  * of a decision already on screen.
  */
-function useDecisionAnchor(active: boolean) {
+function useSeekAnchor(active: boolean) {
   const [node, setNode] = useState<HTMLElement | null>(null);
   const [inView, setInView] = useState(false);
 
@@ -779,14 +780,23 @@ function LogsTab({
   row,
   liveCount,
   onAction,
-  onOpenFailure,
+  onSelect,
+  failure,
+  failureOpen,
+  onFailureOpen,
+  failureRef,
   tick,
   decisionRef,
 }: {
   row: DemoRow;
   liveCount: number;
   onAction: DemoActionHandler;
-  onOpenFailure?: () => void;
+  onSelect: (id: string) => void;
+  /** the served record, if this run has one — the whole thing renders inline */
+  failure: DemoFailureRecord | null;
+  failureOpen: boolean;
+  onFailureOpen: (open: boolean) => void;
+  failureRef?: (node: HTMLElement | null) => void;
   tick: number;
   decisionRef?: (node: HTMLElement | null) => void;
 }) {
@@ -796,6 +806,14 @@ function LogsTab({
     () => (row.id === "pl-daniel" ? [...row.lines, ...LIVE_SEQUENCE.slice(0, liveCount)] : row.lines),
     [row, liveCount],
   );
+  /**
+   * Where the record hangs. A fixture that marked its own dying line gets it
+   * there; one that did not gets it after the last line, which is where the run
+   * ended. A served failure record is NEVER dropped for want of a marker —
+   * that would make the most important surface on the panel depend on a fixture
+   * remembering to flag a line.
+   */
+  const failureLine = lines.findIndex((l) => l.card === "failure");
   const q = query.trim().toLowerCase();
   const matches = (line: DemoLine) =>
     q.length > 0 &&
@@ -837,10 +855,30 @@ function LogsTab({
                 </span>
               </div>
               {line.card === "gate" && <InlineDecision row={row} tick={tick} onAction={onAction} anchorRef={decisionRef} />}
-              {line.card === "failure" && <FailureCardView row={row} onOpenFailure={onOpenFailure} />}
+              {line.card === "failure" &&
+                (failure && i === failureLine ? (
+                  <InlineFailureRecord
+                    failure={failure}
+                    open={failureOpen}
+                    onOpen={onFailureOpen}
+                    onOpenRow={onSelect}
+                    anchorRef={failureRef}
+                  />
+                ) : (
+                  <FailureCardView row={row} />
+                ))}
             </div>
           );
         })}
+        {failure && failureLine < 0 && (
+          <InlineFailureRecord
+            failure={failure}
+            open={failureOpen}
+            onOpen={onFailureOpen}
+            onOpenRow={onSelect}
+            anchorRef={failureRef}
+          />
+        )}
         {row.id === "pl-daniel" && (
           <div className="flex items-center gap-2 px-5 py-1 text-[10.5px] text-muted-foreground">
             <span aria-hidden className="size-1.5 rounded-full bg-primary animate-pulse motion-reduce:animate-none" />
@@ -1971,7 +2009,7 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
    * it may only stop being drawn twice.
    */
   const decisionTab: DemoTab = panelKindOf(row) === "review" ? "review" : "logs";
-  const anchor = useDecisionAnchor(Boolean(row.gate));
+  const anchor = useSeekAnchor(Boolean(row.gate));
   const [noticeDismissed, setNoticeDismissed] = useState(false);
   const [seekNonce, setSeekNonce] = useState(0);
   useEffect(() => setNoticeDismissed(false), [row.id, effectiveTab]);
@@ -1988,16 +2026,35 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
   };
   const noticeShown = Boolean(row.gate) && !noticeDismissed && !anchor.inView;
 
+  /**
+   * The same mechanism for the failure record, which now lives in the stream
+   * too. The outcome bar's `Open failure` is the persistent, undismissable
+   * route to it from any tab: it switches to the logs, expands the diagnostic
+   * record and scrolls it into view. A failed run also OPENS on the logs
+   * (`defaultTabFor`), so this is the way back rather than the way in.
+   */
+  const failureAnchor = useSeekAnchor(Boolean(failure));
+  const [failureSeekNonce, setFailureSeekNonce] = useState(0);
+  useEffect(() => {
+    if (failureSeekNonce === 0) return;
+    failureAnchor.seek();
+  }, [failureSeekNonce, failureAnchor]);
+  const goToFailure = () => {
+    if (effectiveTab !== "logs") onTab("logs");
+    setFailureOpen(true);
+    setFailureSeekNonce((n) => n + 1);
+  };
+
   const handleAction: DemoActionHandler = (target, action) => {
     if (action.kind === "command" && isParkResolution(action)) {
       setParkPending({ row: target, action });
       return;
     }
-    // "Open failure" is navigation to THIS row's own record — it opens the
-    // pinned block rather than travelling anywhere, so the outcome bar's one
-    // action does the thing it says.
+    // "Open failure" is navigation to THIS row's own record, which is now in
+    // the log stream — so it travels there and expands it, rather than toggling
+    // a block that used to sit above the tabs.
     if (action.kind === "navigation" && action.key === "open-failure" && failure) {
-      setFailureOpen(true);
+      goToFailure();
       return;
     }
     // Likewise the outcome bar's `Review` / `Resolve`: with no banner above the
@@ -2089,12 +2146,15 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
         </div>
       )}
 
-      {/* the failure record is pinned above the tabs, because what broke, what
-          reason: what broke, what is half-done and what is safe to retry must be
-          readable from every tab — not just from the one the logs are on */}
-      {failure && (
-        <FailureRecordBlock failure={failure} open={failureOpen} onOpen={setFailureOpen} onOpenRow={onSelect} />
-      )}
+      {/* NOTHING ELSE GOES HERE. The failure record used to be a sixth band
+          above the tabs — outcome line, bold restatement, code chip, permanence
+          chip, disclosure, write-state summary — sitting on top of the log
+          stream the panel is opened to read. It is now inline in the stream at
+          the line the run died on; the one line above and its action are the
+          whole of the failure at the panel top, and the outcome bar's `Open
+          failure` travels to the record. Same rule as the gate banner in
+          wave 6: the top carries a state and its action, the substance lives
+          where it happened. */}
 
       {/* tabs — derived from the panel kind, never a fixed five */}
       {/* The ratified tab treatment: a 2px underline on the active tab, not a
@@ -2160,7 +2220,11 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
             row={row}
             liveCount={liveCount}
             onAction={handleAction}
-            onOpenFailure={failure ? () => setFailureOpen(true) : undefined}
+            onSelect={onSelect}
+            failure={failure}
+            failureOpen={failureOpen}
+            onFailureOpen={setFailureOpen}
+            failureRef={failureAnchor.setNode}
             tick={tick}
             decisionRef={anchor.setNode}
           />

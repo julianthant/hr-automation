@@ -217,6 +217,38 @@ the component; do not re-draw the pattern.
 A dialog's quiet left-hand note goes in `DialogFooter`'s `meta` slot, not a
 hand-rolled `mr-auto` span — see the footer rule below.
 
+### Where a thing goes: the top states, the stream explains
+
+> **The panel top carries a one-line state and its action. The substance lives
+> in the log stream, at the point where it happened.**
+
+The Log Panel is opened to read the stream. Every band stacked above it is
+subtracted from the one thing the panel is for, and a band that restates what
+the band above it already said teaches the operator to skim past both. So a
+state that needs explaining gets **one line and one control** at the top, and
+its full surface is rendered inline in the stream, at the line that produced it,
+where the lines above it are the argument for it.
+
+Two surfaces are built this way and nothing may regress them:
+
+- **A decision** (`Waiting on you` / `Write parked`) — the header's status pill,
+  the outcome line's `Review` / `Resolve`, and a dismissable floating notice
+  while the decision is out of reach. The decision itself is `InlineDecision`.
+- **A failure** — the outcome line's one sentence and its remediation verb. The
+  record itself is `InlineFailureRecord`, and a failed run **opens on the logs**
+  so it is never behind a tab.
+
+Two things this rule does **not** license:
+
+- **It is not "collapse it".** The write-state sentence (*"Nothing was written
+  to UCPath, Kronos or Kuali…"*) is the difference between a safe retry and a
+  duplicate termination. It moved into the stream because the stream is
+  **visible**; putting it behind a disclosure would not have been the same move.
+  What may sit behind a disclosure is diagnosis — the progress ledger, the cause
+  chain, the fingerprint — never what is half-done and never what is safe to do.
+- **It is not "hide it".** Whatever moves into the stream keeps a persistent,
+  undismissable route from every tab, and that route must actually travel there.
+
 ## Layout rules
 
 - A screen is **Panels**. A Panel has one `PanelHeader`, an optional
