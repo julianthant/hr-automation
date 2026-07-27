@@ -1353,6 +1353,93 @@ const wsPriya: DemoRowSpec = {
   shots: [],
 };
 
+/**
+ * SharePoint Download, as a ROOT run rather than only as a delegated one.
+ *
+ * Its production start path is orphaned — `SharePointDownloadButton.tsx` has no
+ * importers — so today the only way to reach it is an OCR orchestrator
+ * delegating it via `rosterMode: download | wait`. Wave 10 gives it a real start
+ * path, and a panel with a start path and no rows would be a start path nobody
+ * could believe. These two rows are also the referents the Run Modal's roster
+ * choices point at: the morning download IS `UCSD_Roster_2026-07-25.xlsx`, the
+ * file the "track the latest" option resolves to, and the queued one is what
+ * "wait for the queued SharePoint download" waits for.
+ */
+const spMorning: DemoRowSpec = {
+  id: "sp-morning",
+  rowType: "run",
+  subjectKind: "catalog",
+  workflowId: "sharepoint-download",
+  title: "Roster export",
+  runId4: "b41d",
+  status: "verifiedDone",
+  run: 41,
+  version: 2,
+  enqueuedAt: at("06:01:40"),
+  startedAt: at("06:01:46"),
+  endedAt: at("06:02:31"),
+  evidence: { receiptId: "rcpt-sp-b41d", confidence: "verified" },
+  receiptShield: "Receipt — the file was re-opened and its row count read back",
+  facts: [
+    { label: "file", value: "UCSD_Roster_2026-07-25.xlsx" },
+    { label: "rows", value: "4,182" },
+  ],
+  outcome: { tone: "success", text: "Downloaded UCSD_Roster_2026-07-25.xlsx · 4,182 rows · every roster-backed start today reads this file" },
+  steps: [
+    { label: "SharePoint auth", state: "done", system: "crm", durationSec: 12 },
+    { label: "Locate export", state: "done", system: "crm", durationSec: 9, keyLines: ["HR Reports › Roster › daily export"] },
+    { label: "Download", state: "done", system: "crm", durationSec: 18, hasShot: true },
+    { label: "Verify", state: "done", durationSec: 6, keyLines: ["re-opened the file · 4,182 rows · 1.2 MB"] },
+  ],
+  lines: [
+    { ts: "6:01:58", kind: "nav", system: "crm", text: "HR Reports › Roster › daily export", step: "Locate export" },
+    { ts: "6:02:07", kind: "write", pills: [{ dir: "write", label: "roster", value: "UCSD_Roster_2026-07-25.xlsx" }], step: "Download" },
+    { ts: "6:02:31", kind: "ok", text: "Re-opened the downloaded file — 4,182 rows, 1.2 MB", duration: "45s", step: "Verify" },
+  ],
+  data: [
+    { step: "Locate export", dir: "read", field: "Export modified", value: "2026-07-25 05:58", system: "crm", ts: "6:01:58" },
+    { step: "Download", dir: "write", field: "Roster file", value: "UCSD_Roster_2026-07-25.xlsx", system: "crm", ts: "6:02:07" },
+    { step: "Verify", dir: "read", field: "Rows read back", value: "4,182", system: "crm", ts: "6:02:31" },
+  ],
+  receipt: {
+    tone: "success",
+    headline: "Verified done · roster on disk",
+    lines: [
+      { label: "File", value: "UCSD_Roster_2026-07-25.xlsx · 1.2 MB", verified: true },
+      { label: "Rows", value: "4,182", verified: true },
+      { label: "Finished", value: "6:02 AM · 45s" },
+    ],
+    note: "Every start that says “use a roster already on disk” resolves to this file until a newer one lands.",
+  },
+  shots: [{ label: "Download confirmation", kind: "step" }],
+};
+
+const spRefresh: DemoRowSpec = {
+  id: "sp-refresh",
+  rowType: "run",
+  subjectKind: "catalog",
+  workflowId: "sharepoint-download",
+  title: "Roster export",
+  runId4: "77c5",
+  status: "queued",
+  run: 42,
+  version: 2,
+  enqueuedAt: at("14:23:10"),
+  evidence: { confidence: "unknown" },
+  queueNote: "in queue 2m · 1 ahead",
+  outcome: { tone: "muted", text: "Queued — a start that asked for a fresh roster is waiting behind this one" },
+  steps: [
+    { label: "SharePoint auth", state: "pending", system: "crm" },
+    { label: "Locate export", state: "pending", system: "crm" },
+    { label: "Download", state: "pending", system: "crm" },
+    { label: "Verify", state: "pending" },
+  ],
+  lines: [{ ts: "2:23:10", kind: "event", text: "Enqueued — a roster-backed start asked for a fresh download", step: "Queued" }],
+  data: [],
+  receipt: { tone: "muted", headline: "Receipt — pending", note: "Nothing has run yet." },
+  shots: [],
+};
+
 const ecTomas: DemoRowSpec = {
   id: "ec-tomas",
   rowType: "run",
@@ -3488,7 +3575,9 @@ const RAW_ROWS: DemoRowSpec[] = [
     plNathan,
     // queued
     wsPriya,
+    spRefresh,
     // finished
+    spMorning,
     oathBatch,
     ocrSpring,
     ecPacket,
