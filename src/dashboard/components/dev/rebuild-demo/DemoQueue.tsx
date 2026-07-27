@@ -10,7 +10,6 @@ import {
   ChevronUp,
   ClipboardList,
   CornerDownRight,
-  Eye,
   FileText,
   GitBranch,
   Info,
@@ -21,8 +20,6 @@ import {
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { QueueRowCard } from "@/components/queue-panel/QueueRowCard";
-import { StatusCounts } from "@/components/queue-panel/StatusCounts";
 import {
   MemberOutcomePending,
   MemberOutcomeWord,
@@ -34,8 +31,8 @@ import {
 import { panelKindSpec, rowExplanationOf, rowVariantSpec } from "./demo-catalog";
 import {
   Button,
+  ChipRow,
   IconButton,
-  Kbd,
   MetaLine,
   Popover,
   PopoverContent,
@@ -49,13 +46,12 @@ import {
   dsSurface,
   dsText,
 } from "./demo-ui";
-import { FooterActions, OutcomeActionButton, RowActionMenu, type DemoActionHandler } from "./DemoActions";
+import { FooterActions, OutcomeActionButton, RowContextMenu, type DemoActionHandler } from "./DemoActions";
 import { rowInBucket, type StatusBucket } from "./DemoShell";
 import { DEMO_DAY, dayLabel } from "./demo-days";
 import {
   bandsFor,
   DEMO_ROWS,
-  DENSITY_RUNGS,
   densityRung,
   effectiveStatus,
   fmtElapsed,
@@ -167,6 +163,59 @@ function FactChipView({ label, value, arrowTo, warn }: NonNullable<DemoRow["fact
         </>
       )}
     </span>
+  );
+}
+
+/**
+ * A group's member tally, read off the ONE status table.
+ *
+ * It replaces the production `StatusCounts`, which the demo had been importing
+ * since wave 1. That component paints `queued` in `text-warning` and `running`
+ * in `text-primary` — a direct contradiction of this design system, where
+ * Queued and Running are deliberately HUELESS and amber is reserved for "a
+ * human is involved". So the one strip in the queue that summarises eight
+ * statuses was rendering four of them in colours the rest of the demo does not
+ * use, which is a large part of why the operator said the row "doesn't look
+ * like the rest of the ui". Same shape, same icons, one source of truth.
+ */
+function DemoStatusCounts({ counts }: { counts: ReturnType<typeof groupCounts> }) {
+  const tallies: { key: ProposedStatus; n: number }[] = [
+    { key: "verifiedDone", n: counts.done + counts.warnings },
+    { key: "running", n: counts.running },
+    { key: "queued", n: counts.queued },
+    { key: "waiting", n: counts.waiting },
+    { key: "parked", n: counts.parked },
+    { key: "failed", n: counts.failed },
+  ];
+  return (
+    <>
+      {tallies.map(({ key, n }) => {
+        // The three that are always true of a group are always shown, so the
+        // strip does not reflow every time one crosses zero; the three that are
+        // exceptions appear only when they happen.
+        const always = key === "verifiedDone" || key === "running" || key === "queued";
+        if (!always && n <= 0) return null;
+        const spec = PROPOSED_STATUS[key];
+        const Icon = spec.icon;
+        return (
+          <span
+            key={key}
+            aria-label={`${n} ${spec.label.toLowerCase()}`}
+            title={spec.label}
+            className={cn(
+              "inline-flex shrink-0 items-center gap-[var(--ds-space-tight)] whitespace-nowrap",
+              n === 0 ? "text-[color:var(--ds-fg-faint)]" : spec.iconClass,
+            )}
+          >
+            <Icon
+              aria-hidden
+              className={cn(dsIcon.sm, key === "running" && n > 0 && "animate-spin motion-reduce:animate-none")}
+            />
+            <span className={dsText.nums}>{n}</span>
+          </span>
+        );
+      })}
+    </>
   );
 }
 
@@ -514,6 +563,85 @@ function sublineFor(row: DemoRow): { tone: string; text: string } | null {
 // The universal demo row card
 // ---------------------------------------------------------------------------
 
+/**
+ * The row's FOOTER — the run's provenance line and its controls.
+ *
+ * WHY IT IS NOT THE PRODUCTION `RowFooter` ANY MORE. That footer packs
+ * `time · #run · id · elapsed · queue note · buttons` onto ONE 11px line and
+ * `truncate`s whatever loses, which at a 400px queue rendered
+ * `2:24 PM · #5 · 1… · in queue 3m · 2 ahead · ⌃ ✕ ⋯` — a trace id cut to a
+ * single character. It also drew itself in the SHIPPED dashboard's tokens
+ * (`bg-secondary/20`, `text-[11px] font-mono`), which is a large part of why the
+ * operator said the queue row "doesn't look like the rest of the ui".
+ *
+ * The rule here: **facts wrap, they never truncate.** The meta zone is one
+ * wrapping provenance line at the row's own indent, and the controls are a
+ * sibling pinned to the top-right — so when a run carries a queue note as well
+ * as an id, the note takes a second line instead of eating the id, and the
+ * buttons stay exactly where they were. A row with little to say stays one line
+ * high; density is spent where there is something to be dense about.
+ */
+function RowFooterLine({
+  row,
+  handlers,
+  elapsed,
+}: {
+  row: DemoRow;
+  handlers: DemoQueueHandlers;
+  elapsed?: string;
+}) {
+  const showId = row.subtitle && row.subtitle !== row.title;
+  const timing = elapsed ?? row.duration ?? undefined;
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-[var(--ds-space-base)] border-t px-[var(--ds-space-cozy)] py-[var(--ds-space-tight)]",
+        dsBorder.subtle,
+        "bg-[var(--ds-surface-2)]",
+      )}
+    >
+      <div
+        className={cn(
+          dsText.meta,
+          dsText.nums,
+          "flex min-h-[var(--ds-h-sm)] min-w-0 flex-1 flex-wrap items-center",
+          "gap-x-[var(--ds-space-base)] gap-y-[var(--ds-space-hair)] text-[color:var(--ds-fg-muted)]",
+        )}
+      >
+        <span className="whitespace-nowrap">{row.time}</span>
+        <span
+          className={cn(
+            "inline-flex shrink-0 items-center border px-[var(--ds-space-tight)]",
+            "h-[var(--ds-h-xs)]",
+            dsRadius.sm,
+            dsBorder.base,
+            "bg-[var(--ds-surface-1)]",
+          )}
+        >
+          #{row.run}
+        </span>
+        {/* The trace id is the row's NAME in every log, every receipt and every
+            support conversation, so it is the last thing that may be cut. It is
+            `nowrap`: if the line runs out, the SEGMENTS AFTER IT wrap. */}
+        {showId && (
+          <span className="whitespace-nowrap text-[color:var(--ds-fg-secondary)]" title={row.subtitle}>
+            {row.subtitle}
+          </span>
+        )}
+        {timing && <span className="whitespace-nowrap">{timing}</span>}
+        {row.queueNote && <span className="whitespace-nowrap">{row.queueNote}</span>}
+      </div>
+      {/* The frequent commands, inline. The full set is one right-click away —
+          there is no `⋯`, because a button whose only job is to admit there are
+          more buttons is a slot spent on every row in the queue. */}
+      <div className="flex shrink-0 items-center gap-[var(--ds-space-hair)] pt-[var(--ds-space-hair)]">
+        <FooterActions row={row} onAction={handlers.onAction} />
+      </div>
+      <span className="sr-only">{`Right-click or press m for every command on ${row.displayName ?? (row.title || row.trace)}`}</span>
+    </div>
+  );
+}
+
 export function DemoRowCard({
   row,
   state,
@@ -536,209 +664,233 @@ export function DemoRowCard({
   const linked = linkedGroupSummary(row);
   const settled = isSettledRow(row);
 
-  // NO status branching here. The footer renders exactly the descriptors the
-  // surface sent for this row; an action the server did not send has no button.
-  const actions = (
-    <>
-      <FooterActions row={row} onAction={handlers.onAction} />
-      <RowActionMenu row={row} onAction={handlers.onAction} />
-    </>
-  );
-
   return (
-    <QueueRowCard
-      selected={selected}
-      selectionTone={nested ? "muted" : "primary"}
-      rootProps={{
-        onClick: () => handlers.onSelect(row.id),
-        role: "button",
-        tabIndex: 0,
-        "aria-pressed": selected,
-        "aria-label": `${row.displayName ?? row.title} — ${statusText(status, gateAge(row, state.tick)).toLowerCase()}`,
-        "data-demo-row-id": row.id,
-        onKeyDown: (e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            handlers.onSelect(row.id);
-          }
-        },
-        className: cn(status === "running" && "border-primary/30"),
-      }}
-      footer={{
-        time: row.time,
-        runNumber: row.run,
-        secondaryId: row.subtitle,
-        suppressIdWhenEquals: row.title,
-        elapsed: elapsed ?? row.queueNote ?? null,
-        duration: row.duration ?? null,
-        actions,
-      }}
-    >
-      <div className="px-3.5 py-2.5">
-        <div className="flex min-w-0 items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            {/* Bulk selection is a TOP-LEVEL act: a member is acted on through
-                its group or on its own row, never half-selected inside one. */}
-            {state.selectMode && !nested && (
-              <input
-                type="checkbox"
-                checked={state.bulkIds.has(row.id)}
-                aria-label={`Select ${row.displayName || row.title || row.trace} for a bulk command`}
-                onClick={(e) => e.stopPropagation()}
-                onChange={() => handlers.onToggleBulk(row.id)}
-                className="size-3.5 shrink-0 accent-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            )}
-            <StatusIcon aria-hidden className={cn("h-3.5 w-3.5 shrink-0", PROPOSED_STATUS[status].iconClass)} />
-            <span
-              title={row.displayName ? `Named by you — subject is ${row.title}` : undefined}
-              className={cn(
-                dsText.title,
-                "truncate font-semibold text-[color:var(--ds-fg)]",
-                row.containment === "rejected" && "italic font-normal text-[color:var(--ds-fg-muted)]",
-              )}
-            >
-              {row.displayName ?? row.title}
-            </span>
-            {/* Which workflow owns this row — the only thing that tells a packet
-                apart from the OCR review row that shares its filename. Printed
-                the moment the surface mixes workflows, and silent when every
-                row on screen would say the same word. */}
-            {row.wfLabel !== state.panelWorkflow && (
-              <span className={rowChip("neutral", cn(dsText.caps, "tracking-[var(--ds-tracking-caps)]"))}>{row.wfLabel}</span>
-            )}
-            {/* Sits on the chip line at the chip's own height, so explaining a
-                row costs the queue no vertical space at all. */}
-            <RowInfo row={row} />
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">{headerChips(row, state.checkedIds, state.tick)}</div>
-        </div>
+    <div className={cn(!nested && "px-[var(--ds-space-cozy)] pt-[var(--ds-space-snug)] first:pt-[var(--ds-space-cozy)]")}>
+      <RowContextMenu row={row} onAction={handlers.onAction}>
+        <div
+          onClick={() => handlers.onSelect(row.id)}
+          role="button"
+          tabIndex={0}
+          aria-pressed={selected}
+          aria-label={`${row.displayName ?? row.title} — ${statusText(status, gateAge(row, state.tick)).toLowerCase()}`}
+          data-demo-row-id={row.id}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              handlers.onSelect(row.id);
+            }
+          }}
+          className={cn(
+            "group relative flex cursor-pointer flex-col overflow-hidden border",
+            dsRadius.lg,
+            dsMotion.base,
+            dsSurface.card,
+            dsFocus,
+            selected ? dsBorder.loud : dsBorder.base,
+            "hover:border-[color:var(--ds-border-strong)]",
+            // Selection is a FILL plus a rail, never a glow: a shadow means
+            // floating, and a selected row is not floating.
+            selected && !nested && "bg-[var(--ds-surface-selected)] shadow-[inset_2px_0_0_var(--ds-accent)]",
+            selected && nested && "bg-[var(--ds-surface-selected)]",
+            status === "running" && !selected && "border-[color:var(--ds-status-running-border)]",
+          )}
+        >
+          {/*
+            THE ROW'S RHYTHM, and the whole of it.
 
-        {/* A counted anchor ("5 separations") has no subject of its own, so the
-            names ARE its identity — without them the row is a number. */}
-        {row.memberPreview && row.groupNoun && (
-          <div
-            className={cn(dsText.meta, "mt-[var(--ds-space-hair)] ml-5 truncate text-[color:var(--ds-fg-muted)]")}
-            title={row.memberPreview}
-          >
-            {row.memberPreview}
-          </div>
-        )}
+            One grid with a fixed leading track (`--ds-w-row-indent`) and ONE
+            vertical gap. Every line under the title hangs off the same edge as
+            the title, because the edge is a grid column rather than an `ml-5`
+            re-typed on each of the six things that can appear here — which is
+            how the old row came to have `mt-1.5` in four places, `mt-[snug]` in
+            two, and a status tick sitting 8px from the name it belongs to while
+            unrelated chips sat 6px apart.
 
-        {sub && (
+            The tick binds to the name at `tight`; groups of content separate at
+            `snug`. Two steps, on the 8px scale, the same two every other
+            surface in this demo uses.
+          */}
           <div
             className={cn(
-              dsText.meta,
-              "mt-[var(--ds-space-snug)] ml-5 flex min-w-0 items-center gap-[var(--ds-space-base)] font-mono",
-              sub.tone,
+              "grid min-w-0 grid-cols-[var(--ds-w-row-indent)_minmax(0,1fr)] items-start",
+              "gap-y-[var(--ds-space-snug)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
             )}
           >
-            <span className="min-w-0 truncate">{sub.text}</span>
-            <OutcomeActionButton row={row} onAction={handlers.onAction} className="ml-auto" />
-          </div>
-        )}
+            <StatusIcon
+              aria-hidden
+              className={cn(dsIcon.md, "col-start-1 row-start-1 mt-px shrink-0", PROPOSED_STATUS[status].iconClass)}
+            />
+            <div className="col-start-2 row-start-1 flex min-w-0 items-center justify-between gap-[var(--ds-space-base)]">
+              <div className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
+                {/* Bulk selection is a TOP-LEVEL act: a member is acted on
+                    through its group or on its own row, never half-selected
+                    inside one. */}
+                {state.selectMode && !nested && (
+                  <input
+                    type="checkbox"
+                    checked={state.bulkIds.has(row.id)}
+                    aria-label={`Select ${row.displayName || row.title || row.trace} for a bulk command`}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={() => handlers.onToggleBulk(row.id)}
+                    className={cn("size-3.5 shrink-0 accent-[var(--ds-accent)]", dsFocus)}
+                  />
+                )}
+                <span
+                  title={row.displayName ? `Named by you — subject is ${row.title}` : undefined}
+                  className={cn(
+                    dsText.title,
+                    "truncate font-semibold text-[color:var(--ds-fg)]",
+                    row.containment === "rejected" && "italic font-normal text-[color:var(--ds-fg-muted)]",
+                  )}
+                >
+                  {row.displayName ?? row.title}
+                </span>
+                {/* Which workflow owns this row — the only thing that tells a
+                    packet apart from the OCR review row that shares its
+                    filename. Printed the moment the surface mixes workflows,
+                    and silent when every row on screen would say the same word. */}
+                {row.wfLabel !== state.panelWorkflow && (
+                  <span className={rowChip("neutral", cn(dsText.caps, "tracking-[var(--ds-tracking-caps)]"))}>{row.wfLabel}</span>
+                )}
+                {/* Sits on the chip line at the chip's own height, so explaining
+                    a row costs the queue no vertical space at all. */}
+                <RowInfo row={row} />
+              </div>
+              <div className="flex shrink-0 items-center gap-[var(--ds-space-snug)]">
+                {headerChips(row, state.checkedIds, state.tick)}
+              </div>
+            </div>
 
-        {/* Linked delegation. A `linked` child keeps its own row in its own
-            panel and the two point at each other — one chip each, never a
-            duplicated run. `member` children live in the body instead. */}
-        {(row.reviewRunId || row.reviewOf) && <LinkedReviewChip row={row} handlers={handlers} />}
+            {/* A counted anchor ("5 separations") has no subject of its own, so
+                the names ARE its identity — without them the row is a number. */}
+            {row.memberPreview && row.groupNoun && (
+              <div className={cn(dsText.meta, "col-start-2 truncate text-[color:var(--ds-fg-muted)]")} title={row.memberPreview}>
+                {row.memberPreview}
+              </div>
+            )}
 
-        {/* A SET of linked children — Oath Upload's signers. Still a chip, not
-            a member list: each signer is an Oath Signature run with its own row
-            in that panel, counted there exactly once. */}
-        {linked && (
-          <div className="mt-1.5 ml-5">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handlers.onOpenPanel(linked.panel, linked.targetId);
-              }}
-              title={`Open the ${linked.panel} panel — ${linked.total === 1 ? "this run lives" : "these runs live"} there, not under this row`}
-              className={linkChip("info")}
-            >
-              <Users aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
-              <span className="truncate">{linked.label}</span>
-              <ArrowUpRight aria-hidden className="size-3 shrink-0" />
-            </button>
-          </div>
-        )}
+            {sub && (
+              <div
+                className={cn(
+                  dsText.meta,
+                  "col-start-2 flex min-w-0 items-center gap-[var(--ds-space-base)]",
+                  sub.tone,
+                )}
+              >
+                <span className="min-w-0 truncate">{sub.text}</span>
+                <OutcomeActionButton row={row} onAction={handlers.onAction} className="ml-auto" />
+              </div>
+            )}
 
-        {/* ONE level of back, never a breadcrumb trail: maximum real depth is 2,
-            so there is only ever one parent worth returning to. */}
-        {row.linkedParentId && !row.reviewOf && DEMO_ROWS[row.linkedParentId] && (
-          <div className="mt-1.5 ml-5">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                const parent = DEMO_ROWS[row.linkedParentId as string];
-                handlers.onOpenPanel(parent.wfLabel, parent.id);
-              }}
-              title={`Delegated by ${DEMO_ROWS[row.linkedParentId].wfLabel} · ${DEMO_ROWS[row.linkedParentId].title} — open it in its own panel`}
-              className={linkChip("neutral")}
-            >
-              <ArrowLeft aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
-              <span className="truncate">
-                {DEMO_ROWS[row.linkedParentId].wfLabel} · {DEMO_ROWS[row.linkedParentId].title}
-              </span>
-            </button>
-          </div>
-        )}
+            {/* Linked delegation. A `linked` child keeps its own row in its own
+                panel and the two point at each other — one chip each, never a
+                duplicated run. `member` children live in the body instead. */}
+            {(row.reviewRunId || row.reviewOf) && (
+              <div className="col-start-2">
+                <LinkedReviewChip row={row} handlers={handlers} />
+              </div>
+            )}
 
-        {row.facts && (
-          <div className="mt-1.5 ml-5 flex min-w-0 flex-wrap items-center gap-1">
-            {row.facts.map((f, i) => (
-              <FactChipView key={i} {...f} />
+            {/* A SET of linked children — Oath Upload's signers. Still a chip,
+                not a member list: each signer is an Oath Signature run with its
+                own row in that panel, counted there exactly once. */}
+            {linked && (
+              <div className="col-start-2">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handlers.onOpenPanel(linked.panel, linked.targetId);
+                  }}
+                  title={`Open the ${linked.panel} panel — ${linked.total === 1 ? "this run lives" : "these runs live"} there, not under this row`}
+                  className={linkChip("info")}
+                >
+                  <Users aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
+                  <span className="truncate">{linked.label}</span>
+                  <ArrowUpRight aria-hidden className="size-3 shrink-0" />
+                </button>
+              </div>
+            )}
+
+            {/* ONE level of back, never a breadcrumb trail: maximum real depth
+                is 2, so there is only ever one parent worth returning to. */}
+            {row.linkedParentId && !row.reviewOf && DEMO_ROWS[row.linkedParentId] && (
+              <div className="col-start-2">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const parent = DEMO_ROWS[row.linkedParentId as string];
+                    handlers.onOpenPanel(parent.wfLabel, parent.id);
+                  }}
+                  title={`Delegated by ${DEMO_ROWS[row.linkedParentId].wfLabel} · ${DEMO_ROWS[row.linkedParentId].title} — open it in its own panel`}
+                  className={linkChip("neutral")}
+                >
+                  <ArrowLeft aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
+                  <span className="truncate">
+                    {DEMO_ROWS[row.linkedParentId].wfLabel} · {DEMO_ROWS[row.linkedParentId].title}
+                  </span>
+                </button>
+              </div>
+            )}
+
+            {/* The fact chips. A GRID, not a wrap: four facts of four different
+                lengths on a flex row leave three on line one and `txn …`
+                orphaned on line two, so the set reads as three-plus-one rather
+                than as one block. */}
+            {row.facts && (
+              <ChipRow className="col-start-2">
+                {row.facts.map((f, i) => (
+                  <FactChipView key={i} {...f} />
+                ))}
+              </ChipRow>
+            )}
+
+            {isGroup && counts && (memberCount > 0 ? (
+              <div className="col-start-2 flex flex-col gap-[var(--ds-space-snug)]">
+                <div className={cn(dsText.meta, "flex items-center gap-[var(--ds-space-cozy)]")}>
+                  <DemoStatusCounts counts={counts} />
+                  {/* Rejected is its own tally. Folding it into done is how a
+                      packet with an unreadable page comes to read as clean. */}
+                  {counts.rejected > 0 && (
+                    <span
+                      className="inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-fg-muted)]"
+                      title={`${counts.rejected} rejected — never became work and excluded from the rollup`}
+                    >
+                      <SearchX aria-hidden className={dsIcon.sm} />
+                      <span className={dsText.nums}>{counts.rejected}</span> rejected
+                    </span>
+                  )}
+                  {/* The checked counter is a PLACE-KEEPER for walking a list
+                      that still needs walking. On a settled group it counts
+                      progress through a job that is over, and invites a mark
+                      that changes nothing — so it goes. */}
+                  {!settled && (
+                    <span
+                      className="ml-auto inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-success-fg)]"
+                      aria-label="checked progress"
+                    >
+                      <CheckCircle2 aria-hidden className={dsIcon.sm} />
+                      <span className={dsText.nums}>
+                        {[...(row.memberIds ?? [])].filter((id) => state.checkedIds.has(id)).length}/{memberCount}
+                      </span>{" "}
+                      checked
+                    </span>
+                  )}
+                </div>
+                <GroupBody row={row} state={state} handlers={handlers} />
+              </div>
+            ) : (
+              <div className="col-start-2">
+                <PacketBeforeFanout row={row} handlers={handlers} />
+              </div>
             ))}
           </div>
-        )}
 
-        {isGroup && counts && (memberCount > 0 ? (
-          <>
-            <div className={cn(dsText.meta, "mt-[var(--ds-space-snug)] ml-5 flex items-center gap-[var(--ds-space-cozy)]")}>
-              <StatusCounts counts={{ done: counts.done + counts.warnings, running: counts.running, queued: counts.queued, failed: counts.failed }} />
-              {counts.waiting > 0 && (
-                <span
-                  className="inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-status-waiting-fg)]"
-                  aria-label={`${counts.waiting} waiting on you`}
-                >
-                  <Eye aria-hidden className={dsIcon.sm} />
-                  {counts.waiting}
-                </span>
-              )}
-              {/* Rejected is its own tally. Folding it into done is how a packet
-                  with an unreadable page comes to read as clean. */}
-              {counts.rejected > 0 && (
-                <span
-                  className="inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-fg-muted)]"
-                  title={`${counts.rejected} rejected — never became work, excluded from the rollup, and the reason this group cannot read as Verified done`}
-                >
-                  <SearchX aria-hidden className={dsIcon.sm} />
-                  {counts.rejected} rejected
-                </span>
-              )}
-              {/* The checked counter is a PLACE-KEEPER for walking a list that
-                  still needs walking. On a settled group it counts progress
-                  through a job that is over, and invites a mark that changes
-                  nothing — so it goes. */}
-              {!settled && (
-                <span
-                  className="ml-auto inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-success-fg)]"
-                  aria-label="checked progress"
-                >
-                  <CheckCircle2 aria-hidden className={dsIcon.sm} />
-                  {[...(row.memberIds ?? [])].filter((id) => state.checkedIds.has(id)).length}/{memberCount} checked
-                </span>
-              )}
-            </div>
-            <GroupBody row={row} state={state} handlers={handlers} />
-          </>
-        ) : (
-          <PacketBeforeFanout row={row} handlers={handlers} />
-        ))}
-      </div>
-    </QueueRowCard>
+          <RowFooterLine row={row} handlers={handlers} elapsed={elapsed} />
+        </div>
+      </RowContextMenu>
+    </div>
   );
 }
 
@@ -816,13 +968,16 @@ function PacketBeforeFanout({ row, handlers }: { row: DemoRow; handlers: DemoQue
   const bulk = row.bulkApprove;
   if (row.extractedCount === undefined) return null;
   return (
-    <div className="mt-1.5 ml-5 flex flex-col gap-1.5">
+    <div className="flex flex-col gap-[var(--ds-space-snug)]">
       <div className={cn(dsText.meta, "flex flex-wrap items-center gap-[var(--ds-space-base)]")}>
         <span className={rowChip("neutral", "font-medium")}>
           <Users aria-hidden className={cn(dsIcon.sm, "text-[color:var(--ds-fg-muted)]")} />
           {row.extractedCount} people
         </span>
-        <span className="text-[color:var(--ds-fg-muted)]">member rows appear when you approve</span>
+        {/* `member rows appear when you approve` was here. It described what
+            the button beside it does, which the row's ⓘ already says once, for
+            every packet in the product ("Approving fans out one real run per
+            person"). */}
       </div>
       {bulk && (
         <div
@@ -885,7 +1040,7 @@ function GroupBody({ row, state, handlers }: { row: DemoRow; state: DemoQueueSta
     // At three people or fewer the group IS its members — a chevron here is
     // pure friction, so they are always open and rendered as full rows.
     return (
-      <div className="mt-1.5 ml-5 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()} role="presentation">
+      <div className="flex flex-col gap-[var(--ds-space-snug)]" onClick={(e) => e.stopPropagation()} role="presentation">
         {ids.map((id) => (
           <DemoRowCard key={id} row={DEMO_ROWS[id]} state={state} handlers={handlers} nested />
         ))}
@@ -942,11 +1097,14 @@ function GroupMemberList({
   const visible = shut ? [] : rung === "well" ? ids : expanded ? ids : ids.slice(0, 4);
   const noun = row.wfLabel === "Oath Signature" ? "signers" : "people";
   return (
-    <div className="mt-1.5 ml-5">
+    <div>
       {visible.length > 0 && (
       <div
         className={cn(
-          "divide-y divide-border/40 overflow-hidden rounded-md border border-border/60",
+          "divide-y overflow-hidden border",
+          dsRadius.md,
+          dsBorder.base,
+          "divide-[color:var(--ds-border-subtle)]",
           rung === "well" && "max-h-[var(--ds-h-member-well)] overflow-y-auto",
         )}
       >
@@ -1076,15 +1234,10 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
         <span className={cn(dsText.title, "mr-[var(--ds-space-tight)] truncate font-semibold text-[color:var(--ds-fg)]")}>
           {group.title}
         </span>
-        {/* This is the LAST RUNG of the density ladder, not a route: the same
-            group, the same members, opened to the size the set actually needs.
-            One back, no breadcrumb — there is only one parent to return to. */}
-        <span
-          title={`Density ladder — ${DENSITY_RUNGS.find((r) => r.key === densityRung(ids.length))?.range}. The drill-in is a rung, not a separate page.`}
-          className={cn(drillChip(false), dsRadius.pill)}
-        >
-          {DENSITY_RUNGS.find((r) => r.key === densityRung(ids.length))?.range} · opened in place
-        </span>
+        {/* `13+ members · opened in place` USED TO BE HERE, and it was the UI
+            describing itself to the operator standing in it. The density rung
+            is a fact about the product, not about this group — it belongs to
+            the row's ⓘ and to the catalog, both of which still carry it. */}
         <span className={cn(drillChip(true), dsRadius.pill)}>
           Attention <span className={dsText.nums}>{attentionN}</span>
         </span>
@@ -1133,7 +1286,11 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
         <span>{memberDetailHeading(group)}</span>
         <span className="text-right">Took</span>
       </div>
-      <div role="listbox" aria-label="Group members, attention first" className="min-h-0 flex-1 divide-y divide-border/30 overflow-y-auto">
+      <div
+        role="listbox"
+        aria-label="Group members, attention first"
+        className="min-h-0 flex-1 divide-y divide-[color:var(--ds-border-subtle)] overflow-y-auto"
+      >
         {ids.map((id) => {
           const m = DEMO_ROWS[id];
           const rejected = m.containment === "rejected";
@@ -1183,29 +1340,22 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
           );
         })}
       </div>
+      {/* The five-key legend that used to sit here is gone. Every one of those
+          keys is in the Top Bar's shortcuts Popover, which is on screen in
+          every view — a band that teaches the operator the same four keys every
+          time they open a group is a band that gets skimmed past twice. What
+          survives is the one thing that is a FACT about this list rather than
+          about the product: the order it is in. */}
       <div
         className={cn(
-          "flex shrink-0 flex-wrap items-center border-t bg-[var(--ds-surface-2)]",
+          "flex shrink-0 items-center justify-end border-t bg-[var(--ds-surface-2)]",
           dsBorder.subtle,
           dsText.meta,
-          "gap-x-[var(--ds-space-cozy)] gap-y-[var(--ds-space-tight)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
+          "px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
           "text-[color:var(--ds-fg-muted)]",
         )}
       >
-        <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
-          <Kbd>j</Kbd>
-          <Kbd>k</Kbd> move
-        </span>
-        <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
-          <Kbd>n</Kbd> next attention
-        </span>
-        <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
-          <Kbd>c</Kbd> mark checked
-        </span>
-        <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
-          <Kbd>Esc</Kbd> back
-        </span>
-        <span className="ml-auto">sorted attention-first</span>
+        sorted attention-first
       </div>
     </div>
   );
@@ -1287,15 +1437,21 @@ export function DemoQueue({
               <FileText aria-hidden className={cn(dsIcon.md, "text-[color:var(--ds-fg-muted)]")} />
               {state.filter === "all" ? `No ${workflowLabel} runs on Jul 25` : `No ${workflowLabel} runs are ${filterWord(state.filter)}`}
             </span>
+            {/* An empty state still owes the operator three things — what would
+                be here, why it is not, and what to do — and no more. The two
+                sentences that used to justify the DESIGN of the empty panel
+                ("a panel that vanishes when idle is a panel you stop trusting",
+                "all three read the same count") are gone: they explained the
+                product to the person using it. */}
             <p className={cn(dsText.body, "max-w-[52ch] leading-relaxed text-[color:var(--ds-fg-muted)]")}>
               {state.filter === "all"
-                ? "This workflow is registered and can be run — it simply has no runs today. A panel that vanishes when idle is a panel you stop trusting, so it stays."
-                : "Rows exist in this workflow, just none in this status. The badge beside the workflow and the pill above both read zero here because all three read the same count."}
+                ? "It is registered and can be run — there is simply nothing on this day."
+                : "There are rows in this workflow, none in this status."}
             </p>
             <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
               {state.filter === "all"
-                ? "Start one from the run controls, or pick another workflow in the Workflow Panel."
-                : "Clear the status pill to see everything in this workflow."}
+                ? "Start one with Start a run, or pick another workflow."
+                : "Clear the status pill to see everything here."}
             </p>
           </div>
         )}
