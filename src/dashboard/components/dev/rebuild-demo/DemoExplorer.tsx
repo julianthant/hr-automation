@@ -24,6 +24,7 @@ import {
   Well,
   dsFocus,
   dsIcon,
+  dsMotion,
   dsText,
 } from "./demo-ui";
 import {
@@ -170,7 +171,7 @@ export function DemoExplorerPage({ onBack, onOpenSettings }: { onBack: () => voi
             )}
           </PanelBody>
           <PanelFooter>
-            <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+            <span className={cn(dsText.meta, "max-w-[104ch] text-[color:var(--ds-fg-muted)]")}>
               The graph is the descriptor; the overlay is this run's own recorded steps. Neither is editable here — read-only was
               ratified first, and an authoring surface would have to bump a version to mean anything.
             </span>
@@ -235,6 +236,7 @@ function GraphNodeRow({
       className={cn(
         "flex min-w-0 items-start gap-[var(--ds-space-base)] rounded-[var(--ds-radius-md)] border p-[var(--ds-space-base)] text-left",
         dsFocus,
+        dsMotion.base,
         selected
           ? "border-[color:var(--ds-border-loud)] bg-[var(--ds-surface-selected)]"
           : "border-[color:var(--ds-border)] bg-[var(--ds-surface-1)] hover:bg-[var(--ds-surface-2)]",

@@ -1,14 +1,18 @@
 import { type ReactNode } from "react";
-import { CheckCircle2, FlaskConical, GitBranch, Link2, Rows3, ScrollText, TriangleAlert, Users } from "lucide-react";
+import { Check, CheckCircle2, FlaskConical, GitBranch, Link2, Rows3, ScrollText, TriangleAlert, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Badge,
   Banner,
   Button,
   Card,
+  CardBody,
   Chip,
   Field,
   KeyValueList,
+  MetaLine,
+  Refusal,
+  SectionLabel,
   Select,
   StatusPill,
   Well,
@@ -16,6 +20,7 @@ import {
   dsIcon,
   dsText,
 } from "./demo-ui";
+import { hasRefusalCode } from "./demo-commands";
 import type { DemoWorkflowRef, SystemKey } from "./demo-wire";
 import {
   SYSTEM_HAS_TEST,
@@ -61,7 +66,7 @@ export function InstanceSelector({
   const test = testSystems(workflow, value);
   return (
     <div className="flex flex-col gap-[var(--ds-space-base)]">
-      <div className="grid grid-cols-2 gap-[var(--ds-space-base)]">
+      <div className="grid grid-cols-1 gap-[var(--ds-space-base)] min-[420px]:grid-cols-2">
         {workflow.systems.map((system) => {
           const hasTest = SYSTEM_HAS_TEST[system];
           return (
@@ -127,11 +132,11 @@ export function RunFlagChips({
 // ---------------------------------------------------------------------------
 
 const ROLE_META: Record<PlanRole, { label: string; icon: ReactNode }> = {
-  group: { label: "Group Row", icon: <Rows3 aria-hidden className="size-3" /> },
-  run: { label: "Run Row", icon: <ScrollText aria-hidden className="size-3" /> },
-  review: { label: "Review Run Row", icon: <ScrollText aria-hidden className="size-3" /> },
-  member: { label: "Member Rows", icon: <Users aria-hidden className="size-3" /> },
-  linked: { label: "Linked runs", icon: <Link2 aria-hidden className="size-3" /> },
+  group: { label: "Group Row", icon: <Rows3 aria-hidden className={dsIcon.sm} /> },
+  run: { label: "Run Row", icon: <ScrollText aria-hidden className={dsIcon.sm} /> },
+  review: { label: "Review Run Row", icon: <ScrollText aria-hidden className={dsIcon.sm} /> },
+  member: { label: "Member Rows", icon: <Users aria-hidden className={dsIcon.sm} /> },
+  linked: { label: "Linked runs", icon: <Link2 aria-hidden className={dsIcon.sm} /> },
 };
 
 export function PlanPreview({
@@ -172,12 +177,12 @@ export function PlanPreview({
 
       {plan.decisions.length > 0 && (
         <Well className="flex flex-col gap-[var(--ds-space-snug)]">
-          <span className={cn(dsText.caps, dsFg.muted)}>Why it is shaped this way</span>
+          <SectionLabel>Why it is shaped this way</SectionLabel>
           <ul className="flex flex-col gap-[var(--ds-space-tight)]">
             {plan.decisions.map((decision) => (
               <li key={decision} className={cn(dsText.body, dsFg.secondary, "flex gap-[var(--ds-space-snug)]")}>
                 <GitBranch aria-hidden className={cn(dsIcon.sm, "mt-0.5 shrink-0", dsFg.faint)} />
-                <span>{decision}</span>
+                <span className="max-w-[74ch]">{decision}</span>
               </li>
             ))}
           </ul>
@@ -190,25 +195,27 @@ export function PlanPreview({
 function PlanRowCard({ row }: { row: EnqueuePlanRow }) {
   const meta = ROLE_META[row.role];
   return (
-    <Card className="p-[var(--ds-space-base)]">
-      <div className="flex min-w-0 flex-wrap items-center gap-[var(--ds-space-base)]">
-        <Badge tone={row.containment === "linked" ? "info" : "neutral"}>
-          {meta.icon}
-          {meta.label}
-        </Badge>
-        <span className={cn(dsText.ui, "min-w-0 flex-1 truncate font-medium", dsFg.base)}>{row.title}</span>
-        {row.bornAs === "not yet created" ? (
-          <span className={cn(dsText.meta, dsFg.faint)}>not yet created</span>
-        ) : (
-          <StatusPill status={row.bornAs} size="sm" />
-        )}
-      </div>
-      <div className="mt-[var(--ds-space-tight)] flex flex-wrap items-center gap-[var(--ds-space-base)]">
-        <span className={cn(dsText.meta, dsText.nums, dsFg.muted)}>{row.subtitle}</span>
-        <Chip label="panel">{row.panel}</Chip>
-        {row.containment && <Chip label="containment">{row.containment}</Chip>}
-      </div>
-      {row.note && <p className={cn(dsText.body, dsFg.secondary, "mt-[var(--ds-space-tight)]")}>{row.note}</p>}
+    <Card>
+      <CardBody className="flex flex-col gap-[var(--ds-space-tight)] py-[var(--ds-space-snug)]">
+        <div className="flex min-w-0 flex-wrap items-center gap-[var(--ds-space-base)]">
+          <Badge tone={row.containment === "linked" ? "info" : "neutral"}>
+            {meta.icon}
+            {meta.label}
+          </Badge>
+          <span className={cn(dsText.ui, "min-w-0 flex-1 truncate font-medium", dsFg.base)}>{row.title}</span>
+          {row.bornAs === "not yet created" ? (
+            <span className={cn(dsText.meta, dsFg.faint)}>not yet created</span>
+          ) : (
+            <StatusPill status={row.bornAs} size="sm" />
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-[var(--ds-space-base)]">
+          <MetaLine items={[row.subtitle]} />
+          <Chip label="panel">{row.panel}</Chip>
+          {row.containment && <Chip label="containment">{row.containment}</Chip>}
+        </div>
+        {row.note && <p className={cn(dsText.body, dsFg.secondary, "max-w-[74ch]")}>{row.note}</p>}
+      </CardBody>
     </Card>
   );
 }
@@ -245,9 +252,7 @@ export function EnqueueResultBanner({
               }))}
             />
           )}
-          <span className={cn(dsText.meta, dsFg.muted)}>
-            {result.clock} · requested by {result.requestedBy}
-          </span>
+          <MetaLine items={[result.clock, `requested by ${result.requestedBy}`]} />
         </div>
       </Banner>
     );
@@ -273,17 +278,27 @@ export function EnqueueResultBanner({
     );
   }
 
+  const dismiss = onDismiss ? (
+    <Button size="sm" variant="secondary" onClick={onDismiss}>
+      Dismiss
+    </Button>
+  ) : undefined;
+
+  if (!hasRefusalCode(result)) {
+    // The mock server broke its own contract. Say that, rather than print a
+    // refusal with a code nobody can look up.
+    return (
+      <Banner tone="danger" title="Rejected — but no refusal code was served" action={dismiss}>
+        {result.detail} Every rejection is supposed to carry a typed code; this one did not, so there is
+        nothing here to quote in a bug report.
+      </Banner>
+    );
+  }
+
   return (
-    <Banner
-      tone="danger"
-      title={result.headline}
-      action={onDismiss ? <Button size="sm" variant="secondary" onClick={onDismiss}>Dismiss</Button> : undefined}
-    >
-      <div className="flex flex-col gap-[var(--ds-space-snug)]">
-        <span>{result.detail}</span>
-        <span className={cn(dsText.meta, dsText.nums, dsFg.muted)}>code: {result.code}</span>
-      </div>
-    </Banner>
+    <Refusal title={result.headline} code={result.code} outcome="nothing is enqueued" action={dismiss}>
+      {result.detail}
+    </Refusal>
   );
 }
 
@@ -300,6 +315,16 @@ export interface StageSpec {
  * A linear stage rail. Completed stages are re-enterable (going back is how a
  * mis-mapped column gets fixed); stages ahead of the current one are not — the
  * pipeline refuses to skip validation.
+ *
+ * A settled stage swaps its number for a check. That is information, not
+ * decoration: in a six-stage pipeline where every stage is a place a silent
+ * substitution could enter, "how much of this is answered" is the thing the
+ * operator is actually tracking. A disabled ghost button was nearly invisible
+ * against the dialog, so the stages still to come now read as pending rather
+ * than as absent.
+ *
+ * The rail is a `<nav>` of buttons, so the whole pipeline is one tab stop group
+ * and the current stage carries `aria-current="step"`.
  */
 export function StageRail({
   stages,
@@ -312,14 +337,26 @@ export function StageRail({
   reachable: ReadonlySet<string>;
   onSelect: (key: string) => void;
 }) {
+  const currentIndex = stages.findIndex((stage) => stage.key === current);
   return (
-    <nav aria-label="Intake stages" className="flex flex-wrap items-center gap-[var(--ds-space-tight)]">
+    <nav
+      aria-label={`Intake stages — step ${currentIndex + 1} of ${stages.length}`}
+      className="flex flex-wrap items-center gap-[var(--ds-space-tight)]"
+    >
       {stages.map((stage, index) => {
         const isCurrent = stage.key === current;
         const canGo = reachable.has(stage.key);
+        const settled = canGo && index < currentIndex;
         return (
           <span key={stage.key} className="flex items-center gap-[var(--ds-space-tight)]">
-            {index > 0 && <span aria-hidden className={cn(dsText.meta, dsFg.faint)}>›</span>}
+            {index > 0 && (
+              <span
+                aria-hidden
+                className={cn(dsText.meta, index <= currentIndex ? dsFg.muted : dsFg.faint)}
+              >
+                ›
+              </span>
+            )}
             <Button
               size="sm"
               variant={isCurrent ? "primary" : canGo ? "outline" : "ghost"}
@@ -327,7 +364,11 @@ export function StageRail({
               aria-current={isCurrent ? "step" : undefined}
               onClick={() => onSelect(stage.key)}
             >
-              <span className={cn(dsText.nums, "opacity-70")}>{index + 1}</span>
+              {settled ? (
+                <Check aria-hidden className={cn(dsIcon.sm, "text-[color:var(--ds-success-fg)]")} />
+              ) : (
+                <span className={cn(dsText.nums, isCurrent ? "opacity-80" : "opacity-60")}>{index + 1}</span>
+              )}
               {stage.label}
             </Button>
           </span>

@@ -11,6 +11,7 @@ import {
   DialogFooter,
   Field,
   Input,
+  Refusal,
   SectionLabel,
   StatusPill,
   Table,
@@ -102,26 +103,29 @@ function BumpDialogBody({
       description={`${BUMP_SCOPE_LABEL[plan.scope]} · ${BUMP_SCOPE_NOTE[plan.scope]}`}
     >
       <DialogBody className="flex flex-col gap-[var(--ds-space-cozy)]">
-        {result && (
-          <Banner
-            tone={result.state === "applied" ? "success" : "danger"}
-            title={result.headline}
-            action={
-              result.state === "applied" ? (
+        {result &&
+          (result.state === "applied" ? (
+            <Banner
+              tone="success"
+              title={result.headline}
+              action={
                 <Button size="sm" variant="secondary" icon={<Archive aria-hidden className={dsIcon.md} />} onClick={onOpenArchive}>
                   Open the archive
                 </Button>
-              ) : undefined
-            }
-          >
-            {result.detail}
-            {result.code && (
-              <span className={cn(dsText.meta, dsText.nums, "ml-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
-                code {result.code}
-              </span>
-            )}
-          </Banner>
-        )}
+              }
+            >
+              {result.detail}
+            </Banner>
+          ) : result.code ? (
+            <Refusal title={result.headline} code={result.code} outcome="nothing was archived and no version moved">
+              {result.detail}
+            </Refusal>
+          ) : (
+            <Banner tone="danger" title={result.headline}>
+              {result.detail} Nothing was archived and no version moved — but the server sent no refusal code, so there
+              is nothing here to quote in a bug report.
+            </Banner>
+          ))}
 
         {/* ---- targets ---- */}
         <div className="flex min-w-0 flex-wrap items-center gap-[var(--ds-space-tight)]">
@@ -221,7 +225,7 @@ function BumpDialogBody({
               </ul>
             </Well>
           )}
-          <p className={cn(dsText.meta, "mt-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
+          <p className={cn(dsText.meta, "mt-[var(--ds-space-snug)] max-w-[86ch] text-[color:var(--ds-fg-muted)]")}>
             Each one is stored as its final projected row plus its receipt and evidence pointers, so opening it later needs zero
             old-version code. The write ledger is untouched — what was filed in a real HR system stays on record either way.
           </p>
@@ -238,12 +242,9 @@ function BumpDialogBody({
         </div>
       </DialogBody>
 
-      <DialogFooter>
-        <span className={cn(dsText.meta, "mr-auto text-[color:var(--ds-fg-muted)]")}>
-          There is no force arm. The refusal is the feature.
-        </span>
+      <DialogFooter meta="There is no force arm. The refusal is the feature.">
         <Button variant="secondary" onClick={onClose}>
-          Close
+          Cancel
         </Button>
         <Button
           variant={plan.blockers.length > 0 ? "danger" : "primary"}

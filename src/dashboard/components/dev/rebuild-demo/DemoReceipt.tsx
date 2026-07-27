@@ -6,6 +6,7 @@ import {
   Banner,
   Chip,
   KeyValueList,
+  MetaLine,
   SectionLabel,
   Table,
   TBody,
@@ -199,10 +200,15 @@ export function ReceiptView({ receipt, row }: { receipt: DemoRunReceipt; row: De
             {`${receipt.confidence} — ${CONFIDENCE_COPY[receipt.confidence]}`}
           </Chip>
         </div>
-        <span className={cn(dsText.meta, dsText.nums, "text-[color:var(--ds-fg-muted)]")}>
-          receipt {receipt.receiptId} · generated {fmtClock(receipt.generatedAt)} · attempt {receipt.attempt}
-          {receipt.retryOf ? ` · retry of ${receipt.retryOf}` : ""} · filed by {receipt.actor}
-        </span>
+        <MetaLine
+          items={[
+            `receipt ${receipt.receiptId}`,
+            `generated ${fmtClock(receipt.generatedAt)}`,
+            `attempt ${receipt.attempt}`,
+            receipt.retryOf && `retry of ${receipt.retryOf}`,
+            `filed by ${receipt.actor}`,
+          ]}
+        />
       </div>
 
       {invariant && (
@@ -408,7 +414,7 @@ export function ReceiptView({ receipt, row }: { receipt: DemoRunReceipt; row: De
             value: f.redacted ? `${f.value} · redacted at capture` : f.value,
           }))}
         />
-        <span className={cn(dsText.meta, dsText.nums, "text-[color:var(--ds-fg-muted)]")}>input hash {receipt.inputHash}</span>
+        <MetaLine items={[`input hash ${receipt.inputHash}`]} />
       </ReceiptSection>
 
       {receipt.reuse.length > 0 && (

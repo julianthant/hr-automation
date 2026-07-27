@@ -16,9 +16,11 @@ import {
   TD,
   TH,
   THead,
+  MetaLine,
   TR,
   dsFocus,
   dsIcon,
+  dsMotion,
   dsText,
 } from "./demo-ui";
 import { fmtClock } from "./demo-wire";
@@ -154,7 +156,7 @@ export function FailureRecordBlock({
           )}
         >
           {open ? "Hide the full record" : "Open the full failure record"}
-          <ChevronDown aria-hidden className={cn(dsIcon.sm, open && "rotate-180")} />
+          <ChevronDown aria-hidden className={cn(dsIcon.sm, dsMotion.fast, open && "rotate-180")} />
         </button>
       </div>
 
@@ -180,9 +182,13 @@ export function FailureRecordBlock({
               }
             >
               <span className="block">{failure.mirrored.verbatim}</span>
-              <span className={cn(dsText.meta, dsText.nums, "mt-[var(--ds-space-tight)] block text-[color:var(--ds-fg-muted)]")}>
-                child {failure.mirrored.childTrace} — quoted verbatim, so this row never says “unknown error” about a failure
-                someone else already explained (D13)
+              <span className="mt-[var(--ds-space-tight)] block">
+                <MetaLine items={[`child ${failure.mirrored.childTrace}`]} />
+                <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+                  {" "}
+                  — quoted verbatim, so this row never says “unknown error” about a failure someone else already
+                  explained (D13)
+                </span>
               </span>
             </Banner>
           )}
@@ -326,10 +332,9 @@ export function FailureRecordBlock({
 }
 
 /**
- * The row's records, if any are served. Exported so the Log Panel asks these
- * two questions instead of reaching into the evidence store itself — a row with
-
-/** the row's failure record, if one is served */
+ * The row's failure record, if one is served. Exported so the Log Panel asks
+ * this question instead of reaching into the evidence store itself.
+ */
 export function failureRecordFor(row: DemoRow): DemoFailureRecord | null {
   return failureFor(row);
 }
