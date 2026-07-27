@@ -1214,7 +1214,7 @@ suggestion: §1.1 span identity → §4 completion union → §5.2 lift mapping 
 
 ---
 
-## 9. Ratified delegation and presentation decisions (D6–D20)
+## 9. Ratified delegation and presentation decisions (D6–D21)
 
 Status: **ratified by the operator 2026-07-25.** These continue the **row-model decision series**
 ratified 2026-07-24 (`reviews/second-look-2026-07-22.md` §6.6 — D1: three row types Run/Group/Member
@@ -1222,12 +1222,18 @@ with review-as-status and eight statuses; D2: a PDF upload is always a Group; D3
 are typed Rejected Member Rows, delete-only; D4: a delegated OCR run keeps its own Run Row in the
 OCR panel plus a link from the parent; D5: groups default collapsed, auto-expand on a member
 `Waiting on you` or `Failed`). **This series is not the reconciliation memo's D-numbers**
-(`04-reconciliation.md` D1–D72) — cite these as *row-model D6…D20*.
+(`04-reconciliation.md` D1–D72) — cite these as *row-model D6…D21*.
 
 D6–D17 close the twelve delegation questions in `reviews/delegation-layouts-2026-07-25.md` §7;
 D18–D20 close three build-gating decisions in `reviews/demo-feature-plan-2026-07-25.md` §6. The
 vocabulary is that ledger's: **`containment`** = `member | linked | rejected` (§3), Group Row anatomy
 + presentation ladder + rollup precedence (§4), delegation shapes S0–S7 (§5).
+
+**Amended 2026-07-27 by the demo redesign** (`?view=rebuild-demo`, commits `1d656f76`..`a380406c`):
+**D11** loses its 41+ status-matrix rung, **D19** moves Data off the tab set without changing one of
+its semantics, and **D21** is added — the step timeline is equal-width. The as-built shell and
+layout those waves settled are recorded at the end of this section; they are not separately
+numbered, because none of them re-opens a question the D-series answered.
 
 ### D6 — oath-upload's signers are `linked`, not `member`; shape S4 is deleted
 
@@ -1277,18 +1283,50 @@ panel, per row-model D4) — **never on the packet group**. From the packet, "wh
 blank" is answered on the **record card**, not by walking a delegation tree. Rationale: maximum real
 depth is 2; surfacing it twice buys nothing and doubles the count surface.
 
-### D11 — the presentation ladder, with the status matrix at 41+
+### D11 — the presentation ladder is three rungs; the status matrix is deleted
+
+**Amended 2026-07-27.** The ladder:
 
 | Members | Expanded body |
 |---|---|
 | 1–3 | Full Member Rows inline |
 | 4–12 | Compact list, first 4 + `Show all N` |
-| 13–40 | Compact list in a scroll well + `Open all N` |
-| **41+** | **Status matrix** + attention strip + `Start review` drill-in |
+| **13+** | Compact list in a scroll well + `Open all N people` |
 
 Member count is continuous — this is presentation, never a row type, and the drill-in is a rung of
-the ladder, not a route. **Supersedes the rebuild demo's current threshold of 20**, which changes to
-41.
+the ladder, not a route. Every group reads the same at every size: count strip → status counts →
+member well (name · detail · EID) → `Open all N people`.
+
+**What this replaces.** The ratified-2026-07-25 D11 had a fourth rung at **41+** that swapped the
+member well for a **status matrix** plus a matrix-only attention strip and a `Start review`
+drill-in. That rung is **deleted**, and with it the attention strip, which existed only to caption
+the matrix. The old 13–40 and 41+ bands merge into one `13+` band.
+
+**Why.** The operator saw the 50-member I-9 packet render as a grid of status cells where the
+18-person work-study group renders named lines, read the matrix as a *different kind of row*, and
+said "we also don't need a new row type for i9 quarterly retention" while pointing at that
+work-study group. Asked to confirm the boundaries that survive, they said "4 is good" — so the
+1–3 / 4–12 rungs stand as ratified. D14 already holds that a group of one still renders as a Group
+Row *because a group that looks like a Run Row makes the next fan-out look like a new object*; the
+matrix broke exactly that rule from the other end of the count. **A second visual language for "the
+same thing but more of it" makes the product read as having more concepts than it has**, which is
+the cost the three-row-type model exists to avoid. Do not reintroduce a per-count layout switch.
+
+**The two numbers behind the surviving rung.** The well is capped at `--ds-h-member-well` =
+**136px ≈ 5.67 rows**. The half-cut sixth row IS the depth cue, which is why it is deliberately
+**not** 144px / 6 whole rows — a well that ends on a clean row edge reads as a complete list, and
+the operator then has no reason to scroll it. Members are ordered **attention-first**, so the top
+of the well IS the attention list the 41+ rung used to draw as a separate strip.
+
+**Nothing was lost.** The per-status information the matrix carried survives as the count strip's
+status counts plus the separate waiting / rejected tallies (D9's `50 people · 3 rejected`), and
+**the drill-in survives** — `Open all N people` is still the route into the full member list at
+every size ≥ 13.
+
+**Supersedes** the original D11's 41+ rung and, with it, `reviews/delegation-layouts-2026-07-25.md`
+§4's four-rung ladder and its "at 41+ the attention strip renders **above** the matrix" rule. The
+original entry's "supersedes the rebuild demo's threshold of 20" clause is spent — the demo now
+implements this ladder as written.
 
 ### D12 — the collapsed row shows the gate's age
 
@@ -1341,26 +1379,57 @@ One row: an **`All`** pill, then a composite **`Needs you`** pill (= `Waiting on
 everything doing?" second. Counts are the same server-side projection that feeds `wfCounts` and the
 queue rows (§2.2); the composite pill is a sum of projected buckets, never a second count path.
 
-### D19 — run-detail tabs derive from panel kind; Screenshots is not a tab; Data and Edit Data are one surface
+### D19 — run-detail tabs derive from panel kind; Screenshots is not a tab; Data is not a tab either
 
 Ratifies the tab model **as built in the rebuild demo**:
 
-- **(a) Tabs derive from the panel kind**, not a fixed set — Run 3 · Review 4 · Group 4 · Member 3.
-- **(b) Screenshots is not a tab.** An **evidence bar** of images sits above the tabs, with no count
-  label; a failure capture carries a red frame.
+- **(a) Tabs derive from the panel kind**, not a fixed set. **Amended 2026-07-27:** the sets are
+  **Run 2 · Review 3 · Group 3 · Member 2** — `Logs · Review · Receipt`, plus `People` on a group —
+  where they were Run 3 · Review 4 · Group 4 · Member 3.
+- **(b) Screenshots is not a tab.** Evidence is its own surface, not a tab.
 - **(c) Data and Edit Data are ONE merged surface** — every value the run touched. Reads are editable
   in place; **writes are shown but not editable**; the footer offers `Load a prior run` and
   `Start a run from this data`.
+- **(d) Amended 2026-07-27 — Data is not a tab.** It is a section of the run's **context rail**,
+  with an `Edit & re-run` **Dialog** for the editing half. `DemoTab` and `tabsFor` drop `"data"`
+  entirely, so no dead tab id is reachable, and `detailSurfaces` re-derives from `tabsFor` at
+  projection.
+
+**(c) is preserved byte-for-byte by (d).** Reads stay editable, writes stay shown and never
+editable, staged writes still render as staged, unconfirmed still says unconfirmed, nothing gains
+success styling it has not earned, and the `Load a prior run` / `Start a run from this data` footer
+survives intact. The unlock rules (`editPolicyFor` with the reason always shown), the CAS on the
+checkpoint generation, and the audited freshness override all carry over into the dialog unchanged.
+**Only the home changed** — the ledger is *read* in the rail and *edited* in a dialog, because
+editing is a task and reference is not. Gating is still `actions[]` descriptors at the `data`
+placement, so a run that may not be edited is simply not sent a Save.
+
+**Why the move.** Logs and Data were mutually exclusive tabs, so the operator could not watch a
+run's log stream and see what that run read and wrote at the same time. That mutual exclusion was a
+significant part of the reported clutter — the panel appeared to hold more than it did because
+half of what it held was behind the other half. The split is by **reading pattern**, not by
+importance: live state (what the run is doing, what it needs from you) stays in the centre column,
+reference (what it read and wrote, what it captured, who asked for it) moves to the rail. Nothing
+is deleted and nothing hides behind a hover.
+
+**(b) is now honoured more literally than before.** D19b said evidence is not a tab; it did not say
+evidence had to be a 52px strip wedged between the timeline and the tab bar, where a capture got a
+76×40 chip and a three-character label. Evidence is now a rail section of real tiles — kind, label,
+the step it was taken on, the clock — so two captures can be told apart without opening either. The
+failure capture keeps its red frame, in the tile and in the lightbox; the filter chips and the
+Export menu carry over unchanged.
 
 **Supersedes the "Log Panel tabs are therefore FIVE: Logs / Data / Review / Receipt / Screenshots"
 wording in `reviews/second-look-2026-07-22.md` §6.6.** Unchanged from that decision sheet: the step
-timeline is **not** a tab (persistent strip + hover detail), and tab defaults stay state-driven
-(`Waiting on you` / `Write parked` → Review, terminal → Receipt, running → Logs).
+timeline is **not** a tab (persistent strip + hover detail — see D21 for its width rule), and tab
+defaults stay state-driven (`Waiting on you` / `Write parked` → Review, terminal → Receipt, running
+→ Logs; a group with a member needing attention → People).
 
 Consequence for §2.2's wire: `QueueSurfaceWire.detailSurfaces` stays server-declared and
 capability-driven — the panel kind selects from what the server declares — but `"screenshots"` no
-longer projects a tab (it projects the evidence bar), and `"edit-data"` / `"view-data"` collapse into
-one `data` surface whose write fields render read-only.
+longer projects a tab (it projects the evidence rail section), and `"edit-data"` / `"view-data"`
+collapse into one `data` surface — which, as of (d), projects a **rail section plus a dialog**, not
+a tab, with its write fields still rendering read-only.
 
 ### D20 — `Write parked` means an unknown write outcome, and nothing else
 
@@ -1373,6 +1442,97 @@ Consequence: the rebuild demo's `sep-rosa` fixture, which labels a pre-submit ho
 with a "Resume & submit" action, is wrong and must be re-authored as a gate. Rationale: parked is the
 one status that means "we may have already filed something"; diluting it with holds we know the
 state of destroys the only signal that warrants a live probe.
+
+### D21 — every step segment on the timeline is the same width; the duration is printed
+
+**Ratified 2026-07-27.** The step timeline (D19's persistent strip, not a tab) draws **equal-width
+segments regardless of duration**. Each segment prints its duration as a label beneath it, and the
+working / waiting totals sit on the axis below. The **gate/wait segment is hatched and equal-width
+like every other**, with the **TRUE age printed as text** beside it. The `×N` retry marker and its
+hover-card row carry over, as does the dashed treatment for a step the run has not reached.
+
+**This reverses a prior operator-directed design.** The timeline was **proportional** — segment
+width ∝ elapsed time — chosen deliberately on the grounds that the width WAS the data, and later
+hardened by clamping the gate wedge to ≤1.5× the step total while printing the real age beside it.
+Both the proportional maths and the clamp are gone: `MIN_SLOT_SEC`, `slot()`, `stepTotal`,
+`gateSlot`/`gateClamped`, the per-step inline width and the wedge clamp were all removed.
+
+**Why the reversal.** A genuinely proportional 34-minute gate beside three minutes of work is a
+true 91% of the track, and at 91% the step labels crush to `3.¹2 4..`. A timeline whose labels
+cannot be read tells you nothing about where the time went either — the literal encoding destroyed
+the thing it was encoding. Equal widths make the track legible at every duration spread, including
+the ones this product actually produces (a gate is usually an order of magnitude longer than the
+work around it, so the pathological case is the common case).
+
+**Why this is NOT a no-fabrication violation, stated so a future agent does not "restore honesty".**
+Equal widths **make no claim about duration**, precisely BECAUSE the duration is printed as a
+number beside every single segment and the totals are on the axis. Nothing implies a length it does
+not also state in words. The no-fabrication rule forbids *inventing* a number or drawing a quantity
+the data does not support; it does not require that every visual dimension be a data channel. A
+bar chart that clamps a bar while printing the real value is a standard convention; inventing the
+value was the bug the clamp era fixed, and that fix (`now − gate.openedAt`, never `max(active, 90)`)
+is retained here in full.
+
+**This is an explicit legibility-over-literalism call the operator made**, verbatim: *"all the
+timeline elements should have equal sizes doesnt matter the time."* **A future agent must not
+restore proportional widths on no-fabrication grounds.** If proportionality is ever wanted again it
+needs a fresh operator decision, not a correctness argument — the correctness argument has been
+made and answered.
+
+---
+
+### Shell and layout as rebuilt, 2026-07-27
+
+Not numbered — none of this re-opens a D-series question, and the D-series is for decisions that
+were *asked*. It is recorded here because the presentation decisions above (D11, D19, D21) were
+made inside this layout and read wrong outside it.
+
+**The detail region is three columns**: **queue · centre · context rail**. The rail is **348px**
+(`--ds-w-context-rail`), collapsible to a labelled spine that says what is inside it
+(`Context · 9 data · 6 captures`), with the collapsed preference applied only above the
+three-column threshold. The split is by reading pattern (§D19): **live state in the centre**
+(gate banner, failure record, outcome, logs/review/receipt), **reference in the rail** (Data,
+Evidence, identity strip, attempt selector, delegation links). **The gate banner and the failure
+record never move into the rail** — `Waiting on you` and `Failed` are the only two states allowed
+to shout, and a decision parked behind a collapse control is a decision that never gets made.
+
+**Three breakpoints, and they are deliberately different numbers:**
+
+| Width | Layout |
+|---|---|
+| **< 1180** | one scrolling stack — shape, then detail, then context. The rail degrades to a section, never to nothing. |
+| **1180–1479** | queue **400px** + a three-column detail cell, with the run's *shape* (timeline) spanning the full region width. |
+| **≥ 1480** | queue **470px**; the centre is wide enough to hold the shape on its own, so the rail rises beside it full-height. |
+
+Both numbers are **measured, not chosen**. 1480 = 470 queue + 348 rail + gaps + padding, which
+leaves the centre ~590px — the width at which a six-segment equal-width timeline still prints
+readable labels. 400 is the **largest** queue that keeps the review's page-beside-fields layout side
+by side below 1480: the review's floor is a **464px centre** (label + value + provenance chip +
+confidence on one line) and centre = 884 − queue at 1280, so 470 gave 414 and stacked it. **The
+cost is real and is stated rather than hidden:** at 1280 no queue width satisfies both — a queue
+that renders `Oath_Packet_Summer.pdf` whole needs ~475px, which puts the centre back under the
+review's floor.
+
+**A consequence worth pinning: inside the detail region, a layout switch keys on the COLUMN, not
+the window.** The same 1280px viewport gives the centre 414px with the rail open and 728px with it
+collapsed, so a viewport media query fires at the wrong moment in both directions. Container
+queries, not `min-[Npx]:`, for anything inside the region. (Caught in the act: the two `Write
+parked` resolutions were being forced side by side into a 414px column, each a ~200px box holding a
+two-line sentence about whether a real UCPath termination exists.)
+
+**The Workflow Panel has three modes**, persisted, cycled with `w`: **floating** (default — a
+window over the panel region, costing no column; Escape or an outside click dismisses it to
+`icon`), **icon** (nothing drawn over the content; the launcher carries the current workflow's
+2-char code and the day's whole `Needs you` count across *every* panel), and **sidebar** (docked,
+200px, always visible). Which panel you are in stays readable in all three because the Queue Panel
+is titled by its workflow.
+
+**`All workflows` is retired.** The cross-panel rail entry, `ALL_WORKFLOWS`, is deleted;
+`rowsForWorkflow` always filters and the app opens on a real panel (`DEFAULT_WORKFLOW`, read from
+the registry so a rename cannot point it at nothing). An operator works one workflow at a time, and
+a queue mixing fourteen workflows forced every row title to carry a workflow label to stay legible
+— which is the same redundancy that made the per-row workflow chip worth deleting. §10.1's one
+counting path (`countRows`) is untouched by this.
 
 ---
 
