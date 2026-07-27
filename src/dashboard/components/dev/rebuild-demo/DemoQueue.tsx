@@ -89,6 +89,17 @@ export interface DemoQueueState {
   selectMode: boolean;
   bulkIds: ReadonlySet<string>;
   tick: number;
+  /**
+   * The Workflow Panel entry this queue is scoped to. A row whose workflow IS
+   * that entry does not print it again — the panel header, the rail badge and
+   * the Status Bar have all already said it, and on a 400px column the chip was
+   * costing a PDF row a hundred pixels of its own filename.
+   *
+   * Left undefined by a surface that mixes workflows (the component gallery,
+   * and any future cross-workflow search), where the chip is the only thing
+   * naming the owner — so the chip comes back on its own, with no flag.
+   */
+  panelWorkflow?: string;
 }
 
 export interface DemoQueueHandlers {
@@ -513,10 +524,13 @@ export function DemoRowCard({
             >
               {row.displayName ?? row.title}
             </span>
-            {/* which workflow owns this row — needed the moment the queue shows
-                more than one workflow, and the only thing that tells a packet
-                apart from the OCR review row that shares its filename */}
-            <span className={rowChip("neutral", cn(dsText.caps, "tracking-[var(--ds-tracking-caps)]"))}>{row.wfLabel}</span>
+            {/* Which workflow owns this row — the only thing that tells a packet
+                apart from the OCR review row that shares its filename. Printed
+                the moment the surface mixes workflows, and silent when every
+                row on screen would say the same word. */}
+            {row.wfLabel !== state.panelWorkflow && (
+              <span className={rowChip("neutral", cn(dsText.caps, "tracking-[var(--ds-tracking-caps)]"))}>{row.wfLabel}</span>
+            )}
             {/* Sits on the chip line at the chip's own height, so explaining a
                 row costs the queue no vertical space at all. */}
             <RowInfo row={row} />

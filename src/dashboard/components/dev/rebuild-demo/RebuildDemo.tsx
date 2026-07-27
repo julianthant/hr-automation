@@ -203,8 +203,8 @@ export function RebuildDemo() {
   const counts = useMemo(() => countRows(scopedRows), [scopedRows]);
 
   const state: DemoQueueState = useMemo(
-    () => ({ view, filter, selectedId, checkedIds, expandedGroups, sort, selectMode, bulkIds, tick }),
-    [view, filter, selectedId, checkedIds, expandedGroups, sort, selectMode, bulkIds, tick],
+    () => ({ view, filter, selectedId, checkedIds, expandedGroups, sort, selectMode, bulkIds, tick, panelWorkflow: activeWorkflow }),
+    [view, filter, selectedId, checkedIds, expandedGroups, sort, selectMode, bulkIds, tick, activeWorkflow],
   );
 
   /** the top-level rows on screen right now — all Select all may ever take */
@@ -502,12 +502,29 @@ export function RebuildDemo() {
                 ever covering the bars above them.
                 TWO thresholds, and they are deliberately different. THIS one
                 (1180) splits queue | detail. The DETAIL cell splits itself
-                again into shape · detail · context at 1280, because that is
-                where the centre column stops being wide enough to read: below
-                it, 470 queue + 348 rail leaves the stream ~314px, so the region
-                degrades to a scrolling stack instead (see `PanelRegion`). */}
+                again into shape · detail · context at 1280 (see `PanelRegion`).
+
+                The QUEUE is 400px until 1480 and 470 above it, and 400 is
+                measured, not chosen. Below 1480 the detail cell has to seat the
+                348px context rail AND a centre column wide enough for the
+                review's page-beside-fields layout; at a 470 queue the centre
+                came out 414px, the review stacked, and the extracted fields —
+                the whole reason that surface exists — went below the fold.
+                The review's floor is a 464px centre (a label, a value, its
+                provenance and its confidence on one line), and at 1280 the
+                centre is 884 minus the queue. So 400 is the LARGEST queue that
+                keeps the review side by side, with 20px of headroom: it is the
+                least the queue can give up rather than a width picked for its
+                own sake, and it is why this number is not 380.
+                Stated plainly, because it is a real cost: at 1280 no width
+                satisfies both. A queue that renders `Oath_Packet_Summer.pdf`
+                whole needs ~475px, which puts the centre back under the review's
+                floor. Filenames were already truncating at 470 (164px of the
+                169px they want); at 400 they lose more, and the full name stays
+                in the row's `title`, the footer's trace id, and the panel header.
+                Above 1480 there is room for both and the queue takes it back. */}
             <div className="relative min-h-0 flex-1">
-            <div className="grid h-full grid-cols-1 gap-3 p-3 min-[1180px]:grid-cols-[470px_minmax(0,1fr)]">
+            <div className="grid h-full grid-cols-1 gap-3 p-3 min-[1180px]:grid-cols-[400px_minmax(0,1fr)] min-[1480px]:grid-cols-[470px_minmax(0,1fr)]">
               <DemoQueue
                 rows={scopedRows}
                 state={state}

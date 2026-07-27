@@ -795,10 +795,19 @@ function ReviewTab({ row }: { row: DemoRow }) {
       </div>
 
       {/* page  ↔  extraction — a CONTAINER query, because what has to fit is
-          the centre column, not the window. Side by side needs ~680px; below
-          that the page stacks above the fields rather than squeezing both. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-y-auto @min-[42.5rem]:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)]">
-        <div className="flex flex-col gap-1.5 border-b border-border/60 p-3 @min-[42.5rem]:border-b-0 @min-[42.5rem]:border-r">
+          the centre column, not the window.
+          TWO rungs, and the split moves between them. The fields column has a
+          hard floor: a label, a value, a provenance chip and a confidence
+          number have to sit on one line or the value starts truncating, which
+          is ~290px, which puts the centre column's floor at 464px. The page is
+          a picture and scales to whatever is left. So from 464px they go side
+          by side with the page at the smaller share,
+          and at 680px — where both can be comfortable — the page takes the
+          share back. Stacking is the last resort, not the 1280px default it
+          became: an extraction the operator has to scroll to reach is the exact
+          complaint this surface exists to answer. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-y-auto @min-[29rem]:grid-cols-[minmax(0,0.62fr)_minmax(0,1fr)] @min-[42.5rem]:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)]">
+        <div className="flex flex-col gap-1.5 border-b border-border/60 p-3 @min-[29rem]:border-b-0 @min-[29rem]:border-r">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{rec.pageNote}</span>
           <div className="flex min-h-[13rem] flex-1 flex-col items-center justify-center gap-1.5 rounded-md border border-border bg-secondary/30">
             <FileText aria-hidden className="size-6 text-muted-foreground/60" />
@@ -817,7 +826,11 @@ function ReviewTab({ row }: { row: DemoRow }) {
             const dirty = value !== f.value;
             return (
               <div key={f.label} className="flex items-baseline gap-2 border-b border-border/40 py-[5px] text-[12px] last:border-b-0">
-                <span className="flex w-28 shrink-0 items-center gap-1.5 text-muted-foreground">
+                {/* 96px, not 112: the four things on this line are the label,
+                    the value, where it came from and how sure we are, and the
+                    VALUE is the one being checked against the page. The label
+                    gives up the width. */}
+                <span className="flex w-24 shrink-0 items-center gap-1.5 text-muted-foreground">
                   {f.label}
                   {dirty && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warning" />}
                 </span>
@@ -865,7 +878,7 @@ function ReviewTab({ row }: { row: DemoRow }) {
             return (
               <div key={c.label} className="flex items-center gap-2 py-[3px] text-[12px]">
                 <Icon aria-hidden className={cn("size-3 shrink-0", spec.cls)} />
-                <span className="w-32 shrink-0 text-muted-foreground">{c.label}</span>
+                <span className="w-28 shrink-0 text-muted-foreground">{c.label}</span>
                 <span className={cn("min-w-0 flex-1 truncate", c.state === "ok" ? "text-secondary-foreground" : spec.cls)}>{c.value}</span>
                 {/* A read-only report cannot be approved, so the only thing to
                     DO about a gap is to look again. */}
@@ -965,8 +978,8 @@ function ReviewTab({ row }: { row: DemoRow }) {
 
 // ---------------------------------------------------------------------------
 // People tab — the Group Panel's per-person work surface.
-// The matrix is the general lookup; the list beneath it is how you actually
-// work through the set, one person at a time.
+// One filtered list — the same member lines the Group Row shows, with room to
+// work through the set one person at a time.
 // ---------------------------------------------------------------------------
 
 const PEOPLE_FILTERS = [
