@@ -1,5 +1,15 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, FileSpreadsheet, FileText, Keyboard, Play, Upload } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  Camera,
+  FileSpreadsheet,
+  FileText,
+  Keyboard,
+  Layers,
+  Play,
+  Search,
+  SlidersHorizontal,
+  Upload,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Badge,
@@ -13,15 +23,13 @@ import {
   DialogFooter,
   EmptyState,
   Field,
+  Kbd,
   MetaLine,
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
   SectionLabel,
   Select,
-  Switch,
   Textarea,
   Well,
+  dsElev,
   dsFg,
   dsFocus,
   dsIcon,
@@ -29,604 +37,866 @@ import {
   dsRadius,
   dsText,
 } from "./demo-ui";
-import { DEMO_WORKFLOWS, type DemoWorkflowId } from "./demo-wire";
 import {
+  DEMO_WORKFLOWS,
+  START_SEPARATOR,
+  START_VALUE_NOUN,
+  defaultChoiceValues,
+  effectiveChoiceValues,
+  requireStartCapability,
+  requireStartMethod,
+  startWorkflowGroups,
+  startableWorkflows,
+  unstartableWorkflows,
+  visibleChoices,
+  visibleFlags,
+  type DemoWorkflowId,
+  type DemoWorkflowRef,
+  type StartMethodKind,
+  type StartMethodWire,
+} from "./demo-wire";
+import {
+  ACTIVE_STARTS,
   ENQUEUE_POLICY_LABEL,
-  INPUT_RUN_SPECS,
   SERVER_WORKFLOW_VERSION,
   UPLOAD_FILES,
-  UPLOAD_RUN_SPECS,
-  deriveInputPlan,
-  deriveUploadPlan,
+  activeConflictFor,
+  captureSessionFor,
+  deriveStartPlan,
   parseEntries,
   submitDemoEnqueue,
   testSystems,
-  titlePhases,
   type DemoEnqueueResult,
   type EnqueuePolicy,
   type InstanceChoice,
   type UploadFileFixture,
 } from "./demo-runstart-wire";
-import { EnqueueResultBanner, InstanceSelector, PlanPreview, RunFlagChips } from "./DemoRunStartKit";
+import {
+  EnqueueResultBanner,
+  InstanceSelector,
+  PlanPreview,
+  RunFlagChips,
+  StartChoiceControl,
+  StartFlagControl,
+} from "./DemoRunStartKit";
 import { DemoIntakeDialog } from "./DemoIntake";
+import { SOURCE_SHEETS } from "./demo-data-intake";
 
 /**
- * DEV-ONLY — the run-START half of the product: the **Run Modal** (upload run)
- * and the **Input Run Panel** (typed run), plus the launcher that reaches them.
+ * DEV-ONLY — **the** Run Modal. One surface, every workflow.
  *
- * The demo could show every state a run reaches and offered no way to create
- * one, which meant the two decisions that actually cost an operator money —
- * *what will this create?* and *where will it write?* — had no surface at all.
+ * Production splits run-starting across two surfaces by HOW you start: a
+ * file-upload `RunModal` and a typed `InputRunPanel`. That is an implementation
+ * detail wearing a UI, and it leaks: `oath-signature` lives in both, so its
+ * typed box has to open the *other* modal when you press Run on an empty line.
  *
- * Three things are deliberate here:
+ * This modal splits by WHAT you are running instead. Pick a workflow → it
+ * declares what it accepts → you get its inputs, its sub-selections, its
+ * settings, and a plan of exactly what will exist afterwards.
  *
- *  - **The plan is shown BEFORE the commit.** `deriveUploadPlan` /
- *    `deriveInputPlan` are the mock server answering "what rows will exist";
- *    the modal renders that answer. A packet is a Group Row + a delegated
- *    review; oath-upload is ONE Run Row whose signers are `linked` in another
- *    panel (D6). Neither is a UI branch — both come off the descriptor.
- *  - **Starting a run is a COMMAND**, so it returns `applied | conflict |
- *    rejected` like every other command. All three are reachable by clicking.
- *  - **Entry validation is loud and per line.** A bad EID names the line, the
- *    value and the rule, and nothing is enqueued until it is fixed or removed.
+ * Four things are deliberate:
+ *
+ *  - **Nothing here knows a workflow.** Every input kind, sub-selection, flag
+ *    and coordinator shape is read off `DemoWorkflowRef.start` (`demo-wire.ts`).
+ *    There is no `workflow === "onbase"` anywhere in this file, so a workflow
+ *    registered tomorrow gets a correct modal for free — and one that declares
+ *    no start capability is not offered rather than offered and broken.
+ *  - **More than one input kind is a PEER CHOICE.** `oath-signature` takes typed
+ *    EIDs, an uploaded packet or photographed pages; they are three tabs, not an
+ *    empty box that secretly opens a different modal.
+ *  - **The plan is shown before the commit, and it never counts people.** Before
+ *    a review reads a document the backend knows PAGES. The preview says pages.
+ *  - **Starting is a COMMAND**, so it returns `applied | conflict | rejected`.
+ *    All three are reachable by clicking.
  */
 
-const NO_FILE = "";
-
 // ---------------------------------------------------------------------------
-// Launcher — the operator's way into all three start surfaces
+// The launcher
 // ---------------------------------------------------------------------------
 
-/** One door in the menu: what it starts, and what kind of input it takes. */
-function StartRunOption({
-  icon,
-  label,
-  note,
-  onClick,
+/** the queue toolbar's one primary control — the modal itself lives at the root */
+export function DemoRunStartButton({ onOpen }: { onOpen: () => void }) {
+  return (
+    <Button
+      size="sm"
+      variant="primary"
+      onClick={onOpen}
+      icon={<Play aria-hidden className={dsIcon.sm} />}
+      iconAfter={<Kbd>r</Kbd>}
+      title="Start a run — any workflow, from anywhere"
+    >
+      Start a run
+    </Button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The workflow picker — the real rail categories, inside the modal
+// ---------------------------------------------------------------------------
+
+function matchesQuery(workflow: DemoWorkflowRef, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return workflow.label.toLowerCase().includes(q) || workflow.code.includes(q) || workflow.category.toLowerCase().includes(q);
+}
+
+function WorkflowPicker({ value, onChange }: { value: DemoWorkflowId; onChange: (next: DemoWorkflowId) => void }) {
+  const [query, setQuery] = useState("");
+  const [showBlocked, setShowBlocked] = useState(false);
+  const groups = useMemo(
+    () =>
+      startWorkflowGroups()
+        .map((group) => ({ ...group, workflows: group.workflows.filter((w) => matchesQuery(w, query)) }))
+        .filter((group) => group.workflows.length > 0),
+    [query],
+  );
+  const blocked = useMemo(() => unstartableWorkflows(), []);
+
+  return (
+    <div className="flex w-[204px] shrink-0 flex-col border-r border-[color:var(--ds-border)]">
+      <div className="shrink-0 border-b border-[color:var(--ds-border)] p-[var(--ds-space-base)]">
+        {/* A plain labelled input rather than SearchInput: this filters a list
+            of fourteen, so a clear affordance would cost a control for a state
+            one keystroke undoes. */}
+        <label className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
+          <Search aria-hidden className={cn(dsIcon.sm, "shrink-0", dsFg.muted)} />
+          <span className="sr-only">Filter workflows</span>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter"
+            className={cn(
+              "min-w-0 flex-1 border-none bg-transparent outline-none",
+              dsText.ui,
+              "text-[color:var(--ds-fg)] placeholder:text-[color:var(--ds-fg-faint)]",
+            )}
+          />
+        </label>
+      </div>
+
+      <nav aria-label="Workflow" className="min-h-0 flex-1 overflow-y-auto p-[var(--ds-space-base)]">
+        {groups.length === 0 ? (
+          <p className={cn(dsText.meta, dsFg.muted)}>No workflow matches “{query}”.</p>
+        ) : (
+          groups.map((group) => (
+            <div key={group.label} className="mb-[var(--ds-space-cozy)] flex flex-col gap-[var(--ds-space-hair)]">
+              <SectionLabel className="px-[var(--ds-space-snug)]">{group.label}</SectionLabel>
+              {group.workflows.map((workflow) => {
+                const selected = workflow.id === value;
+                return (
+                  <button
+                    key={workflow.id}
+                    type="button"
+                    aria-current={selected ? "true" : undefined}
+                    onClick={() => onChange(workflow.id)}
+                    className={cn(
+                      "flex w-full min-w-0 cursor-pointer items-center gap-[var(--ds-space-snug)] text-left",
+                      "h-[var(--ds-h-row)] px-[var(--ds-space-snug)]",
+                      dsRadius.md,
+                      dsText.ui,
+                      dsFocus,
+                      dsMotion.fast,
+                      selected
+                        ? cn("bg-[var(--ds-surface-3)] font-semibold", dsFg.base)
+                        : cn("hover:bg-[var(--ds-surface-2)]", dsFg.secondary),
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{workflow.label}</span>
+                    <span className={cn(dsText.micro, dsText.nums, selected ? dsFg.muted : dsFg.faint)}>{workflow.code}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ))
+        )}
+      </nav>
+
+      {/* Not offered, and it says why. A workflow that simply vanishes from a
+          picker teaches the operator the list is arbitrary.
+
+          A DISCLOSURE, not a Popover: `dsLayer.menu` is z-20 and a Dialog is
+          z-40, so a popover opened from inside a modal renders BEHIND it — the
+          a11y tree says it opened and the screen says nothing happened. Anything
+          disclosed from inside a dialog stays inside the dialog. */}
+      <div className="shrink-0 border-t border-[color:var(--ds-border)] p-[var(--ds-space-base)]">
+        {showBlocked && (
+          <dl className="mb-[var(--ds-space-snug)] flex max-h-[11rem] flex-col gap-[var(--ds-space-base)] overflow-y-auto">
+            {blocked.map(({ workflow, reason }) => (
+              <div key={workflow.id} className="flex flex-col gap-[var(--ds-space-hair)]">
+                <dt className={cn(dsText.meta, "font-semibold", dsFg.base)}>{workflow.label}</dt>
+                <dd className={cn(dsText.meta, dsFg.muted)}>{reason}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="w-full justify-start"
+          aria-expanded={showBlocked}
+          onClick={() => setShowBlocked((v) => !v)}
+        >
+          {blocked.length} not startable
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The peer methods — how you are starting it
+// ---------------------------------------------------------------------------
+
+const METHOD_ICON: Record<StartMethodKind, ReactNode> = {
+  typed: <Keyboard aria-hidden className={dsIcon.sm} />,
+  upload: <Upload aria-hidden className={dsIcon.sm} />,
+  capture: <Camera aria-hidden className={dsIcon.sm} />,
+  spreadsheet: <FileSpreadsheet aria-hidden className={dsIcon.sm} />,
+  bare: <Play aria-hidden className={dsIcon.sm} />,
+};
+
+function MethodTabs({
+  methods,
+  value,
+  onChange,
 }: {
-  icon: ReactNode;
-  label: string;
-  note: string;
-  onClick: () => void;
+  methods: StartMethodWire[];
+  value: StartMethodKind;
+  onChange: (next: StartMethodKind) => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex w-full cursor-pointer flex-col items-start text-left",
-        "gap-[var(--ds-space-hair)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]",
-        dsRadius.md,
-        dsFocus,
-        dsMotion.fast,
-        "hover:bg-[var(--ds-surface-3)]",
-      )}
+    <div
+      role="tablist"
+      aria-label="How to start this run"
+      className={cn("inline-flex items-center gap-[var(--ds-space-hair)] p-[var(--ds-space-hair)]", dsRadius.md, "bg-[var(--ds-surface-2)]")}
     >
-      <span className={cn(dsText.ui, "inline-flex items-center gap-[var(--ds-space-snug)] font-semibold text-[color:var(--ds-fg)]")}>
-        {icon}
-        {label}
-      </span>
-      <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>{note}</span>
-    </button>
-  );
-}
-
-/**
- * ONE primary control, three doors behind it.
- *
- * This used to be a band of its own: a caps "START A RUN" label, three
- * `…`-suffixed buttons and a faint sentence promising the plan comes first —
- * 37px of vertical, every row of it, for something an operator touches a
- * handful of times a day. The three doors are all still here, each named and
- * each explaining what it takes; the promise moved into the menu, where it is
- * read at the moment it matters rather than skimmed past forever.
- */
-export function DemoRunStartControls() {
-  const [surface, setSurface] = useState<"none" | "upload" | "input" | "intake">("none");
-  const [intakeSheetId, setIntakeSheetId] = useState<string | null>(null);
-  const [menu, setMenu] = useState(false);
-
-  const openIntake = useCallback((sheetId: string | null) => {
-    setMenu(false);
-    setIntakeSheetId(sheetId);
-    setSurface("intake");
-  }, []);
-  const open = useCallback((next: "upload" | "input") => {
-    setMenu(false);
-    setSurface(next);
-  }, []);
-
-  return (
-    <>
-      <Popover open={menu} onOpenChange={setMenu}>
-        <PopoverTrigger asChild>
-          <Button
-            size="sm"
-            variant="primary"
-            icon={<Play aria-hidden className={dsIcon.sm} />}
-            iconAfter={<ChevronDown aria-hidden className={dsIcon.sm} />}
+      {methods.map((method) => {
+        const selected = method.kind === value;
+        return (
+          <button
+            key={method.kind}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            onClick={() => onChange(method.kind)}
+            className={cn(
+              "inline-flex cursor-pointer items-center gap-[var(--ds-space-snug)]",
+              "h-[var(--ds-h-md)] px-[var(--ds-space-cozy)]",
+              dsRadius.sm,
+              dsText.ui,
+              dsFocus,
+              dsMotion.fast,
+              "active:translate-y-px",
+              selected
+                ? cn("bg-[var(--ds-surface-overlay)] font-semibold", dsFg.base, dsElev.low)
+                : cn(dsFg.muted, "hover:text-[color:var(--ds-fg)]"),
+            )}
           >
-            Start a run
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
-          title="Start a run"
-          description="Every start shows what it will create before it commits."
-          width="lg"
-          align="start"
-        >
-          <div className="flex flex-col gap-[var(--ds-space-hair)]">
-            <StartRunOption
-              icon={<Upload aria-hidden className={dsIcon.md} />}
-              label="Upload a document…"
-              note="A PDF packet or a single form. The plan names every row it will create."
-              onClick={() => open("upload")}
-            />
-            <StartRunOption
-              icon={<Keyboard aria-hidden className={dsIcon.md} />}
-              label="Type a list…"
-              note="Names or EIDs, one per line. Each line is validated on its own."
-              onClick={() => open("input")}
-            />
-            <StartRunOption
-              icon={<FileSpreadsheet aria-hidden className={dsIcon.md} />}
-              label="Import a spreadsheet…"
-              note="Bind the columns once, then read every rejected cell before anything runs."
-              onClick={() => openIntake(null)}
-            />
-          </div>
-        </PopoverContent>
-      </Popover>
-
-      <DemoRunModal open={surface === "upload"} onOpenChange={(o) => setSurface(o ? "upload" : "none")} onOpenIntake={openIntake} />
-      <DemoInputRunPanel open={surface === "input"} onOpenChange={(o) => setSurface(o ? "input" : "none")} />
-      <DemoIntakeDialog
-        open={surface === "intake"}
-        initialSheetId={intakeSheetId}
-        onOpenChange={(o) => setSurface(o ? "intake" : "none")}
-      />
-    </>
+            {METHOD_ICON[method.kind]}
+            {method.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// A. The Run Modal — a document, a target, and what that combination creates
+// The input surfaces, one per method kind
 // ---------------------------------------------------------------------------
+
+function FileChoice({
+  file,
+  selected,
+  multi,
+  onToggle,
+}: {
+  file: UploadFileFixture;
+  selected: boolean;
+  multi: boolean;
+  onToggle: () => void;
+}) {
+  const active = ACTIVE_STARTS.find((a) => a.subject === file.fileName);
+  return (
+    <Card
+      interactive
+      selected={selected}
+      role={multi ? "checkbox" : "radio"}
+      aria-checked={selected}
+      tabIndex={0}
+      onClick={onToggle}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
+      className="min-h-[var(--ds-h-lg)] flex-row items-center gap-[var(--ds-space-base)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]"
+    >
+      <FileText aria-hidden className={cn(dsIcon.md, "shrink-0", dsFg.muted)} />
+      <span className={cn(dsText.ui, "min-w-0 flex-1 truncate", dsFg.base)}>{file.fileName}</span>
+      <MetaLine className="shrink-0" items={[file.sizeLabel, `${file.pageCount} page${file.pageCount === 1 ? "" : "s"}`]} />
+      {active && <Badge tone="warning">already running</Badge>}
+    </Card>
+  );
+}
+
+function UploadInput({
+  accepts,
+  multiFile,
+  merge,
+  fileIds,
+  onChange,
+}: {
+  accepts: readonly string[];
+  multiFile: boolean;
+  merge: boolean;
+  fileIds: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const files = UPLOAD_FILES.filter((f) => accepts.includes(f.kind));
+  const picked = fileIds.length;
+  return (
+    <div className="flex flex-col gap-[var(--ds-space-snug)]">
+      <div className="flex flex-wrap items-baseline gap-[var(--ds-space-base)]">
+        <SectionLabel>Document</SectionLabel>
+        <span className={cn(dsText.meta, dsFg.muted)}>
+          {multiFile
+            ? merge
+              ? `${picked} picked — several files merge into ONE document`
+              : `${picked} picked — each file is its own run`
+            : "one file"}
+        </span>
+      </div>
+      {/* A plain list, deliberately: putting `role="group"` on the `<ul>`
+          overrides the list role and leaves every `<li>` an orphaned listitem.
+          The cards carry the checkbox/radio semantics themselves. */}
+      <ul aria-label="Document" className="flex flex-col gap-[var(--ds-space-tight)]">
+        {files.map((file) => (
+          <li key={file.id}>
+            <FileChoice
+              file={file}
+              multi={multiFile}
+              selected={fileIds.includes(file.id)}
+              onToggle={() => {
+                if (!multiFile) return onChange([file.id]);
+                onChange(fileIds.includes(file.id) ? fileIds.filter((id) => id !== file.id) : [...fileIds, file.id]);
+              }}
+            />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function TypedInput({
+  method,
+  workflowId,
+  text,
+  onText,
+  problems,
+  validCount,
+}: {
+  method: Extract<StartMethodWire, { kind: "typed" }>;
+  workflowId: DemoWorkflowId;
+  text: string;
+  onText: (next: string) => void;
+  problems: { position: number; raw: string; problem?: { code: string; message: string } }[];
+  validCount: number;
+}) {
+  const nouns = method.accepts.map((k) => START_VALUE_NOUN[k].many);
+  const label = nouns.length === 1 ? nouns[0] : `${nouns.slice(0, -1).join(", ")} or ${nouns[nouns.length - 1]}`;
+  const sep = START_SEPARATOR[method.separator];
+  return (
+    <div className="flex flex-col gap-[var(--ds-space-snug)]">
+      {method.examples && method.examples.length > 0 && (
+        <div className="flex flex-wrap items-center gap-[var(--ds-space-snug)]">
+          <SectionLabel>Examples</SectionLabel>
+          {method.examples.map((example) => (
+            <Button
+              key={example.key}
+              size="sm"
+              variant="outline"
+              title={example.note}
+              onClick={() => onText(example.values.join(`${sep.char} `))}
+            >
+              {example.label}
+            </Button>
+          ))}
+        </div>
+      )}
+      <Field
+        label={`${label} — ${sep.label}`}
+        hint={`${validCount} valid · ${problems.length} refused`}
+        error={problems.length > 0 ? `${problems.length} value${problems.length === 1 ? "" : "s"} will not be enqueued — see below.` : null}
+        description={method.parserLabel}
+      >
+        <Textarea
+          // Re-keyed per workflow so switching one puts the caret back in the
+          // box the operator is about to type into, rather than leaving focus
+          // parked on the rail entry they just clicked.
+          key={workflowId}
+          autoFocus
+          rows={4}
+          value={text}
+          placeholder={method.placeholder}
+          onChange={(e) => onText(e.target.value)}
+        />
+      </Field>
+      {problems.length > 0 && (
+        <ul className="flex flex-col gap-[var(--ds-space-snug)]">
+          {problems.map((entry) => (
+            <li key={`${entry.position}-${entry.raw}`}>
+              <Banner tone="danger" title={`Value ${entry.position} — ${entry.problem?.code}`}>
+                {entry.problem?.message} Nothing on this value is enqueued, and nothing is guessed from it.
+              </Banner>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The modal
+// ---------------------------------------------------------------------------
+
+function firstStartableId(label: string): DemoWorkflowId {
+  const byLabel = startableWorkflows().find((w) => w.label === label);
+  // The panel you are on is the default; a panel whose workflow cannot be
+  // started falls to the first that can, rather than opening on nothing.
+  return (byLabel ?? startableWorkflows()[0]).id;
+}
 
 export function DemoRunModal({
   open,
   onOpenChange,
+  panelWorkflowLabel,
   onOpenIntake,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** the Workflow Panel the operator is standing in — the modal's default */
+  panelWorkflowLabel: string;
   onOpenIntake: (sheetId: string) => void;
 }) {
-  const [fileId, setFileId] = useState(NO_FILE);
-  const [target, setTarget] = useState<DemoWorkflowId>("oath-signature");
+  const [workflowId, setWorkflowId] = useState<DemoWorkflowId>(() => firstStartableId(panelWorkflowLabel));
+  const [method, setMethod] = useState<StartMethodKind>("typed");
+  const [choiceValues, setChoiceValues] = useState<Record<string, string>>({});
+  const [flagValues, setFlagValues] = useState<Record<string, boolean>>({});
+  const [text, setText] = useState("");
+  const [fileIds, setFileIds] = useState<string[]>([]);
+  const [sheetId, setSheetId] = useState("");
   const [policy, setPolicy] = useState<EnqueuePolicy>("reject-active");
-  const [dryRun, setDryRun] = useState(false);
   const [priority, setPriority] = useState<"interactive" | "bulk">("interactive");
   const [instances, setInstances] = useState<InstanceChoice>({});
   const [result, setResult] = useState<DemoEnqueueResult | null>(null);
   /** the contract version this form was BUILT against — bumped by a reload */
   const [formVersion, setFormVersion] = useState<Partial<Record<DemoWorkflowId, number>>>({});
 
-  const file = UPLOAD_FILES.find((f) => f.id === fileId) ?? null;
-  const spec = UPLOAD_RUN_SPECS.find((s) => s.workflow === target) ?? UPLOAD_RUN_SPECS[0];
-  const workflow = DEMO_WORKFLOWS[spec.workflow];
-  const builtVersion = formVersion[spec.workflow] ?? workflow.version;
-
-  const plan = useMemo(
-    () => (file ? deriveUploadPlan(spec, file.fileName, file.pageCount) : null),
-    [file, spec],
-  );
-  const test = testSystems(workflow, instances);
-  const activeConflict = file?.activeRun?.workflow === spec.workflow ? file.fileName : undefined;
-
-  const reset = useCallback(() => {
+  const selectWorkflow = useCallback((next: DemoWorkflowId) => {
+    const capability = requireStartCapability(DEMO_WORKFLOWS[next]);
+    setWorkflowId(next);
+    setMethod(capability.methods[0].kind);
+    setChoiceValues(defaultChoiceValues(capability));
+    setFlagValues({});
+    setText("");
+    setFileIds([]);
+    setSheetId(SOURCE_SHEETS.find((s) => s.workflow === next)?.id ?? "");
     setResult(null);
   }, []);
 
-  const start = useCallback(() => {
-    if (!file || !plan) return;
-    setResult(
-      submitDemoEnqueue({
-        workflow: spec.workflow,
-        expectedWorkflowVersion: builtVersion,
-        plan,
-        policy,
-        dryRun,
-        instances,
-        fileName: file.fileName,
-        activeConflictSubject: activeConflict,
-      }),
-    );
-  }, [file, plan, spec.workflow, builtVersion, policy, dryRun, instances, activeConflict]);
+  // Opening lands on the panel you are standing in, every time — including the
+  // second time, which is why this keys on `open` rather than running once.
+  useEffect(() => {
+    if (open) selectWorkflow(firstStartableId(panelWorkflowLabel));
+  }, [open, panelWorkflowLabel, selectWorkflow]);
 
-  const targets = UPLOAD_RUN_SPECS.filter((s) => !file || s.accepts.includes(file.kind));
+  const workflow = DEMO_WORKFLOWS[workflowId];
+  const capability = requireStartCapability(workflow);
+  const methodWire = requireStartMethod(capability, method);
+  const builtVersion = formVersion[workflowId] ?? workflow.version;
 
-  return (
-    <Dialog open={open} onOpenChange={(next) => { onOpenChange(next); if (!next) reset(); }}>
-      <DialogContent
-        size="lg"
-        title="Run Modal — start from a document"
-        description="Pick the file, pick what should happen to it, and read what that will create before anything is enqueued."
-      >
-        <DialogBody className="flex flex-col gap-[var(--ds-space-loose)]">
-          {result && (
-            <EnqueueResultBanner
-              result={result}
-              onDismiss={() => setResult(null)}
-              onReload={() => {
-                // The ONLY cure for a stale contract: rebuild the form on the
-                // version the server actually serves, then look again.
-                setFormVersion((prev) => ({ ...prev, [spec.workflow]: SERVER_WORKFLOW_VERSION[spec.workflow] ?? workflow.version }));
-                setResult(null);
-              }}
-            />
-          )}
+  const choices = visibleChoices(capability, method, choiceValues);
+  const flags = visibleFlags(capability, method);
+  const dryRun = flags.some((f) => f.key === "dryRun") && flagValues.dryRun === true;
+  const duplicateCheck = flags.some((f) => f.key === "duplicateCheck") && flagValues.duplicateCheck === true;
 
-          <section className="flex flex-col gap-[var(--ds-space-snug)]">
-            <SectionLabel>Document</SectionLabel>
-            <ul className="flex flex-col gap-[var(--ds-space-tight)]">
-              {UPLOAD_FILES.map((item) => (
-                <li key={item.id}>
-                  <FileChoice
-                    file={item}
-                    selected={item.id === fileId}
-                    onSelect={() => {
-                      setFileId(item.id);
-                      setResult(null);
-                      if (item.kind === "spreadsheet") return;
-                      const first = UPLOAD_RUN_SPECS.find((s) => s.accepts.includes(item.kind));
-                      if (first && !UPLOAD_RUN_SPECS.find((s) => s.workflow === target)?.accepts.includes(item.kind)) {
-                        setTarget(first.workflow);
-                      }
-                    }}
-                  />
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          {file?.intakeSheetId ? (
-            <Banner
-              tone="info"
-              title="A spreadsheet is not started here"
-              action={
-                <Button size="sm" variant="primary" onClick={() => { onOpenChange(false); onOpenIntake(file.intakeSheetId ?? ""); }}>
-                  Open the intake
-                </Button>
-              }
-            >
-              A sheet has to be given a header row and a column mapping before it means anything, and every row has to be coerced and
-              accepted or rejected by name. That is the intake pipeline, not an upload run.
-            </Banner>
-          ) : (
-            <>
-              <section className="grid grid-cols-1 gap-[var(--ds-space-cozy)] min-[560px]:grid-cols-2">
-                <Field label="What should happen to it" description={spec.note}>
-                  <Select value={target} onChange={(e) => { setTarget(e.target.value as DemoWorkflowId); setResult(null); }}>
-                    {targets.map((s) => (
-                      <option key={s.workflow} value={s.workflow}>
-                        {DEMO_WORKFLOWS[s.workflow].label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field
-                  label="If one is already running"
-                  description={activeConflict ? `${activeConflict} already has an active ${workflow.label} run.` : "Nothing is running for this document."}
-                >
-                  <Select value={policy} onChange={(e) => { setPolicy(e.target.value as EnqueuePolicy); setResult(null); }}>
-                    {(Object.keys(ENQUEUE_POLICY_LABEL) as EnqueuePolicy[]).map((key) => (
-                      <option key={key} value={key}>
-                        {ENQUEUE_POLICY_LABEL[key]}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Priority" description="bulk work yields the browser lane to anything interactive">
-                  <Select value={priority} onChange={(e) => setPriority(e.target.value as "interactive" | "bulk")}>
-                    <option value="interactive">interactive</option>
-                    <option value="bulk">bulk</option>
-                  </Select>
-                </Field>
-                {/* The switch pairs with the Selects beside it, so it lines up
-                    with the CONTROL row — not with the bottom of a cell that a
-                    neighbour's description line made taller, which is what
-                    `items-end` was doing and why it read as dropped. It mirrors
-                    `Field`'s label row as an aria-hidden spacer in the same type
-                    class, so the reservation is exact instead of a guessed
-                    height; the switch's own label then lands on the Selects'
-                    line and its description on theirs. */}
-                <div className="flex flex-col gap-[var(--ds-space-tight)]">
-                  <span aria-hidden className={cn(dsText.meta, "invisible font-medium")}>
-                    Dry run
-                  </span>
-                  <Switch
-                    checked={dryRun}
-                    onCheckedChange={(next) => { setDryRun(next); setResult(null); }}
-                    label="Dry run"
-                    description="Reads everything for real. Writes nothing, anywhere."
-                  />
-                </div>
-              </section>
-
-              <section className="flex flex-col gap-[var(--ds-space-snug)]">
-                <SectionLabel>Instance — where this will write</SectionLabel>
-                <InstanceSelector workflow={workflow} value={instances} onChange={(next) => { setInstances(next); setResult(null); }} />
-              </section>
-
-              <section className="flex flex-col gap-[var(--ds-space-snug)]">
-                <SectionLabel>What this will create</SectionLabel>
-                {plan ? (
-                  <PlanPreview plan={plan} dryRun={dryRun} test={test} />
-                ) : (
-                  // Bounded, not floating: this is the slot the plan will fill,
-                  // so it holds its shape instead of leaving a hole in a dense
-                  // modal the operator reads top to bottom.
-                  <Well>
-                    <EmptyState
-                      className="p-[var(--ds-space-base)]"
-                      icon={<FileText aria-hidden className={dsIcon.lg} />}
-                      title="No document picked yet"
-                      description="Pick a file above and this fills in with the exact rows the start would create, which panel each one lands in, and the decisions that shape it."
-                    />
-                  </Well>
-                )}
-              </section>
-            </>
-          )}
-        </DialogBody>
-
-        <DialogFooter meta={<MetaLine tone="faint" items={[`${workflow.label} v${builtVersion}`]} />}>
-          <Button variant="secondary" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            icon={<Play aria-hidden className={dsIcon.md} />}
-            disabled={!file || Boolean(file.intakeSheetId) || result?.state === "applied"}
-            onClick={start}
-          >
-            {dryRun ? "Start dry run" : "Start run"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+  const entries = useMemo(
+    () => (methodWire.kind === "typed" ? parseEntries(text, methodWire.accepts, methodWire.separator) : []),
+    [methodWire, text],
   );
-}
-
-function FileChoice({ file, selected, onSelect }: { file: UploadFileFixture; selected: boolean; onSelect: () => void }) {
-  const Icon = file.kind === "spreadsheet" ? FileSpreadsheet : FileText;
-  return (
-    <Card
-      interactive
-      selected={selected}
-      role="button"
-      tabIndex={0}
-      aria-pressed={selected}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
-      className="min-h-[var(--ds-h-lg)] flex-row items-center gap-[var(--ds-space-base)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]"
-    >
-      <Icon aria-hidden className={cn(dsIcon.md, "shrink-0", dsFg.muted)} />
-      <span className={cn(dsText.ui, "min-w-0 flex-1 truncate", dsFg.base)}>{file.fileName}</span>
-      <MetaLine
-        className="shrink-0"
-        items={[file.sizeLabel, `${file.pageCount} page${file.pageCount === 1 ? "" : "s"}`]}
-      />
-      {file.activeRun && <Badge tone="warning">already running</Badge>}
-      {file.intakeSheetId && <Badge tone="info">spreadsheet</Badge>}
-    </Card>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// B. The Input Run Panel — N typed values become one Group Row
-// ---------------------------------------------------------------------------
-
-export function DemoInputRunPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const [workflowId, setWorkflowId] = useState<DemoWorkflowId>("separations");
-  const [text, setText] = useState("");
-  const [dryRun, setDryRun] = useState(false);
-  const [policy, setPolicy] = useState<EnqueuePolicy>("reject-active");
-  const [instances, setInstances] = useState<InstanceChoice>({});
-  const [phase, setPhase] = useState<"pending" | "resolved">("pending");
-  const [result, setResult] = useState<DemoEnqueueResult | null>(null);
-
-  const spec = INPUT_RUN_SPECS.find((s) => s.workflow === workflowId) ?? INPUT_RUN_SPECS[0];
-  const workflow = DEMO_WORKFLOWS[spec.workflow];
-  const entries = useMemo(() => parseEntries(text, spec.subject), [text, spec.subject]);
   const bad = entries.filter((e) => e.problem);
   const valid = entries.filter((e) => !e.problem);
-  const plan = useMemo(() => deriveInputPlan(spec, entries), [spec, entries]);
+  const files = useMemo(() => fileIds.map((id) => UPLOAD_FILES.find((f) => f.id === id)).filter((f): f is UploadFileFixture => Boolean(f)), [fileIds]);
+  const capture = captureSessionFor(workflowId);
+  const sheets = useMemo(() => SOURCE_SHEETS.filter((s) => s.workflow === workflowId), [workflowId]);
+
+  const plan = useMemo(
+    () => deriveStartPlan({ workflow, method: methodWire, entries, files, capture }),
+    [workflow, methodWire, entries, files, capture],
+  );
+
   const test = testSystems(workflow, instances);
-  /** an EID the server already has a live run for — the reject path */
-  const activeConflict = valid.find((e) => e.value === "10055501")?.value;
+  const conflict = activeConflictFor(
+    workflowId,
+    methodWire.kind === "typed" ? valid.map((e) => e.value) : files.map((f) => f.fileName),
+  );
+
+  const scopeLabel =
+    methodWire.kind === "typed"
+      ? `${valid.length} typed value${valid.length === 1 ? "" : "s"}`
+      : methodWire.kind === "upload"
+        ? files.map((f) => `“${f.fileName}”`).join(", ")
+        : methodWire.kind === "capture" && capture
+          ? `capture session ${capture.id}`
+          : workflow.label;
+
+  const blockedReason =
+    methodWire.kind === "typed"
+      ? valid.length === 0
+        ? "Type at least one value."
+        : bad.length > 0
+          ? "Fix or remove the refused values first."
+          : null
+      : methodWire.kind === "upload"
+        ? files.length === 0
+          ? "Pick at least one document."
+          : null
+        : methodWire.kind === "capture" && !capture
+          ? "No capture session is open for this workflow."
+          : methodWire.kind === "spreadsheet" && !sheetId
+            ? "Pick a sheet."
+            : null;
 
   const start = useCallback(() => {
     setResult(
       submitDemoEnqueue({
-        workflow: spec.workflow,
-        expectedWorkflowVersion: workflow.version,
+        workflow: workflowId,
+        expectedWorkflowVersion: builtVersion,
+        method,
         plan,
         policy,
         dryRun,
+        duplicateCheck,
         instances,
-        activeConflictSubject: activeConflict ? `EID ${activeConflict}` : undefined,
+        choices: effectiveChoiceValues(capability, method, choiceValues),
+        scopeLabel,
+        activeConflictSubject: conflict?.label,
       }),
     );
-  }, [spec.workflow, workflow.version, plan, policy, dryRun, instances, activeConflict]);
+  }, [workflowId, builtVersion, method, plan, policy, dryRun, duplicateCheck, instances, capability, choiceValues, scopeLabel, conflict]);
+
+  const isHandoff = methodWire.kind === "spreadsheet";
 
   return (
     <Dialog open={open} onOpenChange={(next) => { onOpenChange(next); if (!next) setResult(null); }}>
       <DialogContent
-        size="lg"
-        title="Input Run Panel — start from typed values"
-        description="One value per line. More than one mints a Group Row; each value becomes a member under it."
+        size="xl"
+        title="Start a run"
+        description="Pick what to run. It declares what it takes, and the plan says exactly what will exist before anything is enqueued."
+        className="h-[min(86vh,700px)]"
       >
-        <DialogBody className="flex flex-col gap-[var(--ds-space-loose)]">
-          {result && <EnqueueResultBanner result={result} onDismiss={() => setResult(null)} />}
+        <div className="flex min-h-0 flex-1">
+          <WorkflowPicker value={workflowId} onChange={selectWorkflow} />
 
-          <section className="grid grid-cols-1 gap-[var(--ds-space-cozy)] min-[560px]:grid-cols-2">
-            <Field label="Workflow" description={spec.parserLabel}>
-              <Select
-                value={workflowId}
-                onChange={(e) => {
-                  setWorkflowId(e.target.value as DemoWorkflowId);
-                  setText("");
+          {/* `@container`, not a viewport query: the form column's width is set
+              by the picker beside it, so a two-up grid has to key on the column
+              it actually lives in. */}
+          <DialogBody className="@container flex flex-1 flex-col gap-[var(--ds-space-loose)]">
+            {result && (
+              <EnqueueResultBanner
+                result={result}
+                onDismiss={() => setResult(null)}
+                onReload={() => {
+                  // The ONLY cure for a stale contract: rebuild the form on the
+                  // version the server actually serves, then look again.
+                  setFormVersion((prev) => ({ ...prev, [workflowId]: SERVER_WORKFLOW_VERSION[workflowId] ?? workflow.version }));
                   setResult(null);
                 }}
-              >
-                {INPUT_RUN_SPECS.map((s) => (
-                  <option key={s.workflow} value={s.workflow}>
-                    {DEMO_WORKFLOWS[s.workflow].label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="If one is already running" description="a second parallel run against the same person is how one gets filed twice">
-              <Select value={policy} onChange={(e) => { setPolicy(e.target.value as EnqueuePolicy); setResult(null); }}>
-                {(Object.keys(ENQUEUE_POLICY_LABEL) as EnqueuePolicy[]).map((key) => (
-                  <option key={key} value={key}>
-                    {ENQUEUE_POLICY_LABEL[key]}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </section>
-
-          <div className="flex flex-wrap items-center gap-[var(--ds-space-snug)]">
-            <SectionLabel>Presets</SectionLabel>
-            {spec.presets.map((preset) => (
-              <Button key={preset.key} size="sm" variant="outline" title={preset.note} onClick={() => { setText(preset.values.join("\n")); setResult(null); }}>
-                {preset.label}
-              </Button>
-            ))}
-          </div>
-
-          <Field
-            label={`${spec.subject === "eid" ? "EIDs" : spec.subject === "email" ? "Emails" : "Names"} — one per line`}
-            hint={`${valid.length} valid · ${bad.length} refused`}
-            error={bad.length > 0 ? `${bad.length} line${bad.length === 1 ? "" : "s"} will not be enqueued — see the list below.` : null}
-            description={spec.emptyOpensUpload ? "Leaving this empty opens the upload modal instead of erroring." : undefined}
-          >
-            <Textarea
-              rows={6}
-              value={text}
-              placeholder={`${spec.placeholder}\n${spec.placeholder}`}
-              onChange={(e) => { setText(e.target.value); setResult(null); }}
-            />
-          </Field>
-
-          {bad.length > 0 && (
-            <ul className="flex flex-col gap-[var(--ds-space-snug)]">
-              {bad.map((entry) => (
-                <li key={`${entry.line}-${entry.raw}`}>
-                  <Banner tone="danger" title={`Line ${entry.line} — ${entry.problem?.code}`}>
-                    {entry.problem?.message} Nothing on this line is enqueued, and nothing is guessed from it.
-                  </Banner>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {valid.length > 0 && (
-            <section className="flex flex-col gap-[var(--ds-space-snug)]">
-              <div className="flex flex-wrap items-center gap-[var(--ds-space-base)]">
-                <SectionLabel>Row titles</SectionLabel>
-                <div className="inline-flex gap-[var(--ds-space-tight)]">
-                  <Button size="sm" variant={phase === "pending" ? "primary" : "outline"} onClick={() => setPhase("pending")}>
-                    As enqueued
-                  </Button>
-                  <Button size="sm" variant={phase === "resolved" ? "primary" : "outline"} onClick={() => setPhase("resolved")}>
-                    After resolution
-                  </Button>
-                </div>
-              </div>
-              <Well className="flex flex-col gap-[var(--ds-space-snug)]">
-                <span className={cn(dsText.body, dsFg.secondary)}>
-                  {phase === "pending"
-                    ? "A row is born titled with exactly what you typed — nobody has looked the person up yet, so nothing else would be true."
-                    : "Once the subject is resolved the title becomes the person's name and the subtitle becomes their EID. A subject nobody could resolve stays as typed — it is never replaced with a guess."}
-                </span>
-                <ul className="flex flex-col gap-[var(--ds-space-tight)]">
-                  {valid.map((entry) => {
-                    const phases = titlePhases(entry, spec.subject);
-                    const shown = phase === "resolved" ? (phases.resolved ?? phases.pending) : phases.pending;
-                    const stillPending = phase === "resolved" && !phases.resolved;
-                    return (
-                      <li key={entry.line} className="flex min-w-0 flex-wrap items-center gap-[var(--ds-space-base)]">
-                        <span className={cn(dsText.ui, "min-w-0 truncate", dsFg.base)}>{shown.title}</span>
-                        <span className={cn(dsText.meta, dsText.nums, dsFg.muted)}>{shown.subtitle}</span>
-                        {stillPending && <Chip tone="warning">unresolved — stays as typed</Chip>}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </Well>
-            </section>
-          )}
-
-          <section className="grid grid-cols-1 gap-[var(--ds-space-cozy)] min-[560px]:grid-cols-2">
-            <div className="flex flex-col gap-[var(--ds-space-snug)]">
-              <SectionLabel>Instance</SectionLabel>
-              <InstanceSelector workflow={workflow} value={instances} onChange={setInstances} />
-            </div>
-            <div className="flex flex-col gap-[var(--ds-space-base)]">
-              {spec.supportsDryRun ? (
-                <Switch checked={dryRun} onCheckedChange={setDryRun} label="Dry run" description="Reads everything for real. Writes nothing, anywhere." />
-              ) : (
-                <Banner tone="info" title="This workflow has no dry run">
-                  {workflow.label} only reads — there is nothing a dry run would suppress, so the toggle is not offered rather than offered and ignored.
-                </Banner>
-              )}
-              <RunFlagChips dryRun={dryRun && spec.supportsDryRun} test={test} priority="interactive" />
-            </div>
-          </section>
-
-          <section className="flex flex-col gap-[var(--ds-space-snug)]">
-            <SectionLabel>What this will create</SectionLabel>
-            {entries.length === 0 ? (
-              <Well>
-                <EmptyState
-                  className="p-[var(--ds-space-base)]"
-                  title="Nothing typed yet"
-                  description={
-                    spec.emptyOpensUpload
-                      ? "Type one value per line, or leave this empty and use the upload modal — an empty typed run is not an error, it is a different surface."
-                      : "Type one value per line. This fills in with the exact rows the start would create."
-                  }
-                />
-              </Well>
-            ) : (
-              <PlanPreview plan={plan} dryRun={dryRun && spec.supportsDryRun} test={test} />
+              />
             )}
-          </section>
-        </DialogBody>
 
-        <DialogFooter meta={<MetaLine tone="faint" items={[`${workflow.label} v${workflow.version}`]} />}>
+            {/* What you are starting, and how — the two facts everything below
+                is conditioned on, on one line each. */}
+            <section className="flex flex-col gap-[var(--ds-space-snug)]">
+              <div className="flex min-w-0 flex-wrap items-center gap-[var(--ds-space-base)]">
+                <h3 className={cn(dsText.section, "min-w-0 font-semibold", dsFg.base)}>{workflow.label}</h3>
+                <Chip label="group">{workflow.category}</Chip>
+                <RunFlagChips dryRun={dryRun} test={test} priority={priority} />
+              </div>
+              <p className={cn(dsText.body, dsFg.secondary, "max-w-[74ch]")}>{capability.note}</p>
+              {capability.methods.length > 1 && (
+                <MethodTabs
+                  methods={capability.methods}
+                  value={method}
+                  onChange={(next) => {
+                    setMethod(next);
+                    setResult(null);
+                  }}
+                />
+              )}
+              <p className={cn(dsText.meta, dsFg.muted, "max-w-[74ch]")}>{methodWire.note}</p>
+            </section>
+
+            {/* The input */}
+            {methodWire.kind === "typed" && (
+              <TypedInput
+                method={methodWire}
+                workflowId={workflowId}
+                text={text}
+                onText={(next) => { setText(next); setResult(null); }}
+                problems={bad}
+                validCount={valid.length}
+              />
+            )}
+
+            {methodWire.kind === "upload" && (
+              <UploadInput
+                accepts={methodWire.accepts}
+                multiFile={methodWire.multiFile}
+                merge={methodWire.merge}
+                fileIds={fileIds}
+                onChange={(next) => { setFileIds(next); setResult(null); }}
+              />
+            )}
+
+            {methodWire.kind === "capture" && (
+              <section className="flex flex-col gap-[var(--ds-space-snug)]">
+                <SectionLabel>Capture session</SectionLabel>
+                {capture ? (
+                  <Well className="flex flex-col gap-[var(--ds-space-snug)]">
+                    <div className="flex flex-wrap items-center gap-[var(--ds-space-base)]">
+                      <Camera aria-hidden className={cn(dsIcon.md, dsFg.muted)} />
+                      <span className={cn(dsText.ui, "font-semibold", dsFg.base)}>
+                        {capture.photoCount} page{capture.photoCount === 1 ? "" : "s"} photographed
+                      </span>
+                      <MetaLine items={[capture.id, capture.deviceLabel, `opened ${capture.openedLabel}`]} />
+                    </div>
+                    <p className={cn(dsText.body, dsFg.secondary, "max-w-[74ch]")}>
+                      The desktop never touches the phone — it is served the session and its page count, which is all a plan needs. This demo
+                      runs no capture server, so the session above is a fixture rather than a QR code that scans to nothing.
+                    </p>
+                  </Well>
+                ) : (
+                  <Well>
+                    <EmptyState
+                      className="p-[var(--ds-space-base)]"
+                      icon={<Camera aria-hidden className={dsIcon.lg} />}
+                      title="No capture session is open"
+                      description="A capture starts on the phone. Until one is open there is nothing to build a plan from, and nothing here will invent one."
+                    />
+                  </Well>
+                )}
+              </section>
+            )}
+
+            {methodWire.kind === "spreadsheet" && (
+              <section className="flex flex-col gap-[var(--ds-space-snug)]">
+                <Field label="Sheet" description="The intake owns the rest: a header row, a column mapping, then every row accepted or rejected by name.">
+                  <Select value={sheetId} onChange={(e) => setSheetId(e.target.value)}>
+                    {sheets.map((sheet) => (
+                      <option key={sheet.id} value={sheet.id}>
+                        {sheet.fileName} · {sheet.sizeLabel}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </section>
+            )}
+
+            {methodWire.kind === "bare" && (
+              <Well className="flex flex-col gap-[var(--ds-space-tight)]">
+                <span className={cn(dsText.ui, "font-semibold", dsFg.base)}>Nothing to fill in</span>
+                <span className={cn(dsText.body, dsFg.secondary, "max-w-[74ch]")}>
+                  This start takes no subject and offers no sub-selections. That is the honest shape of it, not a form that failed to load.
+                </span>
+              </Well>
+            )}
+
+            {/* Sub-selections — descriptor-driven, and absent when there are none */}
+            {choices.length > 0 && (
+              <section className="flex flex-col gap-[var(--ds-space-cozy)]">
+                <SectionLabel>
+                  <SlidersHorizontal aria-hidden className={cn(dsIcon.sm, "mr-[var(--ds-space-tight)] inline")} />
+                  How this run is shaped
+                </SectionLabel>
+                <div className="grid grid-cols-1 gap-[var(--ds-space-cozy)] @min-[560px]:grid-cols-2">
+                  {choices.map((choice) => (
+                    <StartChoiceControl
+                      key={choice.key}
+                      choice={choice}
+                      value={choiceValues[choice.key] ?? choice.defaultValue}
+                      onChange={(next) => {
+                        setChoiceValues((prev) => ({ ...prev, [choice.key]: next }));
+                        setResult(null);
+                      }}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Run settings — the axes every start has, whatever it is */}
+            {!isHandoff && (
+              <section className="flex flex-col gap-[var(--ds-space-cozy)]">
+                <SectionLabel>Run settings</SectionLabel>
+                <div className="grid grid-cols-1 gap-[var(--ds-space-cozy)] @min-[560px]:grid-cols-2">
+                  <Field
+                    label="If one is already running"
+                    description={conflict ? `${conflict.label} — ${conflict.note}.` : "Nothing is running for this subject."}
+                  >
+                    <Select value={policy} onChange={(e) => { setPolicy(e.target.value as EnqueuePolicy); setResult(null); }}>
+                      {(Object.keys(ENQUEUE_POLICY_LABEL) as EnqueuePolicy[]).map((key) => (
+                        <option key={key} value={key}>
+                          {ENQUEUE_POLICY_LABEL[key]}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Priority" description="bulk work yields the browser lane to anything interactive">
+                    <Select value={priority} onChange={(e) => setPriority(e.target.value as "interactive" | "bulk")}>
+                      <option value="interactive">interactive</option>
+                      <option value="bulk">bulk</option>
+                    </Select>
+                  </Field>
+                </div>
+                {flags.length > 0 && (
+                  <div className="flex flex-col gap-[var(--ds-space-base)]">
+                    {flags.map((flag) => (
+                      <StartFlagControl
+                        key={flag.key}
+                        flag={flag}
+                        checked={flagValues[flag.key] === true}
+                        onChange={(next) => {
+                          setFlagValues((prev) => ({ ...prev, [flag.key]: next }));
+                          setResult(null);
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {!isHandoff && (
+              <section className="flex flex-col gap-[var(--ds-space-snug)]">
+                <SectionLabel>Instance — where this will write</SectionLabel>
+                <InstanceSelector workflow={workflow} value={instances} onChange={(next) => { setInstances(next); setResult(null); }} />
+              </section>
+            )}
+
+            {/* The plan */}
+            <section className="flex flex-col gap-[var(--ds-space-snug)]">
+              <SectionLabel>What this will create</SectionLabel>
+              {isHandoff ? (
+                <Well className="flex flex-col gap-[var(--ds-space-snug)]">
+                  <span className={cn(dsText.ui, "font-semibold", dsFg.base)}>{plan.headline}</span>
+                  {plan.decisions.map((decision) => (
+                    <span key={decision} className={cn(dsText.body, dsFg.secondary, "max-w-[74ch]")}>
+                      {decision}
+                    </span>
+                  ))}
+                </Well>
+              ) : plan.rows.length === 0 ? (
+                // Bounded, not floating: this is the slot the plan will fill, so
+                // it holds its shape rather than leaving a hole in a dense modal
+                // the operator reads top to bottom.
+                <Well>
+                  <EmptyState
+                    className="p-[var(--ds-space-base)]"
+                    icon={<Layers aria-hidden className={dsIcon.lg} />}
+                    title={plan.headline}
+                    description="Fill in the input above and this fills in with the exact rows the start would create, which panel each one lands in, and the decisions that shape it."
+                  />
+                </Well>
+              ) : (
+                <PlanPreview plan={plan} dryRun={dryRun} test={test} />
+              )}
+            </section>
+          </DialogBody>
+        </div>
+
+        {/* The footer says either why you cannot start or exactly what starting
+            will make. The plan's cards live in the body where they belong, but
+            its ANSWER — the row count — sits beside the verb, so the operator
+            never has to scroll back down to check what they are about to press.
+            An empty plan has nothing to promise, so it promises nothing. */}
+        <DialogFooter
+          meta={
+            <MetaLine
+              tone="faint"
+              items={
+                [
+                  `${workflow.label} v${builtVersion}`,
+                  blockedReason ?? (isHandoff || plan.rows.length === 0 ? undefined : plan.headline),
+                ].filter(Boolean) as string[]
+              }
+            />
+          }
+        >
           <Button variant="secondary" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button
-            variant="primary"
-            icon={<Play aria-hidden className={dsIcon.md} />}
-            disabled={valid.length === 0 || bad.length > 0 || result?.state === "applied"}
-            onClick={start}
-          >
-            {valid.length > 1 ? `Start ${valid.length} runs` : "Start run"}
-          </Button>
+          {isHandoff ? (
+            <Button
+              variant="primary"
+              icon={<FileSpreadsheet aria-hidden className={dsIcon.md} />}
+              disabled={!sheetId}
+              onClick={() => {
+                onOpenChange(false);
+                onOpenIntake(sheetId);
+              }}
+            >
+              Open the intake…
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              icon={<Play aria-hidden className={dsIcon.md} />}
+              disabled={Boolean(blockedReason) || result?.state === "applied"}
+              onClick={start}
+            >
+              {dryRun ? "Start dry run" : "Start run"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The modal plus the one surface it hands off to. Mounted at the shell's ROOT,
+ * not inside the queue toolbar, because "reachable from anywhere" has to be
+ * true on the Settings, Archive, Explorer and Report takeovers too — none of
+ * which draw a toolbar.
+ */
+export function DemoRunStartSurfaces({
+  open,
+  onOpenChange,
+  panelWorkflowLabel,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  panelWorkflowLabel: string;
+}) {
+  const [intakeSheetId, setIntakeSheetId] = useState<string | null>(null);
+  return (
+    <>
+      <DemoRunModal
+        open={open}
+        onOpenChange={onOpenChange}
+        panelWorkflowLabel={panelWorkflowLabel}
+        onOpenIntake={(sheetId) => setIntakeSheetId(sheetId)}
+      />
+      <DemoIntakeDialog
+        open={intakeSheetId !== null}
+        initialSheetId={intakeSheetId}
+        onOpenChange={(next) => { if (!next) setIntakeSheetId(null); }}
+      />
+    </>
   );
 }

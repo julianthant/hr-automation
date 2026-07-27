@@ -7,9 +7,11 @@ import {
   Button,
   Card,
   CardBody,
+  Checkbox,
   Chip,
   Field,
   KeyValueList,
+  LockedValue,
   MetaLine,
   Refusal,
   SectionLabel,
@@ -21,7 +23,7 @@ import {
   dsText,
 } from "./demo-ui";
 import { hasRefusalCode } from "./demo-commands";
-import type { DemoWorkflowRef, SystemKey } from "./demo-wire";
+import { choiceOptionLabel, type DemoWorkflowRef, type StartChoiceWire, type StartFlagWire, type SystemKey } from "./demo-wire";
 import {
   SYSTEM_HAS_TEST,
   SYSTEM_LABEL,
@@ -122,9 +124,95 @@ export function RunFlagChips({
           test · {test.map((s) => SYSTEM_LABEL[s]).join(", ")}
         </Badge>
       )}
-      {priority && <Badge tone="neutral">{priority}</Badge>}
+      {/* Only when it is NOT the default. A chip that is always there is a chip
+          the eye stops reading — and it would say the same thing as the Priority
+          control two rows below it. */}
+      {priority === "bulk" && <Badge tone="neutral">bulk</Badge>}
     </span>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-selections — ONE control, every workflow, driven by the descriptor
+// ---------------------------------------------------------------------------
+
+/**
+ * One sub-selection, rendered the same way for every workflow that declares
+ * one. This is the whole reason wave 10 moved start capability onto the
+ * descriptor: OCR's form type, OnBase's document type, Oath Upload's mode, the
+ * roster pair and the worker count used to be five bespoke blocks in two
+ * different modals, and a sixth workflow needed a sixth block. They are one
+ * component now, and a workflow that declares none renders nothing at all.
+ *
+ * Two rules the control keeps:
+ *
+ *  - **A locked choice is a different SHAPE, not a one-option select.** It draws
+ *    as a `LockedValue` with the reason on the line beneath, so "the target
+ *    fixes this" is legible without clicking it to find out (wave 8).
+ *  - **An unavailable option is offered, disabled, with its reason.** Hiding the
+ *    23 OnBase document types that exist in OnBase but are not wired here would
+ *    teach the operator the product has never heard of them.
+ */
+export function StartChoiceControl({
+  choice,
+  value,
+  onChange,
+}: {
+  choice: StartChoiceWire;
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  if (choice.locked) {
+    return (
+      <div className="flex min-w-0 flex-col gap-[var(--ds-space-tight)]">
+        <span className={cn(dsText.meta, "font-medium", dsFg.secondary)}>{choice.label}</span>
+        <LockedValue value={choiceOptionLabel(choice, choice.defaultValue)} reason={choice.lockedReason} />
+        {choice.lockedReason && <p className={cn(dsText.meta, dsFg.muted)}>{choice.lockedReason}</p>}
+      </div>
+    );
+  }
+
+  const selected = choice.options.find((o) => o.value === value);
+  const unavailable = choice.options.filter((o) => o.unavailable).length;
+  // The description tracks the CHOICE the operator made, because the specific
+  // consequence of this option is more use than a standing line about the
+  // control. The control's own note is the fallback for an option that has
+  // nothing extra to say.
+  const description = selected?.unavailable ?? selected?.note ?? choice.note;
+
+  return (
+    <Field
+      label={choice.label}
+      description={description}
+      hint={unavailable > 0 ? `${unavailable} not wired` : undefined}
+    >
+      <Select value={value} onChange={(e) => onChange(e.target.value)}>
+        {choice.options.map((option) => (
+          <option key={option.value} value={option.value} disabled={Boolean(option.unavailable)}>
+            {option.label}
+            {option.unavailable ? " — not wired" : ""}
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
+}
+
+/**
+ * A run flag. A `Checkbox`, deliberately, and not a `Switch`: nothing here takes
+ * effect until the primary action is pressed, and the switch primitive's own
+ * contract is that it applies immediately.
+ */
+export function StartFlagControl({
+  flag,
+  checked,
+  onChange,
+}: {
+  flag: StartFlagWire;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return <Checkbox checked={checked} onCheckedChange={(next) => onChange(next === true)} label={flag.label} description={flag.note} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +223,7 @@ const ROLE_META: Record<PlanRole, { label: string; icon: ReactNode }> = {
   group: { label: "Group Row", icon: <Rows3 aria-hidden className={dsIcon.sm} /> },
   run: { label: "Run Row", icon: <ScrollText aria-hidden className={dsIcon.sm} /> },
   review: { label: "Review Run Row", icon: <ScrollText aria-hidden className={dsIcon.sm} /> },
-  member: { label: "Member Rows", icon: <Users aria-hidden className={dsIcon.sm} /> },
+  member: { label: "Member Row", icon: <Users aria-hidden className={dsIcon.sm} /> },
   linked: { label: "Linked runs", icon: <Link2 aria-hidden className={dsIcon.sm} /> },
 };
 
