@@ -739,7 +739,7 @@ function DecisionNotice({
  * nothing. `inView` is what keeps the floating notice from being a second copy
  * of a decision already on screen.
  */
-function useSeekAnchor(active: boolean) {
+function useSeekAnchor(active: boolean, block: ScrollLogicalPosition = "center") {
   const [node, setNode] = useState<HTMLElement | null>(null);
   const [inView, setInView] = useState(false);
 
@@ -765,9 +765,9 @@ function useSeekAnchor(active: boolean) {
   const seek = useCallback(() => {
     if (!node) return;
     const reduced = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    node.scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
+    node.scrollIntoView({ block, behavior: reduced ? "auto" : "smooth" });
     node.focus({ preventScroll: true });
-  }, [node]);
+  }, [node, block]);
 
   return { setNode, inView, seek, mounted: Boolean(node) };
 }
@@ -2009,22 +2009,29 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
    * it may only stop being drawn twice.
    */
   const decisionTab: DemoTab = panelKindOf(row) === "review" ? "review" : "logs";
-  const anchor = useSeekAnchor(Boolean(row.gate));
+  const { setNode: setDecisionNode, inView: decisionInView, seek: seekDecision } = useSeekAnchor(Boolean(row.gate));
   const [noticeDismissed, setNoticeDismissed] = useState(false);
   const [seekNonce, setSeekNonce] = useState(0);
   useEffect(() => setNoticeDismissed(false), [row.id, effectiveTab]);
   // Scrolling is deferred to an effect rather than done in the click handler
   // because the anchor may not exist yet: pressing the notice from the Receipt
   // tab switches tabs first, and the decision only mounts on the next commit.
+  //
+  // The dependency is the STABLE `seek` callback, never the hook's return
+  // object. That object is a fresh literal on every render, and this panel
+  // re-renders once a second on the demo's heartbeat — so depending on it
+  // re-ran the scroll every tick and made the stream impossible to scroll away
+  // from once the operator had jumped to the decision. `seek` changes only when
+  // its node does, which is exactly the deferred case above.
   useEffect(() => {
     if (seekNonce === 0) return;
-    anchor.seek();
-  }, [seekNonce, anchor]);
+    seekDecision();
+  }, [seekNonce, seekDecision]);
   const goToDecision = () => {
     if (effectiveTab !== decisionTab) onTab(decisionTab);
     setSeekNonce((n) => n + 1);
   };
-  const noticeShown = Boolean(row.gate) && !noticeDismissed && !anchor.inView;
+  const noticeShown = Boolean(row.gate) && !noticeDismissed && !decisionInView;
 
   /**
    * The same mechanism for the failure record, which now lives in the stream
@@ -2032,13 +2039,18 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
    * route to it from any tab: it switches to the logs, expands the diagnostic
    * record and scrolls it into view. A failed run also OPENS on the logs
    * (`defaultTabFor`), so this is the way back rather than the way in.
+   *
+   * It lands on `nearest`, not `center`: an expanded failure record is taller
+   * than the stream, and centring a tall block puts its own opening line — the
+   * summary and the write state — above the fold, which is the opposite of what
+   * the jump is for.
    */
-  const failureAnchor = useSeekAnchor(Boolean(failure));
+  const { setNode: setFailureNode, seek: seekFailure } = useSeekAnchor(Boolean(failure), "nearest");
   const [failureSeekNonce, setFailureSeekNonce] = useState(0);
   useEffect(() => {
     if (failureSeekNonce === 0) return;
-    failureAnchor.seek();
-  }, [failureSeekNonce, failureAnchor]);
+    seekFailure();
+  }, [failureSeekNonce, seekFailure]);
   const goToFailure = () => {
     if (effectiveTab !== "logs") onTab("logs");
     setFailureOpen(true);
@@ -2224,13 +2236,13 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
             failure={failure}
             failureOpen={failureOpen}
             onFailureOpen={setFailureOpen}
-            failureRef={failureAnchor.setNode}
+            failureRef={setFailureNode}
             tick={tick}
-            decisionRef={anchor.setNode}
+            decisionRef={setDecisionNode}
           />
         )}
         {effectiveTab === "review" && (
-          <ReviewTab row={row} tick={tick} onAction={handleAction} decisionRef={anchor.setNode} />
+          <ReviewTab row={row} tick={tick} onAction={handleAction} decisionRef={setDecisionNode} />
         )}
         {effectiveTab === "people" && <PeopleTab row={row} onSelect={onSelect} onOpenPanel={onOpenPanel} checkedIds={checkedIds} />}
         {effectiveTab === "receipt" && <ReceiptTab row={row} />}
