@@ -230,6 +230,13 @@ const badgeVariants = cva(
         /** the loudest badge — reserve it for "N need you" */
         attention:
           "bg-[var(--ds-status-waiting-solid-bg)] border-transparent text-[color:var(--ds-status-waiting-solid-fg)] font-semibold",
+        /**
+         * A standing SYSTEM label that must stay legible but must never compete
+         * for attention — an environment marker, a build tag. Same hue as
+         * `info`, no fill, so it reads as chrome rather than as news.
+         */
+        infoOutline:
+          "bg-transparent border-[color:var(--ds-info-border)] text-[color:var(--ds-info-fg)]",
       },
     },
     defaultVariants: { tone: "neutral" },

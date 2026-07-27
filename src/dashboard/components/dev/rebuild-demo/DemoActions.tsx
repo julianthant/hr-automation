@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { actionsAt, type ActionDescriptorWire, type ActionIconKey, type ActionIntent } from "./demo-wire";
+import { Button, IconButton, dsBorder, dsFocus, dsIcon, dsMotion, dsRadius, dsText } from "./demo-ui";
 import type { DemoRow } from "./demo-data";
 import type { DemoCommandResult } from "./demo-commands";
 
@@ -55,26 +56,64 @@ export type DemoActionHandler = (row: DemoRow, action: ActionDescriptorWire) => 
 const NOOP_ACTION: DemoActionHandler = () => {};
 
 const ICONS: Record<ActionIconKey, ReactNode> = {
-  retry: <RotateCcw aria-hidden className="size-3.5" />,
-  cancel: <X aria-hidden className="size-3.5" />,
-  bump: <ChevronsUp aria-hidden className="size-3.5" />,
-  delete: <Trash2 aria-hidden className="size-3.5" />,
-  review: <ClipboardList aria-hidden className="size-3.5" />,
-  resolve: <PauseCircle aria-hidden className="size-3.5" />,
-  rename: <Pencil aria-hidden className="size-3.5" />,
-  external: <ArrowUpRight aria-hidden className="size-3.5" />,
-  drill: <Search aria-hidden className="size-3.5" />,
+  retry: <RotateCcw aria-hidden className={dsIcon.md} />,
+  cancel: <X aria-hidden className={dsIcon.md} />,
+  bump: <ChevronsUp aria-hidden className={dsIcon.md} />,
+  delete: <Trash2 aria-hidden className={dsIcon.md} />,
+  review: <ClipboardList aria-hidden className={dsIcon.md} />,
+  resolve: <PauseCircle aria-hidden className={dsIcon.md} />,
+  rename: <Pencil aria-hidden className={dsIcon.md} />,
+  external: <ArrowUpRight aria-hidden className={dsIcon.md} />,
+  drill: <Search aria-hidden className={dsIcon.md} />,
 };
 
+/**
+ * The wire's seven intents, as colour only. These are NOT `Button` variants:
+ * a descriptor's intent is chosen by the server for a command, and mapping four
+ * of them onto Button would either invent four chromatic variants or flatten
+ * them all to "secondary". So the tone stays a map and the SHELL is shared —
+ * which is the part that was actually broken.
+ */
 const INTENT_PILL: Record<ActionIntent, string> = {
-  primary: "border-primary bg-primary font-semibold text-primary-foreground",
-  neutral: "border-border bg-card font-medium text-secondary-foreground",
-  destructive: "border-destructive/45 bg-destructive/8 font-semibold text-destructive",
-  violet: "border-log-violet/45 bg-log-violet/8 font-semibold text-log-violet",
-  success: "border-success/45 bg-success/8 font-semibold text-success",
-  info: "border-info/40 bg-info/8 font-semibold text-info",
-  warning: "border-warning/45 bg-warning/10 font-semibold text-warning",
+  primary: "border-transparent bg-[var(--ds-accent)] font-semibold text-[color:var(--ds-accent-fg)] hover:bg-[var(--ds-accent-hover)]",
+  neutral: cn(
+    "border-[color:var(--ds-border-strong)] bg-[var(--ds-control-bg)] font-medium",
+    "text-[color:var(--ds-control-fg)] hover:bg-[var(--ds-control-bg-hover)]",
+  ),
+  destructive:
+    "border-[color:var(--ds-danger-border)] bg-[var(--ds-danger-quiet)] font-semibold text-[color:var(--ds-danger)] hover:brightness-125",
+  violet: cn(
+    "border-[color:var(--ds-status-parked-border)] bg-[var(--ds-status-parked-bg)]",
+    "font-semibold text-[color:var(--ds-status-parked-fg)] hover:brightness-125",
+  ),
+  success:
+    "border-[color:var(--ds-success-border)] bg-[var(--ds-success-bg)] font-semibold text-[color:var(--ds-success-fg)] hover:brightness-125",
+  info: "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] font-semibold text-[color:var(--ds-info-fg)] hover:brightness-125",
+  warning: cn(
+    "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]",
+    "font-semibold text-[color:var(--ds-status-waiting-fg)] hover:brightness-125",
+  ),
 };
+
+/**
+ * ONE shell for every intent pill. The banner and the inline outcome button
+ * were two different heights, paddings and font sizes for the same control,
+ * which is why the same command looked like two commands depending on where you
+ * met it. `sm` is the inline slot beside a subline; `md` is the banner.
+ */
+const intentPill = (intent: ActionIntent, size: "sm" | "md"): string =>
+  cn(
+    "inline-flex shrink-0 cursor-pointer items-center justify-center whitespace-nowrap border",
+    size === "sm"
+      ? "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-base)]"
+      : "h-[var(--ds-h-sm)] gap-[var(--ds-space-snug)] px-[var(--ds-space-cozy)]",
+    dsRadius.md,
+    size === "sm" ? dsText.meta : dsText.body,
+    dsFocus,
+    dsMotion.fast,
+    "active:translate-y-px",
+    INTENT_PILL[intent],
+  );
 
 /** the IconActionButton palette is narrower than the wire's intents */
 const INTENT_TONE: Record<ActionIntent, "destructive" | "warning" | "primary" | "muted"> = {
@@ -99,7 +138,11 @@ export function FooterActions({ row, onAction = NOOP_ACTION }: { row: DemoRow; o
   const tree = actions.find((a) => a.command === "cancel-tree");
   return (
     <span className="flex items-center gap-1">
-      {tree && <span className="mr-1 hidden text-[10px] font-sans text-muted-foreground min-[400px]:inline">Cancel group</span>}
+      {tree && (
+        <span className={cn(dsText.micro, "mr-[var(--ds-space-tight)] hidden font-sans text-[color:var(--ds-fg-muted)] min-[400px]:inline")}>
+          Cancel group
+        </span>
+      )}
       {actions.map((a) => (
         <IconActionButton
           key={a.key}
@@ -142,7 +185,7 @@ export function BannerActions({ row, onAction = NOOP_ACTION }: { row: DemoRow; o
   const pills = bannerPills(row);
   if (pills.length === 0) return null;
   return (
-    <div className="mt-2 flex flex-wrap gap-1.5">
+    <div className="mt-[var(--ds-space-base)] flex flex-wrap gap-[var(--ds-space-snug)]">
       {pills.map((a) => (
         <button
           key={a.key}
@@ -151,10 +194,7 @@ export function BannerActions({ row, onAction = NOOP_ACTION }: { row: DemoRow; o
             e.stopPropagation();
             onAction(row, a);
           }}
-          className={cn(
-            "rounded-md border px-2.5 py-0.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            INTENT_PILL[a.intent],
-          )}
+          className={intentPill(a.intent, "md")}
         >
           {a.label}
         </button>
@@ -173,7 +213,7 @@ export function ParkResolutions({ row, onAction = NOOP_ACTION }: { row: DemoRow;
   const options = parkResolutions(row);
   if (options.length === 0) return null;
   return (
-    <div className="mt-2 grid gap-1.5 min-[560px]:grid-cols-2">
+    <div className="mt-[var(--ds-space-base)] grid gap-[var(--ds-space-snug)] min-[560px]:grid-cols-2">
       {options.map((a) => {
         const present = a.command === "resolve-write-present";
         const Icon = present ? CheckCircle2 : CircleSlash;
@@ -186,15 +226,28 @@ export function ParkResolutions({ row, onAction = NOOP_ACTION }: { row: DemoRow;
               onAction(row, a);
             }}
             className={cn(
-              "flex flex-col items-start gap-0.5 rounded-md border px-2.5 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              present ? "border-success/45 bg-success/8 hover:bg-success/12" : "border-destructive/40 bg-destructive/6 hover:bg-destructive/10",
+              "flex cursor-pointer flex-col items-start border text-left",
+              "gap-[var(--ds-space-hair)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]",
+              dsRadius.md,
+              dsFocus,
+              dsMotion.fast,
+              "hover:brightness-125",
+              present
+                ? "border-[color:var(--ds-success-border)] bg-[var(--ds-success-bg)]"
+                : "border-[color:var(--ds-danger-border)] bg-[var(--ds-danger-quiet)]",
             )}
           >
-            <span className={cn("inline-flex items-center gap-1.5 text-[11.5px] font-semibold", present ? "text-success" : "text-destructive")}>
-              <Icon aria-hidden className="size-3" />
+            <span
+              className={cn(
+                dsText.body,
+                "inline-flex items-center gap-[var(--ds-space-snug)] font-semibold",
+                present ? "text-[color:var(--ds-success-fg)]" : "text-[color:var(--ds-danger)]",
+              )}
+            >
+              <Icon aria-hidden className={dsIcon.sm} />
               {a.label}
             </span>
-            {a.detail && <span className="text-[10.5px] leading-snug text-muted-foreground">{a.detail}</span>}
+            {a.detail && <span className={cn(dsText.meta, "leading-snug text-[color:var(--ds-fg-muted)]")}>{a.detail}</span>}
           </button>
         );
       })}
@@ -228,11 +281,7 @@ export function OutcomeActionButton({
         e.stopPropagation();
         onAction(row, action);
       }}
-      className={cn(
-        "shrink-0 rounded-md border px-2 py-px text-[10.5px] font-sans outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        INTENT_PILL[action.intent],
-        className,
-      )}
+      className={cn(intentPill(action.intent, "sm"), "font-sans", className)}
     >
       {action.label}
     </button>
@@ -249,21 +298,19 @@ export function RowActionMenu({ row, onAction = NOOP_ACTION }: { row: DemoRow; o
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label={`More actions for ${row.displayName ?? row.title}`}
+        <IconButton
+          size="sm"
+          label={`More actions for ${row.displayName ?? row.title}`}
           onClick={(e) => e.stopPropagation()}
-          className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <MoreHorizontal aria-hidden className="size-3.5" />
-        </button>
+          icon={<MoreHorizontal aria-hidden className={dsIcon.md} />}
+        />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[190px]">
         {items.map((a) => (
           <DropdownMenuItem
             key={a.key}
             onSelect={() => onAction(row, a)}
-            className={cn("text-[12px]", a.intent === "destructive" && "text-destructive focus:text-destructive")}
+            className={cn(dsText.body, a.intent === "destructive" && "text-destructive focus:text-destructive")}
           >
             <span className="mr-2 inline-flex">{ICONS[a.icon ?? "external"]}</span>
             {a.label}
@@ -297,43 +344,41 @@ export function ConfirmCommandDialog({
     <Dialog open={Boolean(pending && confirm)} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent size="sm">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-[14px]">
+          <DialogTitle className={cn(dsText.title, "flex items-center gap-[var(--ds-space-base)]")}>
             <AlertTriangle
               aria-hidden
-              className={cn("size-4 shrink-0", confirm?.tone === "destructive" ? "text-destructive" : "text-warning")}
+              className={cn(
+                dsIcon.lg,
+                "shrink-0",
+                confirm?.tone === "destructive"
+                  ? "text-[color:var(--ds-danger)]"
+                  : "text-[color:var(--ds-status-waiting-fg)]",
+              )}
             />
             {confirm?.title}
           </DialogTitle>
           {/* The blast radius, in the operator's terms. This copy is served with
               the descriptor — the client never writes a confirmation message,
               because only the server knows how many rows are involved. */}
-          <DialogDescription className="text-[12px] leading-relaxed">{confirm?.body}</DialogDescription>
+          <DialogDescription className={cn(dsText.body, "leading-relaxed")}>{confirm?.body}</DialogDescription>
         </DialogHeader>
         {pending && (
-          <div className="px-1 font-mono text-[10.5px] text-muted-foreground">
+          <div className={cn(dsText.meta, dsText.nums, "px-1 text-[color:var(--ds-fg-muted)]")}>
             {pending.row.workflow.label} · {pending.row.trace} · version {pending.action.expectedVersion ?? pending.row.version}
           </div>
         )}
         <DialogFooter>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-md border border-border bg-card px-3 py-1 text-[12px] font-medium text-secondary-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-          >
+          {/* The safe exit is `secondary` and it comes FIRST; the surface's one
+              committing action is last, so the eye ends on the verb. */}
+          <Button variant="secondary" onClick={onCancel}>
             Keep it as it is
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant={confirm?.tone === "destructive" ? "danger" : "primary"}
             onClick={() => pending && onConfirm(pending)}
-            className={cn(
-              "rounded-md border px-3 py-1 text-[12px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              confirm?.tone === "destructive"
-                ? "border-destructive bg-destructive/15 text-destructive hover:bg-destructive/25"
-                : "border-primary bg-primary text-primary-foreground hover:bg-primary/90",
-            )}
           >
             {confirm?.confirmLabel}
-          </button>
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -346,21 +391,21 @@ export function ConfirmCommandDialog({
 
 const RESULT_TONE: Record<DemoCommandResult["state"], { wrap: string; text: string; icon: ReactNode; word: string }> = {
   applied: {
-    wrap: "border-success/40 bg-success/8",
-    text: "text-success",
-    icon: <CheckCircle2 aria-hidden className="size-3.5" />,
+    wrap: "border-[color:var(--ds-success-border)] bg-[var(--ds-success-bg)]",
+    text: "text-[color:var(--ds-success-fg)]",
+    icon: <CheckCircle2 aria-hidden className={dsIcon.md} />,
     word: "Applied",
   },
   conflict: {
-    wrap: "border-warning/45 bg-warning/10",
-    text: "text-warning",
-    icon: <AlertTriangle aria-hidden className="size-3.5" />,
+    wrap: "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]",
+    text: "text-[color:var(--ds-status-waiting-fg)]",
+    icon: <AlertTriangle aria-hidden className={dsIcon.md} />,
     word: "Conflict",
   },
   rejected: {
-    wrap: "border-destructive/45 bg-destructive/8",
-    text: "text-destructive",
-    icon: <Ban aria-hidden className="size-3.5" />,
+    wrap: "border-[color:var(--ds-danger-border)] bg-[var(--ds-danger-quiet)]",
+    text: "text-[color:var(--ds-danger)]",
+    icon: <Ban aria-hidden className={dsIcon.md} />,
     word: "Rejected",
   },
 };
@@ -381,30 +426,41 @@ export function CommandResultFeed({
 }) {
   if (results.length === 0) return null;
   return (
-    <div className="flex flex-col gap-1.5 border-b border-border/60 bg-secondary/20 px-3 py-2" aria-live="polite" data-demo-result-feed="">
+    <div
+      className={cn(
+        "flex shrink-0 flex-col border-b bg-[var(--ds-surface-2)]",
+        dsBorder.subtle,
+        "gap-[var(--ds-space-snug)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
+      )}
+      aria-live="polite"
+      data-demo-result-feed=""
+    >
       {results.map((r) => {
         const tone = RESULT_TONE[r.state];
         return (
-          <div key={r.id} className={cn("rounded-md border px-2.5 py-1.5", tone.wrap)} data-demo-result={r.state}>
-            <div className="flex min-w-0 items-center gap-2">
+          <div
+            key={r.id}
+            className={cn("border px-[var(--ds-space-base)] py-[var(--ds-space-snug)]", dsRadius.md, tone.wrap)}
+            data-demo-result={r.state}
+          >
+            {/* icon 14 + gap 6 = the 20px hanging indent every line below uses */}
+            <div className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
               <span className={cn("inline-flex shrink-0", tone.text)}>{tone.icon}</span>
-              <span className={cn("shrink-0 text-[11px] font-semibold uppercase tracking-wider", tone.text)}>{tone.word}</span>
-              <span className="min-w-0 truncate text-[12px] font-semibold text-foreground">{r.headline}</span>
-              <span className="ml-auto shrink-0 font-mono text-[9.5px] text-muted-foreground tabular-nums">
+              <span className={cn(dsText.caps, "shrink-0", tone.text)}>{tone.word}</span>
+              <span className={cn(dsText.body, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>{r.headline}</span>
+              <span className={cn(dsText.micro, dsText.nums, "ml-auto shrink-0 text-[color:var(--ds-fg-muted)]")}>
                 {r.actionLabel} · {r.clock} · {r.requestedBy}
               </span>
-              <button
-                type="button"
-                aria-label="Dismiss this result"
+              <IconButton
+                size="sm"
+                label="Dismiss this result"
                 onClick={() => onDismiss(r.id)}
-                className="shrink-0 rounded p-0.5 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <X aria-hidden className="size-3" />
-              </button>
+                icon={<X aria-hidden className={dsIcon.sm} />}
+              />
             </div>
-            <p className="mt-0.5 pl-6 text-[11px] leading-relaxed text-muted-foreground">{r.detail}</p>
+            <p className={cn(dsText.meta, "mt-[var(--ds-space-hair)] pl-5 leading-relaxed text-[color:var(--ds-fg-muted)]")}>{r.detail}</p>
             {r.code && (
-              <p className="mt-0.5 pl-6 font-mono text-[10px] text-destructive">
+              <p className={cn(dsText.micro, dsText.nums, "mt-[var(--ds-space-hair)] pl-5 text-[color:var(--ds-danger)]")}>
                 code {r.code} · {r.rowTitle} · {r.workflowLabel}
               </p>
             )}
@@ -412,25 +468,21 @@ export function CommandResultFeed({
                 cured by refreshing the row, so no refresh is offered here —
                 the Data tab re-offers the patch against the fresh values. */}
             {r.cas && (
-              <p className="mt-0.5 pl-6 font-mono text-[10px] text-warning">
+              <p className={cn(dsText.micro, dsText.nums, "mt-[var(--ds-space-hair)] pl-5 text-[color:var(--ds-status-waiting-fg)]")}>
                 {r.cas.kind} {r.cas.expected} → server {r.cas.server} · your edits are held on the Data tab
               </p>
             )}
             {r.settling && (
-              <p className="mt-0.5 pl-6 font-mono text-[10px] text-log-violet">
+              <p className={cn(dsText.micro, dsText.nums, "mt-[var(--ds-space-hair)] pl-5 text-[color:var(--ds-status-parked-fg)]")}>
                 settling {r.settling.observations}/{r.settling.required} observations · next probe {r.settling.nextProbeAt.slice(11, 19)}
               </p>
             )}
             {r.state === "conflict" && r.serverVersion !== undefined && (
-              <div className="mt-1 flex items-center gap-2 pl-6">
-                <span className="font-mono text-[10px] text-warning">
+              <div className="mt-[var(--ds-space-tight)] flex items-center gap-[var(--ds-space-base)] pl-5">
+                <span className={cn(dsText.micro, dsText.nums, "text-[color:var(--ds-status-waiting-fg)]")}>
                   expectedVersion {r.expectedVersion} → server {r.serverVersion}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => onRefreshRow(r.rowId, r.serverVersion ?? 0)}
-                  className="rounded-md border border-warning/50 bg-warning/15 px-2 py-px text-[10.5px] font-semibold text-warning outline-none hover:bg-warning/25 focus-visible:ring-2 focus-visible:ring-ring"
-                >
+                <button type="button" onClick={() => onRefreshRow(r.rowId, r.serverVersion ?? 0)} className={intentPill("warning", "sm")}>
                   Refresh this row
                 </button>
               </div>
