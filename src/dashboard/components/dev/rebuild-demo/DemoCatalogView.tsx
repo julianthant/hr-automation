@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode } from "react";
 import { ArrowRight, Layers, LayoutList, Link2, PanelRight, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { CONTAINMENT_KINDS, DENSITY_LADDER, PANEL_KINDS, ROLLUP_STEPS, ROW_VARIANTS, type RowVariantSpec } from "./demo-catalog";
+import { CONTAINMENT_KINDS, MEMBER_SHAPE, PANEL_KINDS, ROLLUP_STEPS, ROW_VARIANTS, type RowVariantSpec } from "./demo-catalog";
 import { DEMO_ROWS } from "./demo-data";
 import { Button, CardBase, dsBorder, dsIcon, dsRadius, dsSurface, dsText } from "./demo-ui";
 
@@ -252,16 +252,19 @@ export function DemoCatalogView({ onOpenExample }: { onOpenExample: (id: string)
               ))}
             </div>
           </div>
-          <div className="mt-[var(--ds-space-cozy)] grid gap-[var(--ds-space-cozy)] min-[1100px]:grid-cols-2">
-            {DENSITY_LADDER.map((d) => (
-              <article key={d.key} className={specimenCard}>
-                <div className="flex items-center gap-[var(--ds-space-base)]">
-                  <h3 className={cn(dsText.title, "font-semibold text-[color:var(--ds-fg)]")}>{d.range}</h3>
-                  <ExampleButton id={d.exampleId} onOpen={onOpenExample} />
-                </div>
-                <p className={cn(dsText.body, "mt-[var(--ds-space-snug)] leading-relaxed text-[color:var(--ds-fg-muted)]")}>{d.what}</p>
-              </article>
-            ))}
+          {/* ONE entry, because there is one shape. The ladder had four rungs,
+              then three, now none — each cut for the same reason, which is that
+              a change of shape reads as a change of kind. */}
+          <div className="mt-[var(--ds-space-cozy)]">
+            <article className={specimenCard}>
+              <div className="flex items-center gap-[var(--ds-space-base)]">
+                <h3 className={cn(dsText.title, "font-semibold text-[color:var(--ds-fg)]")}>{MEMBER_SHAPE.range}</h3>
+                <ExampleButton id={MEMBER_SHAPE.exampleId} onOpen={onOpenExample} />
+              </div>
+              <p className={cn(dsText.body, "mt-[var(--ds-space-snug)] leading-relaxed text-[color:var(--ds-fg-muted)]")}>
+                {MEMBER_SHAPE.what}
+              </p>
+            </article>
           </div>
         </section>
 

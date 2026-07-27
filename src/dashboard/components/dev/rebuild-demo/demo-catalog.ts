@@ -13,7 +13,7 @@
  * row's existing shape + subject, so nothing new has to be recorded to get one.
  */
 
-import { DEMO_ROWS, DENSITY_RUNGS, ROLLUP_PRECEDENCE, type Containment, type DemoRow } from "./demo-data";
+import { DEMO_ROWS, MEMBER_LIST_SHAPE, ROLLUP_PRECEDENCE, type Containment, type DemoRow } from "./demo-data";
 import { panelKindOf as panelKind, type PanelKind as PanelKindKey } from "./demo-wire";
 import { PROPOSED_STATUS } from "./demo-status";
 
@@ -484,7 +484,7 @@ export const CONTAINMENT_KINDS: ContainmentSpec[] = [
 
 export const ROLLUP_STEPS = ROLLUP_PRECEDENCE.map((s) => PROPOSED_STATUS[s].label);
 
-export const DENSITY_LADDER = DENSITY_RUNGS;
+export const MEMBER_SHAPE = MEMBER_LIST_SHAPE;
 
 export function rowVariantSpec(row: DemoRow): RowVariantSpec {
   const key = rowVariantOf(row);

@@ -2,7 +2,6 @@ import { test } from "vitest";
 import assert from "node:assert/strict";
 import {
   DEMO_ROWS,
-  densityRung,
   effectiveStatus,
   groupCounts,
   isSettledRow,
@@ -19,6 +18,18 @@ import {
  * look worse and harder to read from."* A row still asking for something or
  * still moving keeps every band. A row whose outcome is settled reports the
  * outcome and stops re-explaining its own composition.
+ *
+ * **There is no density ladder any more (D11, amended 2026-07-27).** Shown a
+ * 2-member group drawn as full inline cards beside a 6-member group drawn as
+ * compact lines, the operator asked *"why are some like this and some like
+ * that? keep the design like above. ditch the bottom design completely."* —
+ * the third and last rung to go, all three cut for the same reason: a change of
+ * SHAPE reads as a change of KIND, so the same object must not appear to be two
+ * objects depending on how many people are in it.
+ *
+ * So the property under test is now stronger than "the ladder is correct": it
+ * is that MEMBER COUNT IS NOT AN INPUT AT ALL. `visibleMemberIds` branches on
+ * settlement and nothing else, at 1 member and at 50.
  */
 
 test("a row that is still asking or still moving is NEVER settled", () => {
@@ -53,37 +64,51 @@ test("a settled ROLLUP over a member that still wants something is not settled",
   assert.equal(isSettledRow(i9), false);
 });
 
-test("a settled group above the inline rung puts NOTHING on screen to walk", () => {
-  const ec = DEMO_ROWS["ec-packet"];
-  const ids = orderedMemberIds(ec.id);
-  assert.equal(densityRung(ids.length), "compact");
+test("a settled group puts NOTHING on screen to walk, at every member count", () => {
+  const settled = Object.values(DEMO_ROWS).filter((r) => r.rowType === "group" && isSettledRow(r));
+  assert.ok(settled.length > 0, "the corpus holds no settled group");
+  // The small group and the large group must behave IDENTICALLY — that pair is
+  // exactly what the operator was shown rendering two different ways.
+  const sizes = new Set(settled.map((r) => orderedMemberIds(r.id).length));
+  assert.ok(sizes.size > 1, "every settled group is the same size — this test needs the spread");
 
-  // Collapsed (the default): no member lines at all, so the keyboard walks the
-  // rows the eye sees and nothing more.
-  assert.deepEqual(visibleMemberIds(ec, new Set()), []);
-  // Expanded by the operator: the ladder takes over and every member is back.
-  assert.deepEqual(visibleMemberIds(ec, new Set([ec.id])), ids);
+  for (const row of settled) {
+    const ids = orderedMemberIds(row.id);
+    // Collapsed (the default): no member lines at all, so the keyboard walks
+    // the rows the eye sees and nothing more.
+    assert.deepEqual(visibleMemberIds(row, new Set()), [], `${row.id} left members on screen while shut`);
+    // Expanded by the operator: EVERY member is back — never a truncated peek,
+    // because the well is what caps the height now.
+    assert.deepEqual(visibleMemberIds(row, new Set([row.id])), ids, `${row.id} truncated its expanded list`);
+  }
 });
 
-test("at 1–3 the group IS its members, whatever its status (D11)", () => {
-  const single = DEMO_ROWS["ec-single"];
-  const ids = orderedMemberIds(single.id);
-  assert.equal(isSettledRow(single), true);
-  assert.equal(densityRung(ids.length), "inline");
-  // Settled, and still fully open — shutting it would leave a row that shows a
-  // count of one and nothing else.
-  assert.deepEqual(visibleMemberIds(single, new Set()), ids);
+test("an UNSETTLED group shows every member, whatever its size (the one shape)", () => {
+  const unsettled = Object.values(DEMO_ROWS).filter((r) => r.rowType === "group" && !isSettledRow(r));
+  assert.ok(unsettled.length > 0);
+  const sizes = new Set(unsettled.map((r) => orderedMemberIds(r.id).length));
+  assert.ok(sizes.size > 1, "every unsettled group is the same size — this test needs the spread");
+
+  for (const row of unsettled) {
+    const ids = orderedMemberIds(row.id);
+    // No `slice(0, 4)`, no rung: the 5-member typed list and the 50-member
+    // roster both put their whole member set in the well.
+    assert.deepEqual(visibleMemberIds(row, new Set()), ids, `${row.id} truncated its member list`);
+    assert.deepEqual(visibleMemberIds(row, new Set([row.id])), ids, `${row.id} changed on expand`);
+  }
 });
 
-test("an UNSETTLED group keeps the rung it always had", () => {
-  // compact + unsettled → the first four, exactly as before the cut
-  const sep = DEMO_ROWS["sep-list"];
-  assert.equal(isSettledRow(sep), false);
-  assert.equal(visibleMemberIds(sep, new Set()).length, 4);
+test("member COUNT is not an input — the smallest and the largest group agree", () => {
+  const groups = Object.values(DEMO_ROWS).filter((r) => r.rowType === "group");
+  const bySize = [...groups].sort((a, b) => orderedMemberIds(a.id).length - orderedMemberIds(b.id).length);
+  const smallest = bySize[0];
+  const largest = bySize[bySize.length - 1];
+  assert.ok(orderedMemberIds(smallest.id).length < orderedMemberIds(largest.id).length);
 
-  // well + unsettled → every line, inside the fixed-height well
-  const i9 = DEMO_ROWS["i9-batch"];
-  const ids = orderedMemberIds(i9.id);
-  assert.equal(densityRung(ids.length), "well");
-  assert.deepEqual(visibleMemberIds(i9, new Set()), ids);
+  // The one honest way to state "one shape at every count": the visible set is
+  // a pure function of settlement, so given the same settlement both ends of
+  // the corpus answer with their WHOLE member set.
+  for (const row of [smallest, largest]) {
+    assert.deepEqual(visibleMemberIds(row, new Set([row.id])), orderedMemberIds(row.id));
+  }
 });

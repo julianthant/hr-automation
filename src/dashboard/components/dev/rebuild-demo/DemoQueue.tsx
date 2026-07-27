@@ -53,7 +53,6 @@ import { fmtVersionTag, workflowVersionTag } from "./demo-wire";
 import {
   bandsFor,
   DEMO_ROWS,
-  densityRung,
   effectiveStatus,
   fmtElapsed,
   gateAge,
@@ -649,12 +648,10 @@ export function DemoRowCard({
   row,
   state,
   handlers,
-  nested,
 }: {
   row: DemoRow;
   state: DemoQueueState;
   handlers: DemoQueueHandlers;
-  nested?: boolean;
 }) {
   const selected = state.selectedId === row.id;
   const status = effectiveStatus(row);
@@ -668,7 +665,7 @@ export function DemoRowCard({
   const settled = isSettledRow(row);
 
   return (
-    <div className={cn(!nested && "px-[var(--ds-space-cozy)] pt-[var(--ds-space-snug)] first:pt-[var(--ds-space-cozy)]")}>
+    <div className="px-[var(--ds-space-cozy)] pt-[var(--ds-space-snug)] first:pt-[var(--ds-space-cozy)]">
       <RowContextMenu row={row} onAction={handlers.onAction}>
         <div
           onClick={() => handlers.onSelect(row.id)}
@@ -693,8 +690,7 @@ export function DemoRowCard({
             "hover:border-[color:var(--ds-border-strong)]",
             // Selection is a FILL plus a rail, never a glow: a shadow means
             // floating, and a selected row is not floating.
-            selected && !nested && "bg-[var(--ds-surface-selected)] shadow-[inset_2px_0_0_var(--ds-accent)]",
-            selected && nested && "bg-[var(--ds-surface-selected)]",
+            selected && "bg-[var(--ds-surface-selected)] shadow-[inset_2px_0_0_var(--ds-accent)]",
             status === "running" && !selected && "border-[color:var(--ds-status-running-border)]",
           )}
         >
@@ -728,7 +724,7 @@ export function DemoRowCard({
                 {/* Bulk selection is a TOP-LEVEL act: a member is acted on
                     through its group or on its own row, never half-selected
                     inside one. */}
-                {state.selectMode && !nested && (
+                {state.selectMode && (
                   <input
                     type="checkbox"
                     checked={state.bulkIds.has(row.id)}
@@ -881,7 +877,7 @@ export function DemoRowCard({
                     </span>
                   )}
                 </div>
-                <GroupBody row={row} state={state} handlers={handlers} />
+                <GroupMemberList row={row} state={state} handlers={handlers} />
               </div>
             ) : (
               <div className="col-start-2">
@@ -1029,29 +1025,21 @@ function PacketBeforeFanout({ row, handlers }: { row: DemoRow; handlers: DemoQue
 }
 
 // ---------------------------------------------------------------------------
-// Density ladder — 1–3 inline · 4–12 compact · 13+ scroll well.
-// Three rungs, one member LINE shape across all of them. Scale changes the
-// container, never the language: a 50-person roster is the 18-person roster
-// with a scrollbar, because a second shape for the same object is what made
-// the queue read as if it held more concepts than it does.
+// ONE member shape, at every count: count strip → compact member lines in a
+// scroll well → drill-in.
+//
+// There is no ladder. Shown a 2-member group drawn as full inline row cards
+// beside a 6-member group drawn as compact lines, the operator asked *"why are
+// some like this and some like that? keep the design like above. ditch the
+// bottom design completely."* — which is the third and last time a rung has
+// been cut for the same reason: a change of SHAPE reads as a change of KIND,
+// and the same object must not appear to be two objects depending on how many
+// people are in it.
+//
+// Scale now changes the container's OVERFLOW and nothing else. Three lines do
+// not fill the well; fifty scroll inside it; the row is the same height either
+// way, and `Open all N` is where a set that size is actually worked.
 // ---------------------------------------------------------------------------
-
-function GroupBody({ row, state, handlers }: { row: DemoRow; state: DemoQueueState; handlers: DemoQueueHandlers }) {
-  const ids = orderedMemberIds(row.id);
-  const rung = densityRung(ids.length);
-  if (rung === "inline") {
-    // At three people or fewer the group IS its members — a chevron here is
-    // pure friction, so they are always open and rendered as full rows.
-    return (
-      <div className="flex flex-col gap-[var(--ds-space-snug)]" onClick={(e) => e.stopPropagation()} role="presentation">
-        {ids.map((id) => (
-          <DemoRowCard key={id} row={DEMO_ROWS[id]} state={state} handlers={handlers} nested />
-        ))}
-      </div>
-    );
-  }
-  return <GroupMemberList row={row} state={state} handlers={handlers} rung={rung} />;
-}
 
 /**
  * A group's disclosure link — one shape for `Show all N` and `Open all N`, so
@@ -1071,44 +1059,33 @@ function filterWord(filter: DemoFilter): string {
   return PROPOSED_STATUS[filter as ProposedStatus].label.toLowerCase();
 }
 
-function GroupMemberList({
-  row,
-  state,
-  handlers,
-  rung,
-}: {
-  row: DemoRow;
-  state: DemoQueueState;
-  handlers: DemoQueueHandlers;
-  rung: "compact" | "well";
-}) {
+function GroupMemberList({ row, state, handlers }: { row: DemoRow; state: DemoQueueState; handlers: DemoQueueHandlers }) {
   const ids = orderedMemberIds(row.id);
   const expanded = state.expandedGroups.has(row.id);
-  // A SETTLED group is collapsed shut, not collapsed-to-four. This is ratified
-  // D5 read literally ("groups default collapsed, auto-expand on a member
-  // `Waiting on you` or `Failed`") — the four-line peek was a softening of it,
-  // and on a finished packet those four lines re-explain a composition the
-  // count strip above has already reported. The ladder (D11) is untouched: it
-  // still decides what the EXPANDED body looks like at every size, and the
-  // disclosure below is one press away.
+  // A SETTLED group is collapsed shut. This is ratified D5 read literally
+  // ("groups default collapsed, auto-expand on a member `Waiting on you` or
+  // `Failed`") — on a finished packet the member lines re-explain a composition
+  // the count strip above has already reported. It is the ONLY branch left in
+  // this component, and it turns on the run's STATE, never on its size.
   const settled = isSettledRow(row);
   const shut = settled && !expanded;
-  // 13 people or 50, every line stays available inside a fixed-height well, so
-  // the row is the same size on screen either way. This is the ONLY treatment
-  // above twelve members — a roster does not get a second visual language just
-  // for being long, it gets the same lines and a scrollbar.
-  const visible = shut ? [] : rung === "well" ? ids : expanded ? ids : ids.slice(0, 4);
+  const visible = shut ? [] : ids;
   const noun = row.wfLabel === "Oath Signature" ? "signers" : "people";
   return (
     <div>
+      {/* The well, at EVERY count. Its cap is what makes scale presentational:
+          three lines sit inside it without scrolling, fifty scroll, and the row
+          occupies the same space either way. The half-cut row at the bottom of
+          a long list IS the depth cue, which is why the cap is 136px and not a
+          whole number of rows. */}
       {visible.length > 0 && (
       <div
         className={cn(
-          "divide-y overflow-hidden border",
+          "divide-y overflow-y-auto border",
           dsRadius.md,
           dsBorder.base,
           "divide-[color:var(--ds-border-subtle)]",
-          rung === "well" && "max-h-[var(--ds-h-member-well)] overflow-y-auto",
+          "max-h-[var(--ds-h-member-well)]",
         )}
       >
         {visible.map((id) => {
@@ -1155,11 +1132,12 @@ function GroupMemberList({
         })}
       </div>
       )}
-      {/* The disclosures. A settled group always carries the toggle (it is the
-          only way back to its members once it is shut); the well's drill-in is
-          unchanged and still the route into the full list at 13+. */}
+      {/* The disclosures, at every count. A settled group carries the toggle —
+          it is the only way back to its members once it is shut — and the
+          drill-in is always offered, because it is the same route into the same
+          list whether that list is three people or fifty. */}
       <div className={cn(visible.length > 0 && "mt-[var(--ds-space-snug)]", "flex items-center gap-[var(--ds-space-cozy)]")}>
-        {(settled || rung === "compact") && (
+        {settled && (
           <button
             type="button"
             onClick={(e) => {
@@ -1172,7 +1150,7 @@ function GroupMemberList({
             {expanded ? "Collapse" : `Show all ${ids.length} ${noun}`}
           </button>
         )}
-        {rung === "well" && !shut && (
+        {!shut && (
           <button
             type="button"
             onClick={(e) => {
