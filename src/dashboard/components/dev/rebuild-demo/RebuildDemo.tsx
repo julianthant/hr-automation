@@ -499,8 +499,13 @@ export function RebuildDemo() {
 
             {/* The panel REGION. It is the positioning context for the floating
                 Workflow Panel, so the window can overlay the panels without
-                ever covering the bars above them — and the grid inside it stays
-                a plain two-cell grid for wave 3 to split. */}
+                ever covering the bars above them.
+                TWO thresholds, and they are deliberately different. THIS one
+                (1180) splits queue | detail. The DETAIL cell splits itself
+                again into shape · detail · context at 1280, because that is
+                where the centre column stops being wide enough to read: below
+                it, 470 queue + 348 rail leaves the stream ~314px, so the region
+                degrades to a scrolling stack instead (see `PanelRegion`). */}
             <div className="relative min-h-0 flex-1">
             <div className="grid h-full grid-cols-1 gap-3 p-3 min-[1180px]:grid-cols-[470px_minmax(0,1fr)]">
               <DemoQueue

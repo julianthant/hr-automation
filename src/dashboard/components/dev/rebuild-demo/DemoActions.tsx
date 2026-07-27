@@ -213,7 +213,12 @@ export function ParkResolutions({ row, onAction = NOOP_ACTION }: { row: DemoRow;
   const options = parkResolutions(row);
   if (options.length === 0) return null;
   return (
-    <div className="mt-[var(--ds-space-base)] grid gap-[var(--ds-space-snug)] min-[560px]:grid-cols-2">
+    // A CONTAINER query: these render inside the gate banner and inside the log
+    // stream, both of which live in the detail region's CENTRE column — whose
+    // width is now a function of the context rail's state as well as the
+    // window's. Keyed to the window, two resolutions were being forced
+    // side-by-side into a 414px column at a 1280px viewport.
+    <div className="mt-[var(--ds-space-base)] grid gap-[var(--ds-space-snug)] @min-[35rem]:grid-cols-2">
       {options.map((a) => {
         const present = a.command === "resolve-write-present";
         const Icon = present ? CheckCircle2 : CircleSlash;
