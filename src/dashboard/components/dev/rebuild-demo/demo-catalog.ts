@@ -177,12 +177,12 @@ export const ROW_VARIANTS: RowVariantSpec[] = [
     subject: "A large fan-out that runs WITHOUT a pre-approval gate — you review the outcomes, not the inputs.",
     titleRule: "Title = the PDF/roster filename. Subtitle = the trace id.",
     carries: [
-      "At 41+ people: the status matrix — one cell per person, the general lookup view",
-      "An attention strip ABOVE the matrix: how many failed / waiting / warned, with Start review",
+      "The same member lines every other group shows, ordered attention first, in a fixed-height scroll well",
+      "Per-status counts plus a separate rejected tally, so a roster never reads as clean while a page is unrunnable",
       "Your own reviewed-N-of-M counter, because nobody else is tracking that you looked",
     ],
     gotcha:
-      "The matrix is the overview, NOT the review — there must always be a per-person detail path off it. It only appears at 41 people or more; below that a person is still a readable line, and 13–40 sit in a fixed-height scroll well so the row does not grow with the roster.",
+      "Scale is presentation, never a second look. A 50-person roster renders in the SAME shape and at the SAME height as an 18-person one — the scroll well is capped and the attention-first ordering puts what needs you at the top of it. `Open all N` is where a set that size is actually worked.",
     workflows: [
       {
         code: "ic",
@@ -291,7 +291,7 @@ export const PANEL_KINDS: PanelKindSpec[] = [
     defaultTab: "Anyone needing attention → People · otherwise Logs while running, Receipt when finished",
     pinned: ["Header with member counts", "Outcome bar", "Coordinator timeline (extract → review → fan-out → rollup)", "Evidence bar"],
     specifics: [
-      "People is the per-person work surface: matrix or list, attention first, click into any person.",
+      "People is the per-person work surface: one filtered list, attention first, click into any person.",
       "Before approval there are no members — People lists the people the OCR extracted, read-only, and says member rows appear when you approve.",
       "The group's Logs are the coordinator's own — member detail belongs to the member.",
       "The receipt carries every member's confirmation number inline, so filing a packet never means opening N rows.",
@@ -317,6 +317,95 @@ export const PANEL_KINDS: PanelKindSpec[] = [
     exampleId: "i9-m-19",
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Row explanations — the ⓘ on every queue row
+//
+// The operator's words: "i feel like we have too much clutter right now. maybe
+// its because i dont understand what is being done." That is the diagnosis to
+// take seriously — a row nobody can name reads as clutter even when every pixel
+// on it is earning its place. So each row can say, on demand, what it is doing,
+// what opening it will show, and why it exists as its own row at all.
+//
+// It hangs off the NAMING layer above rather than off the fixtures, for the
+// same reason the names do: a new fixture inherits a correct sentence with
+// nothing to author, and a sentence can never drift from the row it describes.
+// `doing` + `why` come from the row VARIANT (8), `panel` from the panel KIND
+// (4) — so the four axes an operator confuses (delegated review vs. coordinator
+// vs. member vs. standalone run) each read differently by construction.
+//
+// It is an EXPLANATION, never a hiding place: nothing here is a fact about this
+// particular run. Every load-bearing value — status, age, counts, error, trace
+// — stays on the row where it already lives.
+// ---------------------------------------------------------------------------
+
+export interface RowExplanation {
+  /** the work this row stands for */
+  doing: string;
+  /** what opening it puts on screen */
+  panel: string;
+  /** why it is its own row instead of a line inside something else */
+  why: string;
+}
+
+const VARIANT_EXPLANATION: Record<RowVariant, { doing: string; why: string }> = {
+  "person-run": {
+    doing: "One person, start to finish — this row is that person's entire run.",
+    why: "One person is the smallest thing you can retry, cancel or file, so it gets a row of its own.",
+  },
+  "document-run": {
+    doing: "One document handled end to end — read, reviewed by you, then filed as a single ticket.",
+    why: "The whole PDF produces ONE ticket, so splitting it into people would invent work that does not exist. Its signers are separate runs, linked from here.",
+  },
+  "review-run": {
+    doing: "An OCR extraction waiting for you to check each person against the page it was read from.",
+    // replaced below when the run has no parent — approval only means something
+    // when something downstream is waiting to be released
+    why: "It keeps its own row so the packet that delegated it is counted once, here, and never a second time under that packet.",
+  },
+  "catalog-run": {
+    doing: "A selection from a registry — reports or files, with no person involved anywhere in it.",
+    why: "The whole selection is one job: one place reporting progress, one receipt listing every file it saved.",
+  },
+  "packet-group": {
+    doing: "A PDF of many people, stopped for your approval before anything is written.",
+    why: "Approving fans out one real run per person, so every person stays separately retryable afterwards.",
+  },
+  "roster-group": {
+    doing: "A fan-out running with no approval gate — you review the outcomes here, not the inputs.",
+    why: "One roster is one thing to track, and one bad person is one member to retry rather than a re-run of everyone.",
+  },
+  "person-member": {
+    doing: "One person's share of the group above it — a real run with its own retry and its own receipt.",
+    why: "Replaying this person must never re-run the group, which is only possible because the work is a row and not a line item.",
+  },
+  "rejected-member": {
+    doing: "A page that could never become work — nothing ran for it, and nothing will.",
+    why: "It is listed rather than dropped, so the group cannot read as finished while it is still unresolved.",
+  },
+};
+
+const PANEL_EXPLANATION: Record<PanelKindKey, string> = {
+  run: "Opening it shows the log stream, every value the run read or wrote, and the receipt once it ends.",
+  review: "Opening it starts the review — the scanned page beside the fields read from it, one person at a time.",
+  group: "Opening it lists the people it holds, attention first, and you can open any one of them from there.",
+  member: "Opening it walks the set — previous, next, and a checked mark so you keep your place in it.",
+};
+
+/** the one case where SCOPE, not shape, changes what the row is for */
+const STANDALONE_REVIEW_WHY =
+  "Nobody delegated it, so approving would release no work — this is a read of a document, not a gate in front of one.";
+
+export function rowExplanationOf(row: DemoRow): RowExplanation {
+  const variant = rowVariantOf(row);
+  const base = VARIANT_EXPLANATION[variant];
+  const standaloneReview = variant === "review-run" && !row.reviewOf;
+  return {
+    doing: base.doing,
+    panel: PANEL_EXPLANATION[panelKind(row)],
+    why: standaloneReview ? STANDALONE_REVIEW_WHY : base.why,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Containment — the one field that decides where a child lives and whether it
