@@ -29,7 +29,7 @@ import {
   DEFAULT_WORKFLOW,
   countRows,
   DemoSessionPanel,
-  DemoStatusBar,
+  DemoStatusFilters,
   DemoTopBar,
   DemoWorkflowPanelToggle,
   DemoWorkflowSidebar,
@@ -43,7 +43,7 @@ import {
 // Row lookups go through the ALL-DAYS map: a row selected from a prior day must
 // open exactly like a row from today.
 import { ALL_DEMO_ROWS as DEMO_ROWS, DEMO_DAY } from "./demo-days";
-import { ToastProvider, useDemoTheme, useDsModalOpen } from "./demo-ui";
+import { ToastProvider, openContextMenuFor, useDemoTheme, useDsModalOpen } from "./demo-ui";
 import {
   ATTENTION_STATUSES,
   type DemoRow,
@@ -330,6 +330,24 @@ export function RebuildDemo() {
         return;
       }
 
+      /**
+       * The selected row's full command set, from the keyboard.
+       *
+       * The `⋯` button is gone and right-click replaced it, which on its own
+       * would have made every command that is not in the footer unreachable
+       * without a pointer — in a keyboard-first console that is a regression,
+       * not a trade. The platform's own context-menu key (Menu / Shift+F10)
+       * already works, because the browser dispatches `contextmenu` on the
+       * focused element and Radix's trigger answers it; `m` is the documented
+       * route that does not depend on the operator having that key, and it
+       * works from the selection rather than from focus.
+       */
+      if (e.key === "m") {
+        e.preventDefault();
+        openContextMenuFor(document.querySelector(`[data-demo-row-id="${selectedId}"]`));
+        return;
+      }
+
       const visible = computeVisibleIds(scopedRows, { view, filter, expandedGroups, sort });
       const idx = visible.indexOf(selectedId);
 
@@ -469,17 +487,12 @@ export function RebuildDemo() {
           )}
 
           <main className="flex min-h-0 flex-1 flex-col">
-            {/* Two bars above the panels, and that is the whole budget. The
-                view title moved onto the Queue Panel's own header (which was
-                already saying "Queue · Jul 25" beside nothing), the keyboard
-                legend moved into the Top Bar's shortcuts Popover, and the
-                run-start band folded into the action bar below — three bands
-                that were carrying one idea's worth of content each. */}
-            <DemoStatusBar counts={counts} active={filter} onSelect={setFilter} />
-
-            {/* panel toggle · start a run · sort · select · bulk commands, with
-                the full partial-result vector. Selection reorders and acts; it
-                never filters, so no count can move because of it. */}
+            {/* ONE bar above the panels now, not two. The Status Bar's ten
+                pills were a band of their own directly above a band of
+                unrelated controls; they are the middle GROUP of a single
+                composed bar — where you are and what you start on the left,
+                what you are looking at in the middle, how you are looking at it
+                on the right. Select mode adds a second band while it is on. */}
             <DemoQueueToolbar
               sort={sort}
               onSort={setSort}
@@ -502,6 +515,7 @@ export function RebuildDemo() {
                 <DemoWorkflowPanelToggle mode={panelMode} onMode={setPanelMode} active={activeWorkflow} rows={dayRows} />
               }
               runStart={<DemoRunStartButton onOpen={() => setRunStartOpen(true)} />}
+              filters={<DemoStatusFilters counts={counts} active={filter} onSelect={setFilter} />}
             />
 
             {/* applied · conflict · rejected — all three, side by side, never

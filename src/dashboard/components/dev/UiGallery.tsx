@@ -30,7 +30,7 @@ import { IconActionButton } from "@/components/shared/IconActionButton";
 import { StatusCounts } from "@/components/queue-panel/StatusCounts";
 import { DemoRowCard, type DemoQueueHandlers, type DemoQueueState } from "./rebuild-demo/DemoQueue";
 import { DemoLogPanel } from "./rebuild-demo/DemoLogPanel";
-import { DemoStatusBar, countRows, topLevelRows } from "./rebuild-demo/DemoShell";
+import { DemoStatusFilters, countRows, topLevelRows } from "./rebuild-demo/DemoShell";
 import { CONTAINMENT_KINDS, PANEL_KINDS, ROLLUP_STEPS, ROW_VARIANTS } from "./rebuild-demo/demo-catalog";
 import { PROPOSED_STATUS, StatusBadge, type ProposedStatus } from "./rebuild-demo/demo-status";
 import { DEMO_ROWS, groupCounts } from "./rebuild-demo/demo-data";
@@ -694,10 +694,10 @@ function ControlsTab() {
         <Specimen
           name="Status Bar"
           kind="filter + summary"
-          what="This is the REAL bar rendering the REAL counts — it goes through countRows, the same single path as the Workflow Panel badges and the queue, so two surfaces cannot disagree. Needs you is the only overlap and it is labelled as a composite (Waiting on you + Write parked). A zero count dims rather than disappearing, so the buckets stay in the same place."
+          what="The REAL filter group rendering the REAL counts, through countRows — the same single path as the Workflow Panel badges and the queue. All and Needs you are COMPOSITES, so they are a segmented control rather than two more pills; the eight primitives are chips beside it. A status at zero keeps its slot and its click target but drops its border, its fill and its label, so an empty bucket cannot look like a full one."
           where="countRows(topLevelRows()) — no second tally exists"
         >
-          <DemoStatusBar counts={countRows(topLevelRows())} active="all" onSelect={NOOP} />
+          <DemoStatusFilters counts={countRows(topLevelRows())} active="all" onSelect={NOOP} />
         </Specimen>
       </div>
       <div className="col-span-full">
