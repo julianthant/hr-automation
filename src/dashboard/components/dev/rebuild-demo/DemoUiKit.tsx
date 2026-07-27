@@ -48,6 +48,8 @@ import {
   ProgressBar,
   RadioGroup,
   SearchInput,
+  ValueField,
+  LockedValue,
   SectionLabel,
   Select,
   Separator,
@@ -620,6 +622,7 @@ function FormsSection() {
   const [mode, setMode] = useState<"dry" | "live">("dry");
   const [notify, setNotify] = useState(false);
   const [search, setSearch] = useState("");
+  const [corrected, setCorrected] = useState("07/16/2026");
   return (
     <Section
       id="forms"
@@ -657,6 +660,33 @@ function FormsSection() {
             placeholder="Search people, files, trace ids…"
             shortcut={<Kbd>/</Kbd>}
           />
+
+          {/* A RECORDED value, which is a different thing from a form input:
+              the run observed it, and the only question is whether the operator
+              may correct it. The pair is told apart by SHAPE — a box takes
+              typing, flat text with a lock does not — because on a surface that
+              files real HR transactions, "you may change this" and "you may
+              not" is the load-bearing distinction. Both the Data ledger and the
+              OCR review draw these; do not hand-roll a third. */}
+          <SectionLabel>Recorded value</SectionLabel>
+          <div className="flex flex-col gap-[var(--ds-space-base)]">
+            <ValueField ariaLabel="Separation date — correctable" value={corrected} onChange={setCorrected} />
+            <ValueField
+              ariaLabel="Separation date — corrected, not yet saved"
+              value="07/18/2026"
+              dirty
+              onChange={() => {}}
+            />
+            <LockedValue
+              value="Voluntary termination"
+              reason="A write is a record of what happened, not a form. It is shown here and never edited."
+            />
+            <LockedValue
+              value="never read back"
+              tone="warning"
+              reason="Sent, but never read back — the outcome is unknown until you resolve the park."
+            />
+          </div>
         </div>
 
         <div className="flex flex-col gap-[var(--ds-space-loose)]">

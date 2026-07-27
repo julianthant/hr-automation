@@ -211,6 +211,7 @@ the component; do not re-draw the pattern.
 | **A refusal** — the product declined, on purpose | `Refusal` | Always carries a `code`, and says what was **not** done (`outcome`). Uses `ShieldAlert`, never `TriangleAlert`: the triangle means something broke, the shield means something was refused. A `Banner tone="danger"` is for a *failure*; a refusal is a different sentence. |
 | **A provenance line** — where this came from | `MetaLine` | ids, codes, clocks, actors, hashes — `dsText.meta` + `dsText.nums`, segments joined with ` · `, empty segments dropped. **Never `font-mono`**: that loses the tabular figures that stop a clock from jittering. |
 | **A group heading** | `SectionLabel` | Never hand-roll `cn(dsText.caps, dsFg.muted)`. |
+| **A recorded value** — something the run OBSERVED | `ValueField` / `LockedValue` | A value the operator may correct is drawn as a **field at rest** (control border, inset surface, pencil) — never a bare `<input>` with a transparent border, which is invisible until hovered or already edited. One the operator may **not** correct is flat text with a lock and no box: the pair is told apart by SHAPE, not by a badge and never by colour. Do not make everything look like a field to be consistent — "you may change this" against "you may not" is load-bearing. Dirty is a fill and a border, never ink, and is always paired with a word. |
 
 A dialog's quiet left-hand note goes in `DialogFooter`'s `meta` slot, not a
 hand-rolled `mr-auto` span — see the footer rule below.
@@ -330,7 +331,7 @@ This demo is asserted through the accessibility tree, so a missing label is a
 | `ds/primitives-core.tsx` | Button, IconButton, Badge, CountBadge, Chip, Kbd, Spinner, Skeleton, Separator |
 | `ds/primitives-status.tsx` | the eight statuses + StatusPill / StatusDot / StatusIcon |
 | `ds/primitives-layout.tsx` | Panel, Card, Banner, **Refusal**, **MetaLine**, **BulletList**, EmptyState, Tabs, Well, FloatingSurface |
-| `ds/primitives-form.tsx` | Field, Input, Textarea, Select, Checkbox, RadioGroup, Switch, SearchInput |
+| `ds/primitives-form.tsx` | Field, Input, Textarea, Select, Checkbox, RadioGroup, Switch, SearchInput, **ValueField**, **LockedValue** |
 | `ds/primitives-overlay.tsx` | Dialog, Drawer, **Popover**, Tooltip, Toast |
 | `ds/primitives-data.tsx` | Table, ProgressBar, TimelineSteps, KeyValueList |
 | `demo-ui.tsx` | **the barrel — import from here** |
