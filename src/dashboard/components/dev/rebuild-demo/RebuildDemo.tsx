@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Keyboard } from "lucide-react";
 import { DemoLogPanel, tabsFor, type DemoTab } from "./DemoLogPanel";
 import { computeVisibleIds, DemoQueue, type DemoFilter, type DemoQueueState, type DemoView } from "./DemoQueue";
 import { DemoCatalogView } from "./DemoCatalogView";
@@ -8,7 +7,7 @@ import { CommandResultFeed, ConfirmCommandDialog, type PendingCommand } from "./
 /* Tier 3a: the run-START surfaces (Run Modal · Input Run Panel · spreadsheet
    intake). Self-contained — everything it needs lives in DemoRunStart*.tsx,
    demo-runstart-wire.ts and demo-data-intake.ts. */
-import { DemoRunStartBar } from "./DemoRunStart";
+import { DemoRunStartControls } from "./DemoRunStart";
 import { RenameRunDialog, type PendingRename } from "./DemoRunIdentity";
 import { submitDemoCommand, type DemoCommandResult } from "./demo-commands";
 import type { ActionDescriptorWire } from "./demo-wire";
@@ -38,8 +37,7 @@ import {
 // Row lookups go through the ALL-DAYS map: a row selected from a prior day must
 // open exactly like a row from today.
 import { ALL_DEMO_ROWS as DEMO_ROWS, DEMO_DAY } from "./demo-days";
-import { Kbd, ToastProvider, dsBorder, dsIcon, dsSize, dsText, useDemoTheme } from "./demo-ui";
-import { cn } from "@/lib/utils";
+import { ToastProvider, useDemoTheme } from "./demo-ui";
 import {
   ATTENTION_STATUSES,
   type DemoRow,
@@ -426,59 +424,17 @@ export function RebuildDemo() {
           <DemoWorkflowPanel active={activeWorkflow} onActive={changeWorkflow} rows={dayRows} />
 
           <main className="flex min-h-0 flex-1 flex-col">
-            {/* The view's own name and size. It is a HEADING, not another bar:
-                the panel title is the largest thing in this stack, and the
-                keyboard legend beside it is the quietest. */}
-            <div
-              className={cn(
-                "flex shrink-0 items-center border-b",
-                dsSize.hBar,
-                dsBorder.subtle,
-                "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)]",
-              )}
-            >
-              <h1 className={cn(dsText.title, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>
-                {activeWorkflow}
-              </h1>
-              <span className={cn(dsText.meta, "shrink-0 text-[color:var(--ds-fg-muted)]")}>
-                <span className={dsText.nums}>{counts.all}</span> {counts.all === 1 ? "row" : "rows"}
-              </span>
-              <span
-                className={cn(
-                  dsText.meta,
-                  "ml-auto hidden shrink-0 items-center gap-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)] min-[1000px]:flex",
-                )}
-              >
-                <Keyboard aria-hidden className={cn(dsIcon.md, "text-[color:var(--ds-fg-faint)]")} />
-                <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
-                  <Kbd>j</Kbd>
-                  <Kbd>k</Kbd>
-                  move
-                </span>
-                <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
-                  <Kbd>n</Kbd> next attention
-                </span>
-                <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
-                  <Kbd>Enter</Kbd> open group
-                </span>
-                <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
-                  <Kbd>c</Kbd> check
-                </span>
-                <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
-                  <Kbd>1</Kbd>–<Kbd>4</Kbd> tabs
-                </span>
-              </span>
-            </div>
-
+            {/* Two bars above the panels, and that is the whole budget. The
+                view title moved onto the Queue Panel's own header (which was
+                already saying "Queue · Jul 25" beside nothing), the keyboard
+                legend moved into the Top Bar's shortcuts Popover, and the
+                run-start band folded into the action bar below — three bands
+                that were carrying one idea's worth of content each. */}
             <DemoStatusBar counts={counts} active={filter} onSelect={setFilter} />
 
-            {/* the run-START half of the product: Run Modal · Input Run Panel ·
-                spreadsheet intake */}
-            <DemoRunStartBar />
-
-            {/* sort · select · bulk commands, with the full partial-result
-                vector. Selection reorders and acts; it never filters, so no
-                count can move because of it. */}
+            {/* panel toggle · start a run · sort · select · bulk commands, with
+                the full partial-result vector. Selection reorders and acts; it
+                never filters, so no count can move because of it. */}
             <DemoQueueToolbar
               sort={sort}
               onSort={setSort}
@@ -497,6 +453,7 @@ export function RebuildDemo() {
               outcome={bulkOutcome}
               onDismissOutcome={() => setBulkOutcome(null)}
               onSelectRow={select}
+              runStart={<DemoRunStartControls />}
             />
 
             {/* applied · conflict · rejected — all three, side by side, never

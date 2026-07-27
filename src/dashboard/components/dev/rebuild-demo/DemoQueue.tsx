@@ -1126,8 +1126,13 @@ export function DemoQueue({
           "gap-[var(--ds-space-snug)] px-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]",
         )}
       >
-        <h2 className={cn(dsText.title, "font-semibold text-[color:var(--ds-fg)]")}>Queue</h2>· {dayLabel(day)}
-        <span className="ml-auto">
+        {/* The panel is TITLED by the workflow it holds. That used to be an h1
+            in a band of its own above the Status Bar; here it costs nothing and
+            it is the answer to "which panel am I in" in every Workflow Panel
+            state — including the one where the panel is reduced to an icon. */}
+        <h2 className={cn(dsText.title, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>{workflowLabel}</h2>
+        <span className="shrink-0">queue · {dayLabel(day)}</span>
+        <span className="ml-auto shrink-0">
           <span className={dsText.nums}>{inView.length}</span> {inView.length === 1 ? "run" : "runs"}
         </span>
       </div>
