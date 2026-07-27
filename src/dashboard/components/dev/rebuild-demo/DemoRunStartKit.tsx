@@ -25,8 +25,9 @@ import {
 import { hasRefusalCode } from "./demo-commands";
 import { choiceOptionLabel, type DemoWorkflowRef, type StartChoiceWire, type StartFlagWire, type SystemKey } from "./demo-wire";
 import {
-  SYSTEM_HAS_TEST,
   SYSTEM_LABEL,
+  systemHasTestInstance,
+  systemHost,
   testSystems,
   type DemoEnqueueResult,
   type EnqueuePlan,
@@ -70,16 +71,25 @@ export function InstanceSelector({
     <div className="flex flex-col gap-[var(--ds-space-base)]">
       <div className="grid grid-cols-1 gap-[var(--ds-space-base)] min-[420px]:grid-cols-2">
         {workflow.systems.map((system) => {
-          const hasTest = SYSTEM_HAS_TEST[system];
+          const hasTest = systemHasTestInstance(system);
+          const instance: SystemInstance = hasTest ? (value[system] ?? "prod") : "prod";
           return (
             <Field
               key={system}
               label={SYSTEM_LABEL[system]}
-              description={hasTest ? undefined : "no test instance configured"}
+              /* The HOST, not a reassurance. This is the one fact the retired
+                 global System-URL overrides were hiding: which machine this run
+                 is about to touch, at the moment the choice is made. */
+              description={
+                <span className={cn(dsText.nums, "break-all")}>
+                  {systemHost(system, instance)}
+                  {!hasTest && <span className={dsFg.faint}> · no test host provisioned</span>}
+                </span>
+              }
               disabled={!hasTest}
             >
               <Select
-                value={hasTest ? (value[system] ?? "prod") : "prod"}
+                value={instance}
                 onChange={(e) => onChange({ ...value, [system]: e.target.value as SystemInstance })}
                 disabled={!hasTest}
               >
@@ -357,8 +367,8 @@ export function EnqueueResultBanner({
           <span>{result.detail}</span>
           <KeyValueList
             items={[
-              { key: "form built at", value: `v${result.expectedVersion}` },
-              { key: "server serves", value: `v${result.serverVersion}`, tone: "warning" },
+              { key: "form built against contract", value: result.expectedContract ?? "—" },
+              { key: "server serves contract", value: result.serverContract ?? "—", tone: "warning" },
             ]}
           />
         </div>

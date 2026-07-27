@@ -336,7 +336,7 @@ export function DemoQueueToolbar({
                   {r.code && <span className={cn(dsText.micro, dsText.nums, "shrink-0 text-[color:var(--ds-danger)]")}>{r.code}</span>}
                   {r.state === "conflict" && (
                     <span className={cn(dsText.micro, dsText.nums, "shrink-0 text-[color:var(--ds-status-waiting-fg)]")}>
-                      v{r.expectedVersion} → v{r.serverVersion}
+                      rev {r.expectedVersion} → {r.serverVersion}
                     </span>
                   )}
                 </button>

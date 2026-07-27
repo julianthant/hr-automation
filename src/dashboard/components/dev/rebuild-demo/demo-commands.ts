@@ -7,8 +7,10 @@
  *
  *  - `applied`   the server accepted it and the row moved.
  *  - `conflict`  the operator acted on a STALE surface. The CAS `expectedVersion`
- *                on the descriptor no longer matches the server's version, so
- *                NOTHING was applied. The only cure is a forced refresh.
+ *                on the descriptor — the row's own REVISION, which is not the
+ *                workflow's descriptor version and is never called one in copy —
+ *                no longer matches the server's, so NOTHING was applied. The
+ *                only cure is a forced refresh.
  *  - `rejected`  the command is not permitted in this row's current state. Typed
  *                code + message, and again nothing was applied.
  *
@@ -66,7 +68,13 @@ export interface DemoCommandResult {
   detail: string;
   /** rejected only — a typed code, never a bare string */
   code?: string;
-  /** conflict on the ROW's version only — the feed's refresh acts on this */
+  /**
+   * Conflict on the ROW's own REVISION — a counter that ticks every time this
+   * row changes. It is deliberately NOT the workflow's descriptor version: one
+   * integer used to be both, and a refusal that says "version" without saying
+   * which one sends the operator to the wrong page. The feed's refresh acts on
+   * this.
+   */
   expectedVersion?: number;
   serverVersion?: number;
   /**
@@ -319,7 +327,7 @@ export function submitDemoCommand(row: DemoRow, action: ActionDescriptorWire, ct
       expectedVersion,
       serverVersion: row.version,
       headline: "Conflict — your view of this row is out of date",
-      detail: `You acted on version ${expectedVersion}; the server is at version ${row.version}. NOTHING was applied. Refresh the row and look again before you decide — the change you could not see may be the reason this command is wrong.`,
+      detail: `You acted on revision ${expectedVersion} of this row; the server holds revision ${row.version}. NOTHING was applied. (This is the ROW\u2019s revision, not ${row.workflow.label}\u2019s descriptor version — the workflow did not change under you, this one row did.) Refresh the row and look again before you decide.`,
     };
   }
 

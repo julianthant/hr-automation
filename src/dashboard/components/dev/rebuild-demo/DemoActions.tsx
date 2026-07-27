@@ -438,7 +438,7 @@ function ConfirmBody({
           <DialogDescription className={cn(dsText.body, "leading-relaxed")}>{confirm.body}</DialogDescription>
         </DialogHeader>
         <div className={cn(dsText.meta, dsText.nums, "px-1 text-[color:var(--ds-fg-muted)]")}>
-          {pending.row.workflow.label} · {pending.row.trace} · version {pending.action.expectedVersion ?? pending.row.version}
+          {pending.row.workflow.label} · {pending.row.trace} · row rev {pending.action.expectedVersion ?? pending.row.version}
         </div>
         <DialogFooter>
           {/* The safe exit is `secondary` and it comes FIRST; the surface's one
@@ -549,7 +549,7 @@ export function CommandResultFeed({
             {r.state === "conflict" && r.serverVersion !== undefined && (
               <div className="mt-[var(--ds-space-tight)] flex items-center gap-[var(--ds-space-base)] pl-5">
                 <span className={cn(dsText.micro, dsText.nums, "text-[color:var(--ds-status-waiting-fg)]")}>
-                  expectedVersion {r.expectedVersion} → server {r.serverVersion}
+                  row rev {r.expectedVersion} → server {r.serverVersion}
                 </span>
                 <button type="button" onClick={() => onRefreshRow(r.rowId, r.serverVersion ?? 0)} className={intentPill("warning", "sm")}>
                   Refresh this row

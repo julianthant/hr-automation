@@ -39,7 +39,7 @@ import {
 } from "./demo-explorer-wire";
 import { allTopLevelRows } from "./demo-archive-wire";
 import { effectiveStatus, fmtElapsed, type DemoRow } from "./demo-data";
-import { DEMO_WORKFLOWS } from "./demo-wire";
+import { DEMO_WORKFLOWS, fmtVersionTag } from "./demo-wire";
 
 /**
  * DEV-ONLY — the EXPLORER: a workflow's descriptor graph with a run laid over
@@ -137,13 +137,13 @@ export function DemoExplorerPage({ onBack, onOpenSettings }: { onBack: () => voi
                   <StatusPill status={effectiveStatus(run)} size="sm" />
                   <span className={cn(dsText.meta, dsText.nums, "text-[color:var(--ds-fg-muted)]")}>{overlay.traceId}</span>
                   <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
-                    ran under {run.workflow.label} v{run.workflowVersion}
+                    ran under {run.workflow.label} {fmtVersionTag({ major: run.workflowVersion, minor: run.workflowMinorVersion })}
                   </span>
                   {run.dryRun && <Chip tone="info">dry run — stopped at the boundary</Chip>}
                 </div>
 
                 {run.workflowVersion !== graph.version && (
-                  <Banner tone="warning" title={`This run ran under v${run.workflowVersion}; the graph is v${graph.version}`} className="mb-[var(--ds-space-cozy)]">
+                  <Banner tone="warning" title={`This run ran under ${fmtVersionTag({ major: run.workflowVersion, minor: run.workflowMinorVersion })}; the graph is v${graph.version}.0`} className="mb-[var(--ds-space-cozy)]">
                     Nodes that do not line up are the version difference, not a missing step. A run is only ever comparable with the
                     descriptor it executed — which is exactly why a version bump moves prior runs into the archive.
                   </Banner>

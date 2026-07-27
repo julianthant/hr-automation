@@ -31,7 +31,7 @@ import {
   dsIcon,
   dsText,
 } from "./demo-ui";
-import { DEMO_NOW, DEMO_WORKFLOWS } from "./demo-wire";
+import { DEMO_NOW, DEMO_WORKFLOWS, startContractToken } from "./demo-wire";
 import {
   INTAKE_FIELDS,
   PRIOR_MANIFESTS,
@@ -239,7 +239,7 @@ export function DemoIntakeDialog({
     setResult(
       submitDemoEnqueue({
         workflow: sheet.workflow,
-        expectedWorkflowVersion: DEMO_WORKFLOWS[sheet.workflow].version,
+        expectedContract: startContractToken(DEMO_WORKFLOWS[sheet.workflow]),
         method: "typed",
         plan,
         policy: "reject-active",

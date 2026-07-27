@@ -43,6 +43,7 @@ import {
   DEMO_WORKFLOWS,
   agoSeconds,
   fmtClockSec,
+  startContractToken,
   type CoordinatorShape,
   type DemoWorkflowId,
   type DemoWorkflowRef,
@@ -62,43 +63,98 @@ export type SystemInstance = "prod" | "test";
 
 export type InstanceChoice = Partial<Record<SystemKey, SystemInstance>>;
 
-export const SYSTEM_LABEL: Record<SystemKey, string> = {
-  kuali: "Kuali",
-  ucpath: "UCPath",
-  kronos: "Kronos",
-  crm: "CRM",
-  servicenow: "ServiceNow",
-  onbase: "OnBase",
-  i9: "I-9",
+/**
+ * Every system's entry hosts, keyed by instance.
+ *
+ * This used to be a Settings section of seven editable override boxes, and it
+ * was the wrong shape twice over: an override is a GLOBAL flip with no expiry
+ * that silently redirects every future run, and there is nothing an operator
+ * types here that the deployment does not already know. What an operator
+ * actually asks is *"am I testing against staging on THIS run?"* — a per-run
+ * question, answered by the run modal's instance selector, which now prints the
+ * host each choice resolves to so the answer is a fact and not a promise.
+ *
+ * A system with no `test` host cannot be pointed at one; the selector says so
+ * rather than offering a choice that would silently fall back to production.
+ */
+export interface SystemInstanceWire {
+  label: string;
+  hosts: { prod: string; test?: string };
+  /** why a test instance exists for this system, or why one does not */
+  note: string;
+}
+
+export const DEMO_SYSTEM_INSTANCES: Record<SystemKey, SystemInstanceWire> = {
+  ucpath: {
+    label: "UCPath",
+    hosts: { prod: "ucpath.universityofcalifornia.edu", test: "ucpath-test.universityofcalifornia.edu" },
+    note: "A UCPath write on the test host files nothing real and reads a stale copy of the roster.",
+  },
+  kuali: {
+    label: "Kuali",
+    hosts: { prod: "kuali.ucsd.edu/space/HR", test: "kuali-stg.ucsd.edu/space/HR" },
+    note: "Staging holds its own documents — a doc ID from production will not resolve there.",
+  },
+  kronos: {
+    label: "Kronos",
+    hosts: { prod: "kronos.ucsd.edu/timekeeping" },
+    note: "No test host is provisioned.",
+  },
+  crm: {
+    label: "CRM",
+    hosts: { prod: "crm.ucsd.edu", test: "crm-uat.ucsd.edu" },
+    note: "Read-only for the download workflow, so the risk of the wrong host here is a wrong answer, not a wrong write.",
+  },
+  servicenow: {
+    label: "ServiceNow",
+    hosts: { prod: "ucsd.service-now.com", test: "ucsddev.service-now.com" },
+    note: "A ticket filed on the dev host is real and visible — it just goes to nobody.",
+  },
+  onbase: {
+    label: "OnBase",
+    hosts: { prod: "onbase.ucsd.edu" },
+    note: "No test host is provisioned — a test run here is refused at enqueue rather than silently sent to production.",
+  },
+  i9: {
+    label: "I-9",
+    hosts: { prod: "i9.ucsd.edu" },
+    note: "No test host is provisioned. The doctor's I-9 test-instance check reports the same thing.",
+  },
 };
 
+export const SYSTEM_LABEL: Record<SystemKey, string> = Object.fromEntries(
+  (Object.keys(DEMO_SYSTEM_INSTANCES) as SystemKey[]).map((s) => [s, DEMO_SYSTEM_INSTANCES[s].label]),
+) as Record<SystemKey, string>;
+
+/** whether this system CAN be pointed at a test host at all */
+export function systemHasTestInstance(system: SystemKey): boolean {
+  return DEMO_SYSTEM_INSTANCES[system].hosts.test !== undefined;
+}
+
 /**
- * What a system's URL resolves to today. A system with no test instance
- * configured cannot be pointed at one — the Settings "System URLs" section is
- * the only place that changes, so the selector says so instead of offering a
- * choice that would silently fall back to production.
+ * The host a choice resolves to. FAILS LOUD rather than falling back to
+ * production for a `test` choice on a system with no test host — a silent
+ * substitution here is a real write on the real system.
  */
-export const SYSTEM_HAS_TEST: Record<SystemKey, boolean> = {
-  kuali: true,
-  ucpath: true,
-  kronos: false,
-  crm: true,
-  servicenow: true,
-  onbase: false,
-  i9: false,
-};
+export function systemHost(system: SystemKey, instance: SystemInstance): string {
+  const spec = DEMO_SYSTEM_INSTANCES[system];
+  if (instance === "prod") return spec.hosts.prod;
+  const test = spec.hosts.test;
+  if (!test) throw new Error(`demo wire: ${spec.label} has no test host — a test instance may not resolve to production`);
+  return test;
+}
 
 /** every system the target drives, resolved — a system left unset is `prod` */
 export function resolveInstances(workflow: DemoWorkflowRef, choice: InstanceChoice): Record<string, SystemInstance> {
   const out: Record<string, SystemInstance> = {};
   for (const system of workflow.systems) {
-    out[system] = SYSTEM_HAS_TEST[system] ? (choice[system] ?? "prod") : "prod";
+    out[system] = systemHasTestInstance(system) ? (choice[system] ?? "prod") : "prod";
   }
   return out;
 }
 
 export function testSystems(workflow: DemoWorkflowRef, choice: InstanceChoice): SystemKey[] {
-  return workflow.systems.filter((s) => SYSTEM_HAS_TEST[s] && choice[s] === "test");
+  return workflow.systems.filter((s) => systemHasTestInstance(s) && choice[s] === "test");
 }
 
 // ---------------------------------------------------------------------------
@@ -686,9 +742,9 @@ export interface DemoEnqueueResult {
   detail: string;
   /** rejected only — a typed code, never a bare string */
   code?: string;
-  /** conflict only — the contract the form was built against vs the server's */
-  expectedVersion?: number;
-  serverVersion?: number;
+  /** conflict only — the start CONTRACT the form was built against vs the server's */
+  expectedContract?: string;
+  serverContract?: string;
   /** applied only — what was actually created */
   created?: EnqueuePlanRow[];
   clock: string;
@@ -699,8 +755,13 @@ export interface DemoEnqueueResult {
 
 export interface EnqueueRequest {
   workflow: DemoWorkflowId;
-  /** the descriptor version the form was BUILT against — the CAS token */
-  expectedWorkflowVersion: number;
+  /**
+   * The START CONTRACT the form was built against — the CAS token, and
+   * deliberately not a version number. A form goes stale because the run's
+   * SHAPE moved, not because a label was reworded, so a minor bump leaves every
+   * open form valid and this token untouched.
+   */
+  expectedContract: string;
   /** which peer method started it */
   method: StartMethodKind;
   plan: EnqueuePlan;
@@ -718,14 +779,22 @@ export interface EnqueueRequest {
 }
 
 /**
- * The server's CURRENT descriptor version. `i9-check` is deliberately one ahead
- * of the registry the demo's forms are built from, so a start submitted against
- * the stale contract comes back `conflict` — the CAS path is reachable by
- * clicking, not just describable.
+ * The server's CURRENT start contract per workflow. `i9-check` is deliberately
+ * one MAJOR ahead of the registry the demo's forms are built from, so a start
+ * submitted against the stale contract comes back `conflict` — the CAS path is
+ * reachable by clicking, not just describable.
+ *
+ * A minor bump never appears here: it does not move the shape, so it does not
+ * move the contract.
  */
-export const SERVER_WORKFLOW_VERSION: Partial<Record<DemoWorkflowId, number>> = {
-  "i9-check": DEMO_WORKFLOWS["i9-check"].version + 1,
+export const SERVER_CONTRACT_TOKEN: Partial<Record<DemoWorkflowId, string>> = {
+  "i9-check": startContractToken(DEMO_WORKFLOWS["i9-check"], DEMO_WORKFLOWS["i9-check"].version + 1),
 };
+
+/** the contract token the server would compare a start against */
+export function serverContractToken(workflow: DemoWorkflowRef): string {
+  return SERVER_CONTRACT_TOKEN[workflow.id] ?? startContractToken(workflow);
+}
 
 let sequence = 0;
 
@@ -753,15 +822,15 @@ export function submitDemoEnqueue(req: EnqueueRequest): DemoEnqueueResult {
 
   // 1. CAS first. A form built against a retired contract can never be allowed
   //    to enqueue, whatever it asks for.
-  const serverVersion = SERVER_WORKFLOW_VERSION[req.workflow] ?? workflow.version;
-  if (serverVersion !== req.expectedWorkflowVersion) {
+  const serverContract = serverContractToken(workflow);
+  if (serverContract !== req.expectedContract) {
     return {
       ...base,
       state: "conflict",
-      expectedVersion: req.expectedWorkflowVersion,
-      serverVersion,
-      headline: "Conflict — this form was built against an older contract",
-      detail: `You filled in the ${workflow.label} v${req.expectedWorkflowVersion} form; the server serves v${serverVersion}. NOTHING was enqueued. Reload the form and check every field again — the change you could not see may be the reason this start is wrong.`,
+      expectedContract: req.expectedContract,
+      serverContract,
+      headline: "Conflict — this form was built against an older START CONTRACT",
+      detail: `You filled in the ${workflow.label} form built against contract ${req.expectedContract}; the server serves ${serverContract}. NOTHING was enqueued. The run's SHAPE moved — a step or a field this form does not know about — so reload the form and check every value again. (A reworded label would not have done this: only a shape change moves the contract.)`,
     };
   }
 

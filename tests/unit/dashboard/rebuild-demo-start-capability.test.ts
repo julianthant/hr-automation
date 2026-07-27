@@ -70,6 +70,7 @@ test("a workflow with no start path is not offered", () => {
     "oath-signature",
     "oath-upload",
     "ocr",
+    "old-kronos-reports",
     "onbase",
     "onboarding",
     "person-lookup",
@@ -78,9 +79,12 @@ test("a workflow with no start path is not offered", () => {
     "work-study",
   ]);
 
-  // The three that stay delegated / runner-owned, each with its own reason.
+  // The two that stay delegated-only, each with its own reason. Old Kronos
+  // Reports left this list in wave 12: its report timeout was a global setting
+  // for a workflow the dashboard could not start, and the honest fix was to make
+  // the span (and the patience that tracks it) a per-run choice.
   const blocked = unstartableWorkflows().map((b) => b.workflow.id).sort();
-  assert.deepEqual(blocked, ["i9-lookup", "old-kronos-reports", "person-match"]);
+  assert.deepEqual(blocked, ["i9-lookup", "person-match"]);
   for (const entry of unstartableWorkflows()) assert.ok(entry.reason.length > 20, `${entry.workflow.id} has no reason`);
 
   // ...and asking for a capability they do not have FAILS LOUD rather than
@@ -92,11 +96,14 @@ test("the picker groups by the same real categories the rail uses, empty groups 
   const groups = startWorkflowGroups();
   assert.deepEqual(
     groups.map((g) => g.label),
-    ["Onboarding", "OnBase", "Separations", "Work Study", "Payroll", "Search", "Utils"],
+    ["Onboarding", "OnBase", "Separations", "Work Study", "Payroll", "Timekeeping", "Search", "Utils"],
   );
-  // Timekeeping's only member (Old Kronos Reports) is not startable, so the
-  // group is dropped rather than rendered empty.
-  assert.ok(!groups.some((g) => g.label === "Timekeeping"));
+  // A category with no startable member is DROPPED rather than rendered as an
+  // empty heading. Timekeeping used to prove that by accident (its only member
+  // was unstartable); now that Old Kronos Reports is startable, the property is
+  // asserted directly instead of relying on a fixture that could change again.
+  const withoutTimekeeping = startWorkflowGroups(DEMO_WORKFLOW_LIST.filter((w) => w.category !== "Timekeeping"));
+  assert.ok(!withoutTimekeeping.some((g) => g.label === "Timekeeping"));
   for (const group of groups) assert.ok(group.workflows.length > 0, `${group.label} rendered empty`);
 });
 
@@ -119,6 +126,7 @@ test("every workflow declares the input kinds production actually accepts", () =
     onbase: ["upload"],
     "i9-check": ["upload"],
     "sharepoint-download": ["bare"],
+    "old-kronos-reports": ["bare"],
   };
   for (const [id, kinds] of Object.entries(expected)) {
     assert.deepEqual(methodKinds(id as DemoWorkflowId), kinds, `${id} accepts the wrong input kinds`);

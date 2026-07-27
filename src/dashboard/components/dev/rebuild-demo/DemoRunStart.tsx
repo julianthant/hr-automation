@@ -45,11 +45,13 @@ import {
   effectiveChoiceValues,
   requireStartCapability,
   requireStartMethod,
+  startContractToken,
   startWorkflowGroups,
   startableWorkflows,
   unstartableWorkflows,
   visibleChoices,
   visibleFlags,
+  workflowVersionTag,
   type DemoWorkflowId,
   type DemoWorkflowRef,
   type StartMethodKind,
@@ -58,7 +60,7 @@ import {
 import {
   ACTIVE_STARTS,
   ENQUEUE_POLICY_LABEL,
-  SERVER_WORKFLOW_VERSION,
+  serverContractToken,
   UPLOAD_FILES,
   activeConflictFor,
   captureSessionFor,
@@ -494,7 +496,10 @@ export function DemoRunModal({
   const [instances, setInstances] = useState<InstanceChoice>({});
   const [result, setResult] = useState<DemoEnqueueResult | null>(null);
   /** the contract version this form was BUILT against — bumped by a reload */
-  const [formVersion, setFormVersion] = useState<Partial<Record<DemoWorkflowId, number>>>({});
+  /* The START CONTRACT each open form was built against. It is a token, not a
+     version: a minor (presentation-only) bump leaves every open form valid, so
+     nothing here moves for one. */
+  const [formContract, setFormContract] = useState<Partial<Record<DemoWorkflowId, string>>>({});
 
   const selectWorkflow = useCallback((next: DemoWorkflowId) => {
     const capability = requireStartCapability(DEMO_WORKFLOWS[next]);
@@ -517,7 +522,7 @@ export function DemoRunModal({
   const workflow = DEMO_WORKFLOWS[workflowId];
   const capability = requireStartCapability(workflow);
   const methodWire = requireStartMethod(capability, method);
-  const builtVersion = formVersion[workflowId] ?? workflow.version;
+  const builtContract = formContract[workflowId] ?? startContractToken(workflow);
 
   const choices = visibleChoices(capability, method, choiceValues);
   const flags = visibleFlags(capability, method);
@@ -575,7 +580,7 @@ export function DemoRunModal({
     setResult(
       submitDemoEnqueue({
         workflow: workflowId,
-        expectedWorkflowVersion: builtVersion,
+        expectedContract: builtContract,
         method,
         plan,
         policy,
@@ -587,7 +592,7 @@ export function DemoRunModal({
         activeConflictSubject: conflict?.label,
       }),
     );
-  }, [workflowId, builtVersion, method, plan, policy, dryRun, duplicateCheck, instances, capability, choiceValues, scopeLabel, conflict]);
+  }, [workflowId, builtContract, method, plan, policy, dryRun, duplicateCheck, instances, capability, choiceValues, scopeLabel, conflict]);
 
   const isHandoff = methodWire.kind === "spreadsheet";
 
@@ -613,7 +618,7 @@ export function DemoRunModal({
                 onReload={() => {
                   // The ONLY cure for a stale contract: rebuild the form on the
                   // version the server actually serves, then look again.
-                  setFormVersion((prev) => ({ ...prev, [workflowId]: SERVER_WORKFLOW_VERSION[workflowId] ?? workflow.version }));
+                  setFormContract((prev) => ({ ...prev, [workflowId]: serverContractToken(workflow) }));
                   setResult(null);
                 }}
               />
@@ -830,7 +835,7 @@ export function DemoRunModal({
               tone="faint"
               items={
                 [
-                  `${workflow.label} v${builtVersion}`,
+                  `${workflow.label} ${workflowVersionTag(workflow)}`,
                   blockedReason ?? (isHandoff || plan.rows.length === 0 ? undefined : plan.headline),
                 ].filter(Boolean) as string[]
               }

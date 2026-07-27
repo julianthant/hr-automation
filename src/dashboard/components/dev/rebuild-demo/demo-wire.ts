@@ -562,8 +562,24 @@ export interface DemoWorkflowRef {
   label: string;
   /** the workflow's OWN category — the rail groups by this and nothing else */
   category: DemoWorkflowCategory;
-  /** descriptor version currently serving runs — the archive key's other half */
+  /**
+   * The MAJOR half of the descriptor version: the run's SHAPE. It moves when a
+   * step is added, removed or renamed, or when the data contract changes — the
+   * cases where a run started under the old descriptor can no longer be
+   * rendered by the new one. **This is the digit that forces archiving**, and it
+   * is the only digit the archive keys on.
+   */
   version: number;
+  /**
+   * The MINOR half: presentation only — a label, a title rule, a description.
+   * Nothing archives, in-flight runs continue, and every old run still renders
+   * correctly. Absent means `.0`.
+   *
+   * There is deliberately no third digit. A third would need a category that is
+   * neither shape-breaking nor cosmetic, and a change invisible to a run does
+   * not need a version at all.
+   */
+  minorVersion?: number;
   /** the systems this workflow drives; `resolvedInstance` is served per system */
   systems: SystemKey[];
   /**
@@ -646,6 +662,7 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
     label: "Separations",
     category: "Separations",
     version: 7,
+    minorVersion: 2,
     systems: ["kuali", "ucpath", "kronos"],
     start: {
       note: "Files one separation per Kuali document — the UCPath transaction, the Kuali finalization and the Kronos pay-rule change.",
@@ -687,6 +704,7 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
     label: "Onboarding",
     category: "Onboarding",
     version: 11,
+    minorVersion: 1,
     systems: ["crm", "ucpath", "i9", "kuali"],
     start: {
       note: "Walks one new hire from their CRM record through the UCPath hire, the I-9 and the Kuali onboarding document.",
@@ -823,6 +841,7 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
     label: "OCR",
     category: "Utils",
     version: 9,
+    minorVersion: 1,
     systems: ["i9"],
     start: {
       note: "Reads a document and stops at a review. Started here it is STANDALONE: nothing delegated it, so approving would release no work and there is no approve step.",
@@ -1101,12 +1120,115 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
     category: "Timekeeping",
     version: 4,
     systems: ["kronos"],
-    notStartable:
-      "Not exposed through the dashboard: its runtime state — the tracker mutex, the reports directory, the date range — has to be initialised by a runner before a batch can launch.",
+    start: {
+      note: "Builds and downloads a timekeeping report into the reports folder. It writes no HR record — the output is a file.",
+      methods: [
+        {
+          kind: "bare",
+          label: "Run the report",
+          note: "There is nothing to type. The span below is the whole instruction, and it takes one row.",
+        },
+      ],
+      choices: [
+        {
+          key: "reportSpan",
+          label: "Report span",
+          note: "How much of the timekeeping history the report builder has to assemble.",
+          defaultValue: "pay-period",
+          options: [
+            { value: "week", label: "One week" },
+            { value: "pay-period", label: "Pay period" },
+            { value: "quarter", label: "Quarter to date", note: "the builder is slow on this one — the patience below tracks it" },
+          ],
+        },
+        {
+          key: "reportPatience",
+          label: "How long to wait for the builder",
+          note: "A quarter-span report is not a slow one-week report; the wait belongs to the run, not to the machine.",
+          defaultValue: "auto",
+          options: [
+            { value: "auto", label: "Match the span", note: "the server derives it — 4m for a week, 7m for a pay period, 15m for a quarter" },
+            { value: "240", label: "4 minutes" },
+            { value: "420", label: "7 minutes" },
+            { value: "900", label: "15 minutes" },
+          ],
+        },
+      ],
+      flags: [],
+    },
   },
 };
 
 export const DEMO_WORKFLOW_LIST: DemoWorkflowRef[] = Object.values(DEMO_WORKFLOWS);
+
+// ---------------------------------------------------------------------------
+// Descriptor version — `major.minor`, and the three things it is NOT
+// ---------------------------------------------------------------------------
+
+/**
+ * A descriptor version is two parts because there is exactly one distinction
+ * that changes what somebody does:
+ *
+ *  - **major** — the run's SHAPE moved (steps added / removed / renamed, or the
+ *    data contract changed). Runs started under the old descriptor cannot be
+ *    rendered by the new one, so a major bump ARCHIVES every prior-version run.
+ *  - **minor** — presentation only. Nothing archives, in-flight runs continue,
+ *    old runs still render correctly.
+ *
+ * ONE integer used to play three roles at once — descriptor identity, archive
+ * key and the enqueue form's CAS token — while a DIFFERENT integer was the row
+ * CAS token, and both reached the operator as the word "version". The three are
+ * separated here so a refusal can name the right one:
+ *
+ *  - identity is `major.minor`, and is what is displayed;
+ *  - the archive keys on `major` alone (`archiveKey`);
+ *  - the start form's CAS token is `startContractToken` — an opaque string, not
+ *    a version, that moves only when the shape does.
+ *
+ * The row CAS token is a fourth thing entirely (a per-row revision) and lives
+ * on the action descriptor; it is never called a version in copy.
+ */
+export interface DescriptorVersion {
+  major: number;
+  minor: number;
+}
+
+export function descriptorVersion(workflow: DemoWorkflowRef): DescriptorVersion {
+  return { major: workflow.version, minor: workflow.minorVersion ?? 0 };
+}
+
+/** `7.2` — the two-part identity, never a bare integer */
+export function fmtVersion(version: DescriptorVersion): string {
+  return `${version.major}.${version.minor}`;
+}
+
+/** `v7.2` — every place a descriptor version is shown to the operator */
+export function fmtVersionTag(version: DescriptorVersion): string {
+  return `v${fmtVersion(version)}`;
+}
+
+/** the workflow's current descriptor version, as it is displayed */
+export function workflowVersionTag(workflow: DemoWorkflowRef): string {
+  return fmtVersionTag(descriptorVersion(workflow));
+}
+
+/**
+ * What the ARCHIVE keys on. Only the major digit: a minor bump changes nothing
+ * a stored run needs, so it archives nothing and cannot make a run un-openable.
+ */
+export function archiveKey(version: DescriptorVersion): number {
+  return version.major;
+}
+
+/**
+ * The START FORM's CAS token. Deliberately a string that does not look like a
+ * version: a form is not stale because a label was reworded, it is stale
+ * because the SHAPE it was built against moved. Comparing this instead of a
+ * version number is what lets a minor bump leave every open form valid.
+ */
+export function startContractToken(workflow: DemoWorkflowRef, major = workflow.version): string {
+  return `${workflow.code}-c${major}`;
+}
 
 /** one rail group: a category heading and the workflows the registry binned under it */
 export interface WorkflowCategoryGroup {
