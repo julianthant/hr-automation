@@ -37,6 +37,22 @@ export interface DemoCommandSettling {
   fenceClearedAt: string;
 }
 
+/**
+ * A refused result that carries its code — which every refusal does, because a
+ * refusal the operator cannot quote is a refusal they cannot get help with.
+ *
+ * Both result shapes in the demo (`DemoCommandResult`, `DemoEnqueueResult`)
+ * keep `code` optional, since `applied` and `conflict` have none. This is what
+ * lets a caller reach the code without either a type assertion or a fabricated
+ * default — the two things the fail-loud rule forbids. If it ever returns false
+ * the mock server has broken its own contract, and the caller says so out loud.
+ */
+export function hasRefusalCode<T extends { state: string; code?: string }>(
+  result: T,
+): result is T & { code: string } {
+  return result.state === "rejected" && typeof result.code === "string";
+}
+
 export interface DemoCommandResult {
   /** unique per submission, so repeated clicks stack instead of collapsing */
   id: string;

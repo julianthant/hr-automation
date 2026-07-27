@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import {
   Badge,
   Banner,
+  BulletList,
   Button,
   Card,
   CardBody,
@@ -253,16 +254,12 @@ export function DemoActivityReportPage({ onBack, onOpenSettings }: { onBack: () 
                     1 estimated figure
                   </Badge>
                 </span>
-                {report.caveats.map((caveat) => (
-                  <p key={caveat} className={cn(dsText.body, "text-[color:var(--ds-fg-secondary)]")}>
-                    · {caveat}
-                  </p>
-                ))}
+                <BulletList items={report.caveats} className="max-w-[92ch]" />
               </CardBody>
             </Card>
           </PanelBody>
           <PanelFooter>
-            <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+            <span className={cn(dsText.meta, "max-w-[110ch] text-[color:var(--ds-fg-muted)]")}>
               Every count here comes from the same projection the queue renders — the report and the dashboard cannot disagree.
               The only figure that is not measured is hours saved, which is {MANUAL_MINUTES_PROVENANCE}
             </span>

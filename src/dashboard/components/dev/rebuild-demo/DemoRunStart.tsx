@@ -13,6 +13,8 @@ import {
   DialogFooter,
   EmptyState,
   Field,
+  MetaLine,
+  SectionLabel,
   Select,
   Switch,
   Textarea,
@@ -80,7 +82,7 @@ export function DemoRunStartBar() {
 
   return (
     <div className="flex flex-wrap items-center gap-[var(--ds-space-base)] border-b border-[color:var(--ds-border)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]">
-      <span className={cn(dsText.caps, dsFg.muted)}>Start a run</span>
+      <SectionLabel>Start a run</SectionLabel>
       <Button size="sm" variant="primary" icon={<Upload aria-hidden className={dsIcon.md} />} onClick={() => setSurface("upload")}>
         Upload a document…
       </Button>
@@ -189,7 +191,7 @@ export function DemoRunModal({
           )}
 
           <section className="flex flex-col gap-[var(--ds-space-snug)]">
-            <span className={cn(dsText.caps, dsFg.muted)}>Document</span>
+            <SectionLabel>Document</SectionLabel>
             <ul className="flex flex-col gap-[var(--ds-space-snug)]">
               {UPLOAD_FILES.map((item) => (
                 <li key={item.id}>
@@ -265,30 +267,33 @@ export function DemoRunModal({
               </section>
 
               <section className="flex flex-col gap-[var(--ds-space-snug)]">
-                <span className={cn(dsText.caps, dsFg.muted)}>Instance — where this will write</span>
+                <SectionLabel>Instance — where this will write</SectionLabel>
                 <InstanceSelector workflow={workflow} value={instances} onChange={(next) => { setInstances(next); setResult(null); }} />
               </section>
 
               <section className="flex flex-col gap-[var(--ds-space-snug)]">
-                <span className={cn(dsText.caps, dsFg.muted)}>What this will create</span>
+                <SectionLabel>What this will create</SectionLabel>
                 {plan ? (
                   <PlanPreview plan={plan} dryRun={dryRun} test={test} />
                 ) : (
-                  <EmptyState
-                    icon={<FileText aria-hidden className="size-5" />}
-                    title="No document picked yet"
-                    description="Pick a file above and this fills in with the exact rows the start would create, which panel each one lands in, and the decisions that shape it."
-                  />
+                  // Bounded, not floating: this is the slot the plan will fill,
+                  // so it holds its shape instead of leaving a hole in a dense
+                  // modal the operator reads top to bottom.
+                  <Well>
+                    <EmptyState
+                      className="p-[var(--ds-space-base)]"
+                      icon={<FileText aria-hidden className={dsIcon.lg} />}
+                      title="No document picked yet"
+                      description="Pick a file above and this fills in with the exact rows the start would create, which panel each one lands in, and the decisions that shape it."
+                    />
+                  </Well>
                 )}
               </section>
             </>
           )}
         </DialogBody>
 
-        <DialogFooter>
-          <span className={cn(dsText.meta, dsText.nums, dsFg.faint, "mr-auto")}>
-            {workflow.label} v{builtVersion}
-          </span>
+        <DialogFooter meta={<MetaLine tone="faint" items={[`${workflow.label} v${builtVersion}`]} />}>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
@@ -413,7 +418,7 @@ export function DemoInputRunPanel({ open, onOpenChange }: { open: boolean; onOpe
           </section>
 
           <div className="flex flex-wrap items-center gap-[var(--ds-space-snug)]">
-            <span className={cn(dsText.caps, dsFg.muted)}>Presets</span>
+            <SectionLabel>Presets</SectionLabel>
             {spec.presets.map((preset) => (
               <Button key={preset.key} size="sm" variant="outline" title={preset.note} onClick={() => { setText(preset.values.join("\n")); setResult(null); }}>
                 {preset.label}
@@ -450,7 +455,7 @@ export function DemoInputRunPanel({ open, onOpenChange }: { open: boolean; onOpe
           {valid.length > 0 && (
             <section className="flex flex-col gap-[var(--ds-space-snug)]">
               <div className="flex flex-wrap items-center gap-[var(--ds-space-base)]">
-                <span className={cn(dsText.caps, dsFg.muted)}>Row titles</span>
+                <SectionLabel>Row titles</SectionLabel>
                 <div className="inline-flex gap-[var(--ds-space-tight)]">
                   <Button size="sm" variant={phase === "pending" ? "primary" : "outline"} onClick={() => setPhase("pending")}>
                     As enqueued
@@ -486,7 +491,7 @@ export function DemoInputRunPanel({ open, onOpenChange }: { open: boolean; onOpe
 
           <section className="grid grid-cols-1 gap-[var(--ds-space-cozy)] min-[560px]:grid-cols-2">
             <div className="flex flex-col gap-[var(--ds-space-snug)]">
-              <span className={cn(dsText.caps, dsFg.muted)}>Instance</span>
+              <SectionLabel>Instance</SectionLabel>
               <InstanceSelector workflow={workflow} value={instances} onChange={setInstances} />
             </div>
             <div className="flex flex-col gap-[var(--ds-space-base)]">
@@ -502,26 +507,26 @@ export function DemoInputRunPanel({ open, onOpenChange }: { open: boolean; onOpe
           </section>
 
           <section className="flex flex-col gap-[var(--ds-space-snug)]">
-            <span className={cn(dsText.caps, dsFg.muted)}>What this will create</span>
+            <SectionLabel>What this will create</SectionLabel>
             {entries.length === 0 ? (
-              <EmptyState
-                title="Nothing typed yet"
-                description={
-                  spec.emptyOpensUpload
-                    ? "Type one value per line, or leave this empty and use the upload modal — an empty typed run is not an error, it is a different surface."
-                    : "Type one value per line. This fills in with the exact rows the start would create."
-                }
-              />
+              <Well>
+                <EmptyState
+                  className="p-[var(--ds-space-base)]"
+                  title="Nothing typed yet"
+                  description={
+                    spec.emptyOpensUpload
+                      ? "Type one value per line, or leave this empty and use the upload modal — an empty typed run is not an error, it is a different surface."
+                      : "Type one value per line. This fills in with the exact rows the start would create."
+                  }
+                />
+              </Well>
             ) : (
               <PlanPreview plan={plan} dryRun={dryRun && spec.supportsDryRun} test={test} />
             )}
           </section>
         </DialogBody>
 
-        <DialogFooter>
-          <span className={cn(dsText.meta, dsText.nums, dsFg.faint, "mr-auto")}>
-            {workflow.label} v{workflow.version}
-          </span>
+        <DialogFooter meta={<MetaLine tone="faint" items={[`${workflow.label} v${workflow.version}`]} />}>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>

@@ -16,6 +16,9 @@ import {
   Field,
   Input,
   KeyValueList,
+  MetaLine,
+  Refusal,
+  SectionLabel,
   Select,
   TBody,
   TD,
@@ -347,13 +350,20 @@ export function DemoIntakeDialog({
           />
         </DialogBody>
 
-        <DialogFooter>
-          {sheet && (
-            <span className={cn(dsText.meta, dsText.nums, dsFg.faint, "mr-auto truncate")}>
-              {sheet.fileName}
-              {headerRow ? ` · header row ${headerRow} · fingerprint ${headerFingerprint(columns).slice(0, 8)}` : ""}
-            </span>
-          )}
+        <DialogFooter
+          meta={
+            sheet && (
+              <MetaLine
+                tone="faint"
+                items={[
+                  sheet.fileName,
+                  headerRow && `header row ${headerRow}`,
+                  headerRow && `fingerprint ${headerFingerprint(columns).slice(0, 8)}`,
+                ]}
+              />
+            )
+          }
+        >
           {stage !== "file" && (
             <Button
               variant="ghost"
@@ -364,7 +374,7 @@ export function DemoIntakeDialog({
             </Button>
           )}
           <Button variant="secondary" onClick={() => close(false)}>
-            Close
+            Cancel
           </Button>
           {stage === "mapping" && (
             <Button variant="primary" onClick={() => goto("validate")} disabled={bindings.length === 0}>
@@ -404,7 +414,7 @@ export function DemoIntakeDialog({
 function FileStage({ onPick, selectedId }: { onPick: (sheet: SourceSheet) => void; selectedId: string | null }) {
   return (
     <section className="flex flex-col gap-[var(--ds-space-snug)]">
-      <span className={cn(dsText.caps, dsFg.muted)}>Source file</span>
+      <SectionLabel>Source file</SectionLabel>
       <ul className="flex flex-col gap-[var(--ds-space-snug)]">
         {SOURCE_SHEETS.map((sheet) => (
           <li key={sheet.id}>
@@ -766,9 +776,20 @@ function ValidateStage({
       </div>
 
       {block && (
-        <Banner tone="danger" title={`Blocked — ${block.code}`} action={block.code === "no-valid-rows" ? undefined : <Button size="sm" variant="secondary" onClick={onRemap}>Back to mapping</Button>}>
+        <Refusal
+          title="This plan cannot start"
+          code={block.code}
+          outcome="nothing is enqueued"
+          action={
+            block.code === "no-valid-rows" ? undefined : (
+              <Button size="sm" variant="secondary" onClick={onRemap}>
+                Back to mapping
+              </Button>
+            )
+          }
+        >
           {block.message}
-        </Banner>
+        </Refusal>
       )}
 
       {misMapHints.map((hint) => (
@@ -898,7 +919,7 @@ function ValidateStage({
 
       {manifest.corrections.length > 0 && (
         <Well className="flex flex-col gap-[var(--ds-space-tight)]">
-          <span className={cn(dsText.caps, dsFg.muted)}>Corrections</span>
+          <SectionLabel>Corrections</SectionLabel>
           {manifest.corrections.map((correction) => (
             <span key={`${correction.sourceRow}-${correction.targetFieldId}`} className={cn(dsText.body, dsText.nums, dsFg.secondary)}>
               row {correction.sourceRow} · {correction.targetFieldId}: “{correction.original}” → “{correction.correctedValue}”
@@ -909,7 +930,7 @@ function ValidateStage({
 
       {manifest.exclusions.length > 0 && (
         <Well className="flex flex-col gap-[var(--ds-space-tight)]">
-          <span className={cn(dsText.caps, dsFg.muted)}>Exclusions</span>
+          <SectionLabel>Exclusions</SectionLabel>
           {manifest.exclusions.map((exclusion) => (
             <span key={exclusion.sourceRow} className={cn(dsText.body, dsFg.secondary)}>
               <span className={dsText.nums}>row {exclusion.sourceRow}</span> — {exclusion.reason}
@@ -929,9 +950,9 @@ function ManifestStage({ manifest, block }: { manifest: IntakePlanManifest; bloc
   return (
     <section className="flex flex-col gap-[var(--ds-space-cozy)]">
       {block ? (
-        <Banner tone="danger" title={`This plan cannot start — ${block.code}`}>
+        <Refusal title="This plan cannot start" code={block.code} outcome="nothing is enqueued">
           {block.message}
-        </Banner>
+        </Refusal>
       ) : (
         <Banner tone="success" title={`${manifest.totals.valid} of ${manifest.totals.sourceRows} source rows will run`}>
           Every source row below has exactly one disposition. The counts are derived from those dispositions, never summed from the
@@ -1039,7 +1060,7 @@ function RerunStage({ manifest, sheetId }: { manifest: IntakePlanManifest; sheet
 
       <div className="grid grid-cols-1 gap-[var(--ds-space-cozy)] min-[640px]:grid-cols-2">
         <Well className="flex flex-col gap-[var(--ds-space-tight)]">
-          <span className={cn(dsText.caps, dsFg.muted)}>In this plan, not in {prior.planId}</span>
+          <SectionLabel>In this plan, not in {prior.planId}</SectionLabel>
           {diff.added.length === 0 ? (
             <span className={dsFg.faint}>nothing</span>
           ) : (
@@ -1051,7 +1072,7 @@ function RerunStage({ manifest, sheetId }: { manifest: IntakePlanManifest; sheet
           )}
         </Well>
         <Well className="flex flex-col gap-[var(--ds-space-tight)]">
-          <span className={cn(dsText.caps, dsFg.muted)}>In {prior.planId}, not here</span>
+          <SectionLabel>In {prior.planId}, not here</SectionLabel>
           {diff.removed.length === 0 ? (
             <span className={dsFg.faint}>nothing</span>
           ) : (

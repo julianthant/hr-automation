@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
-  BellOff,
   Calendar,
   ChevronLeft,
   ChevronRight,
@@ -11,14 +10,12 @@ import {
   MailOpen,
   Search,
   SearchX,
-  ShieldAlert,
   Siren,
   TriangleAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Badge,
-  Banner,
   Button,
   Chip,
   CountBadge,
@@ -31,6 +28,8 @@ import {
   IconButton,
   Kbd,
   SearchInput,
+  MetaLine,
+  Refusal,
   StatusPill,
   TBody,
   TD,
@@ -39,6 +38,8 @@ import {
   TR,
   Table,
   dsFocus,
+  dsIcon,
+  dsMotion,
   dsText,
   useToasts,
 } from "./demo-ui";
@@ -97,13 +98,13 @@ export function DemoDateNav({ day, onDay }: { day: string; onDay: (day: string) 
         size="sm"
         disabled={!older}
         onClick={() => older && onDay(older)}
-        icon={<ChevronLeft aria-hidden className="size-3.5" />}
+        icon={<ChevronLeft aria-hidden className={dsIcon.md} />}
       />
       <span
         title={`${counts[day]} rows on this day · the tracker holds ${DEMO_DAYS.length} days`}
         className={cn("inline-flex items-center gap-1.5 px-1.5", dsText.ui, "text-[color:var(--ds-fg)]")}
       >
-        <Calendar aria-hidden className="size-3 text-[color:var(--ds-fg-muted)]" />
+        <Calendar aria-hidden className={cn(dsIcon.sm, "text-[color:var(--ds-fg-muted)]")} />
         {dayLabelWithToday(day)}
         <CountBadge value={counts[day] ?? 0} tone={day === DEMO_DAY ? "info" : "neutral"} />
       </span>
@@ -112,7 +113,7 @@ export function DemoDateNav({ day, onDay }: { day: string; onDay: (day: string) 
         size="sm"
         disabled={!newer}
         onClick={() => newer && onDay(newer)}
-        icon={<ChevronRight aria-hidden className="size-3.5" />}
+        icon={<ChevronRight aria-hidden className={dsIcon.md} />}
       />
     </span>
   );
@@ -153,12 +154,17 @@ export function DemoSearchControl({ onNavigate }: { onNavigate: DemoNavigateTo }
         onClick={() => setOpen(true)}
         aria-label="Search runs"
         className={cn(
-          "ml-auto flex h-7 min-w-0 max-w-[240px] flex-1 items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 text-left",
+          "ml-auto flex min-w-0 max-w-[240px] flex-1 items-center gap-[var(--ds-space-snug)] border px-[var(--ds-space-base)] text-left",
+          "h-[var(--ds-h-md)] rounded-[var(--ds-radius-md)] border-[color:var(--ds-border-strong)] bg-[var(--ds-surface-2)]",
           dsFocus,
+          dsMotion.base,
+          "hover:border-[color:var(--ds-border-loud)]",
         )}
       >
-        <Search aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground">Search people, files, trace ids…</span>
+        <Search aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+        <span className={cn(dsText.meta, "min-w-0 flex-1 truncate text-[color:var(--ds-fg-muted)]")}>
+          Search people, files, trace ids…
+        </span>
         <Kbd>/</Kbd>
       </button>
 
@@ -208,7 +214,7 @@ function SearchOutcomeView({ outcome, onPick }: { outcome: DemoSearchOutcome; on
   if (outcome.state === "idle") {
     return (
       <EmptyState
-        icon={<SearchX aria-hidden className="size-5" />}
+        icon={<SearchX aria-hidden className={dsIcon.lg} />}
         title="Nothing typed yet"
         description={`Search reads every run the tracker holds — ${DEMO_DAYS.length} days. Pick one of the examples above to see a result set, a genuine zero-hit answer, and a lookup that fails.`}
       />
@@ -220,12 +226,14 @@ function SearchOutcomeView({ outcome, onPick }: { outcome: DemoSearchOutcome; on
   if (outcome.state === "failed") {
     return (
       <div className="p-[var(--ds-space-loose)]">
-        <Banner tone="danger" title={outcome.headline} icon={<ShieldAlert aria-hidden className="size-4" />}>
-          <span className="block">{outcome.detail}</span>
-          <span className={cn(dsText.meta, "mt-[var(--ds-space-tight)] block font-mono text-[color:var(--ds-fg-muted)]")}>
-            code {outcome.code} · query “{outcome.query}” · no corpus was scanned
-          </span>
-        </Banner>
+        <Refusal
+          title={outcome.headline}
+          code={outcome.code}
+          meta={[`query “${outcome.query}”`]}
+          outcome="no corpus was scanned"
+        >
+          {outcome.detail}
+        </Refusal>
       </div>
     );
   }
@@ -233,7 +241,7 @@ function SearchOutcomeView({ outcome, onPick }: { outcome: DemoSearchOutcome; on
   if (outcome.state === "empty") {
     return (
       <EmptyState
-        icon={<SearchX aria-hidden className="size-5" />}
+        icon={<SearchX aria-hidden className={dsIcon.lg} />}
         title={`No run matches “${outcome.query}”`}
         description={`This is an answer, not a failure: ${outcome.scan.rows} rows across ${outcome.scan.days} days were read and none matched. If the lookup itself had failed you would see a red error instead.`}
       />
@@ -242,8 +250,13 @@ function SearchOutcomeView({ outcome, onPick }: { outcome: DemoSearchOutcome; on
 
   return (
     <div className="flex flex-col">
-      <div className={cn("px-[var(--ds-space-loose)] py-[var(--ds-space-base)]", dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
-        {outcome.hits.length} match{outcome.hits.length === 1 ? "" : "es"} · {outcome.scan.rows} rows read across {outcome.scan.days} days
+      <div className="px-[var(--ds-space-loose)] py-[var(--ds-space-base)]">
+        <MetaLine
+          items={[
+            `${outcome.hits.length} match${outcome.hits.length === 1 ? "" : "es"}`,
+            `${outcome.scan.rows} rows read across ${outcome.scan.days} days`,
+          ]}
+        />
       </div>
       <div className="min-h-0 overflow-x-auto px-[var(--ds-space-loose)] pb-[var(--ds-space-loose)]">
         <Table label={`Search results for ${outcome.query}`}>
@@ -391,14 +404,27 @@ export function DemoNotificationBell({ onNavigate, tick }: { onNavigate: DemoNav
         type="button"
         aria-label={`Notifications — ${unread} unread`}
         onClick={() => setOpen(true)}
-        className={cn("relative rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground", dsFocus)}
+        className={cn(
+          "relative rounded-[var(--ds-radius-md)] p-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]",
+          "hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]",
+          dsFocus,
+          dsMotion.base,
+        )}
       >
-        <Bell aria-hidden className="size-3.5" />
+        <Bell aria-hidden className={dsIcon.md} />
         {unread > 0 && (
+          // Dark ink on a bright fill — the same contract the two LOUD statuses
+          // use (DESIGN.md). White numerals on this red fail AA at 10px.
           <span
+            aria-hidden
             className={cn(
-              "absolute -right-0.5 -top-0.5 flex size-3.5 items-center justify-center rounded-full text-[8.5px] font-bold text-background",
-              critical ? "bg-destructive" : "bg-warning",
+              "absolute -right-0.5 -top-0.5 flex items-center justify-center rounded-full",
+              "size-[var(--ds-space-cozy)] font-semibold",
+              dsText.micro,
+              dsText.nums,
+              critical
+                ? "bg-[var(--ds-status-failed-solid-bg)] text-[color:var(--ds-status-failed-solid-fg)]"
+                : "bg-[var(--ds-status-waiting-solid-bg)] text-[color:var(--ds-status-waiting-solid-fg)]",
             )}
           >
             {unread}
@@ -418,15 +444,18 @@ export function DemoNotificationBell({ onNavigate, tick }: { onNavigate: DemoNav
                 you missed, and hiding it would be the lie it exists to prevent. */}
             {backfill?.gap && (
               <div className="border-b border-[color:var(--ds-border)] p-[var(--ds-space-cozy)]">
-                <Banner tone="danger" title={backfill.title} icon={<BellOff aria-hidden className="size-4" />}>
-                  <span className="block">{backfill.body}</span>
-                  <span className={cn(dsText.meta, "mt-[var(--ds-space-tight)] block font-mono text-[color:var(--ds-fg-muted)]")}>
-                    gap {fmtClock(backfill.gap.from)} → {fmtClock(backfill.gap.to)} · code {backfill.gap.code}
+                <Refusal
+                  title={backfill.title}
+                  code={backfill.gap.code}
+                  meta={[`gap ${fmtClock(backfill.gap.from)} → ${fmtClock(backfill.gap.to)}`]}
+                >
+                  <span className="flex flex-col gap-[var(--ds-space-tight)]">
+                    <span>{backfill.body}</span>
+                    <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+                      {backfill.gap.reason} · pinned: this one record cannot be filtered, snoozed or dismissed
+                    </span>
                   </span>
-                  <span className={cn(dsText.meta, "mt-[var(--ds-space-tight)] block text-[color:var(--ds-fg-muted)]")}>
-                    {backfill.gap.reason} · pinned: this one record cannot be filtered, snoozed or dismissed
-                  </span>
-                </Banner>
+                </Refusal>
               </div>
             )}
 
@@ -441,7 +470,7 @@ export function DemoNotificationBell({ onNavigate, tick }: { onNavigate: DemoNav
             <div className="min-h-0 flex-1 overflow-y-auto">
               {shown.length === 0 ? (
                 <EmptyState
-                  icon={<Inbox aria-hidden className="size-5" />}
+                  icon={<Inbox aria-hidden className={dsIcon.lg} />}
                   title="Nothing under this filter"
                   description="The records still exist — switch the filter to see them. A count that reads zero here never means a notification was deleted."
                 />
@@ -515,11 +544,11 @@ function NotificationRow({
     >
       <div className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
         {!read && <span aria-label="unread" className="size-1.5 shrink-0 rounded-full bg-[var(--ds-accent)]" />}
-        <Icon aria-hidden className={cn("size-3.5 shrink-0", n.severity === "critical" ? "text-[color:var(--ds-danger)]" : "text-[color:var(--ds-fg-muted)]")} />
+        <Icon aria-hidden className={cn(dsIcon.md, "shrink-0", n.severity === "critical" ? "text-[color:var(--ds-danger)]" : "text-[color:var(--ds-fg-muted)]")} />
         <span className={cn(dsText.ui, "min-w-0 flex-1 truncate", read ? "text-[color:var(--ds-fg-secondary)]" : "font-semibold text-[color:var(--ds-fg)]")}>
           {n.title}
         </span>
-        <span className={cn(dsText.meta, dsText.nums, "shrink-0 text-[color:var(--ds-fg-muted)]")}>{notificationAge(n, tick)} ago</span>
+        <MetaLine className="shrink-0" items={[`${notificationAge(n, tick)} ago`]} />
       </div>
 
       <p className={cn(dsText.body, "text-[color:var(--ds-fg-muted)]")}>{n.body}</p>
@@ -545,12 +574,12 @@ function NotificationRow({
         <Button
           size="sm"
           variant="ghost"
-          icon={read ? <Mail aria-hidden className="size-3" /> : <MailOpen aria-hidden className="size-3" />}
+          icon={read ? <Mail aria-hidden className={dsIcon.sm} /> : <MailOpen aria-hidden className={dsIcon.sm} />}
           onClick={() => onRead(!read)}
         >
           {read ? "Mark unread" : "Mark read"}
         </Button>
-        <Button size="sm" variant="ghost" icon={<Clock aria-hidden className="size-3" />} onClick={onSnooze}>
+        <Button size="sm" variant="ghost" icon={<Clock aria-hidden className={dsIcon.sm} />} onClick={onSnooze}>
           {snoozing ? "Un-snooze" : "Snooze 1h"}
         </Button>
       </div>

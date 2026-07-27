@@ -95,7 +95,7 @@ function CaptureFrame({ capture, className }: { capture: DemoCapture; className?
         className,
       )}
     >
-      <ImageOff aria-hidden className="size-6 text-[color:var(--ds-fg-faint)]" />
+      <ImageOff aria-hidden className={cn(dsIcon.lg, "text-[color:var(--ds-fg-faint)]")} />
       <span className={cn(dsText.body, "text-center text-[color:var(--ds-fg-muted)]")}>
         The capture itself is a PNG in content-addressed storage. The demo corpus carries its metadata, not its bytes —
         drawing a stand-in of a real system page on an evidence surface is the one thing this view must never do.
@@ -347,17 +347,17 @@ export function EvidenceBar({ row }: { row: DemoRow }) {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-[240px]">
           <DropdownMenuItem
-            className="text-[12px]"
+            className={dsText.body}
             onSelect={() => {
               downloadDemoFile(`${row.trace}-logs.txt`, exportRunLogsText(row), "text/plain");
               toast({ tone: "success", title: "Logs exported", description: `${row.trace}-logs.txt — the run's own lines, nothing added.` });
             }}
           >
-            <FileText aria-hidden className="mr-2 size-3.5" />
+            <FileText aria-hidden className={cn("mr-2", dsIcon.md)} />
             Logs as .txt
           </DropdownMenuItem>
           <DropdownMenuItem
-            className="text-[12px]"
+            className={dsText.body}
             onSelect={() => {
               downloadDemoFile(`${row.trace}-run.json`, exportRunJson(row), "application/json");
               toast({
@@ -367,11 +367,11 @@ export function EvidenceBar({ row }: { row: DemoRow }) {
               });
             }}
           >
-            <FileJson aria-hidden className="mr-2 size-3.5" />
+            <FileJson aria-hidden className={cn("mr-2", dsIcon.md)} />
             Run as .json
           </DropdownMenuItem>
-          <DropdownMenuItem className="text-[12px]" onSelect={copyTrace}>
-            <Copy aria-hidden className="mr-2 size-3.5" />
+          <DropdownMenuItem className={dsText.body} onSelect={copyTrace}>
+            <Copy aria-hidden className={cn("mr-2", dsIcon.md)} />
             Copy the trace id
           </DropdownMenuItem>
         </DropdownMenuContent>

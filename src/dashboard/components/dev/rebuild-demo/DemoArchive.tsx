@@ -25,6 +25,7 @@ import {
   Well,
   dsFocus,
   dsIcon,
+  dsMotion,
   dsText,
 } from "./demo-ui";
 import {
@@ -172,6 +173,7 @@ export function DemoArchivePage({ onBack, onOpenSettings }: { onBack: () => void
                               className={cn(
                                 "flex w-full min-w-0 items-center gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)] text-left",
                                 dsFocus,
+                                dsMotion.base,
                                 active ? "bg-[var(--ds-surface-selected)]" : "hover:bg-[var(--ds-surface-3)]",
                               )}
                             >
@@ -198,7 +200,7 @@ export function DemoArchivePage({ onBack, onOpenSettings }: { onBack: () => void
             )}
           </PanelBody>
           <PanelFooter>
-            <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+            <span className={cn(dsText.meta, "max-w-[104ch] text-[color:var(--ds-fg-muted)]")}>
               Archived runs never appear in a count, a rail badge or a Status Bar pill — active surfaces hold current-version runs
               only.
             </span>
@@ -392,7 +394,7 @@ function ArchivedRunDetail({
       </PanelBody>
 
       <PanelFooter>
-        <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+        <span className={cn(dsText.meta, "max-w-[104ch] text-[color:var(--ds-fg-muted)]")}>
           Read-only. There is no retry, cancel or edit here — the code this run executed is not the code that is loaded.
         </span>
         <Button
