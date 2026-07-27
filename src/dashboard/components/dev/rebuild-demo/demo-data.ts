@@ -35,7 +35,9 @@ import {
   type DemoTab,
   type DemoWorkflowId,
   type DemoWorkflowRef,
+  type GateCandidateSpec,
   type GateOptionSpec,
+  type RecordFieldSource,
   type SystemKey,
 } from "./demo-wire";
 
@@ -131,7 +133,13 @@ export interface DemoGate {
   title: string;
   /** the instant the gate opened — the ONLY input to the waiting age (D-Q7) */
   openedAt: string;
-  candidates?: { heading: string; name: string; sub: string }[];
+  /**
+   * The people the gate is asking the operator to choose between. A LIST, not a
+   * pair: a name search returns as many rows as it returns, and each carries
+   * its own retained capture (`captureId`) so the choice is made against what
+   * the source system showed, not against two strings.
+   */
+  candidates?: GateCandidateSpec[];
   staged?: { field: string; value: string; system: SystemKey; unconfirmed?: boolean }[];
   /**
    * The typed answers this gate accepts. They become banner-placement entries in
@@ -183,8 +191,14 @@ export interface DemoOutcome {
 export interface DemoRecordField {
   label: string;
   value: string;
-  /** where the value came from — drives the provenance chip */
-  source: "paper" | "roster" | "ucpath";
+  /**
+   * Where the value came from — drives the provenance chip. `operator` is a
+   * value a HUMAN typed over the machine's; a fixture never authors it, because
+   * it only becomes true the moment the operator corrects the field, and at
+   * that moment the model confidence stops applying and is dropped rather than
+   * inherited.
+   */
+  source: RecordFieldSource;
   /** LLM confidence for a paper-read value (0–1); omitted for looked-up values */
   confidence?: number;
   editable?: boolean;
@@ -682,8 +696,21 @@ const sepMaria: DemoRowSpec = {
     title: "Waiting on you — identity approval",
     openedAt: at("14:03:34"),
     candidates: [
-      { heading: "On the input record", name: "Maria Lopez", sub: "no EID · Kuali doc 4-VMPHRW" },
-      { heading: "UCPath name match (proposed)", name: "M. Lopez-Garcia", sub: "10583942 · Dept 000371 · Blank Ast 3" },
+      {
+        heading: "On the input record",
+        name: "Maria Lopez",
+        sub: "no EID · Kuali doc 4-VMPHRW",
+        matchedOn: "the name typed on the separation document",
+        captureId: "cap-ident-sep-maria-input",
+      },
+      {
+        heading: "UCPath name match (proposed)",
+        name: "M. Lopez-Garcia",
+        sub: "10583942 · Dept 000371 · Blank Ast 3",
+        eid: "10583942",
+        matchedOn: "surname + department, 1 active result",
+        captureId: "cap-ident-sep-maria-match",
+      },
     ],
     options: [
       { key: "use-eid", label: "Use 10583942", intent: "primary", command: "resolve-gate", resolution: "pick-eid:10583942" },
@@ -702,7 +729,7 @@ const sepMaria: DemoRowSpec = {
         },
       },
     ],
-    note: "Resolving returns the run to Running at UCPath transaction; the staged writes in the Data tab go live. Dismiss ends the run with nothing written.",
+    note: "The run stopped BEFORE the UCPath transaction and cannot pass it until you answer — the 2 writes are staged, not sent. Resolving returns it to Running at UCPath transaction and the staged writes go live. Dismiss ends the run with nothing written.",
   },
   receipt: {
     tone: "muted",
@@ -1419,27 +1446,52 @@ function i9Member(i: number): DemoRowSpec {
     case "waiting":
       return {
         ...base,
-        memberFact: "2 name candidates",
-        outcome: { tone: "warning", text: "Two active UCPath people match this name — pick one" },
+        memberFact: "3 name candidates",
+        outcome: { tone: "warning", text: "Three active UCPath people match this name — pick one" },
         steps: [
-          { label: "Person match", state: "waiting", system: "ucpath", keyLines: ["2 active candidates share this name"] },
+          { label: "Person match", state: "waiting", system: "ucpath", keyLines: ["3 active candidates share this name"] },
           { label: "Person lookup", state: "pending", system: "ucpath" },
           { label: "Roster match", state: "pending", system: "i9" },
         ],
         lines: [
-          { ts, kind: "warn", system: "ucpath", text: "2 active people named on this form — pausing for a decision", card: "gate", step: "Person match" },
+          { ts, kind: "warn", system: "ucpath", text: "3 active people named on this form — pausing for a decision", card: "gate", step: "Person match" },
         ],
         gate: {
           kind: "identity",
           title: "Waiting on you — which person is on the form?",
           openedAt: plusSeconds(startedAt, 12),
+          // THREE, not two. A name search returns what it returns, and a gate
+          // that can only draw a pair would have to drop the third person.
           candidates: [
-            { heading: "Candidate A", name: `${name}`, sub: `10531548 · Dept 000371 · hired 03/12/2024` },
-            { heading: "Candidate B", name: `${name} (2nd match)`, sub: `10577940 · Dept 000512 · hired 09/02/2019` },
+            {
+              heading: "Candidate A",
+              name: `${name}`,
+              sub: `10531548 · Dept 000371 · hired 03/12/2024`,
+              eid: "10531548",
+              matchedOn: "hire date matches the form within tolerance",
+              captureId: "cap-ident-ic-m11-a",
+            },
+            {
+              heading: "Candidate B",
+              name: `${name} (2nd match)`,
+              sub: `10577940 · Dept 000512 · hired 09/02/2019`,
+              eid: "10577940",
+              matchedOn: "exact name, different department",
+              captureId: "cap-ident-ic-m11-b",
+            },
+            {
+              heading: "Candidate C",
+              name: `${name} (3rd match)`,
+              sub: `10604771 · Dept 000371 · hired 08/19/2025`,
+              eid: "10604771",
+              matchedOn: "exact name, same department as A",
+              captureId: "cap-ident-ic-m11-c",
+            },
           ],
           options: [
             { key: "use-a", label: "Use 10531548", intent: "primary", command: "resolve-gate", resolution: "pick-eid:10531548" },
             { key: "use-b", label: "Use 10577940", intent: "neutral", command: "resolve-gate", resolution: "pick-eid:10577940" },
+            { key: "use-c", label: "Use 10604771", intent: "neutral", command: "resolve-gate", resolution: "pick-eid:10604771" },
             {
               key: "skip",
               label: "Skip person",
@@ -1454,10 +1506,10 @@ function i9Member(i: number): DemoRowSpec {
               },
             },
           ],
-          note: "The I-9 hire date on the form (03/12/2024) matches candidate A within tolerance — shown first.",
+          note: "Nothing is checked and nothing is written until you pick — the run is stopped at Person match, one step before it would touch anything. The I-9 hire date on the form (03/12/2024) matches candidate A within tolerance, so A is shown first; open each candidate's capture to see the UCPath page it came from.",
         },
         receipt: { tone: "muted", headline: "Receipt — pending", note: "Blocked on the identity decision; nothing recorded yet." },
-        shots: [{ label: "Both candidates", kind: "step" }],
+        shots: [{ label: "All three candidates", kind: "step" }],
       };
     case "doneWarnings":
       return {
@@ -3022,8 +3074,18 @@ function sepListMember(i: number): DemoRowSpec {
         title: "Waiting on you — identity approval",
         openedAt: at("13:53:20"),
         candidates: [
-          { heading: "As you typed it", name, sub: "no EID · typed into the input panel" },
-          { heading: "UCPath name match (proposed)", name: "I. R. Garcia", sub: `${eid} · Dept 000482 · Lab Ast 2` },
+          // No `captureId`, and that is the honest answer rather than an
+          // omission: a name typed into the input panel was never on a page, so
+          // there is no capture of it to retain. The surface says exactly that.
+          { heading: "As you typed it", name, sub: "no EID · typed into the input panel", matchedOn: "your keystrokes" },
+          {
+            heading: "UCPath name match (proposed)",
+            name: "I. R. Garcia",
+            sub: `${eid} · Dept 000482 · Lab Ast 2`,
+            eid,
+            matchedOn: "surname + first initial, 1 active result",
+            captureId: "cap-ident-sep-l-2-match",
+          },
         ],
         options: [
           { key: "use-eid", label: `Use ${eid}`, intent: "primary", command: "resolve-gate", resolution: `pick-eid:${eid}` },
@@ -3042,7 +3104,7 @@ function sepListMember(i: number): DemoRowSpec {
             },
           },
         ],
-        note: "Resolving returns this member to Running at Identity check. The other members never stopped — a group waits on nobody.",
+        note: "This member is stopped at Identity check and has written nothing; it cannot reach the UCPath transaction until you answer. Resolving returns it to Running at Identity check. The other members never stopped — a group waits on nobody.",
       },
       receipt: { tone: "muted", headline: "Receipt — pending", note: "Nothing written. This member is holding the whole group at Waiting on you." },
     };
