@@ -23,7 +23,14 @@ import {
 import { cn } from "@/lib/utils";
 import { QueueRowCard } from "@/components/queue-panel/QueueRowCard";
 import { StatusCounts } from "@/components/queue-panel/StatusCounts";
-import { PROPOSED_STATUS, StatusBadge, statusText, type ProposedStatus } from "./demo-status";
+import {
+  MemberOutcomePending,
+  MemberOutcomeWord,
+  PROPOSED_STATUS,
+  StatusBadge,
+  statusText,
+  type ProposedStatus,
+} from "./demo-status";
 import { panelKindSpec, rowExplanationOf, rowVariantSpec } from "./demo-catalog";
 import {
   Button,
@@ -44,7 +51,6 @@ import {
 } from "./demo-ui";
 import { FooterActions, OutcomeActionButton, RowActionMenu, type DemoActionHandler } from "./DemoActions";
 import { rowInBucket, type StatusBucket } from "./DemoShell";
-import type { MemberOutcomeSpec } from "./demo-wire";
 import { DEMO_DAY, dayLabel } from "./demo-days";
 import {
   bandsFor,
@@ -214,42 +220,23 @@ function memberDetailHeading(group: DemoRow): string {
 }
 
 /**
- * How an OUTCOME is drawn. Deliberately NOT a `StatusPill`: an outcome answers
- * "what did it find", a status answers "did it run", and rendering one in the
- * other's chrome is how a `Verified done · Not found` row comes to read as a
- * failure. It is a word in a column — the word is always the differentiator,
- * and the tone only decides how loudly it is said.
- */
-const OUTCOME_TONE: Record<MemberOutcomeSpec["tone"], string> = {
-  danger: "font-medium text-[color:var(--ds-status-failed-fg)]",
-  warn: "font-medium text-[color:var(--ds-status-waiting-fg)]",
-  neutral: "text-[color:var(--ds-fg-secondary)]",
-  quiet: "text-[color:var(--ds-fg-muted)]",
-};
-
-/**
  * The third column of a member line.
  *
- * A workflow that declares a member-outcome vocabulary gets the typed OUTCOME;
- * one that does not keeps the free-text fact it already sends. Both land in the
- * same fixed column, so the two kinds of group still read as the same shape.
+ * A workflow that declares a member-outcome vocabulary gets the typed OUTCOME
+ * (drawn by the ONE shared renderer in `demo-status.tsx`, which the Log Panel's
+ * People tab uses too); one that does not keeps the free-text fact it already
+ * sends. Both land in the same fixed column, so the two kinds of group still
+ * read as the same shape.
  */
 function MemberDetailCell({ row }: { row: DemoRow }) {
   const outcome = row.memberOutcomeSpec;
-  if (outcome) {
-    return (
-      <span title={outcome.meaning} className={cn(dsText.meta, "min-w-0 truncate", OUTCOME_TONE[outcome.tone])}>
-        {outcome.label}
-      </span>
-    );
-  }
+  if (outcome) return <MemberOutcomeWord outcome={outcome} />;
   if (row.workflow.memberOutcomes) {
     // The workflow HAS a vocabulary and this member has not answered yet. The
     // column holds outcomes and only outcomes — dropping its free-text fact in
     // here would put `person-lookup…` under a heading that reads `Outcome`, and
-    // the whole complaint was two axes sharing one column. An em dash rather
-    // than an empty cell, so a blank does not read as a value that failed.
-    return <span className={cn(dsText.meta, dsText.nums, "text-[color:var(--ds-fg-faint)]")}>—</span>;
+    // the whole complaint was two axes sharing one column.
+    return <MemberOutcomePending />;
   }
   return (
     <span

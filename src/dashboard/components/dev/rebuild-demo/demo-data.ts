@@ -1442,7 +1442,11 @@ function i9Member(i: number): DemoRowSpec {
       startedAt: undefined,
       eid: undefined,
       displayOnly: true,
-      memberFact: "no searchable name",
+      // DETAIL ONLY. The outcome word already says "no name to search on";
+      // what it cannot say is WHICH page, which is the one fact that tells the
+      // operator where to look. A detail column that repeats the outcome is the
+      // crammed string the vocabulary replaced.
+      memberFact: "page 31",
       memberOutcome: "not-searchable",
       outcome: { tone: "muted", text: "Rejected page — no searchable name on the form. Display-only: no task exists, delete is the only action." },
       steps: [{ label: "OCR extraction", state: "failed", system: "i9", keyLines: ["page 31: no name field detected"] }],
@@ -1459,7 +1463,8 @@ function i9Member(i: number): DemoRowSpec {
     case "failed":
       return {
         ...base,
-        memberFact: "no UCPath match",
+        // detail: which roster row was left unmatched — "Not found" says the rest
+        memberFact: `roster row ${i + 1}`,
         memberOutcome: "not-found",
         endedAt: plusSeconds(startedAt, 41),
         evidence: { failureId: `fail-ic-m${pad(i, 3)}`, confidence: "unknown" },
@@ -1480,7 +1485,8 @@ function i9Member(i: number): DemoRowSpec {
     case "waiting":
       return {
         ...base,
-        memberFact: "3 name candidates",
+        // detail: HOW MANY, which is what decides whether this is a quick pick
+        memberFact: "3 candidates",
         memberOutcome: "unsure",
         outcome: { tone: "warning", text: "Three active UCPath people match this name — pick one" },
         steps: [
@@ -1549,7 +1555,8 @@ function i9Member(i: number): DemoRowSpec {
     case "doneWarnings":
       return {
         ...base,
-        memberFact: "S2 missing — flag",
+        // detail: WHICH section is missing — "Incomplete" says that one is
+        memberFact: "Section 2 missing",
         memberOutcome: "incomplete",
         endedAt: plusSeconds(startedAt, 34 + (i % 5) * 7),
         evidence: { receiptId: `rcpt-ic-m${pad(i, 3)}`, confidence: "partial" },
@@ -1612,7 +1619,9 @@ function i9Member(i: number): DemoRowSpec {
       // not found anything.
       return {
         ...base,
-        memberFact: "S1 + S2 · retain 3y",
+        // detail: the retention period. "Found" already asserts both sections
+        // were located, so repeating "S1 + S2" here spent the column twice.
+        memberFact: "retain 3y",
         memberOutcome: "found",
         endedAt: plusSeconds(startedAt, 34 + (i % 5) * 7),
         evidence: { receiptId: `rcpt-ic-m${pad(i, 3)}`, confidence: "verified" },
