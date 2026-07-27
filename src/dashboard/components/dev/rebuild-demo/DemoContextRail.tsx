@@ -866,17 +866,17 @@ export function ContextRail({
          * reached for mid-read, so putting the long editable ledger above it
          * meant scrolling past a form to look at a screenshot.
          *
-         * While Data is EXPANDED the rail is Data's: the other three sections
-         * would only be scroll distance between the ledger and its footer at a
-         * moment when the operator is typing into it, and every one of them is
-         * one press away again.
+         * Expanding Data hides PROVENANCE AND DELEGATION only. Evidence stays
+         * where it is on purpose, and not just because the order was asked for:
+         * the expand control lives in the Data section's own header, and
+         * folding the section above it would teleport that control to the top
+         * of the rail the moment it was pressed. Undoing a press has to cost no
+         * pointer travel — the swap retargets a grid column, which is a layout
+         * property nothing may animate, so there is no motion to carry the eye
+         * to a button that moved.
          */}
-        {!dataExpanded && (
-          <>
-            <EvidenceSection row={row} />
-            <Separator />
-          </>
-        )}
+        <EvidenceSection row={row} />
+        <Separator />
 
         <DataSection
           row={row}
@@ -905,7 +905,7 @@ export function ContextRail({
 
         {dataExpanded && (
           <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
-            Evidence, provenance and delegation are hidden while you edit — narrow the surface to bring them back.
+            Provenance and delegation are hidden while you edit — narrow the surface to bring them back.
           </p>
         )}
       </div>
