@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { effectiveStatus, fmtElapsed, type DemoRow } from "./demo-data";
-import { DEMO_WORKFLOW_LIST, DEMO_WORKFLOWS, type DemoWorkflowCategory } from "./demo-wire";
+import { buildWorkflowCategoryGroups, DEMO_WORKFLOW_LIST, DEMO_WORKFLOWS, type DemoWorkflowCategory } from "./demo-wire";
 import { DEMO_DAY, topLevelRowsForDay } from "./demo-days";
 import {
   DemoDateNav,
@@ -294,10 +294,13 @@ export function DemoTopBar({
 // ---------------------------------------------------------------------------
 
 /**
- * Per-entry copy the registry cannot carry. The rail ITSELF is not a hand list:
- * it is the workflow registry (`/api/workflow-definitions` in production)
- * grouped by each descriptor's own category, so a workflow the backend serves
- * can never be missing from the rail.
+ * Per-entry copy the registry cannot carry.
+ *
+ * Everything ELSE about the rail comes from the registry: the entries are
+ * `/api/workflow-definitions` (mocked by `DEMO_WORKFLOWS`) and the groups are
+ * each descriptor's OWN `category`, so a workflow the backend serves can never
+ * be missing from the rail and can never sit under a heading the product does
+ * not use.
  */
 const RAIL_NOTES: Partial<Record<string, string>> = {
   // Deliberately kept at zero. It has no callers today, but it is a real
@@ -307,12 +310,25 @@ const RAIL_NOTES: Partial<Record<string, string>> = {
     "No runs today. Kept visible on purpose — a workflow that vanishes when idle is a workflow you stop trusting the rail about.",
 };
 
-const RAIL_GROUPS: { label: DemoWorkflowCategory; entries: { label: string; note?: string }[] }[] = (
-  ["People", "Documents", "Data"] as DemoWorkflowCategory[]
-).map((category) => ({
-  label: category,
-  entries: DEMO_WORKFLOW_LIST.filter((w) => w.category === category).map((w) => ({ label: w.label, note: RAIL_NOTES[w.label] })),
-}));
+/**
+ * The rail's groups, in display order.
+ *
+ * The ONLY hardcoded thing here is the order (`DEMO_CATEGORY_ORDER`), exactly
+ * as production hardcodes `PREFERRED_CATEGORY_ORDER` and derives everything
+ * else. Membership is the descriptor's `category`; an unlisted category is
+ * appended; an uncategorised workflow falls into a trailing `Other`; and a
+ * category nothing is registered under is DROPPED rather than rendered as an
+ * empty heading.
+ *
+ * This replaces a closed three-value union — People / Documents / Data — that
+ * the demo invented and re-binned every workflow into, so Oath Signature read
+ * as `Documents` here and `Onboarding` in the product the demo is planning.
+ */
+const RAIL_GROUPS: { label: DemoWorkflowCategory; entries: { label: string; note?: string }[] }[] =
+  buildWorkflowCategoryGroups().map((g) => ({
+    label: g.label,
+    entries: g.workflows.map((w) => ({ label: w.label, note: RAIL_NOTES[w.label] })),
+  }));
 
 /** label → the workflow's own 2-char code, the prefix of every one of its trace ids */
 const WORKFLOW_CODE: Record<string, string> = Object.fromEntries(DEMO_WORKFLOW_LIST.map((w) => [w.label, w.code]));
@@ -1332,52 +1348,67 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
         ))}
       </div>
 
-      {/* micro pipeline — where the in-flight item is, without opening anything */}
-      {s.steps && s.steps.length >= 2 && (
-        <div aria-hidden className="flex items-center" title={s.steps.map((st) => st.label).join(" · ")}>
-          {s.steps.map((st, i) => (
-            <span key={st.label} className="flex flex-1 items-center last:flex-none">
-              <span
-                className={cn(
-                  "size-1.5 shrink-0 rounded-full",
-                  st.state === "done" && "bg-[var(--ds-success-fg)] opacity-85",
-                  st.state === "current" && "bg-[var(--ds-accent)] ring-2 ring-[color:var(--ds-accent-quiet)]",
-                  st.state === "pending" && cn("border bg-[var(--ds-surface-2)]", dsBorder.base),
-                )}
-              />
-              {i < s.steps!.length - 1 && (
-                <span
-                  className={cn(
-                    "h-px min-w-[3px] flex-1",
-                    st.state === "done" ? "bg-[var(--ds-success-fg)] opacity-30" : "bg-[var(--ds-border)]",
-                  )}
-                />
-              )}
-            </span>
-          ))}
-        </div>
-      )}
+      {/*
+        THE BASE — pipeline then footer, pinned to the bottom as one block.
 
-      {/* The footer PINS to the bottom, and the slack above it is left empty on
-          purpose. An idle worker genuinely has less to say than a blocked one,
-          and stretching its browser tiles or padding it out with filler would
-          dress it up as busier than it is — the cards are the same height so
-          the row can be read across, not so every card looks equally loaded. */}
-      <div
-        className={cn(
-          dsText.meta,
-          "mt-auto flex items-center border-t text-[color:var(--ds-fg-muted)]",
-          dsBorder.subtle,
-          "gap-[var(--ds-space-snug)] pt-[var(--ds-space-snug)]",
-        )}
-      >
-        <span className={dsText.nums}>{s.elapsedSec > 0 ? fmtElapsed(s.elapsedSec + tick) : "—"}</span>
-        <span className="min-w-0 flex-1 truncate" title={s.sleepPerTaskSec ? `Sleeps ${s.sleepPerTaskSec}s between tasks` : undefined}>
-          {s.sleepPerTaskSec ? `${s.step ?? ""} · ${s.sleepPerTaskSec}s/task sleep` : (s.step ?? "")}
-        </span>
-        <Button size="sm" variant="outline" onClick={NOOP} className="shrink-0">
-          Stop
-        </Button>
+        Everything above this varies by card: a lane row wraps to two lines on a
+        three-system worker, a lease-wait note appears on exactly one card, and
+        a tile grid is one row or two. Anchoring the base (rather than only the
+        footer, which is what `mt-auto` used to do) is what puts every card's
+        progress bar on ONE baseline instead of wherever its own content
+        happened to end — the operator's ask, and the reason the row of cards
+        can be read across at all.
+
+        The pipeline's row is RESERVED at a fixed height on every card, so a
+        worker with no item in flight keeps the same baseline without being
+        given a bar it has not earned. The slack lands above, and it is left
+        EMPTY on purpose: an idle worker genuinely has less to say than a
+        blocked one, and padding it out would dress it up as busier than it is.
+      */}
+      <div className="mt-auto flex flex-col gap-[var(--ds-space-snug)]">
+        <div className={cn("flex shrink-0 items-center", dsSize.hMicroPipeline)}>
+          {/* micro pipeline — where the in-flight item is, without opening anything */}
+          {s.steps && s.steps.length >= 2 && (
+            <span aria-hidden className="flex flex-1 items-center" title={s.steps.map((st) => st.label).join(" · ")}>
+              {s.steps.map((st, i) => (
+                <span key={st.label} className="flex flex-1 items-center last:flex-none">
+                  <span
+                    className={cn(
+                      "size-1.5 shrink-0 rounded-full",
+                      st.state === "done" && "bg-[var(--ds-success-fg)] opacity-85",
+                      st.state === "current" && "bg-[var(--ds-accent)] ring-2 ring-[color:var(--ds-accent-quiet)]",
+                      st.state === "pending" && cn("border bg-[var(--ds-surface-2)]", dsBorder.base),
+                    )}
+                  />
+                  {i < s.steps!.length - 1 && (
+                    <span
+                      className={cn(
+                        "h-px min-w-[3px] flex-1",
+                        st.state === "done" ? "bg-[var(--ds-success-fg)] opacity-30" : "bg-[var(--ds-border)]",
+                      )}
+                    />
+                  )}
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
+        <div
+          className={cn(
+            dsText.meta,
+            "flex items-center border-t text-[color:var(--ds-fg-muted)]",
+            dsBorder.subtle,
+            "gap-[var(--ds-space-snug)] pt-[var(--ds-space-snug)]",
+          )}
+        >
+          <span className={dsText.nums}>{s.elapsedSec > 0 ? fmtElapsed(s.elapsedSec + tick) : "—"}</span>
+          <span className="min-w-0 flex-1 truncate" title={s.sleepPerTaskSec ? `Sleeps ${s.sleepPerTaskSec}s between tasks` : undefined}>
+            {s.sleepPerTaskSec ? `${s.step ?? ""} · ${s.sleepPerTaskSec}s/task sleep` : (s.step ?? "")}
+          </span>
+          <Button size="sm" variant="outline" onClick={NOOP} className="shrink-0">
+            Stop
+          </Button>
+        </div>
       </div>
     </article>
   );
