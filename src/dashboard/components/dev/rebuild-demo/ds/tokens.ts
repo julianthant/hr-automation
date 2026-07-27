@@ -138,6 +138,8 @@ export const dsSize = {
   hRow: "h-[var(--ds-h-row)]",
   hBar: "h-[var(--ds-h-bar)]",
   hTopbar: "h-[var(--ds-h-topbar)]",
+  /** the Session Card's reserved micro-pipeline band — see the token's note */
+  hMicroPipeline: "h-[var(--ds-h-micro-pipeline)]",
   wRail: "w-[var(--ds-w-rail)]",
 } as const;
 
