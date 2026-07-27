@@ -110,6 +110,7 @@ export function DemoQueueToolbar({
   onSelectRow,
   leading,
   runStart,
+  filters,
 }: {
   sort: DemoSortKey;
   onSort: (k: DemoSortKey) => void;
@@ -126,8 +127,10 @@ export function DemoQueueToolbar({
   onSelectRow: (id: string) => void;
   /** shell-owned, far left: the Workflow Panel toggle, where its column began */
   leading?: ReactNode;
-  /** shell-owned: the three run-start surfaces, folded in from their own band */
+  /** shell-owned: the one Run Modal's primary control */
   runStart?: ReactNode;
+  /** shell-owned: the status filter group, folded in from its own band */
+  filters?: ReactNode;
 }) {
   const selectedCount = selectedIds.size;
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
@@ -142,35 +145,64 @@ export function DemoQueueToolbar({
 
   return (
     <div className={cn("flex shrink-0 flex-col border-b", dsBorder.subtle)}>
+      {/*
+        ONE BAR, THREE GROUPS, and the grouping is by what a control DOES.
+
+        It was two 36px bands, one hairline apart: a Status Bar of ten pills
+        above a row of five unrelated control types at uniform spacing —
+        a panel toggle, a primary button, a bare `⇅`, the sort select it
+        belonged to, and a checkbox toggle — with the whole thing crammed left
+        and the right half of the window empty. Nothing was grouped, nothing was
+        anchored, and the two bands stacked into a thick undifferentiated band
+        with no primary in it.
+
+        Now: WHERE YOU ARE and WHAT YOU START on the left (the panel you are in,
+        then the one primary action on the surface), WHAT YOU ARE LOOKING AT in
+        the middle (the filters, which take the slack and scroll if a narrow
+        window makes them), and HOW YOU ARE LOOKING AT IT on the right (sort,
+        then select) — pushed into the dead space with `ml-auto`. Two hairlines,
+        each separating a group from the next, rather than one every 8px.
+      */}
       <div
         className={cn(
-          "flex items-center overflow-x-auto",
+          "flex items-center",
           dsSize.hBar,
           "gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
         )}
       >
         {leading}
-        {leading && <span aria-hidden className="h-4 w-px shrink-0 bg-[var(--ds-border)]" />}
         {runStart}
-        {runStart && <span aria-hidden className="h-4 w-px shrink-0 bg-[var(--ds-border)]" />}
+        {(leading || runStart) && <span aria-hidden className={cn("h-4 w-px shrink-0", "bg-[var(--ds-border)]")} />}
 
-        <label className={cn(dsText.meta, "inline-flex shrink-0 items-center gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
-          <ArrowUpDown aria-hidden className={dsIcon.sm} />
-          <span className="sr-only">Sort the queue</span>
+        <div className="flex min-w-0 flex-1 items-center">{filters}</div>
+
+        <span aria-hidden className={cn("h-4 w-px shrink-0", "bg-[var(--ds-border)]")} />
+
+        {/* Sort is ONE control. The `⇅` used to be a separate glyph sitting a
+            gap away from the select it belonged to, so it read as a sixth
+            control rather than as this one's icon. */}
+        <span className="relative shrink-0">
+          <ArrowUpDown
+            aria-hidden
+            className={cn(
+              dsIcon.sm,
+              "pointer-events-none absolute left-[var(--ds-space-snug)] top-1/2 -translate-y-1/2 text-[color:var(--ds-fg-muted)]",
+            )}
+          />
           <select
             aria-label="Sort the queue"
             value={sort}
             onChange={(e) => onSort(e.target.value as DemoSortKey)}
             title={DEMO_SORTS.find((s) => s.key === sort)?.note}
             className={cn(
-              "cursor-pointer border px-[var(--ds-space-snug)]",
+              "cursor-pointer appearance-none border pl-[var(--ds-space-section)] pr-[var(--ds-space-base)]",
               "h-[var(--ds-h-sm)]",
               dsRadius.md,
               dsText.meta,
               dsFocus,
               dsMotion.fast,
-              dsBorder.strong,
-              "bg-[var(--ds-control-bg)] text-[color:var(--ds-fg)] hover:bg-[var(--ds-control-bg-hover)]",
+              dsBorder.base,
+              "bg-[var(--ds-surface-1)] text-[color:var(--ds-fg-secondary)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]",
             )}
           >
             {DEMO_SORTS.map((s) => (
@@ -179,14 +211,13 @@ export function DemoQueueToolbar({
               </option>
             ))}
           </select>
-        </label>
-        <span aria-hidden className="h-4 w-px shrink-0 bg-[var(--ds-border)]" />
+        </span>
 
         <button
           type="button"
           aria-pressed={selectMode}
           onClick={() => onSelectMode(!selectMode)}
-          title="Select rows to act on several at once. Selection never changes a count — the badges and pills stay exactly as they are."
+          title="Act on several rows at once"
           className={cn(
             toolbarControl(),
             selectMode
@@ -197,36 +228,51 @@ export function DemoQueueToolbar({
           {selectMode ? <CheckSquare aria-hidden className={dsIcon.sm} /> : <Square aria-hidden className={dsIcon.sm} />}
           Select
         </button>
+      </div>
 
-        {selectMode && (
-          <>
-            <Button size="sm" variant="secondary" onClick={allSelected ? onClearSelection : onSelectAll}>
-              {allSelected ? "Clear" : `Select all ${visibleIds.length} in view`}
-            </Button>
-            <span className={cn(dsText.meta, dsText.nums, "shrink-0 text-[color:var(--ds-fg-muted)]")}>{selectedCount} selected</span>
+      {/* SELECT MODE IS A MODE, so it gets its own band rather than six more
+          controls shoved into a bar that is already carrying three groups.
+          It exists only while the mode is on, so it costs nothing at rest —
+          which is the difference between a second line and a second bar. */}
+      {selectMode && (
+        <div
+          className={cn(
+            "flex items-center border-t bg-[var(--ds-surface-2)]",
+            dsSize.hBar,
+            dsBorder.subtle,
+            "gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
+          )}
+        >
+          <Button size="sm" variant="secondary" onClick={allSelected ? onClearSelection : onSelectAll}>
+            {allSelected ? "Clear" : `Select all ${visibleIds.length} in view`}
+          </Button>
+          <span className={cn(dsText.meta, dsText.nums, "shrink-0 text-[color:var(--ds-fg-muted)]")}>
+            {selectedCount} selected
+          </span>
+          <span className="ml-auto flex shrink-0 items-center gap-[var(--ds-space-snug)]">
             {BULK_COMMANDS.map((c) => {
               const Icon = c.icon;
               return (
                 <Button
                   key={c.command}
                   size="sm"
-                  // Four peer commands in a toolbar, so four `outline`s — except
-                  // Delete, the only irreversible one, which takes the surface's
-                  // single danger slot. Two danger buttons on one surface is
-                  // exactly what the ban exists to stop.
+                  // Four peer commands, so four `outline`s — except Delete, the
+                  // only irreversible one, which takes the surface's single
+                  // danger slot. Two danger buttons on one surface is exactly
+                  // what the ban exists to stop.
                   variant={c.command === "hide" ? "dangerGhost" : "outline"}
                   disabled={selectedCount === 0}
                   onClick={() => onBulk(c.command, c.label)}
-                  title={`${c.label} every selected row that offers it. Rows that do not are reported, never silently skipped.`}
+                  title={`${c.label} every selected row that offers it`}
                   icon={<Icon aria-hidden className={dsIcon.sm} />}
                 >
                   {c.label}
                 </Button>
               );
             })}
-          </>
-        )}
-      </div>
+          </span>
+        </div>
+      )}
 
       {outcome && buckets && (
         <div
