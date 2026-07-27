@@ -26,11 +26,14 @@ import { DemoDateNav, DemoNotificationBell, DemoSearchControl, type DemoNavigate
 import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
 import {
   Badge,
+  Button,
   DS_STATUS,
   IconButton,
   dsBorder,
+  dsElev,
   dsFocus,
   dsIcon,
+  dsLayer,
   dsMotion,
   dsRadius,
   dsSize,
@@ -688,30 +691,73 @@ const DEMO_SESSIONS: DemoSession[] = [
   },
 ];
 
+/**
+ * A worker's phase. Same hue ramp as everything else in the demo, so "this
+ * daemon is alive" and "this row is running" are not two unrelated blues.
+ */
 const PHASE_TONE: Record<SessionPhase, { dot: string; label: string; text: string }> = {
-  running: { dot: "bg-success", label: "Running", text: "text-success" },
-  authenticating: { dot: "bg-warning animate-pulse motion-reduce:animate-none", label: "Authenticating", text: "text-warning" },
-  idle: { dot: "bg-muted-foreground/60", label: "Idle", text: "text-muted-foreground" },
-  keepalive: { dot: "bg-info", label: "Keep-alive", text: "text-info" },
-  complete: { dot: "bg-success/60", label: "Complete", text: "text-muted-foreground" },
-  failed: { dot: "bg-destructive", label: "Failed", text: "text-destructive" },
+  running: { dot: "bg-[var(--ds-success-fg)]", label: "Running", text: "text-[color:var(--ds-success-fg)]" },
+  authenticating: {
+    dot: "bg-[var(--ds-status-waiting-fg)] animate-pulse motion-reduce:animate-none",
+    label: "Authenticating",
+    text: "text-[color:var(--ds-status-waiting-fg)]",
+  },
+  idle: { dot: "bg-[var(--ds-fg-faint)]", label: "Idle", text: "text-[color:var(--ds-fg-muted)]" },
+  keepalive: { dot: "bg-[var(--ds-info-fg)]", label: "Keep-alive", text: "text-[color:var(--ds-info-fg)]" },
+  complete: { dot: "bg-[var(--ds-success-fg)] opacity-60", label: "Complete", text: "text-[color:var(--ds-fg-muted)]" },
+  failed: { dot: "bg-[var(--ds-danger)]", label: "Failed", text: "text-[color:var(--ds-danger)]" },
 };
 
+/**
+ * A browser's health. `unknown` is deliberately NOT styled like `healthy` — a
+ * session that was never probed must not read as one that passed. It is the
+ * only tile with no fill at all, which is the same "nothing has happened yet"
+ * cue the Queued status uses.
+ */
 const HEALTH_TONE: Record<BrowserHealth, { cls: string; icon: typeof Activity; label: string }> = {
-  healthy: { cls: "border-border bg-secondary/40 text-muted-foreground", icon: CheckCircle2, label: "Ready" },
-  unknown: { cls: "border-border bg-secondary/20 text-muted-foreground", icon: CircleHelp, label: "Not checked" },
-  refreshing: { cls: "border-info/45 bg-info/10 text-info", icon: RotateCw, label: "Refreshing" },
-  unhealthy: { cls: "border-warning/45 bg-warning/10 text-warning", icon: AlertTriangle, label: "Unhealthy" },
-  failed: { cls: "border-destructive/45 bg-destructive/10 text-destructive", icon: AlertTriangle, label: "Failed" },
-  paused: { cls: "border-log-violet/45 bg-log-violet/10 text-log-violet", icon: Pause, label: "Paused" },
+  healthy: {
+    cls: "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)]",
+    icon: CheckCircle2,
+    label: "Ready",
+  },
+  unknown: {
+    cls: "border-[color:var(--ds-border-subtle)] bg-transparent text-[color:var(--ds-fg-faint)]",
+    icon: CircleHelp,
+    label: "Not checked",
+  },
+  refreshing: {
+    cls: "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
+    icon: RotateCw,
+    label: "Refreshing",
+  },
+  unhealthy: {
+    cls: "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
+    icon: AlertTriangle,
+    label: "Unhealthy",
+  },
+  failed: {
+    cls: "border-[color:var(--ds-danger-border)] bg-[var(--ds-danger-quiet)] text-[color:var(--ds-danger)]",
+    icon: AlertTriangle,
+    label: "Failed",
+  },
+  paused: {
+    cls: "border-[color:var(--ds-status-parked-border)] bg-[var(--ds-status-parked-bg)] text-[color:var(--ds-status-parked-fg)]",
+    icon: Pause,
+    label: "Paused",
+  },
 };
 
-function BrowserTile({ b }: { b: DemoBrowser }) {
+/**
+ * `span` fills the second column when a card holds an ODD number of browsers.
+ * A lone half-width tile beside dead space reads as a tile that failed to
+ * render, which is exactly the wrong thing for a panel about health.
+ */
+function BrowserTile({ b, span }: { b: DemoBrowser; span?: boolean }) {
   const tone = HEALTH_TONE[b.health];
   const Icon = tone.icon;
   const [open, setOpen] = useState(false);
   return (
-    <div className="relative">
+    <div className={cn("relative", span && "col-span-2")}>
       {/* Zero chrome at rest — the state word owns the full tile width. An
           earlier design crammed six hover glyphs in here and crushed
           "Refreshing" to "R". Actions live behind a right-click menu. */}
@@ -732,19 +778,33 @@ function BrowserTile({ b }: { b: DemoBrowser }) {
           }
         }}
         className={cn(
-          "flex w-full min-w-0 cursor-pointer flex-col gap-0.5 rounded-md border px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "flex w-full min-w-0 cursor-pointer flex-col border",
+          "gap-[var(--ds-space-hair)] px-[var(--ds-space-base)] py-[var(--ds-space-tight)]",
+          dsRadius.md,
+          dsFocus,
+          dsMotion.base,
           tone.cls,
-          open && "ring-1 ring-ring/60",
+          open && "border-[color:var(--ds-border-loud)]",
         )}
       >
-        <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider">
-          <Icon aria-hidden className={cn("size-3 shrink-0", b.health === "refreshing" && "animate-spin motion-reduce:animate-none")} />
+        <span className={cn(dsText.caps, "flex items-center gap-[var(--ds-space-tight)]")}>
+          <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0", b.health === "refreshing" && "animate-spin motion-reduce:animate-none")} />
           {b.label}
         </span>
-        <span className="truncate text-[10px] opacity-80">{tone.label}</span>
+        <span className={cn(dsText.micro, "truncate opacity-80")}>{tone.label}</span>
       </div>
       {open && (
-        <div role="menu" className="absolute bottom-full left-0 z-20 mb-1 w-44 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg">
+        <div
+          role="menu"
+          className={cn(
+            "absolute bottom-full left-0 mb-[var(--ds-space-tight)] w-44 overflow-hidden border py-[var(--ds-space-tight)]",
+            dsLayer.menu,
+            dsRadius.md,
+            dsBorder.base,
+            "bg-[var(--ds-surface-overlay)]",
+            dsElev.mid,
+          )}
+        >
           {["Peek (live screenshot)", "Check now", "Bring to front", "Refresh page", "Reopen tab", b.health === "paused" ? "Resume auto-recovery" : "Pause auto-recovery"].map(
             (item, i) => (
               <button
@@ -753,11 +813,16 @@ function BrowserTile({ b }: { b: DemoBrowser }) {
                 role="menuitem"
                 onClick={() => setOpen(false)}
                 className={cn(
-                  "flex w-full items-center gap-2 px-2.5 py-1 text-left text-[11.5px] text-secondary-foreground outline-none hover:bg-accent focus-visible:bg-accent",
-                  (i === 1 || i === 5) && "border-t border-border/60",
+                  "flex w-full cursor-pointer items-center text-left",
+                  "gap-[var(--ds-space-snug)] px-[var(--ds-space-cozy)] py-[var(--ds-space-tight)]",
+                  dsText.body,
+                  dsMotion.fast,
+                  "text-[color:var(--ds-fg-secondary)] outline-none",
+                  "hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)] focus-visible:bg-[var(--ds-surface-3)]",
+                  (i === 1 || i === 5) && cn("border-t", dsBorder.subtle),
                 )}
               >
-                {i === 0 && <Camera aria-hidden className="size-3" />}
+                {i === 0 && <Camera aria-hidden className={dsIcon.sm} />}
                 {item}
               </button>
             ),
@@ -768,6 +833,26 @@ function BrowserTile({ b }: { b: DemoBrowser }) {
   );
 }
 
+/** at cap = this worker cannot take another item; that is the number that
+    explains a queue that is not moving, so it is the one that goes amber */
+const atCap = (slot: { inUse: number; cap: number }): boolean => slot.inUse >= slot.cap;
+
+/**
+ * One capacity chip shape for lanes AND for every system budget. They were two
+ * near-identical hand-rolled spans at 9.5px, which is below the type floor and
+ * made the row wrap ragged whenever a card carried three systems.
+ */
+const capacityChip = (full: boolean): string =>
+  cn(
+    "inline-flex shrink-0 items-center border",
+    "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
+    dsRadius.sm,
+    dsText.micro,
+    full
+      ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]"
+      : "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)]",
+  );
+
 function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
   const tone = PHASE_TONE[s.phase];
   const inFlight = s.phase === "running";
@@ -776,48 +861,67 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
   // tiles, no timer, nothing to stop. Keep it visible so the failure is learned.
   if (s.crashed) {
     return (
-      <article className="flex w-[268px] shrink-0 flex-col gap-1 rounded-lg border border-destructive/40 bg-destructive/5 p-2.5">
-        <div className="flex items-center gap-2">
-          <span aria-hidden className="size-2 shrink-0 rounded-full bg-destructive" />
-          <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-foreground">{s.workflow}</span>
-          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-destructive">Launch failed</span>
+      <article
+        className={cn(
+          "flex shrink-0 flex-col border",
+          "w-[var(--ds-w-session-card)] gap-[var(--ds-space-tight)] p-[var(--ds-space-base)]",
+          dsRadius.lg,
+          "border-[color:var(--ds-danger-border)] bg-[var(--ds-danger-quiet)]",
+        )}
+      >
+        <div className="flex items-center gap-[var(--ds-space-base)]">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--ds-danger)]" />
+          <span className={cn(dsText.ui, "min-w-0 flex-1 truncate font-semibold text-[color:var(--ds-fg)]")}>{s.workflow}</span>
+          <span className={cn(dsText.caps, "shrink-0 text-[color:var(--ds-danger)]")}>Launch failed</span>
         </div>
-        <p className="text-[10.5px] leading-tight text-destructive/80">{s.subline}</p>
+        <p className={cn(dsText.meta, "text-[color:var(--ds-danger)] opacity-85")}>{s.subline}</p>
       </article>
     );
   }
 
   return (
-    <article className={cn("flex w-[268px] shrink-0 flex-col rounded-lg border bg-card p-2.5", s.phase === "failed" ? "border-destructive/40" : "border-border")}>
-      <div className="flex items-center gap-2">
+    <article
+      className={cn(
+        "flex shrink-0 flex-col border",
+        "w-[var(--ds-w-session-card)] gap-[var(--ds-space-snug)] p-[var(--ds-space-base)]",
+        dsRadius.lg,
+        dsSurface.card,
+        s.phase === "failed" ? "border-[color:var(--ds-danger-border)]" : dsBorder.base,
+      )}
+    >
+      <div className="flex items-center gap-[var(--ds-space-snug)]">
         <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
         {/* the trailing instance ordinal is always stripped from the title */}
-        <span className="min-w-0 truncate text-[12.5px] font-semibold text-foreground">{s.workflow}</span>
+        <span className={cn(dsText.ui, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>{s.workflow}</span>
         {s.queued ? (
-          <span className="shrink-0 rounded bg-primary/10 px-1.5 py-px text-[10px] leading-none text-primary">
-            <span className="font-medium">{s.queued}</span> queued
+          <span
+            className={cn(
+              "inline-flex shrink-0 items-center border px-[var(--ds-space-tight)]",
+              "h-[var(--ds-h-xs)] gap-[var(--ds-space-hair)]",
+              dsRadius.sm,
+              dsText.micro,
+              "border-[color:var(--ds-status-queued-border)] text-[color:var(--ds-status-queued-fg)]",
+            )}
+          >
+            <span className={dsText.nums}>{s.queued}</span> queued
           </span>
         ) : null}
-        <span className={cn("ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-wider", tone.text)}>{tone.label}</span>
+        <span className={cn(dsText.caps, "ml-auto shrink-0", tone.text)}>{tone.label}</span>
       </div>
-      <span className={cn("mt-0.5 truncate text-[10.5px]", inFlight ? "font-mono text-muted-foreground" : "text-muted-foreground")}>{s.subline}</span>
+      <span className={cn(dsText.meta, "-mt-[var(--ds-space-tight)] truncate text-[color:var(--ds-fg-muted)]", inFlight && dsText.nums)}>
+        {s.subline}
+      </span>
 
       {/* Capacity, before the browsers. "1/1 lanes · ucpath 1/1" is the answer
           to "can this worker take another item", and it has to be readable
           without opening anything. A slot at its cap is amber — that is the
           number that explains a stalled queue. */}
       {(s.lanes || s.budgets) && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+        <div className="flex flex-wrap items-center gap-[var(--ds-space-tight)]">
           {s.lanes && (
-            <span
-              title={`${s.lanes.inUse} of ${s.lanes.cap} lanes in use — a lane is one item in flight`}
-              className={cn(
-                "inline-flex items-center gap-1 rounded border px-1.5 py-px text-[9.5px] leading-none",
-                s.lanes.inUse >= s.lanes.cap ? "border-warning/45 bg-warning/10 text-warning" : "border-border bg-secondary/40 text-muted-foreground",
-              )}
-            >
-              <Gauge aria-hidden className="size-2.5" />
-              <span className="font-mono tabular-nums">
+            <span title={`${s.lanes.inUse} of ${s.lanes.cap} lanes in use — a lane is one item in flight`} className={capacityChip(atCap(s.lanes))}>
+              <Gauge aria-hidden className="size-2.5 shrink-0" />
+              <span className={dsText.nums}>
                 {s.lanes.inUse}/{s.lanes.cap}
               </span>
               lanes
@@ -827,13 +931,10 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
             <span
               key={b.system}
               title={`${b.system}: ${b.inUse} of ${b.cap} concurrent sessions in use by this worker`}
-              className={cn(
-                "inline-flex items-center gap-1 rounded border px-1.5 py-px text-[9.5px] leading-none",
-                b.inUse >= b.cap ? "border-warning/45 bg-warning/10 text-warning" : "border-border bg-secondary/40 text-muted-foreground",
-              )}
+              className={capacityChip(atCap(b))}
             >
               {b.system}
-              <span className="font-mono tabular-nums">
+              <span className={dsText.nums}>
                 {b.inUse}/{b.cap}
               </span>
             </span>
@@ -845,55 +946,72 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
           an executor that is alive, healthy and stuck must say so, or the panel
           is decorative. */}
       {s.waiting && (
-        <div className="mt-1.5 flex items-start gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2 py-1">
-          <Hourglass aria-hidden className="mt-px size-3 shrink-0 text-warning" />
-          <span className="min-w-0 text-[10px] leading-tight text-warning">
-            Waiting <span className="font-mono tabular-nums">{fmtElapsed(s.waiting.sinceSec + tick)}</span> for the{" "}
+        <div
+          className={cn(
+            "flex items-start border",
+            "gap-[var(--ds-space-snug)] px-[var(--ds-space-base)] py-[var(--ds-space-tight)]",
+            dsRadius.md,
+            "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]",
+          )}
+        >
+          <Hourglass aria-hidden className={cn(dsIcon.sm, "mt-px shrink-0 text-[color:var(--ds-status-waiting-fg)]")} />
+          <span className={cn(dsText.meta, "min-w-0 text-[color:var(--ds-status-waiting-fg)]")}>
+            Waiting <span className={dsText.nums}>{fmtElapsed(s.waiting.sinceSec + tick)}</span> for the{" "}
             <span className="font-semibold">{s.waiting.system}</span> lease — held by {s.waiting.heldByWorkflow}{" "}
-            <span className="font-mono">{s.waiting.heldByTrace}</span>
+            <span className={dsText.nums}>{s.waiting.heldByTrace}</span>
           </span>
         </div>
       )}
 
-      <div className="mt-1.5 grid grid-cols-2 gap-1">
-        {s.browsers.map((b) => (
-          <BrowserTile key={b.id} b={b} />
+      {/* An odd last tile spans both columns: a lone half-width tile beside
+          dead space reads as one that failed to render. */}
+      <div className="grid grid-cols-2 gap-[var(--ds-space-tight)]">
+        {s.browsers.map((b, i) => (
+          <BrowserTile key={b.id} b={b} span={s.browsers.length % 2 === 1 && i === s.browsers.length - 1} />
         ))}
       </div>
 
       {/* micro pipeline — where the in-flight item is, without opening anything */}
       {s.steps && s.steps.length >= 2 && (
-        <div aria-hidden className="mt-1.5 flex items-center gap-0" title={s.steps.map((st) => st.label).join(" · ")}>
+        <div aria-hidden className="flex items-center" title={s.steps.map((st) => st.label).join(" · ")}>
           {s.steps.map((st, i) => (
             <span key={st.label} className="flex flex-1 items-center last:flex-none">
               <span
                 className={cn(
                   "size-1.5 shrink-0 rounded-full",
-                  st.state === "done" && "bg-success/85",
-                  st.state === "current" && "bg-primary shadow-[0_0_0_2px_color-mix(in_srgb,var(--primary)_18%,transparent)]",
-                  st.state === "pending" && "border border-border bg-muted",
+                  st.state === "done" && "bg-[var(--ds-success-fg)] opacity-85",
+                  st.state === "current" && "bg-[var(--ds-accent)] ring-2 ring-[color:var(--ds-accent-quiet)]",
+                  st.state === "pending" && cn("border bg-[var(--ds-surface-2)]", dsBorder.base),
                 )}
               />
               {i < s.steps!.length - 1 && (
-                <span className={cn("h-px min-w-[3px] flex-1", st.state === "done" ? "bg-success/30" : "bg-border")} />
+                <span
+                  className={cn(
+                    "h-px min-w-[3px] flex-1",
+                    st.state === "done" ? "bg-[var(--ds-success-fg)] opacity-30" : "bg-[var(--ds-border)]",
+                  )}
+                />
               )}
             </span>
           ))}
         </div>
       )}
 
-      <div className="mt-1.5 flex items-center gap-2 border-t border-border/60 pt-1.5 text-[10px] text-muted-foreground">
-        <span className="font-mono tabular-nums">{s.elapsedSec > 0 ? fmtElapsed(s.elapsedSec + tick) : "—"}</span>
+      <div
+        className={cn(
+          dsText.meta,
+          "flex items-center border-t text-[color:var(--ds-fg-muted)]",
+          dsBorder.subtle,
+          "gap-[var(--ds-space-snug)] pt-[var(--ds-space-snug)]",
+        )}
+      >
+        <span className={dsText.nums}>{s.elapsedSec > 0 ? fmtElapsed(s.elapsedSec + tick) : "—"}</span>
         <span className="min-w-0 flex-1 truncate" title={s.sleepPerTaskSec ? `Sleeps ${s.sleepPerTaskSec}s between tasks` : undefined}>
           {s.sleepPerTaskSec ? `${s.step ?? ""} · ${s.sleepPerTaskSec}s/task sleep` : (s.step ?? "")}
         </span>
-        <button
-          type="button"
-          onClick={NOOP}
-          className="shrink-0 rounded border border-border px-1.5 py-px text-[10px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          stop
-        </button>
+        <Button size="sm" variant="outline" onClick={NOOP} className="shrink-0">
+          Stop
+        </Button>
       </div>
     </article>
   );
@@ -912,45 +1030,68 @@ export function DemoSessionPanel({ tick }: { tick: number }) {
   const lanesCap = DEMO_SESSIONS.reduce((n, s) => n + (s.lanes?.cap ?? 0), 0);
   const blocked = DEMO_SESSIONS.filter((s) => s.waiting);
 
+  /** the summary chips on the collapsed bar — one shape, two loudness levels */
+  const barChip = (warn: boolean): string =>
+    cn(
+      "inline-flex shrink-0 items-center border",
+      "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
+      dsRadius.sm,
+      dsText.micro,
+      warn
+        ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]"
+        : "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)]",
+    );
+
   return (
-    <section aria-label="Session Panel" className="shrink-0 border-t border-border bg-card">
-      <div className="flex h-9 items-center gap-3 px-3">
+    <section aria-label="Session Panel" className={cn("shrink-0 border-t", dsBorder.base, dsSurface.card)}>
+      <div className={cn("flex items-center", dsSize.hBar, "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)]")}>
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-1 py-1 text-left outline-none hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn(
+            "flex min-w-0 flex-1 cursor-pointer items-center overflow-hidden text-left",
+            "h-[var(--ds-h-md)] gap-[var(--ds-space-cozy)] px-[var(--ds-space-tight)]",
+            dsRadius.md,
+            dsFocus,
+            dsMotion.fast,
+            "hover:bg-[var(--ds-surface-3)]",
+          )}
         >
-          {open ? <ChevronDown aria-hidden className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronUp aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />}
-          <span className="text-[11.5px] font-medium text-foreground">Sessions</span>
+          {open ? (
+            <ChevronDown aria-hidden className={cn(dsIcon.md, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+          ) : (
+            <ChevronUp aria-hidden className={cn(dsIcon.md, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+          )}
+          <span className={cn(dsText.ui, "shrink-0 font-semibold text-[color:var(--ds-fg)]")}>Sessions</span>
           {/* 3-way split — a daemon that is alive but has not reported a phase is
               still AUTHENTICATING, never idle. Calling it idle misreads capacity. */}
-          <span className="flex items-center gap-2.5 text-[11px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1">
-              <span aria-hidden className="size-1.5 rounded-full bg-success" />
+          <span className={cn(dsText.meta, "flex shrink-0 items-center gap-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]")}>
+            <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+              <span aria-hidden className="size-1.5 rounded-full bg-[var(--ds-success-fg)]" />
               {running} running
             </span>
-            <span className="inline-flex items-center gap-1">
-              <span aria-hidden className="size-1.5 rounded-full bg-warning animate-pulse motion-reduce:animate-none" />
+            <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+              <span
+                aria-hidden
+                className="size-1.5 rounded-full bg-[var(--ds-status-waiting-fg)] animate-pulse motion-reduce:animate-none"
+              />
               {auth} authenticating
             </span>
-            <span className="inline-flex items-center gap-1">
-              <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground/60" />
+            <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+              <span aria-hidden className="size-1.5 rounded-full bg-[var(--ds-fg-faint)]" />
               {idle} idle
             </span>
             {failed > 0 && (
-              <span className="inline-flex items-center gap-1 text-destructive">
-                <span aria-hidden className="size-1.5 rounded-full bg-destructive" />
+              <span className="inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-danger)]">
+                <span aria-hidden className="size-1.5 rounded-full bg-[var(--ds-danger)]" />
                 {failed} failed
               </span>
             )}
           </span>
-          <span
-            title={`${lanesInUse} of ${lanesCap} lanes in use across every worker`}
-            className="inline-flex items-center gap-1 rounded border border-border bg-secondary/40 px-1.5 py-px text-[10px] text-muted-foreground"
-          >
-            <Gauge aria-hidden className="size-3" />
-            <span className="font-mono tabular-nums">
+          <span title={`${lanesInUse} of ${lanesCap} lanes in use across every worker`} className={barChip(false)}>
+            <Gauge aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
+            <span className={dsText.nums}>
               {lanesInUse}/{lanesCap}
             </span>
             lanes
@@ -958,37 +1099,39 @@ export function DemoSessionPanel({ tick }: { tick: number }) {
           {blocked.length > 0 && (
             <span
               title={blocked.map((s) => `${s.workflow} is waiting on the ${s.waiting?.system} lease`).join(" · ")}
-              className="inline-flex items-center gap-1 rounded border border-warning/40 bg-warning/10 px-1.5 py-px text-[10px] text-warning"
+              className={barChip(true)}
             >
-              <Hourglass aria-hidden className="size-3" />
+              <Hourglass aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
               {blocked.length} waiting on a lease
             </span>
           )}
           {sickBrowsers > 0 && (
-            <span className="inline-flex items-center gap-1 rounded border border-warning/40 bg-warning/10 px-1.5 py-px text-[10px] text-warning">
-              <AlertTriangle aria-hidden className="size-3" />
+            <span className={barChip(true)}>
+              <AlertTriangle aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
               {sickBrowsers} browsers need attention
             </span>
           )}
         </button>
-        <span className="flex shrink-0 items-center gap-1.5">
-          <button
-            type="button"
-            aria-label="Add a worker"
-            onClick={NOOP}
-            className="rounded-md p-1 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Plus aria-hidden className="size-3.5" />
-          </button>
-          <span className="inline-flex items-center gap-1 text-[10.5px] text-success">
-            <span aria-hidden className="size-1.5 rounded-full bg-success animate-pulse motion-reduce:animate-none" />
+        <span className="flex shrink-0 items-center gap-[var(--ds-space-snug)]">
+          <IconButton size="sm" label="Add a worker" onClick={NOOP} icon={<Plus aria-hidden className={dsIcon.md} />} />
+          <span className={cn(dsText.meta, "inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-success-fg)]")}>
+            <span aria-hidden className="size-1.5 rounded-full bg-[var(--ds-success-fg)] animate-pulse motion-reduce:animate-none" />
             Live
           </span>
         </span>
       </div>
 
       {open && (
-        <div className="flex gap-2 overflow-x-auto border-t border-border/60 px-3 py-2.5">
+        <div
+          className={cn(
+            // items-start, not stretch: a card is as tall as what it knows.
+            // The crashed worker has two lines to say, and stretching it into a
+            // full-height red block overstates it and looks unfinished.
+            "flex items-start overflow-x-auto border-t",
+            dsBorder.subtle,
+            "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-cozy)]",
+          )}
+        >
           {DEMO_SESSIONS.map((s) => (
             <SessionCard key={s.id} s={s} tick={tick} />
           ))}

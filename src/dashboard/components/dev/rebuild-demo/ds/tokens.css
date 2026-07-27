@@ -206,6 +206,7 @@
   --ds-h-bar: 36px; /* status bar, panel toolbar */
   --ds-h-topbar: 44px; /* the app top bar */
   --ds-w-rail: 200px; /* the workflow rail */
+  --ds-w-session-card: 268px; /* one worker card in the Session Panel drawer */
 
   /* ---------------------------------------------------------------------
      RADIUS — derived from the product's --radius (8px) so the demo can
