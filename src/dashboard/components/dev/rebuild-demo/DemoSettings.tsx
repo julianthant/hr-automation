@@ -8,6 +8,7 @@ import {
   FolderTree,
   Gauge,
   Info,
+  Keyboard,
   Link2,
   Lock,
   Monitor,
@@ -72,6 +73,7 @@ import {
   type SettingSource,
   type StorageMode,
 } from "./demo-settings-wire";
+import { DEMO_SHORTCUTS, DemoShortcutsLegend } from "./demo-shortcuts";
 
 /**
  * DEV-ONLY — the rebuild demo's SETTINGS surface.
@@ -110,7 +112,8 @@ export type SettingsSectionKey =
   | "behaviour"
   | "system-urls"
   | "budgets"
-  | "storage";
+  | "storage"
+  | "keyboard";
 
 interface SectionSpec {
   key: SettingsSectionKey;
@@ -173,7 +176,27 @@ const STATUS_SECTIONS: SectionSpec[] = [
   },
 ];
 
-const SECTIONS: SectionSpec[] = [...EDITABLE_SECTIONS, ...STATUS_SECTIONS];
+/**
+ * HELP — its own nav group, not a sixth Status entry.
+ *
+ * Two reasons it is separated rather than appended. `STATUS_SECTIONS` is read
+ * BY INDEX for its blurbs (`STATUS_SECTIONS[1]`, `[2]`), so appending is a trap
+ * waiting for the next insert; and Help answers a different question from the
+ * rest of the page — Status says what the deployment IS, Help says what the
+ * product DOES — which is exactly the kind of distinction a nav group exists to
+ * make.
+ */
+const HELP_SECTIONS: SectionSpec[] = [
+  {
+    key: "keyboard",
+    label: "Keyboard",
+    icon: Keyboard,
+    blurb: "Every key the shell binds, by where it works.",
+    status: true,
+  },
+];
+
+const SECTIONS: SectionSpec[] = [...EDITABLE_SECTIONS, ...STATUS_SECTIONS, ...HELP_SECTIONS];
 
 // ---------------------------------------------------------------------------
 // Provenance
@@ -856,11 +879,65 @@ function StorageSection({ storage }: { storage: StorageMode }) {
 }
 
 // ---------------------------------------------------------------------------
+// Help: keyboard
+// ---------------------------------------------------------------------------
+
+/**
+ * The keyboard legend, at reading size.
+ *
+ * It renders `DEMO_SHORTCUTS` through the SAME component the Top Bar popover
+ * uses, so a key cannot be bound in one place and described in another. The two
+ * differ only in density: the popover is one list in 380px, this is the same
+ * list with its scope named, because a page has the room to say WHERE a key
+ * works and that is the first thing an operator gets wrong.
+ *
+ * The two rules below are not teaching — they are the conditions under which
+ * these bindings do and do not fire, which is a fact about the bindings and the
+ * one thing a legend of keys cannot carry in a key column.
+ */
+function KeyboardSection() {
+  return (
+    <Panel className="min-h-0 flex-1">
+      <PanelHeader
+        title="Keyboard"
+        subtitle={HELP_SECTIONS[0].blurb}
+        icon={<Keyboard aria-hidden className={dsIcon.lg} />}
+        meta={`${DEMO_SHORTCUTS.length} bindings`}
+      />
+      <PanelBody className="flex flex-col gap-[var(--ds-space-section)] p-[var(--ds-space-cozy)]">
+        <DemoShortcutsLegend grouped className="max-w-[64ch]" />
+
+        <div className="flex min-w-0 flex-col gap-[var(--ds-space-snug)]">
+          <SectionLabel>When they fire</SectionLabel>
+          <BulletList
+            className="max-w-[86ch]"
+            items={[
+              "Never while the caret is in a text field — typing a name into search does not jump the queue.",
+              "Never while a dialog or a drawer is open. That surface owns the keyboard, including Escape.",
+              "Right-click, and the platform's own Menu / Shift+F10 key, open the same row menu that m does — m works from the SELECTION, so it does not need the row to be focused.",
+            ]}
+          />
+        </div>
+      </PanelBody>
+    </Panel>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // The page
 // ---------------------------------------------------------------------------
 
-export function DemoSettingsPage({ storage, onBack }: { storage: StorageMode; onBack: () => void }) {
-  const [active, setActive] = useState<SettingsSectionKey>("general");
+export function DemoSettingsPage({
+  storage,
+  onBack,
+  initialSection = "general",
+}: {
+  storage: StorageMode;
+  onBack: () => void;
+  /** which section the page opens on — the Top Bar's Help route lands on Keyboard */
+  initialSection?: SettingsSectionKey;
+}) {
+  const [active, setActive] = useState<SettingsSectionKey>(initialSection);
   const [result, setResult] = useState<SettingSaveResult | null>(null);
   /**
    * The draft is PAGE state, keyed by leaf. It used to live inside the section
@@ -925,6 +1002,10 @@ export function DemoSettingsPage({ storage, onBack }: { storage: StorageMode; on
         {STATUS_SECTIONS.map((entry) => (
           <SectionButton key={entry.key} entry={entry} active={active === entry.key} dirty={0} onClick={() => setActive(entry.key)} />
         ))}
+        <SectionLabel className="px-[var(--ds-space-base)] pb-[var(--ds-space-tight)] pt-[var(--ds-space-cozy)]">Help</SectionLabel>
+        {HELP_SECTIONS.map((entry) => (
+          <SectionButton key={entry.key} entry={entry} active={active === entry.key} dirty={0} onClick={() => setActive(entry.key)} />
+        ))}
       </nav>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-[var(--ds-space-base)] p-[var(--ds-space-cozy)]">
@@ -946,6 +1027,8 @@ export function DemoSettingsPage({ storage, onBack }: { storage: StorageMode; on
           <BudgetsSection />
         ) : section.key === "storage" ? (
           <StorageSection storage={storage} />
+        ) : section.key === "keyboard" ? (
+          <KeyboardSection />
         ) : (
           <LeafSection section={section} draft={draft} onDraft={setDraftValue} />
         )}

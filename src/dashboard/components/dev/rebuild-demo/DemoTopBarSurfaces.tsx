@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowUpRight,
   Bell,
   Calendar,
   ChevronLeft,
@@ -64,6 +65,7 @@ import {
   type DemoSearchOutcome,
   type NotificationFilterKey,
 } from "./demo-flows-wire";
+import { DemoShortcutsLegend } from "./demo-shortcuts";
 
 /**
  * DEV-ONLY — the Top Bar surfaces that were dead: SEARCH, the DATE navigator,
@@ -87,8 +89,8 @@ export interface DemoNavigateTo {
 // ===========================================================================
 
 /**
- * The demo's whole keyboard flow, in the one control that was already sitting
- * in the Top Bar doing nothing.
+ * The Top Bar's route to the keyboard flow — the one control that was already
+ * sitting there doing nothing.
  *
  * It used to be a permanent legend strip beside the view title — five key
  * groups the operator reads once and then scrolls past every day, holding a
@@ -96,24 +98,13 @@ export interface DemoNavigateTo {
  * home for something that has to be REACHABLE rather than visible: it opens on
  * click, so pointer, touch and keyboard all get to it, unlike the hover-only
  * tooltip DESIGN.md forbids for anything load-bearing.
+ *
+ * The LIST itself is `demo-shortcuts.tsx`, shared with Settings → Help. This
+ * control keeps its own footnote — a popover the operator opened mid-task is
+ * exactly where "not while you are typing" is worth one line — while the Help
+ * page states the same rule where somebody reading the product would look.
  */
-const DEMO_SHORTCUTS: { keys: string[]; join?: string; what: string }[] = [
-  { keys: ["r"], what: "start a run — any workflow, from any view" },
-  { keys: ["j", "k"], what: "move down / up the queue" },
-  { keys: ["n"], what: "jump to the next row waiting on you" },
-  { keys: ["Enter"], what: "open the selected group" },
-  // The keyboard route to the row context menu. Right-click and the platform's
-  // own Menu / Shift+F10 key open the same menu; this one does not depend on
-  // the operator's keyboard having that key, and it works from the SELECTION
-  // rather than from focus.
-  { keys: ["m"], what: "every command on the selected row" },
-  { keys: ["Esc"], what: "back out of a group" },
-  { keys: ["c"], what: "mark the selected member checked" },
-  { keys: ["1", "4"], join: "–", what: "switch the detail panel's tab" },
-  { keys: ["w"], what: "cycle the Workflow Panel — floating, icon, sidebar" },
-];
-
-export function DemoShortcutsPopover() {
+export function DemoShortcutsPopover({ onOpenHelp }: { onOpenHelp?: () => void }) {
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -125,25 +116,24 @@ export function DemoShortcutsPopover() {
         width="lg"
         align="end"
       >
-        <dl className="flex flex-col gap-[var(--ds-space-snug)]">
-          {DEMO_SHORTCUTS.map((s) => (
-            <div key={s.what} className="flex items-baseline gap-[var(--ds-space-base)]">
-              <dt className="flex shrink-0 items-center gap-[var(--ds-space-tight)]">
-                {s.keys.map((k, i) => (
-                  <span key={k} className="inline-flex items-center gap-[var(--ds-space-tight)]">
-                    {i > 0 && s.join && (
-                      <span aria-hidden className={cn(dsText.meta, "text-[color:var(--ds-fg-faint)]")}>
-                        {s.join}
-                      </span>
-                    )}
-                    <Kbd>{k}</Kbd>
-                  </span>
-                ))}
-              </dt>
-              <dd className={cn(dsText.body, "min-w-0 text-[color:var(--ds-fg-secondary)]")}>{s.what}</dd>
-            </div>
-          ))}
-        </dl>
+        <DemoShortcutsLegend />
+        {/* The other route to the same registry. A popover is where you check
+            one key mid-task; the Help page is where you read the set — and a
+            page nobody can find from the control that shows the same list is a
+            page nobody opens. */}
+        {onOpenHelp && (
+          <div className="mt-[var(--ds-space-base)] border-t border-[color:var(--ds-border-subtle)] pt-[var(--ds-space-snug)]">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onOpenHelp}
+              icon={<ArrowUpRight aria-hidden className={dsIcon.md} />}
+              className="w-full justify-start"
+            >
+              Help
+            </Button>
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );

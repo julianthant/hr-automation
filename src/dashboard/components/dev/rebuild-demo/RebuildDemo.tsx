@@ -20,7 +20,7 @@ import { DemoQueueToolbar, runBulkCommand, type BulkOutcome } from "./DemoBulkBa
    Explorer and the activity report. Self-contained: everything they need
    lives in Demo{Settings,VersionBump,Archive,Explorer,ActivityReport}.tsx and
    demo-{settings,archive,explorer,report}-wire.ts. */
-import { DemoSettingsPage, DemoStorageBanner } from "./DemoSettings";
+import { DemoSettingsPage, DemoStorageBanner, type SettingsSectionKey } from "./DemoSettings";
 import { DemoArchivePage } from "./DemoArchive";
 import { DemoExplorerPage } from "./DemoExplorer";
 import { DemoActivityReportPage } from "./DemoActivityReport";
@@ -75,6 +75,13 @@ export function RebuildDemo() {
   const { theme, toggleTheme } = useDemoTheme();
   const [selectedId, setSelectedId] = useState("oath-summer");
   const [shellView, setShellView] = useState<DemoShellView>("queue");
+  /**
+   * Which Settings section the gear opens on. The gear itself always lands on
+   * the first one; the Top Bar's keyboard popover has its own route straight to
+   * Help → Keyboard, so a control that shows the shortcut list can reach the
+   * page that holds the same list.
+   */
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionKey>("general");
   const [activeWorkflow, setActiveWorkflow] = useState(DEFAULT_WORKFLOW);
   // Floating window · icon · docked sidebar, persisted. The 200px column is a
   // choice now rather than a tax, and the default costs the panels nothing.
@@ -447,6 +454,10 @@ export function RebuildDemo() {
         onToggleTheme={toggleTheme}
         storage={storage}
         onStorage={setStorage}
+        onOpenHelp={() => {
+          setSettingsSection("keyboard");
+          setShellView("settings");
+        }}
       />
 
       {/* A degraded dashboard says so on every view, not only on the page that
@@ -454,7 +465,7 @@ export function RebuildDemo() {
       <DemoStorageBanner storage={storage} onOpenSettings={() => setShellView("settings")} />
 
       {shellView === "settings" ? (
-        <DemoSettingsPage storage={storage} onBack={() => setShellView("queue")} />
+        <DemoSettingsPage storage={storage} initialSection={settingsSection} onBack={() => setShellView("queue")} />
       ) : shellView === "archive" ? (
         <DemoArchivePage
           onBack={() => setShellView("queue")}
