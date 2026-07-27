@@ -499,22 +499,22 @@ const POPOVER_WIDTH: Record<DsPopoverWidth, string> = {
 };
 
 /**
- * Entry motion is ORIGIN-AWARE: the surface travels the last 3px out of the
- * side it is actually anchored to, so it reads as coming FROM the trigger
- * rather than fading in from nowhere. Transform and opacity only, on the
- * `--ds-dur-3` token, which `prefers-reduced-motion` zeroes with everything
- * else.
+ * Entry motion is ORIGIN-AWARE: the surface scales out of the point it is
+ * anchored to, so it reads as coming FROM the trigger rather than appearing
+ * from nowhere. `--radix-popover-content-transform-origin` is the exact anchor
+ * point Radix computed — which is why this survives a collision FLIP, where a
+ * hand-picked origin (or a translate keyed off the `side` prop) would have the
+ * surface moving away from its own trigger.
  *
- * It keys off Radix's own `data-side`, not the `side` PROP, because the prop is
- * a request: a popover near the bottom of the viewport flips, and a flipped
- * surface that still travelled downward would be moving away from its trigger.
+ * It scales from 0.97, never from 0: nothing in the world appears from nothing.
+ * Transform and opacity only, on `--ds-dur-3`, which `prefers-reduced-motion`
+ * zeroes along with every other duration in the system.
+ *
+ * There is no EXIT animation, deliberately, and Dialog and Drawer do the same:
+ * an entrance answers "where did this come from", a dismissal answers nothing.
+ * Slow where the operator is deciding, instant where the system is responding.
  */
-const POPOVER_ORIGIN = cn(
-  "data-[side=bottom]:-translate-y-[3px]",
-  "data-[side=top]:translate-y-[3px]",
-  "data-[side=left]:translate-x-[3px]",
-  "data-[side=right]:-translate-x-[3px]",
-);
+const POPOVER_ORIGIN = "origin-[var(--radix-popover-content-transform-origin)]";
 
 /**
  * ```tsx
@@ -623,7 +623,8 @@ function PopoverSurface({
           "max-w-[calc(100vw-var(--ds-space-section))] outline-none",
           dsLayer.menu,
           dsMotion.enter,
-          entered ? "opacity-100 translate-x-0 translate-y-0" : cn("opacity-0", POPOVER_ORIGIN),
+          POPOVER_ORIGIN,
+          entered ? "opacity-100 scale-100" : "opacity-0 scale-[0.97]",
           className,
         )}
       >

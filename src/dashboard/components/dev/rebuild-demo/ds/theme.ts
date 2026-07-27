@@ -71,9 +71,20 @@ export function useDemoTheme(): {
   useEffect(() => {
     const html = document.documentElement;
     const { body } = document;
+    /* A palette change is a CUT. Without this, the elements carrying
+       `ds-motion` would crossfade their colours over 90–140ms while everything
+       else snapped, and the swap would read as a ragged wipe. The attribute
+       zeroes every duration token for the frame the new palette lands in; see
+       "THEME SWAP" in `tokens.css`. */
+    html.setAttribute("data-demo-theme-switching", "");
+    const settle = requestAnimationFrame(() => {
+      requestAnimationFrame(() => html.removeAttribute("data-demo-theme-switching"));
+    });
     html.setAttribute(DEMO_THEME_ATTR, theme);
     body.setAttribute(DEMO_THEME_ATTR, theme);
     return () => {
+      cancelAnimationFrame(settle);
+      html.removeAttribute("data-demo-theme-switching");
       // The demo is one view inside the real dashboard; leaving the attribute
       // behind would re-theme every other view.
       html.removeAttribute(DEMO_THEME_ATTR);

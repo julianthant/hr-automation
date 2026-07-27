@@ -308,6 +308,28 @@
 }
 
 /* ==========================================================================
+   THEME SWAP — a cut, not a transition
+   ==========================================================================
+   A palette change is not motion: colour is neither transform nor opacity, and
+   animating it across a whole page is a paint on every node. Worse, doing
+   NOTHING is not neutral either — every element carrying `ds-motion` /
+   `ds-motion-fast` already transitions `color` and `background-color`, so the
+   swap would crossfade those elements over 90–140ms while everything else
+   snapped, and the page would read as a ragged wipe rather than one change.
+
+   `ds/theme.ts` sets this attribute for the single frame the swap lands in.
+   Zeroing the four duration tokens is the same switch `prefers-reduced-motion`
+   throws at the bottom of this file: every transition in the system reads them,
+   so one declaration removes all of them without an `!important` anywhere.
+   ========================================================================== */
+:root[data-demo-theme-switching] {
+  --ds-dur-1: 0ms;
+  --ds-dur-2: 0ms;
+  --ds-dur-3: 0ms;
+  --ds-dur-4: 0ms;
+}
+
+/* ==========================================================================
    THEME · DARK — "Graphite Warm"
    ==========================================================================
    Warm near-black. Depth comes from the surface ladder plus a white-alpha
