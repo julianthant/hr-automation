@@ -312,6 +312,12 @@
      column and truncates there, which it did before at any width. */
   --ds-w-member-detail: 104px;
   --ds-w-member-eid: 64px;
+  /* A queue row's HANGING INDENT — the leading column its status tick sits in,
+     and the left edge every line under the title aligns to. It is a real grid
+     track, so the row's rhythm comes from ONE gap instead of a hand-picked
+     `ml-5` on each of the six things that can appear under a title. 14px icon +
+     the 4px that binds the tick to the name it belongs to. */
+  --ds-w-row-indent: 18px;
   --ds-w-rail: 200px; /* the workflow rail */
   /* The run's CONTEXT RAIL — the third column of the detail region, where the
      Data ledger, the evidence and the run's provenance live so the log stream
@@ -331,7 +337,23 @@
   --ds-w-popover-sm: 240px;
   --ds-w-popover-md: 300px;
   --ds-w-popover-lg: 380px;
+  /* A context menu's FLOOR. It holds verbs, so it is narrow — but it must not
+     be narrower than its own longest verb or the menu re-flows around whichever
+     row it was opened on, and a menu that changes width per object reads as a
+     different menu each time. */
+  --ds-w-menu: 216px;
   --ds-w-session-card: 268px; /* one worker card in the Session Panel drawer */
+  /* One cell of a wrapping CHIP ROW. Chips carry facts of wildly different
+     lengths, so a plain `flex-wrap` leaves every line ending somewhere else and
+     an orphan on line two — the ragged edge the operator called out. Laying them
+     on a track of this width gives every line the SAME ending edge, so a wrapped
+     row reads as one block instead of as debris. 148px seats the demo's longest
+     fact (`txn TXN-0891245`) without hyphenating it. */
+  --ds-w-chip-cell: 148px;
+  /* The same idea at the density a Session Card runs at: `ucpath 1/1` is a
+     third the width of a queue fact, and a 148px track would leave one chip a
+     line and half the card empty. */
+  --ds-w-capacity-cell: 76px;
 
   /* ---------------------------------------------------------------------
      RADIUS — derived from the product's --radius (8px) so the demo can

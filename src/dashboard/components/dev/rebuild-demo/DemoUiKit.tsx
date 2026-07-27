@@ -3,8 +3,10 @@ import {
   ArrowUpRight,
   Camera,
   ChevronsUp,
+  ClipboardList,
   Inbox,
   Info,
+  Pencil,
   Play,
   RotateCcw,
   ShieldCheck,
@@ -24,6 +26,12 @@ import {
   CardHeader,
   Checkbox,
   Chip,
+  ChipRow,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
   CountBadge,
   MetaLine,
   Refusal,
@@ -78,7 +86,10 @@ import {
   Tooltip,
   TooltipProvider,
   Well,
+  dsBorder,
+  dsFocus,
   dsIcon,
+  dsRadius,
   dsText,
   useToasts,
   type DsStatus,
@@ -177,6 +188,15 @@ function Section({
     </section>
   );
 }
+
+/** five facts of five different widths — the case a bare `flex-wrap` gets wrong */
+const CHIP_ROW_SPECIMEN: { label: string; value: string }[] = [
+  { label: "wage", value: "$18.50/hr" },
+  { label: "effective", value: "07/01" },
+  { label: "dept", value: "000482" },
+  { label: "txn", value: "TXN-0891245" },
+  { label: "EID", value: "10084412" },
+];
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -552,6 +572,30 @@ function ContainersSection() {
               ]}
             />
           </Well>
+
+          {/* ChipRow — the same five facts twice. The top row is a bare
+              `flex-wrap`, which is what every chip row in this demo used to be:
+              line one ends at the container edge, line two ends wherever its
+              last chip stopped, and the set reads as four-plus-one. The bottom
+              row lays them on the shared track, so both lines end on the same
+              edge and it reads as one block. */}
+          <div className="flex flex-col gap-[var(--ds-space-snug)]">
+            <SectionLabel>ChipRow — a wrapping row of peer facts</SectionLabel>
+            <div className="flex flex-wrap gap-[var(--ds-space-tight)] opacity-60">
+              {CHIP_ROW_SPECIMEN.map((c) => (
+                <Chip key={c.label} label={c.label}>
+                  {c.value}
+                </Chip>
+              ))}
+            </div>
+            <ChipRow>
+              {CHIP_ROW_SPECIMEN.map((c) => (
+                <Chip key={c.label} label={c.label} className="w-full">
+                  {c.value}
+                </Chip>
+              ))}
+            </ChipRow>
+          </div>
         </div>
       </div>
 
@@ -791,6 +835,41 @@ function OverlaysSection() {
         <Button variant="secondary" onClick={() => setDrawer(true)}>
           Open drawer
         </Button>
+      </Row>
+      {/* ContextMenu — an object's own commands, ON the object. There is no
+          `⋯` in this system: a button whose only job is to admit there are more
+          buttons costs a slot on every row in a queue. Right-click the panel
+          below, or focus it and press the platform's Menu / Shift+F10 key —
+          a shell binds its own shortcut through `openContextMenuFor`. */}
+      <Row label="ContextMenu">
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div
+              role="button"
+              tabIndex={0}
+              className={cn(
+                "flex w-[260px] cursor-context-menu items-center justify-center border border-dashed",
+                "h-[var(--ds-h-lg)]",
+                dsRadius.md,
+                dsFocus,
+                dsText.body,
+                "border-[color:var(--ds-border-strong)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)]",
+              )}
+            >
+              Right-click me
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent label="Commands for the specimen row">
+            <ContextMenuItem icon={<ClipboardList aria-hidden className={dsIcon.md} />}>Review</ContextMenuItem>
+            <ContextMenuSeparator className={cn("my-[var(--ds-space-tight)] h-px border-t", dsBorder.subtle)} />
+            <ContextMenuItem icon={<RotateCcw aria-hidden className={dsIcon.md} />}>Retry</ContextMenuItem>
+            <ContextMenuItem icon={<Pencil aria-hidden className={dsIcon.md} />}>Name this run…</ContextMenuItem>
+            <ContextMenuSeparator className={cn("my-[var(--ds-space-tight)] h-px border-t", dsBorder.subtle)} />
+            <ContextMenuItem icon={<Trash2 aria-hidden className={dsIcon.md} />} tone="destructive" hint="asks first">
+              Delete
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
       </Row>
       <Row label="Toast">
         <Button

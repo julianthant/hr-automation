@@ -454,6 +454,48 @@ export function MetaLine({
 }
 
 /* =========================================================================
+ * ChipRow — a wrapping row of facts that ends on ONE edge
+ * ====================================================================== */
+
+/**
+ * A row of chips that WRAPS without going ragged.
+ *
+ * `flex-wrap` on a set of chips of unequal width leaves each line ending
+ * wherever its last chip happened to stop, and the commonest result is one
+ * orphan on line two: `wage $18.50/hr` `effective 07/01` `dept 000482` above a
+ * lone `txn TXN-0891245`. Four facts then read as three-plus-one instead of as
+ * one block of four.
+ *
+ * A GRID track fixes it at the root: every chip occupies one cell of the same
+ * width, so every line ends on the same edge and the wrap is a second row of a
+ * table rather than an overflow. `auto-fit` means the track count is whatever
+ * the container can hold, so the same row is two columns in a 400px queue and
+ * four in a full-width panel with no breakpoint anywhere.
+ *
+ * Use it for a set of PEER facts. A row that mixes a chip with a sentence or a
+ * button is not this — it is a flex row, and the chip is one item in it.
+ */
+export function ChipRow({
+  children,
+  /** the widest a single cell may be — defaults to `--ds-w-chip-cell` */
+  cell,
+  className,
+}: {
+  children: ReactNode;
+  cell?: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn("grid min-w-0 items-center gap-[var(--ds-space-tight)]", className)}
+      style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${cell ?? "var(--ds-w-chip-cell)"}, 1fr))` }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/* =========================================================================
  * Refusal — the server said no
  * ====================================================================== */
 
