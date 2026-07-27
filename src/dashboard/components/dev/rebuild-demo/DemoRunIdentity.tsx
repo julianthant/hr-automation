@@ -25,7 +25,7 @@ import {
 } from "./demo-ui";
 import { StatusBadge } from "./demo-status";
 import { attemptDuration, attemptTrace, fmtElapsed, type DemoRerunDiffEntry, type DemoRow } from "./demo-data";
-import type { ActionDescriptorWire } from "./demo-wire";
+import { fmtVersionTag, workflowVersionTag, type ActionDescriptorWire } from "./demo-wire";
 
 /**
  * DEV-ONLY — WHICH RUN IS THIS, exactly.
@@ -63,6 +63,7 @@ import type { ActionDescriptorWire } from "./demo-wire";
 
 export function RunIdentityStrip({ row }: { row: DemoRow }) {
   const testSystems = Object.entries(row.resolvedInstance).filter(([, v]) => v === "test");
+  const ranVersion = fmtVersionTag({ major: row.workflowVersion, minor: row.workflowMinorVersion });
   const [presetOpen, setPresetOpen] = useState(false);
   useEffect(() => setPresetOpen(false), [row.id]);
 
@@ -96,16 +97,19 @@ export function RunIdentityStrip({ row }: { row: DemoRow }) {
         >
           {row.priority}
         </Chip>
+        {/* MAJOR is what makes a run incomparable — the minor digit is
+            presentation, so a row one minor behind is still the same run shape
+            and is deliberately NOT flagged. */}
         <Chip
           label="wf"
           tone={row.workflowVersion !== row.workflow.version ? "warning" : "neutral"}
           title={
             row.workflowVersion !== row.workflow.version
-              ? `Ran under ${row.workflow.label} v${row.workflowVersion}; runs are served by v${row.workflow.version} now. Runs of different versions are not comparable — a retry would replay retired code.`
-              : `${row.workflow.label} v${row.workflowVersion} — the version currently serving runs.`
+              ? `Ran under ${row.workflow.label} ${ranVersion}; runs are served by ${workflowVersionTag(row.workflow)} now. The run's SHAPE moved, so these are not comparable — a retry would replay retired code.`
+              : `${row.workflow.label} ${ranVersion} — the version currently serving runs.`
           }
         >
-          {`v${row.workflowVersion}`}
+          {ranVersion}
         </Chip>
         <Chip label="app" title="The app build that served this run — the other half of the archive key.">
           {row.appVersion}

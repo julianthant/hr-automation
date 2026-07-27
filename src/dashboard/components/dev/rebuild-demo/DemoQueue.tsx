@@ -49,6 +49,7 @@ import {
 import { FooterActions, OutcomeActionButton, RowContextMenu, type DemoActionHandler } from "./DemoActions";
 import { rowInBucket, type StatusBucket } from "./DemoShell";
 import { DEMO_DAY, dayLabel } from "./demo-days";
+import { fmtVersionTag, workflowVersionTag } from "./demo-wire";
 import {
   bandsFor,
   DEMO_ROWS,
@@ -384,12 +385,14 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): 
           dry run
         </span>
       )}
+      {/* MAJOR only: a run one MINOR behind renders identically, so flagging it
+          would be a chip that never means anything. */}
       {row.workflowVersion !== row.workflow.version && (
         <span
-          title={`Ran under ${row.workflow.label} v${row.workflowVersion}; runs are served by v${row.workflow.version} now. Archived runs are not comparable with today's.`}
+          title={`Ran under ${row.workflow.label} ${fmtVersionTag({ major: row.workflowVersion, minor: row.workflowMinorVersion })}; runs are served by ${workflowVersionTag(row.workflow)} now. Its shape moved, so it is not comparable with today's.`}
           className={rowChip("neutral", dsText.nums)}
         >
-          v{row.workflowVersion}
+          {fmtVersionTag({ major: row.workflowVersion, minor: row.workflowMinorVersion })}
         </span>
       )}
       {row.attemptHistory && (

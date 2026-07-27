@@ -367,8 +367,14 @@ export interface DemoRowSpec {
   priority?: "interactive" | "bulk";
   /** per-system prod/test resolution; a system left out resolved to prod */
   instance?: Partial<Record<SystemKey, "prod" | "test">>;
-  /** the descriptor version this run executed under (defaults to the registry's current) */
+  /** the descriptor MAJOR this run executed under (defaults to the registry's current) */
   workflowVersion?: number;
+  /**
+   * The descriptor MINOR. A run stamped at an older MAJOR is authored with its
+   * own minor; one at the current major inherits the registry's, because a
+   * minor bump does not move a run — it only changes how the same run reads.
+   */
+  workflowMinorVersion?: number;
   /** actor attribution — every row and every command records one */
   requestedBy?: string;
   /** accepted into the queue */
@@ -490,6 +496,7 @@ export interface DemoRow extends DemoRowSpec {
   priority: "interactive" | "bulk";
   resolvedInstance: Partial<Record<SystemKey, "prod" | "test">>;
   workflowVersion: number;
+  workflowMinorVersion: number;
   appVersion: string;
   requestedBy: string;
   evidence: DemoEvidenceWire;
@@ -625,6 +632,8 @@ export function projectRow(spec: DemoRowSpec, rawById: Map<string, DemoRowSpec>)
     priority: spec.priority ?? "interactive",
     resolvedInstance,
     workflowVersion: spec.workflowVersion ?? workflow.version,
+    workflowMinorVersion:
+      spec.workflowMinorVersion ?? (spec.workflowVersion === undefined ? (workflow.minorVersion ?? 0) : 0),
     appVersion: DEMO_APP_VERSION,
     requestedBy: spec.requestedBy ?? DEMO_OPERATOR,
     evidence: spec.evidence ?? { confidence: "unknown" },
