@@ -1208,7 +1208,10 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
     return (
       <article
         className={cn(
-          "flex shrink-0 flex-col border",
+          // No explicit height: `align-items: stretch` only stretches an item
+        // whose cross size computes to `auto`, so an `h-full` here would opt
+        // every card straight back out of the uniform row.
+        "flex shrink-0 flex-col border",
           "w-[var(--ds-w-session-card)] gap-[var(--ds-space-tight)] p-[var(--ds-space-base)]",
           dsRadius.lg,
           "border-[color:var(--ds-danger-border)] bg-[var(--ds-danger-quiet)]",
@@ -1227,6 +1230,9 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
   return (
     <article
       className={cn(
+        // No explicit height: `align-items: stretch` only stretches an item
+        // whose cross size computes to `auto`, so an `h-full` here would opt
+        // every card straight back out of the uniform row.
         "flex shrink-0 flex-col border",
         "w-[var(--ds-w-session-card)] gap-[var(--ds-space-snug)] p-[var(--ds-space-base)]",
         dsRadius.lg,
@@ -1342,10 +1348,15 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
         </div>
       )}
 
+      {/* The footer PINS to the bottom, and the slack above it is left empty on
+          purpose. An idle worker genuinely has less to say than a blocked one,
+          and stretching its browser tiles or padding it out with filler would
+          dress it up as busier than it is — the cards are the same height so
+          the row can be read across, not so every card looks equally loaded. */}
       <div
         className={cn(
           dsText.meta,
-          "flex items-center border-t text-[color:var(--ds-fg-muted)]",
+          "mt-auto flex items-center border-t text-[color:var(--ds-fg-muted)]",
           dsBorder.subtle,
           "gap-[var(--ds-space-snug)] pt-[var(--ds-space-snug)]",
         )}
@@ -1469,10 +1480,15 @@ export function DemoSessionPanel({ tick }: { tick: number }) {
       {open && (
         <div
           className={cn(
-            // items-start, not stretch: a card is as tall as what it knows.
-            // The crashed worker has two lines to say, and stretching it into a
-            // full-height red block overstates it and looks unfinished.
-            "flex items-start overflow-x-auto border-t",
+            // items-stretch: every card is as tall as the tallest. This
+            // OVERRIDES an earlier "a card is as tall as what it knows" — true
+            // of one card, wrong of the row, because five intrinsic heights
+            // made the strip read as ragged debris and put every footer on its
+            // own baseline, so `Stop` was in five places and the elapsed clocks
+            // could not be compared down a column. Uniform height is what makes
+            // the row scannable; the empty space inside a quiet card is left
+            // empty (see the footer note in `SessionCard`) rather than filled.
+            "flex items-stretch overflow-x-auto border-t",
             dsBorder.subtle,
             "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-cozy)]",
           )}
