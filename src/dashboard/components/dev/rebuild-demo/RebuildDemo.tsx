@@ -24,7 +24,7 @@ import { DemoExplorerPage } from "./DemoExplorer";
 import { DemoActivityReportPage } from "./DemoActivityReport";
 import type { StorageMode } from "./demo-settings-wire";
 import {
-  ALL_WORKFLOWS,
+  DEFAULT_WORKFLOW,
   countRows,
   DemoSessionPanel,
   DemoStatusBar,
@@ -71,7 +71,7 @@ export function RebuildDemo() {
   const { theme, toggleTheme } = useDemoTheme();
   const [selectedId, setSelectedId] = useState("oath-summer");
   const [shellView, setShellView] = useState<DemoShellView>("queue");
-  const [activeWorkflow, setActiveWorkflow] = useState(ALL_WORKFLOWS);
+  const [activeWorkflow, setActiveWorkflow] = useState(DEFAULT_WORKFLOW);
   // the day partition every surface reads — the top bar's date IS this value
   const [day, setDay] = useState(DEMO_DAY);
   const [view, setView] = useState<DemoView>({ kind: "queue" });
@@ -238,15 +238,26 @@ export function RebuildDemo() {
     [openPanel],
   );
 
-  /** moving the date re-anchors the selection inside the new day's corpus */
+  /**
+   * Moving the date re-anchors the selection inside the new day's corpus.
+   * The selection has to stay inside the panel you are looking at, or the
+   * detail panel describes a row the queue does not hold — so it lands on this
+   * workflow's first row for the new day, and only follows the day elsewhere
+   * when this workflow has nothing on it.
+   */
   const changeDay = useCallback(
     (next: string) => {
       setDay(next);
       setView({ kind: "queue" });
       const rows = topLevelRows(next);
-      if (!rows.some((r) => r.id === selectedId) && rows.length > 0) select(rows[0].id);
+      if (rows.some((r) => r.id === selectedId)) return;
+      const inPanel = rows.find((r) => r.wfLabel === activeWorkflow);
+      const landing = inPanel ?? rows[0];
+      if (!landing) return;
+      if (!inPanel) setActiveWorkflow(landing.wfLabel);
+      select(landing.id);
     },
-    [select, selectedId],
+    [select, selectedId, activeWorkflow],
   );
 
   const handlers = useMemo(
@@ -357,7 +368,9 @@ export function RebuildDemo() {
   const openExample = useCallback(
     (id: string) => {
       setShellView("queue");
-      setActiveWorkflow(ALL_WORKFLOWS);
+      // Land in the example's OWN panel. With no all-workflows view there is
+      // nowhere neutral to open it, and the row's workflow is the honest one.
+      setActiveWorkflow(DEMO_ROWS[id]?.wfLabel ?? DEFAULT_WORKFLOW);
       setFilter("all");
       setView({ kind: "queue" });
       setDay(DEMO_ROWS[id]?.enqueuedAt.slice(0, 10) ?? DEMO_DAY);
@@ -425,7 +438,7 @@ export function RebuildDemo() {
               )}
             >
               <h1 className={cn(dsText.title, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>
-                {activeWorkflow === ALL_WORKFLOWS ? "All workflows" : activeWorkflow}
+                {activeWorkflow}
               </h1>
               <span className={cn(dsText.meta, "shrink-0 text-[color:var(--ds-fg-muted)]")}>
                 <span className={dsText.nums}>{counts.all}</span> {counts.all === 1 ? "row" : "rows"}
@@ -503,7 +516,7 @@ export function RebuildDemo() {
                 rows={scopedRows}
                 state={state}
                 handlers={handlers}
-                workflowLabel={activeWorkflow === ALL_WORKFLOWS ? "" : activeWorkflow}
+                workflowLabel={activeWorkflow}
                 day={day}
               />
 

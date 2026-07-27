@@ -1155,7 +1155,7 @@ export function DemoQueue({
             </p>
             <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
               {state.filter === "all"
-                ? "Start one from the run controls, or pick another workflow in the rail."
+                ? "Start one from the run controls, or pick another workflow in the Workflow Panel."
                 : "Clear the status pill to see everything in this workflow."}
             </p>
           </div>
