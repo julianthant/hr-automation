@@ -445,6 +445,8 @@ export function RebuildDemo() {
         tick={tick}
         theme={theme}
         onToggleTheme={toggleTheme}
+        storage={storage}
+        onStorage={setStorage}
       />
 
       {/* A degraded dashboard says so on every view, not only on the page that
@@ -452,12 +454,7 @@ export function RebuildDemo() {
       <DemoStorageBanner storage={storage} onOpenSettings={() => setShellView("settings")} />
 
       {shellView === "settings" ? (
-        <DemoSettingsPage
-          storage={storage}
-          onStorage={setStorage}
-          onOpenView={setShellView}
-          onBack={() => setShellView("queue")}
-        />
+        <DemoSettingsPage storage={storage} onBack={() => setShellView("queue")} />
       ) : shellView === "archive" ? (
         <DemoArchivePage onBack={() => setShellView("queue")} onOpenSettings={() => setShellView("settings")} />
       ) : shellView === "explorer" ? (
