@@ -207,7 +207,13 @@ This demo is asserted through the accessibility tree, so a missing label is a
 - Dialog and Drawer are Radix: focus enters on open, **returns to the trigger on
   close**, Escape dismisses, the rest of the page is hidden from assistive tech.
 - Toasts: `role="status"`, except `danger` which is `role="alert"` and **never
-  auto-dismisses** — a failed write is acknowledged by a human. **While a Dialog
+  auto-dismisses** — a failed write is acknowledged by a human. Because it never
+  dismisses, a `danger` toast **recedes to a one-line chip** after a few seconds
+  rather than sitting on top of the panel underneath it forever: same tint, same
+  icon, still naming the failure, still dismissible, and back to the full card on
+  hover or a press (the timer never fires while the pointer is over it or focus
+  is inside it, and an operator who expands it keeps it expanded). The alert
+  persists; only its footprint recedes. **While a Dialog
   or Drawer is open the toast viewport steps aside** (bottom-right → bottom-left,
   away from the footer's action gutter) **and goes inert** (cards
   `pointer-events: none`, their controls disabled), so a persistent toast can
