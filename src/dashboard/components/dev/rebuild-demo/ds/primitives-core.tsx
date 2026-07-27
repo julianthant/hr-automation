@@ -302,6 +302,12 @@ export interface DsChipProps {
   /** renders a remove affordance with its own accessible name */
   onRemove?: () => void;
   removeLabel?: string;
+  /**
+   * A hover explanation. SUPPLEMENTARY only — a chip's own text must still say
+   * what it is, because a title is invisible to touch and to a keyboard user who
+   * never tabs to it (DESIGN.md: nothing load-bearing lives in a tooltip alone).
+   */
+  title?: string;
   className?: string;
 }
 
@@ -328,6 +334,7 @@ export function Chip({
   onSelect,
   onRemove,
   removeLabel = "Remove",
+  title,
   className,
 }: DsChipProps) {
   const interactive = Boolean(onSelect);
@@ -356,7 +363,17 @@ export function Chip({
         type="button"
         aria-pressed={selected ?? false}
         onClick={onSelect}
-        className={cn(shell, "cursor-pointer", dsFocus, dsMotion.fast, "hover:bg-[var(--ds-surface-3)]")}
+        title={title}
+        className={cn(
+          shell,
+          "cursor-pointer",
+          dsFocus,
+          dsMotion.fast,
+          "hover:bg-[var(--ds-surface-3)]",
+          // The same 1px dip Button uses. A filter chip is a button; without
+          // this it was the only pressable in the system that ignored a press.
+          "active:translate-y-px",
+        )}
       >
         {body}
       </button>
@@ -364,7 +381,7 @@ export function Chip({
   }
 
   return (
-    <span className={shell}>
+    <span className={shell} title={title}>
       {body}
       {onRemove && (
         <button

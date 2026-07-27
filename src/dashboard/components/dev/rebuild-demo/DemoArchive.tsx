@@ -9,6 +9,7 @@ import {
   CardBody,
   Chip,
   EmptyState,
+  PageHeader,
   Panel,
   PanelBody,
   PanelFooter,
@@ -25,6 +26,7 @@ import {
   Well,
   dsFocus,
   dsIcon,
+  dsMotion,
   dsText,
 } from "./demo-ui";
 import {
@@ -84,28 +86,26 @@ export function DemoArchivePage({ onBack, onOpenSettings }: { onBack: () => void
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-[var(--ds-space-base)] border-b border-[color:var(--ds-border)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]">
-        <Button variant="ghost" size="sm" icon={<ArrowLeft aria-hidden className={dsIcon.md} />} onClick={onBack}>
-          Back to the dashboard
-        </Button>
-        <span className="flex items-center gap-[var(--ds-space-snug)]">
-          <Archive aria-hidden className={cn(dsIcon.lg, "text-[color:var(--ds-fg-muted)]")} />
-          <span className={cn(dsText.section, "font-semibold text-[color:var(--ds-fg)]")}>Archive</span>
+      <PageHeader
+        title="Archive"
+        icon={<Archive aria-hidden className={dsIcon.lg} />}
+        badge={
           <Badge tone="neutral">
             <Lock aria-hidden className={dsIcon.sm} />
             read-only
           </Badge>
-        </span>
-        <Button
-          className="ml-auto"
-          variant="ghost"
-          size="sm"
-          icon={<Settings aria-hidden className={dsIcon.md} />}
-          onClick={onOpenSettings}
-        >
-          Version registry
-        </Button>
-      </div>
+        }
+        back={
+          <Button variant="ghost" size="sm" icon={<ArrowLeft aria-hidden className={dsIcon.md} />} onClick={onBack}>
+            Back to the dashboard
+          </Button>
+        }
+        actions={
+          <Button variant="ghost" size="sm" icon={<Settings aria-hidden className={dsIcon.md} />} onClick={onOpenSettings}>
+            Version registry
+          </Button>
+        }
+      />
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-[var(--ds-space-base)] p-[var(--ds-space-cozy)] min-[1100px]:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
         {/* ---- the list, grouped by the bump that swept it ---- */}
@@ -172,6 +172,7 @@ export function DemoArchivePage({ onBack, onOpenSettings }: { onBack: () => void
                               className={cn(
                                 "flex w-full min-w-0 items-center gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)] text-left",
                                 dsFocus,
+                                dsMotion.base,
                                 active ? "bg-[var(--ds-surface-selected)]" : "hover:bg-[var(--ds-surface-3)]",
                               )}
                             >
@@ -198,7 +199,7 @@ export function DemoArchivePage({ onBack, onOpenSettings }: { onBack: () => void
             )}
           </PanelBody>
           <PanelFooter>
-            <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+            <span className={cn(dsText.meta, "max-w-[104ch] text-[color:var(--ds-fg-muted)]")}>
               Archived runs never appear in a count, a rail badge or a Status Bar pill — active surfaces hold current-version runs
               only.
             </span>
@@ -392,7 +393,7 @@ function ArchivedRunDetail({
       </PanelBody>
 
       <PanelFooter>
-        <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+        <span className={cn(dsText.meta, "max-w-[104ch] text-[color:var(--ds-fg-muted)]")}>
           Read-only. There is no retry, cancel or edit here — the code this run executed is not the code that is loaded.
         </span>
         <Button

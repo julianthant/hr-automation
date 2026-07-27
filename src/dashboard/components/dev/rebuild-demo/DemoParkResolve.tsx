@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, CircleSlash, Loader2, ShieldAlert } from "lucide-react";
+import { CheckCircle2, CircleSlash, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Banner,
@@ -11,16 +11,19 @@ import {
   DialogFooter,
   Field,
   Input,
+  MetaLine,
   RadioGroup,
+  Refusal,
   Textarea,
   Well,
+  dsIcon,
   dsText,
   useToasts,
 } from "./demo-ui";
 import { fmtClock, fmtElapsed, type ActionDescriptorWire } from "./demo-wire";
 import type { DemoRow } from "./demo-data";
 import type { DemoActionHandler } from "./DemoActions";
-import type { DemoCommandResult, DemoCommandSettling } from "./demo-commands";
+import { hasRefusalCode, type DemoCommandResult, type DemoCommandSettling } from "./demo-commands";
 import { fenceCleared, fenceClearsAt, writeFenceFor } from "./demo-flows-wire";
 
 /**
@@ -177,14 +180,21 @@ export function ParkResolveDialog({
         <DialogBody className="flex flex-col gap-[var(--ds-space-cozy)]">
           <FenceFacts row={row} tick={tick} />
 
-          {refusal && (
-            <Banner tone="danger" title={refusal.headline} icon={<ShieldAlert aria-hidden className="size-4" />}>
-              <span className="block">{refusal.detail}</span>
-              <span className={cn(dsText.meta, "mt-[var(--ds-space-tight)] block font-mono text-[color:var(--ds-fg-muted)]")}>
-                code {refusal.code} · nothing was recorded · your answer below is untouched
-              </span>
-            </Banner>
-          )}
+          {refusal &&
+            (hasRefusalCode(refusal) ? (
+              <Refusal
+                title={refusal.headline}
+                code={refusal.code}
+                outcome="nothing was recorded · your answer below is untouched"
+              >
+                {refusal.detail}
+              </Refusal>
+            ) : (
+              <Banner tone="danger" title={refusal.headline}>
+                {refusal.detail} Nothing was recorded and your answer below is untouched — but the server sent no
+                refusal code, so there is nothing here to quote in a bug report.
+              </Banner>
+            ))}
 
           <div className="flex flex-col gap-[var(--ds-space-tight)]">
             <RadioGroup
@@ -300,7 +310,7 @@ export function ParkResolveDialog({
           <Button
             variant={arm === "present" ? "primary" : "danger"}
             disabled={!canSubmit}
-            icon={arm === "present" ? <CheckCircle2 aria-hidden className="size-3.5" /> : <CircleSlash aria-hidden className="size-3.5" />}
+            icon={arm === "present" ? <CheckCircle2 aria-hidden className={dsIcon.md} /> : <CircleSlash aria-hidden className={dsIcon.md} />}
             onClick={submit}
           >
             {arm === "present" ? "I saw it — record present" : "I looked — record absent"}
@@ -358,16 +368,21 @@ export function SettlingPanel({ settling, tick }: { settling: DemoCommandSettlin
     <Banner
       tone="info"
       title={`Still parked — settling ${settling.observations} of ${settling.required} observations`}
-      icon={<Loader2 aria-hidden className="size-4 animate-spin motion-reduce:animate-none" />}
+      icon={<Loader2 aria-hidden className={cn(dsIcon.lg, "animate-spin motion-reduce:animate-none")} />}
     >
       <span className="block">
         Your observation was recorded. The row is back in work: a second, independent probe is queued for{" "}
         <span className={dsText.nums}>{fmtClock(settling.nextProbeAt)}</span> and retry stays locked until the two agree.
         Nothing may submit in the meantime.
       </span>
-      <span className={cn(dsText.meta, "mt-[var(--ds-space-tight)] block font-mono text-[color:var(--ds-fg-muted)]")}>
-        fence cleared {fmtClock(settling.fenceClearedAt)} · waiting {waited} · not_before {settling.nextProbeAt.slice(11, 19)}
-      </span>
+      <MetaLine
+        className="mt-[var(--ds-space-tight)] block"
+        items={[
+          `fence cleared ${fmtClock(settling.fenceClearedAt)}`,
+          `waiting ${waited}`,
+          `not_before ${settling.nextProbeAt.slice(11, 19)}`,
+        ]}
+      />
     </Banner>
   );
 }

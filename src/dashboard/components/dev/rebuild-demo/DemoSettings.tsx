@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import {
   Badge,
   Banner,
+  BulletList,
   Button,
   Card,
   CardBody,
@@ -33,6 +34,7 @@ import {
   PanelFooter,
   PanelHeader,
   ProgressBar,
+  Refusal,
   SectionLabel,
   Separator,
   Table,
@@ -44,6 +46,7 @@ import {
   Well,
   dsFocus,
   dsIcon,
+  dsMotion,
   dsText,
 } from "./demo-ui";
 import {
@@ -247,23 +250,30 @@ function ProvenanceStack({ leaf }: { leaf: SettingLeafWire }) {
 }
 
 function ResultBanner({ result, onDismiss }: { result: SettingChangeResult; onDismiss: () => void }) {
+  const dismiss = (
+    <Button size="sm" variant="ghost" onClick={onDismiss}>
+      Dismiss
+    </Button>
+  );
+  if (result.state === "applied") {
+    return (
+      <Banner tone="success" title={result.headline} action={dismiss}>
+        {result.detail}
+      </Banner>
+    );
+  }
+  if (!result.code) {
+    return (
+      <Banner tone="danger" title={result.headline} action={dismiss}>
+        {result.detail} Nothing was saved — but the server sent no refusal code, so there is nothing here to quote in a
+        bug report.
+      </Banner>
+    );
+  }
   return (
-    <Banner
-      tone={result.state === "applied" ? "success" : "danger"}
-      title={result.headline}
-      action={
-        <Button size="sm" variant="ghost" onClick={onDismiss}>
-          Dismiss
-        </Button>
-      }
-    >
+    <Refusal title={result.headline} code={result.code} outcome="nothing was saved" action={dismiss}>
       {result.detail}
-      {result.code && (
-        <span className={cn(dsText.meta, dsText.nums, "ml-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
-          code {result.code}
-        </span>
-      )}
-    </Banner>
+    </Refusal>
   );
 }
 
@@ -286,7 +296,7 @@ function LeafSection({
   const dirty = leaves.filter((leaf) => draft[leaf.key] !== undefined && draft[leaf.key] !== leaf.effective);
 
   return (
-    <Panel className="min-h-0">
+    <Panel className="min-h-0 flex-1">
       <PanelHeader
         title={section.label}
         subtitle={section.blurb}
@@ -325,7 +335,15 @@ function LeafSection({
                   )}
                 </div>
                 {!leaf.editable && (
-                  <p className={cn(dsText.meta, "text-[color:var(--ds-status-waiting-fg)]")}>{settingLockReason(leaf)}</p>
+                  <p
+                    className={cn(
+                      dsText.meta,
+                      "flex max-w-[86ch] items-start gap-[var(--ds-space-tight)] text-[color:var(--ds-status-waiting-fg)]",
+                    )}
+                  >
+                    <ShieldAlert aria-hidden className={cn(dsIcon.sm, "mt-px shrink-0")} />
+                    <span>{settingLockReason(leaf)}</span>
+                  </p>
                 )}
               </div>
               <div className="min-w-0 border-t pt-[var(--ds-space-base)] border-[color:var(--ds-border-subtle)] min-[900px]:border-l min-[900px]:border-t-0 min-[900px]:pl-[var(--ds-space-cozy)] min-[900px]:pt-0">
@@ -369,14 +387,14 @@ function LeafSection({
 function SystemUrlsSection({ storage, onResult }: { storage: StorageMode; onResult: (r: SettingChangeResult) => void }) {
   const testCount = DEMO_SYSTEM_URLS.filter((entry) => entry.resolved === "test").length;
   return (
-    <Panel className="min-h-0">
+    <Panel className="min-h-0 flex-1">
       <PanelHeader
         title="System URLs"
         subtitle={SYSTEM_URL_SECTION.blurb}
         icon={<Link2 aria-hidden className={dsIcon.lg} />}
         meta={`${testCount} on a test instance`}
       />
-      <PanelBody>
+      <PanelBody className="flex flex-col">
         <Banner
           tone={testCount > 0 ? "warning" : "info"}
           title={
@@ -463,7 +481,7 @@ function SystemUrlsSection({ storage, onResult }: { storage: StorageMode; onResu
 
 function BudgetsSection() {
   return (
-    <Panel className="min-h-0">
+    <Panel className="min-h-0 flex-1">
       <PanelHeader
         title="Performance budgets"
         subtitle="What the executor is allowed to hold at once. A cap that is full is why a queued row is not moving."
@@ -536,7 +554,7 @@ function PreflightSection() {
   const failing = DEMO_PREFLIGHT.filter((check) => check.verdict === "fail").length;
   const warning = DEMO_PREFLIGHT.filter((check) => check.verdict === "warning").length;
   return (
-    <Panel className="min-h-0">
+    <Panel className="min-h-0 flex-1">
       <PanelHeader
         title="Preflight / doctor"
         subtitle="Advisory only. Nothing here blocks a run — it tells you what will fail before you spend a Duo prompt finding out."
@@ -561,13 +579,7 @@ function PreflightSection() {
               {check.blocks.length > 0 && (
                 <Well>
                   <SectionLabel className="mb-[var(--ds-space-tight)]">What this blocks</SectionLabel>
-                  <ul className="flex flex-col gap-[var(--ds-space-hair)]">
-                    {check.blocks.map((item) => (
-                      <li key={item} className={cn(dsText.body, "text-[color:var(--ds-fg-secondary)]")}>
-                        · {item}
-                      </li>
-                    ))}
-                  </ul>
+                  <BulletList items={check.blocks} />
                 </Well>
               )}
               {check.remediation && (
@@ -601,7 +613,7 @@ function StorageSection({ storage, onStorage }: { storage: StorageMode; onStorag
   const degraded = snapshot.mode === "read-only-degraded";
   const newest = snapshot.backups[0];
   return (
-    <Panel className="min-h-0">
+    <Panel className="min-h-0 flex-1">
       <PanelHeader
         title="Storage health"
         subtitle="The tracker volume, the authority generation, and the backups a restore would use."
@@ -684,21 +696,13 @@ function StorageSection({ storage, onStorage }: { storage: StorageMode; onStorag
             <Card>
               <CardBody className="flex flex-col gap-[var(--ds-space-snug)]">
                 <SectionLabel>Still works</SectionLabel>
-                {snapshot.stillWorks.map((item) => (
-                  <p key={item} className={cn(dsText.body, "text-[color:var(--ds-fg-secondary)]")}>
-                    · {item}
-                  </p>
-                ))}
+                <BulletList items={snapshot.stillWorks} />
               </CardBody>
             </Card>
             <Card tone="danger">
               <CardBody className="flex flex-col gap-[var(--ds-space-snug)]">
                 <SectionLabel>Does not work</SectionLabel>
-                {snapshot.blocked.map((item) => (
-                  <p key={item} className={cn(dsText.body, "text-[color:var(--ds-fg-secondary)]")}>
-                    · {item}
-                  </p>
-                ))}
+                <BulletList items={snapshot.blocked} />
               </CardBody>
             </Card>
           </div>
@@ -741,7 +745,7 @@ function VersionsSection({ onBump }: { onBump: (target: BumpTarget) => void }) {
   const blocked = registry.filter((entry) => entry.nonTerminal > 0).length;
 
   return (
-    <Panel className="min-h-0">
+    <Panel className="min-h-0 flex-1">
       <PanelHeader
         title="Version registry"
         subtitle="The dashboard's authoritative record of every workflow's current version. Active surfaces only ever contain current-version runs."
@@ -897,6 +901,7 @@ export function DemoSettingsPage({
               "flex min-w-0 items-center gap-[var(--ds-space-snug)] rounded-[var(--ds-radius-md)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)] text-left",
               "text-[color:var(--ds-fg-muted)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]",
               dsFocus,
+              dsMotion.base,
             )}
           >
             <entry.icon aria-hidden className={cn(dsIcon.md, "shrink-0")} />
@@ -908,7 +913,7 @@ export function DemoSettingsPage({
         ))}
       </nav>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-[var(--ds-space-base)] overflow-y-auto p-[var(--ds-space-cozy)]">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-[var(--ds-space-base)] p-[var(--ds-space-cozy)]">
         {result && <ResultBanner result={result} onDismiss={() => setResult(null)} />}
         {storage === "read-only-degraded" && !result && (
           <Banner tone="danger" title="Storage is read-only — no setting can be saved">
@@ -947,6 +952,7 @@ function SectionButton({ entry, active, onClick }: { entry: SectionSpec; active:
         "flex min-w-0 items-center gap-[var(--ds-space-snug)] rounded-[var(--ds-radius-md)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)] text-left",
         dsText.ui,
         dsFocus,
+        dsMotion.base,
         active
           ? "bg-[var(--ds-surface-selected)] font-semibold text-[color:var(--ds-fg)]"
           : "text-[color:var(--ds-fg-muted)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]",
@@ -996,19 +1002,11 @@ export function DemoStorageBanner({ storage, onOpenSettings }: { storage: Storag
         <div className="mt-[var(--ds-space-base)] grid grid-cols-1 gap-[var(--ds-space-base)] min-[820px]:grid-cols-2">
           <Well>
             <SectionLabel className="mb-[var(--ds-space-tight)]">Still works</SectionLabel>
-            {snapshot.stillWorks.map((item) => (
-              <p key={item} className={cn(dsText.body, "text-[color:var(--ds-fg-secondary)]")}>
-                · {item}
-              </p>
-            ))}
+            <BulletList items={snapshot.stillWorks} />
           </Well>
           <Well>
             <SectionLabel className="mb-[var(--ds-space-tight)]">Does not work</SectionLabel>
-            {snapshot.blocked.map((item) => (
-              <p key={item} className={cn(dsText.body, "text-[color:var(--ds-fg-secondary)]")}>
-                · {item}
-              </p>
-            ))}
+            <BulletList items={snapshot.blocked} />
           </Well>
         </div>
       )}

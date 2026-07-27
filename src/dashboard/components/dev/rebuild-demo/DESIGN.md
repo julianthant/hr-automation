@@ -136,6 +136,20 @@ Always pass `age` when you have it. *"Waiting on you"* is a state;
 
 ---
 
+## The three shapes every surface repeats
+
+These exist because twenty surfaces each invented their own version. Reach for
+the component; do not re-draw the pattern.
+
+| Shape | Component | The rule |
+|---|---|---|
+| **A refusal** — the product declined, on purpose | `Refusal` | Always carries a `code`, and says what was **not** done (`outcome`). Uses `ShieldAlert`, never `TriangleAlert`: the triangle means something broke, the shield means something was refused. A `Banner tone="danger"` is for a *failure*; a refusal is a different sentence. |
+| **A provenance line** — where this came from | `MetaLine` | ids, codes, clocks, actors, hashes — `dsText.meta` + `dsText.nums`, segments joined with ` · `, empty segments dropped. **Never `font-mono`**: that loses the tabular figures that stop a clock from jittering. |
+| **A group heading** | `SectionLabel` | Never hand-roll `cn(dsText.caps, dsFg.muted)`. |
+
+A dialog's quiet left-hand note goes in `DialogFooter`'s `meta` slot, not a
+hand-rolled `mr-auto` span — see the footer rule below.
+
 ## Layout rules
 
 - A screen is **Panels**. A Panel has one `PanelHeader`, an optional
@@ -145,6 +159,11 @@ Always pass `age` when you have it. *"Waiting on you"* is a state;
   long queue, and an unnamed table is a mystery to a screen reader.
 - **One primary and at most one danger action per surface.** Actions go
   right-aligned in a footer, primary last, so the eye ends on the verb.
+- **Every dialog footer is the same footer**, in this order:
+  `meta (quiet, left) · Back? · Cancel · [primary]`. Put the quiet note in
+  `DialogFooter`'s `meta` prop. The dismiss verb is **`Cancel`** when the
+  surface was building something that will not now exist, and **`Close`** when
+  it was only showing you something. Never both words in one flow.
 - Rows are `--ds-h-row` (32px). Do not invent a row height.
 - Truncate with `truncate` + `min-w-0` on the flex child; never wrap a person's
   name onto two lines in a dense list.
@@ -194,6 +213,10 @@ This demo is asserted through the accessibility tree, so a missing label is a
   `pointer-events: none`, their controls disabled), so a persistent toast can
   never swallow a click meant for the decision the operator is making. It stays
   fully visible and becomes live again when the modal closes.
+  **A dialog built on any OTHER primitive must call `useDsModalPresence()`** from
+  a component that mounts only while it is open — the registry is what makes the
+  step-aside happen, and a dialog that skips it is one a persistent `danger`
+  toast can still click-block.
 - Contrast is WCAG AA minimum, including text on a solid status fill (which is
   why the loud statuses use dark ink on a bright fill).
 - Colour is never the only differentiator, anywhere.
@@ -231,7 +254,7 @@ This demo is asserted through the accessibility tree, so a missing label is a
 | `ds/tokens.ts` | the class names builders type (`dsText`, `dsLayer`, `dsFocus`, …) |
 | `ds/primitives-core.tsx` | Button, IconButton, Badge, CountBadge, Chip, Kbd, Spinner, Skeleton, Separator |
 | `ds/primitives-status.tsx` | the eight statuses + StatusPill / StatusDot / StatusIcon |
-| `ds/primitives-layout.tsx` | Panel, Card, Banner, EmptyState, Tabs, Well, FloatingSurface |
+| `ds/primitives-layout.tsx` | Panel, Card, Banner, **Refusal**, **MetaLine**, **BulletList**, EmptyState, Tabs, Well, FloatingSurface |
 | `ds/primitives-form.tsx` | Field, Input, Textarea, Select, Checkbox, RadioGroup, Switch, SearchInput |
 | `ds/primitives-overlay.tsx` | Dialog, Drawer, Tooltip, Toast |
 | `ds/primitives-data.tsx` | Table, ProgressBar, TimelineSteps, KeyValueList |
