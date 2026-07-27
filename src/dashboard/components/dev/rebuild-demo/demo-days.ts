@@ -315,7 +315,7 @@ const krThursday: DemoRowSpec = {
   id: "d2-kr-report",
   rowType: "run",
   subjectKind: "catalog",
-  workflowId: "kronos-reports",
+  workflowId: "old-kronos-reports",
   title: "Timecard exceptions · SDCMP",
   runId4: "0f77",
   status: "verifiedDone",

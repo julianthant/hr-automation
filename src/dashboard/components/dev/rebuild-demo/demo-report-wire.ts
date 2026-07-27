@@ -57,6 +57,7 @@ export const MANUAL_MINUTES: Record<DemoWorkflowId, number> = {
   onboarding: 35,
   "person-lookup": 4,
   "person-match": 3,
+  "i9-lookup": 3,
   "work-study": 6,
   "kronos-pay-rule": 8,
   ocr: 15,
@@ -66,7 +67,8 @@ export const MANUAL_MINUTES: Record<DemoWorkflowId, number> = {
   onbase: 10,
   "i9-check": 6,
   "crm-doc-download": 3,
-  "kronos-reports": 20,
+  "sharepoint-download": 2,
+  "old-kronos-reports": 20,
 };
 
 export const MANUAL_MINUTES_PROVENANCE =
