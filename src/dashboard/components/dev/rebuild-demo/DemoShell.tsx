@@ -24,7 +24,19 @@ import { DEMO_WORKFLOW_LIST, type DemoWorkflowCategory } from "./demo-wire";
 import { DEMO_DAY, topLevelRowsForDay } from "./demo-days";
 import { DemoDateNav, DemoNotificationBell, DemoSearchControl, type DemoNavigateTo } from "./DemoTopBarSurfaces";
 import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
-import { DS_STATUS } from "./demo-ui";
+import {
+  Badge,
+  DS_STATUS,
+  IconButton,
+  dsBorder,
+  dsFocus,
+  dsIcon,
+  dsMotion,
+  dsRadius,
+  dsSize,
+  dsSurface,
+  dsText,
+} from "./demo-ui";
 
 /**
  * DEV-ONLY — the replica shell around the rebuild demo.
@@ -142,18 +154,39 @@ export function DemoTopBar({
   tick: number;
 }) {
   return (
-    <header className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-card px-3">
-      <span className="flex items-center gap-2">
-        <span className="flex size-6 items-center justify-center rounded-md bg-primary/15">
-          <ShieldCheck aria-hidden className="size-3.5 text-primary" />
+    <header
+      className={cn(
+        "flex shrink-0 items-center border-b",
+        dsSize.hTopbar,
+        dsBorder.base,
+        dsSurface.card,
+        "gap-[var(--ds-space-cozy)] px-[var(--ds-space-cozy)]",
+      )}
+    >
+      <span className="flex shrink-0 items-center gap-[var(--ds-space-base)]">
+        <span
+          aria-hidden
+          className={cn("flex items-center justify-center", dsRadius.md, "size-[var(--ds-h-sm)] bg-[var(--ds-accent-quiet)]")}
+        >
+          <ShieldCheck className={cn(dsIcon.md, "text-[color:var(--ds-accent)]")} />
         </span>
-        <span className="text-[13px] font-semibold text-foreground">HR Automation</span>
+        <span className={cn(dsText.ui, "font-semibold text-[color:var(--ds-fg)]")}>HR Automation</span>
       </span>
-      <span className="rounded-full border border-info/40 bg-info/10 px-2 py-px text-[9.5px] font-semibold uppercase tracking-wider text-info">
+      {/* A standing environment marker, not news. It has to be unmissable when
+          you look at it and invisible when you are not — the loud tier belongs
+          to `Waiting on you` and `Failed`, and nothing else may take it. */}
+      <Badge tone="infoOutline" className={cn(dsRadius.pill, dsText.caps, "shrink-0")}>
         rebuild demo · synthetic data
-      </span>
+      </Badge>
 
-      <div className="ml-2 inline-flex rounded-md border border-border bg-secondary/40 p-0.5">
+      <div
+        className={cn(
+          "inline-flex shrink-0 border p-[var(--ds-space-hair)]",
+          dsRadius.md,
+          dsBorder.base,
+          "bg-[var(--ds-surface-2)]",
+        )}
+      >
         {SWITCHER_VIEWS.map((v) => (
           <button
             key={v}
@@ -161,8 +194,15 @@ export function DemoTopBar({
             aria-pressed={view === v}
             onClick={() => onView(v)}
             className={cn(
-              "rounded px-2.5 py-0.5 text-[11.5px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              view === v ? "bg-card font-semibold text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+              "inline-flex cursor-pointer items-center px-[var(--ds-space-base)]",
+              "h-[var(--ds-h-sm)]",
+              dsRadius.sm,
+              dsText.meta,
+              dsFocus,
+              dsMotion.fast,
+              view === v
+                ? "bg-[var(--ds-surface-3)] font-semibold text-[color:var(--ds-fg)]"
+                : "font-medium text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
             )}
           >
             {SHELL_VIEW_LABEL[v]}
@@ -176,26 +216,20 @@ export function DemoTopBar({
 
       <DemoDateNav day={day} onDay={onDay} />
 
-      <span className="flex shrink-0 items-center gap-0.5">
+      <span className="flex shrink-0 items-center gap-[var(--ds-space-hair)]">
         <DemoNotificationBell onNavigate={onNavigate} tick={tick} />
-        <button type="button" aria-label="Shortcuts" onClick={NOOP} className="rounded-md p-1.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-          <HelpCircle aria-hidden className="size-3.5" />
-        </button>
+        <IconButton size="sm" label="Shortcuts" onClick={NOOP} icon={<HelpCircle aria-hidden className={dsIcon.md} />} />
         {/* The gear opens the real Settings surface (provenance, System URLs,
             budgets, doctor, storage health, version registry) and is the door
             to the Archive / Explorer / Activity report takeovers. */}
-        <button
-          type="button"
-          aria-label="Settings"
+        <IconButton
+          size="sm"
+          label="Settings"
           aria-pressed={view === "settings"}
           onClick={() => onView("settings")}
-          className={cn(
-            "rounded-md p-1.5 outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-            view === "settings" ? "bg-accent text-foreground" : "text-muted-foreground",
-          )}
-        >
-          <Settings aria-hidden className="size-3.5" />
-        </button>
+          icon={<Settings aria-hidden className={dsIcon.md} />}
+          className={cn(view === "settings" && "bg-[var(--ds-surface-3)] text-[color:var(--ds-fg)]")}
+        />
       </span>
     </header>
   );
@@ -250,90 +284,130 @@ export function DemoWorkflowPanel({
   }, [rows]);
   const allCount = useMemo(() => countRows(rows).all, [rows]);
 
-  return (
-    <nav aria-label="Workflow Panel" className="flex w-[200px] shrink-0 flex-col overflow-y-auto bg-card py-3">
-      <button
-        type="button"
-        aria-pressed={active === ALL_WORKFLOWS}
-        onClick={() => onActive(ALL_WORKFLOWS)}
+  /**
+   * Every rail entry is the same object; only `All workflows` has no group.
+   * `value` is what the panel filters BY and `label` is what the operator
+   * reads — they are not the same string for the all-workflows entry.
+   */
+  const entry = (
+    value: string,
+    label: string,
+    total: number,
+    queued: number,
+    on: boolean,
+    note?: string,
+    current?: boolean,
+  ) => (
+    <button
+      type="button"
+      aria-pressed={current ? undefined : on}
+      aria-current={current && on ? "page" : undefined}
+      title={note}
+      onClick={() => onActive(value)}
+      className={cn(
+        "group flex w-full cursor-pointer items-stretch text-left",
+        "gap-[var(--ds-space-base)] pl-[var(--ds-space-tight)] pr-[var(--ds-space-base)]",
+        dsSize.hRow,
+        dsRadius.md,
+        dsFocus,
+        dsMotion.base,
+        on ? "bg-[var(--ds-surface-selected)]" : "hover:bg-[var(--ds-surface-3)]",
+      )}
+    >
+      {/* The 3px marker is the non-colour cue for "this is the panel you are
+          in" — the fill alone is too quiet at this density. */}
+      <span
+        aria-hidden
         className={cn(
-          "mx-1.5 mb-4 flex h-10 items-stretch gap-2 rounded-md py-0 pl-1 pr-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary",
-          active === ALL_WORKFLOWS ? "bg-accent/40" : "hover:bg-secondary",
+          "my-[var(--ds-space-snug)] w-[var(--ds-border-w-rail)] rounded-r-full",
+          dsMotion.base,
+          on ? "bg-[var(--ds-accent)]" : "bg-transparent group-hover:bg-[var(--ds-border-loud)]",
         )}
-      >
-        <span aria-hidden className={cn("my-1.5 w-[3px] rounded-r-full", active === ALL_WORKFLOWS ? "bg-primary" : "bg-transparent")} />
-        <span className="flex flex-1 items-center">
-          <span className={cn("text-[13px]", active === ALL_WORKFLOWS ? "font-semibold text-foreground" : "font-medium text-foreground/90")}>
-            All workflows
-          </span>
-        </span>
+      />
+      <span className="flex min-w-0 flex-1 items-center">
         <span
           className={cn(
-            "flex shrink-0 items-center font-mono text-[11px] leading-none tabular-nums",
-            active === ALL_WORKFLOWS ? "font-semibold text-primary" : "text-foreground",
+            dsText.ui,
+            "truncate",
+            on ? "font-semibold text-[color:var(--ds-fg)]" : "font-medium text-[color:var(--ds-fg-secondary)]",
           )}
         >
-          {allCount}
+          {label}
         </span>
-      </button>
+      </span>
+      <span className="flex shrink-0 items-center gap-[var(--ds-space-tight)]">
+        {/* Queued wears its own hue here too — outline slate, never amber.
+            Nothing has happened to these rows yet; they are not a warning. */}
+        {queued > 0 && (
+          <span
+            title={`${queued} queued`}
+            className={cn(
+              "inline-flex items-center border px-[var(--ds-space-tight)]",
+              "h-[var(--ds-h-xs)]",
+              dsRadius.sm,
+              dsText.micro,
+              dsText.nums,
+              "border-[color:var(--ds-status-queued-border)] text-[color:var(--ds-status-queued-fg)]",
+            )}
+          >
+            {queued}
+          </span>
+        )}
+        {/* A count that hits zero DIMS, it does not disappear — the eye must
+            not have to re-scan the rail to find out a panel is idle. */}
+        <span
+          className={cn(
+            dsText.meta,
+            dsText.nums,
+            "flex items-center justify-end",
+            total === 0
+              ? "text-[color:var(--ds-fg-faint)]"
+              : on
+                ? "font-semibold text-[color:var(--ds-fg)]"
+                : "text-[color:var(--ds-fg-secondary)]",
+          )}
+        >
+          {total}
+        </span>
+      </span>
+    </button>
+  );
+
+  return (
+    <nav
+      aria-label="Workflow Panel"
+      className={cn("flex shrink-0 flex-col overflow-y-auto", dsSize.wRail, dsSurface.card, "py-[var(--ds-space-cozy)]")}
+    >
+      <div className="px-[var(--ds-space-snug)] pb-[var(--ds-space-cozy)]">
+        {entry(ALL_WORKFLOWS, "All workflows", allCount, 0, active === ALL_WORKFLOWS)}
+      </div>
 
       {RAIL_GROUPS.map((g) => (
-        <div key={g.label} className="mb-4">
-          <div className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{g.label}</div>
-          <ul className="flex flex-col gap-px px-1.5">
+        <div key={g.label} className="pb-[var(--ds-space-cozy)]">
+          {/* More air above a group heading than below it — the label belongs to
+              the list under it, not to the one it just left. */}
+          <div className={cn(dsText.caps, "px-[var(--ds-space-cozy)] pb-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
+            {g.label}
+          </div>
+          <ul className="flex flex-col gap-px px-[var(--ds-space-snug)]">
             {g.entries.map((e) => {
               const c = counts.get(e.label);
-              const on = active === e.label;
+              // Rows are deliberately icon-free — the workflow icons live on
+              // Session Cards and the add-worker picker, not here.
               return (
-                <li key={e.label}>
-                  {/* Rows are deliberately icon-free — the workflow icons live on
-                      Session Cards and the add-worker picker, not here. */}
-                  <button
-                    type="button"
-                    aria-current={on ? "page" : undefined}
-                    title={e.note}
-                    onClick={() => onActive(e.label)}
-                    className={cn(
-                      "group flex h-10 w-full items-stretch gap-2 rounded-md py-0 pl-1 pr-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary",
-                      on ? "bg-accent/40" : "hover:bg-secondary",
-                    )}
-                  >
-                    <span
-                      aria-hidden
-                      className={cn("my-1.5 w-[3px] rounded-r-full transition-colors", on ? "bg-primary" : "bg-transparent group-hover:bg-border")}
-                    />
-                    <span className="flex min-w-0 flex-1 items-center">
-                      <span className={cn("truncate text-[13px]", on ? "font-semibold text-foreground" : "font-medium text-foreground/90")}>
-                        {e.label}
-                      </span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-1.5">
-                      {c && c.queued > 0 && (
-                        <span
-                          title={`${c.queued} queued`}
-                          className="rounded-sm bg-warning/15 px-1 py-0.5 font-mono text-[9px] font-semibold leading-none tabular-nums text-warning"
-                        >
-                          {c.queued}
-                        </span>
-                      )}
-                      <span
-                        className={cn(
-                          "font-mono text-[11px] leading-none tabular-nums",
-                          !c || c.total === 0 ? "text-muted-foreground/50" : on ? "font-semibold text-primary" : "text-foreground",
-                        )}
-                      >
-                        {c?.total ?? 0}
-                      </span>
-                    </span>
-                  </button>
-                </li>
+                <li key={e.label}>{entry(e.label, e.label, c?.total ?? 0, c?.queued ?? 0, active === e.label, e.note, true)}</li>
               );
             })}
           </ul>
         </div>
       ))}
 
-      <p className="mt-auto px-4 pt-3 text-[9.5px] leading-relaxed text-muted-foreground/70">
+      <p
+        className={cn(
+          dsText.micro,
+          "mt-auto px-[var(--ds-space-loose)] pt-[var(--ds-space-cozy)] leading-relaxed text-[color:var(--ds-fg-muted)]",
+        )}
+      >
         Badges, Status Bar pills and the queue all go through one counting path — they cannot disagree.
       </p>
     </nav>
@@ -395,26 +469,63 @@ export function DemoStatusBar({
         title={title}
         onClick={() => onSelect(on ? "all" : key)}
         className={cn(
-          "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          on ? "border-primary/45 bg-primary/12 font-semibold text-foreground" : "border-border bg-card text-muted-foreground hover:text-foreground",
+          "inline-flex shrink-0 cursor-pointer items-center border",
+          "h-[var(--ds-h-sm)] gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
+          dsRadius.md,
+          dsText.meta,
+          dsFocus,
+          dsMotion.fast,
+          on
+            ? cn(dsBorder.loud, "bg-[var(--ds-surface-selected)] font-semibold text-[color:var(--ds-fg)]")
+            : cn(dsBorder.base, dsSurface.card, "text-[color:var(--ds-fg-muted)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]"),
+          // A zero DIMS, it never disappears: a status you cannot see is a
+          // status you cannot rule out.
           n === 0 && !on && "opacity-45",
         )}
       >
-        <Icon aria-hidden className={cn("size-3", tone, spin && n > 0 && "animate-spin motion-reduce:animate-none")} />
+        <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0", tone, spin && n > 0 && "animate-spin motion-reduce:animate-none")} />
         {label}
-        <span className="font-mono tabular-nums">{n}</span>
+        <span className={dsText.nums}>{n}</span>
       </button>
     );
   };
 
   return (
-    <div role="group" aria-label="Status Bar" className="flex items-center gap-1 overflow-x-auto border-b border-border/60 px-2 py-1.5">
-      {pill("all", "All", LayoutDashboard, "text-muted-foreground", "Every row in this view")}
-      {pill("needsYou", "Needs you", Eye, "text-warning", "Waiting on you + Write parked — the two states that are stuck on a decision from you")}
-      <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-border" />
-      {STATUS_PILL_ORDER.map((s) =>
-        pill(s, PROPOSED_STATUS[s].label, PROPOSED_STATUS[s].icon, statusPillTone(s), PROPOSED_STATUS[s].meaning, s === "running"),
-      )}
+    // The pills never collapse into an overflow menu — a status you cannot
+    // click is a status you cannot triage — so at a narrow window the row
+    // scrolls. The right edge fades into the page so a clipped pill reads as
+    // "there is more", not as a pill that happens to end there. Over empty
+    // space the fade is the page colour and therefore invisible.
+    <div className="relative shrink-0">
+      <div
+        role="group"
+        aria-label="Status Bar"
+        className={cn(
+          "flex items-center overflow-x-auto border-b",
+          dsSize.hBar,
+          dsBorder.subtle,
+          "gap-[var(--ds-space-tight)] px-[var(--ds-space-base)]",
+        )}
+      >
+        {pill("all", "All", LayoutDashboard, "text-[color:var(--ds-fg-muted)]", "Every row in this view")}
+        {pill(
+          "needsYou",
+          "Needs you",
+          Eye,
+          "text-[color:var(--ds-status-waiting-fg)]",
+          "Waiting on you + Write parked — the two states that are stuck on a decision from you",
+        )}
+        {/* The two composites, then the eight. The rule is on the left of the
+            statuses because it separates two KINDS of pill, not two statuses. */}
+        <span aria-hidden className={cn("mx-[var(--ds-space-hair)] h-4 w-px shrink-0", "bg-[var(--ds-border)]")} />
+        {STATUS_PILL_ORDER.map((s) =>
+          pill(s, PROPOSED_STATUS[s].label, PROPOSED_STATUS[s].icon, statusPillTone(s), PROPOSED_STATUS[s].meaning, s === "running"),
+        )}
+      </div>
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 right-0 w-[var(--ds-space-section)] bg-gradient-to-l from-[var(--ds-surface-page)] to-transparent"
+      />
     </div>
   );
 }
