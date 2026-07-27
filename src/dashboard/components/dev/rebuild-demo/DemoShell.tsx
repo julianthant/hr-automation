@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { effectiveStatus, fmtElapsed, type DemoRow } from "./demo-data";
-import { DEMO_WORKFLOW_LIST, type DemoWorkflowCategory } from "./demo-wire";
+import { DEMO_WORKFLOW_LIST, DEMO_WORKFLOWS, type DemoWorkflowCategory } from "./demo-wire";
 import { DEMO_DAY, topLevelRowsForDay } from "./demo-days";
 import { DemoDateNav, DemoNotificationBell, DemoSearchControl, type DemoNavigateTo } from "./DemoTopBarSurfaces";
 import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
@@ -77,7 +77,15 @@ const NOOP = () => {};
  */
 export type StatusBucket = "all" | "needsYou" | ProposedStatus;
 
-export const ALL_WORKFLOWS = "All";
+/**
+ * The panel the app opens on. There is no "All workflows" entry: an operator
+ * works one workflow at a time, the cross-panel view was a fifteenth rail row
+ * that no triage pass ever used, and a queue mixing fourteen workflows made
+ * every row's title carry a workflow label to stay legible. Read from the
+ * registry rather than typed as a string, so renaming a workflow cannot leave
+ * the app opening on a panel that does not exist.
+ */
+export const DEFAULT_WORKFLOW = DEMO_WORKFLOWS["oath-signature"].label;
 
 /**
  * Every top-level row ON A DAY (members belong to their group, never to the
@@ -90,7 +98,7 @@ export function topLevelRows(day: string = DEMO_DAY): DemoRow[] {
 }
 
 export function rowsForWorkflow(rows: DemoRow[], workflow: string): DemoRow[] {
-  return workflow === ALL_WORKFLOWS ? rows : rows.filter((r) => r.wfLabel === workflow);
+  return rows.filter((r) => r.wfLabel === workflow);
 }
 
 export function rowInBucket(row: DemoRow, bucket: StatusBucket): boolean {
@@ -309,28 +317,14 @@ export function DemoWorkflowPanel({
     }
     return map;
   }, [rows]);
-  const allCount = useMemo(() => countRows(rows).all, [rows]);
 
-  /**
-   * Every rail entry is the same object; only `All workflows` has no group.
-   * `value` is what the panel filters BY and `label` is what the operator
-   * reads — they are not the same string for the all-workflows entry.
-   */
-  const entry = (
-    value: string,
-    label: string,
-    total: number,
-    queued: number,
-    on: boolean,
-    note?: string,
-    current?: boolean,
-  ) => (
+  /** Every rail entry is the same object; the label IS what it filters by. */
+  const entry = (label: string, total: number, queued: number, on: boolean, note?: string) => (
     <button
       type="button"
-      aria-pressed={current ? undefined : on}
-      aria-current={current && on ? "page" : undefined}
+      aria-current={on ? "page" : undefined}
       title={note}
-      onClick={() => onActive(value)}
+      onClick={() => onActive(label)}
       className={cn(
         "group flex w-full cursor-pointer items-stretch text-left",
         "gap-[var(--ds-space-base)] pl-[var(--ds-space-tight)] pr-[var(--ds-space-base)]",
@@ -405,10 +399,6 @@ export function DemoWorkflowPanel({
       aria-label="Workflow Panel"
       className={cn("flex shrink-0 flex-col overflow-y-auto", dsSize.wRail, dsSurface.card, "py-[var(--ds-space-cozy)]")}
     >
-      <div className="px-[var(--ds-space-snug)] pb-[var(--ds-space-cozy)]">
-        {entry(ALL_WORKFLOWS, "All workflows", allCount, 0, active === ALL_WORKFLOWS)}
-      </div>
-
       {RAIL_GROUPS.map((g) => (
         <div key={g.label} className="pb-[var(--ds-space-cozy)]">
           {/* More air above a group heading than below it — the label belongs to
@@ -421,9 +411,7 @@ export function DemoWorkflowPanel({
               const c = counts.get(e.label);
               // Rows are deliberately icon-free — the workflow icons live on
               // Session Cards and the add-worker picker, not here.
-              return (
-                <li key={e.label}>{entry(e.label, e.label, c?.total ?? 0, c?.queued ?? 0, active === e.label, e.note, true)}</li>
-              );
+              return <li key={e.label}>{entry(e.label, c?.total ?? 0, c?.queued ?? 0, active === e.label, e.note)}</li>;
             })}
           </ul>
         </div>
