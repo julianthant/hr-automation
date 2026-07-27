@@ -300,28 +300,28 @@ export function DemoCatalogView({ onOpenExample }: { onOpenExample: (id: string)
                     </span>
                   ))}
                 </div>
-                {/* Everything below the tab specimen is ONE trailing block on
-                    the row's bottom edge — what the panel opens on, what is
-                    always visible, and what is specific to it. The tab strip
-                    above wraps to two rows on the four-tab kinds and not on the
-                    two-tab ones, which is exactly what used to shove these
-                    three facts out of step between neighbouring cards. */}
-                <CardBase className="gap-[var(--ds-space-tight)] pt-[var(--ds-space-snug)]">
-                  <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
-                    <span className="text-[color:var(--ds-fg-secondary)]">Opens on:</span> {p.defaultTab}
-                  </p>
+                <p className={cn(dsText.meta, "mt-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
+                  <span className="text-[color:var(--ds-fg-secondary)]">Opens on:</span> {p.defaultTab}
+                </p>
 
-                  <span className={cn(dsText.caps, "mt-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>Always visible</span>
-                  <ul className="flex flex-col gap-[var(--ds-space-hair)]">
-                    {p.pinned.map((c) => (
-                      <li key={c} className={cn(dsText.meta, "flex gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
-                        <span aria-hidden className={cn(specBullet, "bg-[var(--ds-info-fg)] opacity-60")} />
-                        <span className="min-w-0">{c}</span>
-                      </li>
-                    ))}
-                  </ul>
+                <span className={cn(dsText.caps, "mt-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]")}>Always visible</span>
+                <ul className="mt-[var(--ds-space-tight)] flex flex-col gap-[var(--ds-space-hair)]">
+                  {p.pinned.map((c) => (
+                    <li key={c} className={cn(dsText.meta, "flex gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
+                      <span aria-hidden className={cn(specBullet, "bg-[var(--ds-info-fg)] opacity-60")} />
+                      <span className="min-w-0">{c}</span>
+                    </li>
+                  ))}
+                </ul>
 
-                  <span className={cn(dsText.caps, "mt-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>Specifics</span>
+                {/* Only the LAST section takes the base. Pinning the whole
+                    trailing group put the card's slack directly under the tab
+                    specimen, where a 90px hole reads as something that failed
+                    to render; between two labelled sections it reads as what it
+                    is — this kind has less to say. Bottoms still land on one
+                    line, which is the defect that mattered. */}
+                <CardBase className="gap-[var(--ds-space-tight)] pt-[var(--ds-space-cozy)]">
+                  <span className={cn(dsText.caps, "text-[color:var(--ds-fg-muted)]")}>Specifics</span>
                   <ul className="flex flex-col gap-[var(--ds-space-hair)]">
                     {p.specifics.map((c) => (
                       <li key={c} className={cn(dsText.meta, "flex gap-[var(--ds-space-snug)] text-[color:var(--ds-fg-secondary)]")}>
