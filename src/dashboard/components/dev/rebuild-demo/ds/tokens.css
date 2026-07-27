@@ -252,11 +252,25 @@
   --ds-h-row: 32px; /* one queue/table row */
   --ds-h-bar: 36px; /* status bar, panel toolbar */
   --ds-h-topbar: 44px; /* the app top bar */
+  /* The Session Card's micro step pipeline. It is a RESERVED band, not a
+     measured one: every card gives the bar the same slot whether or not it
+     holds an item, so the bars land on one baseline down the row and a worker
+     with nothing in flight is not handed a bar it has not earned. */
+  --ds-h-micro-pipeline: 8px;
   /* The scroll well a Group Row shows its members in. This is the value that
      makes scale presentational: at ~5.5 lines a group of 50 occupies exactly
      the same space as a group of 13, so a queue full of groups keeps a
      predictable height and the row never has to change SHAPE to hold more. */
   --ds-h-member-well: 136px;
+  /* The two FIXED columns of a member line, in the well and in the drill-in.
+     They are fixed so the names down the left and the EIDs down the right land
+     on the same edge in every group — a member list whose third column sizes
+     itself to its content puts every EID in a different place and makes a
+     50-person roster unreadable. 132px is the widest OUTCOME word the demo's
+     vocabularies hold ("Not searchable" at 11px) plus its marker, with room for
+     the free-text detail a workflow that declares no vocabulary still sends. */
+  --ds-w-member-detail: 132px;
+  --ds-w-member-eid: 64px;
   --ds-w-rail: 200px; /* the workflow rail */
   /* The run's CONTEXT RAIL — the third column of the detail region, where the
      Data ledger, the evidence and the run's provenance live so the log stream

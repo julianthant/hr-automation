@@ -44,6 +44,7 @@ import {
 } from "./demo-ui";
 import { FooterActions, OutcomeActionButton, RowActionMenu, type DemoActionHandler } from "./DemoActions";
 import { rowInBucket, type StatusBucket } from "./DemoShell";
+import type { MemberOutcomeSpec } from "./demo-wire";
 import { DEMO_DAY, dayLabel } from "./demo-days";
 import {
   bandsFor,
@@ -54,7 +55,9 @@ import {
   fmtElapsed,
   gateAge,
   groupCounts,
+  isSettledRow,
   linkedGroupSummary,
+  visibleMemberIds,
   orderedMemberIds,
   sortDemoRows,
   type DemoRow,
@@ -114,23 +117,6 @@ export interface DemoQueueHandlers {
   onOpenPanel: (workflow: string, id: string) => void;
   /** add/remove a row from the bulk target set */
   onToggleBulk: (id: string) => void;
-}
-
-/**
- * Which of a group's members are actually on screen — and therefore which ones
- * j/k should walk. Deriving traversal from the SAME rung that renders them is
- * what keeps the keyboard and the eye in the same place.
- */
-export function visibleMemberIds(row: DemoRow, expandedGroups: ReadonlySet<string>): string[] {
-  const ids = orderedMemberIds(row.id);
-  switch (densityRung(ids.length)) {
-    case "inline":
-      return ids;
-    case "compact":
-      return expandedGroups.has(row.id) ? ids : ids.slice(0, 4);
-    case "well":
-      return ids;
-  }
 }
 
 /** the j/k traversal order for the current view — the SAME order the eye sees */
@@ -198,6 +184,83 @@ function MicroSteps({ row }: { row: DemoRow }) {
           )}
         />
       ))}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The member line — one grid, three columns, every group
+// ---------------------------------------------------------------------------
+
+/**
+ * The member line's column template, shared by the well and the drill-in.
+ *
+ * FIXED third and fourth columns are the whole point. The old line was a flex
+ * row whose detail column sized itself to its own text, so the EIDs down a
+ * 50-person roster landed in fifty different places and the longest member
+ * decided where everyone else's name was cut. Fixing the two right-hand columns
+ * gives the name every pixel that is left and puts the outcomes and the EIDs on
+ * two straight edges.
+ */
+const MEMBER_GRID = "grid grid-cols-[1rem_minmax(0,1fr)_var(--ds-w-member-detail)_var(--ds-w-member-eid)]";
+
+/**
+ * What the detail column is CALLED for this group — `Outcome` when its workflow
+ * declares an outcome vocabulary, `Detail` when the column holds free text.
+ * Read off the workflow, never off the workflow's id.
+ */
+function memberDetailHeading(group: DemoRow): string {
+  return group.workflow.memberOutcomes ? "Outcome" : "Detail";
+}
+
+/**
+ * How an OUTCOME is drawn. Deliberately NOT a `StatusPill`: an outcome answers
+ * "what did it find", a status answers "did it run", and rendering one in the
+ * other's chrome is how a `Verified done · Not found` row comes to read as a
+ * failure. It is a word in a column — the word is always the differentiator,
+ * and the tone only decides how loudly it is said.
+ */
+const OUTCOME_TONE: Record<MemberOutcomeSpec["tone"], string> = {
+  danger: "font-medium text-[color:var(--ds-status-failed-fg)]",
+  warn: "font-medium text-[color:var(--ds-status-waiting-fg)]",
+  neutral: "text-[color:var(--ds-fg-secondary)]",
+  quiet: "text-[color:var(--ds-fg-muted)]",
+};
+
+/**
+ * The third column of a member line.
+ *
+ * A workflow that declares a member-outcome vocabulary gets the typed OUTCOME;
+ * one that does not keeps the free-text fact it already sends. Both land in the
+ * same fixed column, so the two kinds of group still read as the same shape.
+ */
+function MemberDetailCell({ row }: { row: DemoRow }) {
+  const outcome = row.memberOutcomeSpec;
+  if (outcome) {
+    return (
+      <span
+        title={outcome.meaning}
+        className={cn(dsText.meta, "min-w-0 truncate", OUTCOME_TONE[outcome.tone])}
+      >
+        {outcome.label}
+      </span>
+    );
+  }
+  // No vocabulary declared, and nothing found yet, both read as "—" rather than
+  // as an empty cell: a blank column in a list of filled ones reads as a value
+  // that failed to load.
+  return (
+    <span
+      className={cn(
+        dsText.meta,
+        dsText.nums,
+        "min-w-0 truncate",
+        row.status === "failed" && row.containment !== "rejected"
+          ? "text-[color:var(--ds-status-failed-fg)]"
+          : "text-[color:var(--ds-fg-muted)]",
+      )}
+    >
+      {row.memberFact ?? "—"}
     </span>
   );
 }
@@ -395,6 +458,20 @@ function RowInfo({ row }: { row: DemoRow }) {
           <p className={cn(dsText.body, "leading-relaxed text-[color:var(--ds-fg)]")}>{ex.doing}</p>
           <p className={cn(dsText.body, "leading-relaxed text-[color:var(--ds-fg-secondary)]")}>{ex.panel}</p>
           <p className={cn(dsText.body, "leading-relaxed text-[color:var(--ds-fg-secondary)]")}>{ex.why}</p>
+          {/* The rule the row's controls obey. It is here rather than on the
+              row because it is the same rule on every packet — a sentence that
+              never changes does not deserve four lines of a 400px column. */}
+          {ex.constraint && (
+            <p
+              className={cn(
+                dsText.body,
+                "border-l pl-[var(--ds-space-base)] leading-relaxed",
+                "border-[color:var(--ds-border-loud)] text-[color:var(--ds-fg-secondary)]",
+              )}
+            >
+              {ex.constraint}
+            </p>
+          )}
           <MetaLine items={[spec.rowType, panel.name, `${row.wfLabel} · ${row.trace}`]} tone="faint" />
         </div>
       </PopoverContent>
@@ -427,7 +504,16 @@ function sublineFor(row: DemoRow): { tone: string; text: string } | null {
   // A group's own decision lives on a member, so the group has no gate of its
   // own to quote — its rolled-up outcome is the sentence that says what is
   // blocked and what is at risk.
-  if (row.rowType === "group")
+  //
+  // CUT ON A SETTLED GROUP. On `ec-packet` that sentence read "5 done · 1
+  // rejected — the packet stays at Done with warnings until the rejected page
+  // is deleted or acknowledged": its first half is the status-counts strip two
+  // bands below it, rendered again as prose, and its second half is a rule that
+  // is true of every packet in the product. The full sentence is unchanged and
+  // still rendered — by the panel's outcome line, which wave 6 made
+  // unconditional — so nothing is lost, it is just not said twice on a row
+  // nobody has to act on.
+  if (row.rowType === "group" && !isSettledRow(row))
     return {
       tone: status === "waiting" ? "text-[color:var(--ds-status-waiting-fg)]" : "text-[color:var(--ds-fg-muted)]",
       text: row.outcome.text,
@@ -459,6 +545,7 @@ export function DemoRowCard({
   const memberCount = row.memberIds?.length ?? 0;
   const StatusIcon = PROPOSED_STATUS[status].icon;
   const linked = linkedGroupSummary(row);
+  const settled = isSettledRow(row);
 
   // NO status branching here. The footer renders exactly the descriptors the
   // surface sent for this row; an action the server did not send has no button.
@@ -642,13 +729,19 @@ export function DemoRowCard({
                   {counts.rejected} rejected
                 </span>
               )}
-              <span
-                className="ml-auto inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-success-fg)]"
-                aria-label="checked progress"
-              >
-                <CheckCircle2 aria-hidden className={dsIcon.sm} />
-                {[...(row.memberIds ?? [])].filter((id) => state.checkedIds.has(id)).length}/{memberCount} checked
-              </span>
+              {/* The checked counter is a PLACE-KEEPER for walking a list that
+                  still needs walking. On a settled group it counts progress
+                  through a job that is over, and invites a mark that changes
+                  nothing — so it goes. */}
+              {!settled && (
+                <span
+                  className="ml-auto inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-success-fg)]"
+                  aria-label="checked progress"
+                >
+                  <CheckCircle2 aria-hidden className={dsIcon.sm} />
+                  {[...(row.memberIds ?? [])].filter((id) => state.checkedIds.has(id)).length}/{memberCount} checked
+                </span>
+              )}
             </div>
             <GroupBody row={row} state={state} handlers={handlers} />
           </>
@@ -720,6 +813,15 @@ function LinkedReviewChip({ row, handlers }: { row: DemoRow; handlers: DemoQueue
  * the extracted count — the thing it genuinely knows — and offers the bulk
  * approval right here. Editing a value is deliberately NOT offered: a value may
  * only change with its scanned page on screen.
+ *
+ * **The block is an ACTION plus ONE line.** It used to carry a full paragraph —
+ * who was excluded and why, then the whole editing policy — wrapped into four
+ * lines inside a 400px column, where it was taller than the two buttons it was
+ * explaining and dwarfed the row it sat in. What stayed is the fact this packet
+ * alone has (`1 excluded — Diego Diaz is inactive in UCPath`); the reasoning
+ * moved to the two surfaces that exist for it: the panel's decision, which
+ * already renders the gate's own note in full, and the row's ⓘ, which carries
+ * the editing rule because that rule is the same on every packet in the product.
  */
 function PacketBeforeFanout({ row, handlers }: { row: DemoRow; handlers: DemoQueueHandlers }) {
   const bulk = row.bulkApprove;
@@ -736,7 +838,7 @@ function PacketBeforeFanout({ row, handlers }: { row: DemoRow; handlers: DemoQue
       {bulk && (
         <div
           className={cn(
-            "flex flex-wrap items-center border",
+            "flex min-w-0 items-center border",
             "gap-[var(--ds-space-snug)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]",
             dsRadius.md,
             "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]",
@@ -747,6 +849,7 @@ function PacketBeforeFanout({ row, handlers }: { row: DemoRow; handlers: DemoQue
             variant="primary"
             onClick={(e) => e.stopPropagation()}
             icon={<CheckCircle2 aria-hidden className={dsIcon.sm} />}
+            className="shrink-0"
           >
             Approve {bulk.approvable} of {bulk.total}
           </Button>
@@ -758,12 +861,20 @@ function PacketBeforeFanout({ row, handlers }: { row: DemoRow; handlers: DemoQue
               if (row.reviewRunId) handlers.onOpenPanel(DEMO_ROWS[row.reviewRunId].wfLabel, row.reviewRunId);
             }}
             iconAfter={<ArrowUpRight aria-hidden className={dsIcon.sm} />}
+            className="shrink-0"
           >
             Open review
           </Button>
-          <span className={cn(dsText.meta, "min-w-0 flex-1 leading-snug text-[color:var(--ds-fg-muted)]")}>
-            {bulk.blockedNote} {bulk.editNote}
-          </span>
+          {bulk.excluded && (
+            <span
+              // The full sentence stays reachable without hover: it is the gate
+              // note the panel renders, one press away on the same row.
+              title={`${bulk.excluded.count} of ${bulk.total} cannot be approved — ${bulk.excluded.reason}. Open the review for the rest.`}
+              className={cn(dsText.meta, "ml-auto min-w-0 truncate text-[color:var(--ds-status-waiting-fg)]")}
+            >
+              <span className={dsText.nums}>{bulk.excluded.count}</span> excluded — {bulk.excluded.reason}
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -795,6 +906,18 @@ function GroupBody({ row, state, handlers }: { row: DemoRow; state: DemoQueueSta
   return <GroupMemberList row={row} state={state} handlers={handlers} rung={rung} />;
 }
 
+/**
+ * A group's disclosure link — one shape for `Show all N` and `Open all N`, so
+ * "there is more of this behind here" always looks the same in a row.
+ */
+const disclosureLink = cn(
+  dsText.meta,
+  "inline-flex cursor-pointer items-center gap-[var(--ds-space-tight)]",
+  dsFocus,
+  dsMotion.fast,
+  "text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
+);
+
 /** the status pill's own word, so the empty state names the filter the operator set */
 function filterWord(filter: DemoFilter): string {
   if (filter === "needsYou") return "waiting on you or write parked";
@@ -814,14 +937,24 @@ function GroupMemberList({
 }) {
   const ids = orderedMemberIds(row.id);
   const expanded = state.expandedGroups.has(row.id);
+  // A SETTLED group is collapsed shut, not collapsed-to-four. This is ratified
+  // D5 read literally ("groups default collapsed, auto-expand on a member
+  // `Waiting on you` or `Failed`") — the four-line peek was a softening of it,
+  // and on a finished packet those four lines re-explain a composition the
+  // count strip above has already reported. The ladder (D11) is untouched: it
+  // still decides what the EXPANDED body looks like at every size, and the
+  // disclosure below is one press away.
+  const settled = isSettledRow(row);
+  const shut = settled && !expanded;
   // 13 people or 50, every line stays available inside a fixed-height well, so
   // the row is the same size on screen either way. This is the ONLY treatment
   // above twelve members — a roster does not get a second visual language just
   // for being long, it gets the same lines and a scrollbar.
-  const visible = rung === "well" ? ids : expanded ? ids : ids.slice(0, 4);
+  const visible = shut ? [] : rung === "well" ? ids : expanded ? ids : ids.slice(0, 4);
   const noun = row.wfLabel === "Oath Signature" ? "signers" : "people";
   return (
     <div className="mt-1.5 ml-5">
+      {visible.length > 0 && (
       <div
         className={cn(
           "divide-y divide-border/40 overflow-hidden rounded-md border border-border/60",
@@ -841,8 +974,9 @@ function GroupMemberList({
                 handlers.onSelect(id);
               }}
               className={cn(
-                "flex w-full cursor-pointer items-center text-left",
-                "h-[var(--ds-h-sm)] gap-[var(--ds-space-base)] px-[var(--ds-space-base)]",
+                MEMBER_GRID,
+                "w-full cursor-pointer items-center text-left",
+                "h-[var(--ds-h-sm)] gap-x-[var(--ds-space-base)] px-[var(--ds-space-base)]",
                 dsText.body,
                 dsFocus,
                 dsMotion.fast,
@@ -856,68 +990,52 @@ function GroupMemberList({
               />
               <span
                 className={cn(
-                  "min-w-0 flex-1 truncate text-[color:var(--ds-fg)]",
+                  "min-w-0 truncate text-[color:var(--ds-fg)]",
                   m.containment === "rejected" && "italic text-[color:var(--ds-fg-muted)]",
                 )}
               >
                 {m.title}
               </span>
-              <span
-                className={cn(
-                  dsText.meta,
-                  dsText.nums,
-                  "shrink-0 truncate",
-                  m.status === "failed" && m.containment !== "rejected"
-                    ? "text-[color:var(--ds-status-failed-fg)]"
-                    : "text-[color:var(--ds-fg-muted)]",
-                )}
-              >
-                {m.memberFact}
-              </span>
-              <span className={cn(dsText.meta, dsText.nums, "w-16 shrink-0 text-right text-[color:var(--ds-fg-muted)]")}>
+              <MemberDetailCell row={m} />
+              <span className={cn(dsText.meta, dsText.nums, "min-w-0 truncate text-right text-[color:var(--ds-fg-muted)]")}>
                 {m.eid ?? "—"}
               </span>
             </button>
           );
         })}
       </div>
-      {rung === "well" ? (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            handlers.onDrillIn(row.id);
-          }}
-          className={cn(
-            dsText.meta,
-            "mt-[var(--ds-space-snug)] inline-flex cursor-pointer items-center gap-[var(--ds-space-tight)]",
-            dsFocus,
-            dsMotion.fast,
-            "text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
-          )}
-        >
-          <ArrowRight aria-hidden className={dsIcon.sm} />
-          Open all {ids.length} {noun}
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            handlers.onToggleGroup(row.id);
-          }}
-          className={cn(
-            dsText.meta,
-            "mt-[var(--ds-space-snug)] inline-flex cursor-pointer items-center gap-[var(--ds-space-tight)]",
-            dsFocus,
-            dsMotion.fast,
-            "text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
-          )}
-        >
-          {expanded ? <ChevronUp aria-hidden className={dsIcon.sm} /> : <ChevronDown aria-hidden className={dsIcon.sm} />}
-          {expanded ? "Collapse" : `Show all ${ids.length} ${noun}`}
-        </button>
       )}
+      {/* The disclosures. A settled group always carries the toggle (it is the
+          only way back to its members once it is shut); the well's drill-in is
+          unchanged and still the route into the full list at 13+. */}
+      <div className={cn(visible.length > 0 && "mt-[var(--ds-space-snug)]", "flex items-center gap-[var(--ds-space-cozy)]")}>
+        {(settled || rung === "compact") && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handlers.onToggleGroup(row.id);
+            }}
+            className={disclosureLink}
+          >
+            {expanded ? <ChevronUp aria-hidden className={dsIcon.sm} /> : <ChevronDown aria-hidden className={dsIcon.sm} />}
+            {expanded ? "Collapse" : `Show all ${ids.length} ${noun}`}
+          </button>
+        )}
+        {rung === "well" && !shut && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handlers.onDrillIn(row.id);
+            }}
+            className={disclosureLink}
+          >
+            <ArrowRight aria-hidden className={dsIcon.sm} />
+            Open all {ids.length} {noun}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -925,6 +1043,13 @@ function GroupMemberList({
 // ---------------------------------------------------------------------------
 // Drill-in triage table
 // ---------------------------------------------------------------------------
+
+/**
+ * The drill-in's columns. The detail and EID widths are the SAME tokens the
+ * well uses, so a member says the same thing in the same place at both rungs.
+ */
+const DRILL_GRID =
+  "grid grid-cols-[1rem_minmax(110px,1fr)_var(--ds-w-member-eid)_var(--ds-w-member-detail)_3rem]";
 
 /** the drill-in header's three summary chips — one shape, two loudness levels */
 const drillChip = (warn: boolean): string =>
@@ -996,6 +1121,27 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
           />
         </span>
       </div>
+      {/* Column heads earn their 20px HERE and nowhere else. This is the rung
+          the operator opens to work a list down, and a column of one-word
+          outcomes is only legible once the word above it says what the column
+          is. Inside a queue row's well the same heads would cost every group
+          on screen a band, which is why the well has none. */}
+      <div
+        aria-hidden
+        className={cn(
+          DRILL_GRID,
+          dsText.caps,
+          "shrink-0 items-center border-b bg-[var(--ds-surface-2)]",
+          dsBorder.subtle,
+          "h-[var(--ds-h-xs)] gap-x-[var(--ds-space-cozy)] px-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]",
+        )}
+      >
+        <span />
+        <span>Person</span>
+        <span>EID</span>
+        <span>{memberDetailHeading(group)}</span>
+        <span className="text-right">Took</span>
+      </div>
       <div role="listbox" aria-label="Group members, attention first" className="min-h-0 flex-1 divide-y divide-border/30 overflow-y-auto">
         {ids.map((id) => {
           const m = DEMO_ROWS[id];
@@ -1012,7 +1158,8 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
               data-demo-row-id={id}
               onClick={() => handlers.onSelect(id)}
               className={cn(
-                "grid w-full cursor-pointer grid-cols-[16px_minmax(110px,1.2fr)_74px_minmax(100px,1fr)_44px] items-center text-left",
+                DRILL_GRID,
+                "w-full cursor-pointer items-center text-left",
                 "h-[var(--ds-h-row)] gap-x-[var(--ds-space-cozy)] px-[var(--ds-space-cozy)]",
                 dsText.body,
                 dsFocus,
@@ -1036,19 +1183,10 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
                 )}
               </span>
               <span className={cn(dsText.meta, dsText.nums, "text-[color:var(--ds-fg-muted)]")}>{m.eid ?? "—"}</span>
-              <span
-                className={cn(
-                  dsText.meta,
-                  dsText.nums,
-                  "truncate",
-                  m.status === "failed" && !rejected && "text-[color:var(--ds-status-failed-fg)]",
-                  (m.status === "waiting" || m.status === "doneWarnings") && "text-[color:var(--ds-status-waiting-fg)]",
-                  (m.status === "verifiedDone" || m.status === "running" || rejected) && "text-[color:var(--ds-fg-muted)]",
-                  m.status === "queued" && "text-[color:var(--ds-fg-faint)]",
-                )}
-              >
-                {m.memberFact}
-              </span>
+              {/* Same cell as the well's, so opening a group to its last rung
+                  does not change what its members are saying — only how many
+                  of them you can see at once. */}
+              <MemberDetailCell row={m} />
               <span className={cn(dsText.meta, dsText.nums, "text-right text-[color:var(--ds-fg-muted)]")}>{m.duration ?? "—"}</span>
             </button>
           );
