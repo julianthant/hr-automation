@@ -381,6 +381,22 @@ export const onboardingWorkflow = defineWorkflow({
     log.success("No duplicate found — proceeding with I-9 creation");
     ctx.updateData({ rehire: "No" });
 
+    // A rehearsal stops before the first possible system-of-record mutation.
+    // I-9 search and creation currently share one step, so the whole step stays
+    // below the boundary: dry run means no profile create and no Smart HR submit.
+    if (input.dryRun) {
+      await ctx.screenshot({ kind: "step", label: "onboarding-dry-run-before-writes" });
+      ctx.updateData({
+        status: "Dry Run Complete",
+        dryRun: true,
+        i9ProfileId: "Not created — dry run",
+      });
+      log.success(
+        "DRY RUN: read-only onboarding checks complete — I-9 profile creation and Smart HR submit skipped",
+      );
+      return;
+    }
+
     // --- Phase 4: I-9 search (existing) or creation (new) ---
 
     const i9ProfileId = await ctx.step("i9-creation", async () => {
@@ -467,20 +483,6 @@ export const onboardingWorkflow = defineWorkflow({
           `[Step: transaction] START template='${TEMPLATE_ID}' `
           + `effectiveDate='${data.effectiveDate}'`,
         );
-
-        // Dry-run guard: stop BEFORE the irreversible UCPath Smart HR submit.
-        // Everything upstream (CRM extraction, person search, I-9 search-first
-        // create) has already run; we only skip `plan.execute()` →
-        // `clickSaveAndSubmit`, the single UCPath mutation in this workflow.
-        // Mirrors oath-signature / emergency-contact dry-run behavior.
-        if (input.dryRun) {
-          await ctx.screenshot({ kind: "form", label: "onboarding-dry-run-before-submit" });
-          ctx.updateData({ status: "Dry Run Complete", dryRun: true });
-          log.success(
-            "DRY RUN: reached Smart HR transaction — submit skipped (no UCPath mutation)",
-          );
-          return;
-        }
 
         // ── Duplicate-hire idempotency probe (before the irreversible submit) ──
         // A prior run can submit the Smart HR hire server-side yet die before

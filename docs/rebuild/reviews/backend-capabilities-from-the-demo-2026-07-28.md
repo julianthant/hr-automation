@@ -22,26 +22,25 @@ not obvious.
 ## 0. Two findings about the REAL product (read these first)
 
 These are not demo notes. They are facts about the **live system**, surfaced only because the demo
-had to state, for every workflow, where the dry-run boundary sits — and two workflows had no
-honest answer to draw. **Both are operational hazards worth an explicit decision**, not
-documentation gaps.
+had to state, for every workflow, where the dry-run boundary sits. Both now have explicit operator
+decisions; the onboarding defect is fixed and the accepted absences remain facts the capability
+matrix must expose.
 
-1. **`work-study` and `kronos-pay-rule` honour no dry run at all.** Neither workflow's handler
+1. **ACCEPTED: `work-study` and `kronos-pay-rule` honour no dry run at all.** Neither workflow's handler
    reads a `dryRun` flag anywhere (`src/workflows/work-study/`, `src/workflows/kronos-pay-rule/`
    — grep is empty). Both write to a system of record, and both offer no rehearsal mode. This is
    consistent with the run-surface survey, which found dry-run offered only on separations,
    onboarding, emergency-contact, oath-signature, oath-upload and onbase. **For those two
-   workflows, the first real run *is* the run.** The rebuild's write-safety layer (doc 09) should
-   either give them a boundary or record, as a ratified decision, that they run without one.
+   workflows, the first real run *is* the run.** This is not a defect to paper over with a false
+   rehearsal; the descriptor must serve the absence and its reason so the capability matrix can
+   distinguish it from a capability that has not been built.
 
-2. **`onboarding` creates the I-9 profile even on a dry run.** Its dry-run guard sits at the
-   Smart HR submit (`src/workflows/onboarding/workflow.ts` — the guard's own comment: "Everything
-   upstream (CRM extraction, person search, I-9 search-first create) has already run; we only skip
-   `plan.execute()`"). So a "rehearsal" has already written something real — an I-9 profile in a
-   production system — before it reaches the boundary it rehearses. The demo's Explorer draws this
-   honestly (the boundary node sits after the i9-creation node); the decision it forces is
-   whether an I-9 profile created by a rehearsal is acceptable residue, and if not, where the
-   boundary must move.
+2. **RESOLVED 2026-07-28: `onboarding` dry run stops before I-9 creation.** The handler now
+   completes its read-only CRM extraction and UCPath identity checks, then returns before the
+   combined `i9-creation` step and therefore before Smart HR too. A rehearsal writes to no system
+   of record. `tests/unit/workflows/onboarding/workflow.test.ts` pins the boundary before both
+   mutation sites. The demo Explorer must draw the same corrected boundary: I-9 creation and
+   Smart HR are both below it.
 
 ---
 
