@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import {
   AlertTriangle,
@@ -48,12 +49,13 @@ import {
   dsRadius,
   dsSize,
   dsSurface,
+  useDsEnterTransition,
   dsText,
 } from "./demo-ui";
 import { FooterActions, OutcomeActionButton, RowContextMenu, type DemoActionHandler } from "./DemoActions";
 import { rowInBucket, type StatusBucket } from "./DemoShell";
 import { DEMO_DAY, dayLabel } from "./demo-days";
-import { fmtVersionTag, workflowVersionTag } from "./demo-wire";
+import { demoNowMs, fmtVersionTag, workflowVersionTag } from "./demo-wire";
 import {
   bandsFor,
   DEMO_ROWS,
@@ -680,6 +682,49 @@ function RowFooterLine({
   );
 }
 
+/**
+ * THE ATTENTION TRANSITION — the one status change this product animates.
+ *
+ * `DESIGN.md` says never animate status churn, and it is right: this dashboard
+ * updates constantly, and if everything that changes also moves it is
+ * unreadable exactly when it is busiest. Elapsed timers, counts, background
+ * settling and self-initiated re-sorts all stay perfectly still.
+ *
+ * A run CROSSING INTO `Waiting on you` or `Failed` is different in kind, and
+ * the difference is what the rest of the rule is protecting. Those are the two
+ * states allowed to shout; a run entering one has stopped being background and
+ * become work, and the moment it happens is the moment an operator's attention
+ * is somewhere else. A row that silently turns amber between glances is a row
+ * that gets found late.
+ *
+ * So: it fires on the EDGE, never on the state. A row that was already waiting
+ * when you scrolled to it does nothing — it has already been noticed, and
+ * re-announcing it every render is exactly the churn the rule forbids. It
+ * settles once, and it is over.
+ */
+function useAttentionAnnounce(status: ProposedStatus): boolean {
+  const attention = status === "waiting" || status === "failed";
+  const previous = useRef<ProposedStatus | null>(null);
+  const [announcing, setAnnouncing] = useState(false);
+
+  useEffect(() => {
+    const was = previous.current;
+    previous.current = status;
+    // First sight of a row is not a transition. Mounting into an attention
+    // status is how EVERY row on a busy panel would announce itself on paint.
+    if (was === null || was === status) return;
+    if (!attention) return;
+    setAnnouncing(true);
+    const id = window.setTimeout(() => setAnnouncing(false), ATTENTION_ANNOUNCE_MS);
+    return () => window.clearTimeout(id);
+  }, [attention, status]);
+
+  return announcing;
+}
+
+/** how long the settle lasts — one `move`, then still */
+const ATTENTION_ANNOUNCE_MS = 900;
+
 export function DemoRowCard({
   row,
   state,
@@ -691,6 +736,7 @@ export function DemoRowCard({
 }) {
   const selected = state.selectedId === row.id;
   const status = effectiveStatus(row);
+  const announcing = useAttentionAnnounce(status);
   const sub = sublineFor(row);
   const elapsed = row.elapsedSec !== undefined ? fmtElapsed(row.elapsedSec + state.tick) : undefined;
   const isGroup = row.rowType === "group";
@@ -741,6 +787,21 @@ export function DemoRowCard({
             // "the system is pointing at this" is one statement, not two.
             selected && "bg-[var(--ds-surface-selected)] shadow-[inset_2px_0_0_var(--ds-ring)]",
             status === "running" && !selected && "border-[color:var(--ds-status-running-border)]",
+            // THE ANNOUNCE. A single settle on the edge into an attention
+            // status: the row lifts by the one travel distance and its border
+            // takes the status ink, then it is still. Transform and opacity
+            // only, interruptible like everything else (it is a transition, so
+            // grabbing the row mid-settle re-targets rather than finishing),
+            // and both the travel and the clock are tokens the reduced-motion
+            // preference already zeroes.
+            announcing &&
+              cn(
+                dsMotion.move,
+                "-translate-y-[var(--ds-travel-sm)]",
+                status === "failed"
+                  ? "border-[color:var(--ds-status-failed-fg)]"
+                  : "border-[color:var(--ds-status-waiting-border)]",
+              ),
           )}
         >
           {/*
@@ -1210,6 +1271,7 @@ function PersonLine({
   selected,
   onClick,
   title,
+  arriving,
 }: {
   icon: typeof CheckCircle2;
   iconClass?: string;
@@ -1220,7 +1282,15 @@ function PersonLine({
   selected?: boolean;
   onClick?: (e: ReactMouseEvent) => void;
   title?: string;
+  /**
+   * This person was read WHILE the list was on screen — so the line arrives
+   * rather than appearing. See `RecordStreamList` for why that is a fact off
+   * the wire and not a render trick, and why the rest of the list does not do
+   * it. The hook runs unconditionally; only the classes are gated.
+   */
+  arriving?: boolean;
 }) {
+  const entering = useDsEnterTransition();
   const body = (
     <>
       <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0", iconClass)} />
@@ -1236,10 +1306,15 @@ function PersonLine({
     "w-full items-center text-left",
     "h-[var(--ds-h-sm)] gap-x-[var(--ds-space-base)] px-[var(--ds-space-base)]",
     dsText.body,
+    // It comes from BELOW, because that is where the next person is coming
+    // from: the list grows downward, so a line that slid down from above would
+    // be moving against the direction the work is arriving in.
+    arriving && cn(dsMotion.enter, "data-[demo-enter=from]:translate-y-[var(--ds-travel-md)] data-[demo-enter=from]:opacity-0"),
   );
+  const motionProps = arriving ? entering : undefined;
   if (!onClick) {
     return (
-      <div title={title} className={shape}>
+      <div title={title} className={shape} {...motionProps}>
         {body}
       </div>
     );
@@ -1257,6 +1332,7 @@ function PersonLine({
         "hover:bg-[var(--ds-surface-3)]",
         selected && "bg-[var(--ds-surface-selected)]",
       )}
+      {...motionProps}
     >
       {body}
     </button>
@@ -1281,6 +1357,25 @@ function RecordStreamList({ row, tick }: { row: DemoRow; tick: number }) {
   const stream = recordStream(row, tick);
   if (stream.total === 0) return null;
   const pending = stream.total - stream.read.length;
+  /*
+    WHICH RECORDS ANNOUNCE THEMSELVES, and why it is a fact and not a trick.
+
+    "New work arriving" is the one place in this product where motion carries
+    MEANING rather than continuity: these people appeared one at a time because
+    the run read them one at a time, and a list that simply grows longer while
+    you look away has not told you that. So a line ARRIVES.
+
+    The gate is `readAt`, straight off the wire — a record read within the last
+    few seconds of demo time is one that arrived while you were watching. That
+    is what stops the whole list animating on first paint (DESIGN.md: nothing
+    animates on load): open a row twelve minutes into a run and every `readAt`
+    is old, so twelve records simply are there, which is the truth. Open it
+    while the run is reading and each new one slides in as it lands.
+
+    Derived, never bookkept: no "ids I have already rendered" ref, so the
+    animation cannot get out of step with the data by a re-render.
+  */
+  const nowMs = demoNowMs(tick);
   return (
     <div className="flex flex-col gap-[var(--ds-space-snug)]">
       <div className={cn(dsText.meta, "flex items-center gap-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]")}>
@@ -1303,6 +1398,11 @@ function RecordStreamList({ row, tick }: { row: DemoRow; tick: number }) {
           {stream.read.map((rec) => (
             <PersonLine
               key={rec.id}
+              arriving={
+                stream.streaming &&
+                rec.readAt !== undefined &&
+                nowMs - Date.parse(rec.readAt) < RECORD_ARRIVAL_WINDOW_MS
+              }
               icon={RECORD_STATE_ICON[rec.state].icon}
               iconClass={RECORD_STATE_ICON[rec.state].cls}
               name={rec.name}
@@ -1324,6 +1424,14 @@ function RecordStreamList({ row, tick }: { row: DemoRow; tick: number }) {
     </div>
   );
 }
+
+/**
+ * How recently a record has to have been read for its line to ARRIVE rather
+ * than simply be there. Wide enough that a slow tick cannot miss the window,
+ * short enough that re-opening a row seconds later does not replay the whole
+ * extraction as a light show.
+ */
+const RECORD_ARRIVAL_WINDOW_MS = 4000;
 
 /**
  * A record's own state, on the ratified status glyphs — `ready` reads as the

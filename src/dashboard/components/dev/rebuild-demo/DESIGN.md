@@ -375,21 +375,124 @@ Two things this rule does **not** license:
 
 ## Motion rules
 
-Motion is functional only. It answers *where did this come from* or
-*did my press register* — nothing moves for delight.
+Motion is functional only. It answers *where did this come from*, *did my press
+register*, or *this just became your problem* — nothing moves for delight.
 
-- **Do animate:** dialog/drawer entry (they come from somewhere), toast entry,
-  press feedback (`active:translate-y-px`), hover tints, determinate progress
-  width, the `Running` spinner.
-- **Do not animate:** anything on first page load, list reordering, numbers
-  counting up, status changes, or a tooltip (a delayed fade after a delayed
-  open feels broken — tooltips appear instantly, on purpose).
-- Transform and opacity only. Never animate layout properties.
-- Durations come from `--ds-dur-*`. `prefers-reduced-motion` zeroes all four
-  tokens, which removes every transition in the system at once — do not add a
-  separate reduced-motion branch for a transition.
+### The token set — five classes, and there is no sixth
+
+`ds/tokens.ts` exports the names; `ds/tokens.css` owns the values. **Never type
+a duration or an easing.** Every one of these is a TRANSITION, never a
+key-frame, and that is what makes the language *interruptible*: a transition
+re-targets from wherever it currently is the moment its end value changes, so
+grabbing something mid-flight answers at once instead of finishing the move it
+was making.
+
+| Class | Duration | Easing | What it is for |
+|---|---|---|---|
+| `dsMotion.base` | `--ds-dur-2` 140ms | `--ds-ease-out` | colour / fill / edge, in place — hover tints, a status settling |
+| `dsMotion.fast` | `--ds-dur-1` 90ms | `--ds-ease-out` | press + hover on a **command**. A press must feel like a press |
+| `dsMotion.enter` | `--ds-dur-enter` 150ms | `--ds-ease-out` | something **arriving** — an overlay, a toast, a record just read |
+| `dsMotion.exit` | `--ds-dur-exit` 90ms | `--ds-ease-in` | something **leaving**. It goes; it does not drift |
+| `dsMotion.move` | `--ds-dur-move` 220ms | `--ds-ease-standard` | a **spatial** change — a panel reshaping, a rail collapsing |
+
+Easings: `--ds-ease-out` `cubic-bezier(0.16, 1, 0.3, 1)` · `--ds-ease-in`
+`cubic-bezier(0.4, 0, 1, 1)` · `--ds-ease-standard`
+`cubic-bezier(0.45, 0, 0.55, 1)`. **`ease-in` is only ever for leaving** —
+starting slow at the moment the eye is watching hardest is what makes an
+interface feel sluggish.
+
+`enter` and `exit` are the house pair and they are deliberately **asymmetric**
+(150 / 90): arriving has to be *read*, leaving only has to be *acknowledged*.
+
+Travel is a language too, and it **names a direction — it is never a journey**:
+`dsTravel.sm` (`--ds-travel-sm` 4px) for a popover leaving its trigger,
+`dsTravel.md` (`--ds-travel-md` 8px) for a dialog, a toast or a record arriving.
+
+### Where it earns its place
+
+- **Overlays** — dialog, drawer, popover, context menu, lightbox. They come
+  from somewhere, and **origin-aware**: a popover scales out of its resolved
+  trigger (`--radix-popover-content-transform-origin`, never `center` and never
+  the `side` *prop* — a collision-flipped popover must not animate away from
+  itself); a drawer comes from its edge; a modal stays centred, because it is
+  anchored to nothing.
+- **Panels** — the Workflow Panel's three modes, the context rail collapsing,
+  the queue narrowing on drill-in. A spatial change should read as movement.
+- **New work arriving** — the progressive member list. Records appearing one at
+  a time *because they were read one at a time* is motion carrying meaning, not
+  decorating a list. Gate it on the wire's own arrival instant (`readAt`), not
+  on render bookkeeping, so nothing animates on first paint.
+- **Press feedback on commands** — `active:translate-y-px`, `dsMotion.fast`.
+- **The attention transition** — see the amendment below.
+
+**Mounting is the one case a transition cannot express on its own** (there is no
+previous value to move away from). `useDsEnterTransition()` manufactures one:
+spread it on the element, describe where it comes from with
+`data-[demo-enter=from]:` classes, and everything after the first frame behaves
+like every other transition in the system.
+
+### What must stay STILL
+
+This is the discipline that separates professional from busy, and it matters
+more than any of the above. **Ambient churn does not move.** Elapsed timers
+ticking, counts incrementing, background status settling, a self-initiated
+re-sort. This dashboard updates constantly; if everything that updates also
+moves, it is unreadable exactly when it is busiest.
+
+Also still: anything on first page load, list reordering, numbers counting up,
+and tooltips (a delayed fade after a delayed open feels broken — tooltips
+appear instantly, on purpose).
+
+### AMENDMENT (wave 14): *never animate status changes* narrows
+
+> **Was:** never animate status changes.
+> **Now:** never animate ambient status *churn* — but a run that starts needing
+> you may announce itself, once, on the edge.
+
+**Why the original was written, and why it still holds for almost everything.**
+A queue of forty rows re-renders continuously: steps advance, timers tick,
+counts settle, members finish. If every one of those changes moved, the panel
+would shimmer permanently and the operator would learn to ignore movement
+altogether — which is the worst outcome, because movement is then unavailable
+for the one thing that needs it.
+
+**Why the exception is narrow and not a loophole.** Two states are allowed to
+shout in this product, `Waiting on you` and `Failed`. A run *crossing into* one
+has stopped being background and become work, and the moment that happens is
+precisely the moment the operator is looking somewhere else. A row that turns
+amber silently between glances is a row that gets found late.
+
+**The four constraints that keep it from becoming a licence:**
+
+1. **Edge, never state.** It fires on the *transition into* an attention
+   status. A row that was already waiting when you scrolled to it does nothing.
+2. **Never on mount.** First sight of a row is not a change; otherwise every
+   row on a busy panel announces itself on paint, which is the churn this rule
+   exists to prevent.
+3. **Once, then still.** One settle (`ATTENTION_ANNOUNCE_MS`), and it is over.
+   Nothing pulses, nothing repeats, nothing waits to be acknowledged.
+4. **Only the two loud statuses.** `Running`, `Queued`, `Done`, `Cancelled`,
+   `Done with warnings` and every count beside them stay exactly as still as
+   they were. Reaching for this on a third status is the drift, and the answer
+   is no.
+
+Implemented once, in `useAttentionAnnounce` (`DemoQueue.tsx`). Do not re-derive
+it at a second call site.
+
+### Mechanics
+
+- **Transform and opacity only.** Never animate `width`, `height`, `top`,
+  `left` or a margin.
+- Durations and travel come from tokens. `prefers-reduced-motion` zeroes
+  **both** — the clock *and* the distance — which removes every transition in
+  the system at once. **Do not add a separate reduced-motion branch for a
+  transition**; zeroing only the clock would still slide a drawer 8px in one
+  frame, which is a jump, which is what the preference is asking not to see.
 - Tailwind `animate-*` utilities **must** carry `motion-reduce:animate-none` on
   the same line (the architecture guard enforces this).
+- Key-frames and bare `animation` properties are banned anywhere under
+  `src/dashboard/**` — guard-enforced, and it is also why the language is
+  interruptible.
 
 ---
 
