@@ -841,7 +841,7 @@ function WorkflowEntryList({
   const counts = useMemo(() => countRowsByWorkflow(rows), [rows]);
 
   /** Every rail entry is the same object; the label IS what it filters by. */
-  const entry = (label: string, total: number, needsYou: number, on: boolean, note?: string) => (
+  const entry = (label: string, total: number, queued: number, needsYou: number, on: boolean, note?: string) => (
     <button
       type="button"
       aria-current={on ? "page" : undefined}
@@ -905,22 +905,36 @@ function WorkflowEntryList({
             <span className={dsText.nums}>{needsYou}</span>
           </span>
         )}
-        {/* A count that hits zero DIMS, it does not disappear — the eye must
+        {/* `queued │ total`, PER WORKFLOW. Operator: *"the queued | total should
+            be in beside each workflow."* It is the pair the collapsed launcher
+            used to carry as one global figure, which is where it was ambiguous —
+            here each number is scoped to the panel it sits on, and the two are
+            told apart by a rule rather than by the operator remembering an
+            order. Both come off `countRowsByWorkflow`, the same pass the
+            attention badge and the Status Bar read.
+
+            A count that hits zero DIMS, it does not disappear — the eye must
             not have to re-scan the rail to find out a panel is idle. */}
         <span
-          title={`${total} row${total === 1 ? "" : "s"} in ${label}`}
-          className={cn(
-            dsText.meta,
-            dsText.nums,
-            "flex items-center justify-end",
-            total === 0
-              ? "text-[color:var(--ds-fg-faint)]"
-              : on
-                ? "font-semibold text-[color:var(--ds-fg)]"
-                : "text-[color:var(--ds-fg-secondary)]",
-          )}
+          title={`${label}: ${queued} queued of ${total} row${total === 1 ? "" : "s"} today`}
+          aria-label={`${queued} queued of ${total} in ${label}`}
+          className={cn(dsText.meta, dsText.nums, "flex items-center justify-end gap-[var(--ds-space-hair)]")}
         >
-          {total}
+          <span className={queued === 0 ? "text-[color:var(--ds-fg-faint)]" : "text-[color:var(--ds-fg-secondary)]"}>
+            {queued}
+          </span>
+          <span aria-hidden className="text-[color:var(--ds-fg-faint)]">│</span>
+          <span
+            className={
+              total === 0
+                ? "text-[color:var(--ds-fg-faint)]"
+                : on
+                  ? "font-semibold text-[color:var(--ds-fg)]"
+                  : "text-[color:var(--ds-fg-secondary)]"
+            }
+          >
+            {total}
+          </span>
         </span>
       </span>
     </button>
@@ -928,6 +942,20 @@ function WorkflowEntryList({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-[var(--ds-space-cozy)]">
+      {/* The pair is named ONCE, as a column head, not per row: two bare
+          numbers beside a rule is exactly the anonymous-badge problem the
+          launcher had, and a caption on every entry would be the same word
+          fourteen times. */}
+      <div
+        className={cn(
+          dsText.caps,
+          "flex items-center justify-end gap-[var(--ds-space-hair)] px-[var(--ds-space-cozy)] pb-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]",
+        )}
+      >
+        <span>queued</span>
+        <span aria-hidden className="text-[color:var(--ds-fg-faint)]">│</span>
+        <span>all</span>
+      </div>
       {RAIL_GROUPS.map((g) => (
         <div key={g.label} className="pb-[var(--ds-space-cozy)]">
           {/* More air above a group heading than below it — the label belongs to
@@ -940,7 +968,11 @@ function WorkflowEntryList({
               const c = counts.get(e.label);
               // Rows are deliberately icon-free — the workflow icons live on
               // Session Cards and the add-worker picker, not here.
-              return <li key={e.label}>{entry(e.label, c?.all ?? 0, c?.needsYou ?? 0, active === e.label, e.note)}</li>;
+              return (
+                <li key={e.label}>
+                  {entry(e.label, c?.all ?? 0, c?.queued ?? 0, c?.needsYou ?? 0, active === e.label, e.note)}
+                </li>
+              );
             })}
           </ul>
         </div>
@@ -1181,8 +1213,12 @@ export function DemoStatusFilters({
         title={title}
         onClick={() => onSelect(on ? "all" : key)}
         className={cn(
-          "inline-flex shrink-0 cursor-pointer items-center",
-          "h-[var(--ds-h-sm)] gap-[var(--ds-space-tight)] px-[var(--ds-space-base)]",
+          // `h-full`, not a height of its own: the composite's CONTAINER owns
+          // the bar's height and this fills it, so the segment cannot be taller
+          // than the box it is in — which is how that box became 30px in a row
+          // of 24 in the first place.
+          "inline-flex h-full shrink-0 cursor-pointer items-center",
+          "gap-[var(--ds-space-tight)] px-[var(--ds-space-base)]",
           dsRadius.sm,
           dsText.meta,
           dsFocus,
@@ -1216,7 +1252,7 @@ export function DemoStatusFilters({
         onClick={() => onSelect(on ? "all" : s)}
         className={cn(
           "inline-flex shrink-0 cursor-pointer items-center border",
-          "h-[var(--ds-h-sm)] gap-[var(--ds-space-snug)]",
+          "h-[var(--ds-h-toolbar)] gap-[var(--ds-space-snug)]",
           empty ? "border-transparent px-[var(--ds-space-tight)]" : "px-[var(--ds-space-base)]",
           dsRadius.md,
           dsText.meta,
@@ -1256,7 +1292,11 @@ export function DemoStatusFilters({
     >
       <div
         className={cn(
-          "inline-flex shrink-0 border p-[var(--ds-space-hair)]",
+          // The composites' box owns the bar's height and its two segments fill it
+          // (`h-full`). It was 30px in a row of 24 — the one outlier the
+          // operator was pointing at — because the segments carried a height of
+          // their own and the box grew to hold them plus its padding and border.
+          "inline-flex h-[var(--ds-h-toolbar)] shrink-0 border p-[var(--ds-space-hair)]",
           dsRadius.md,
           dsBorder.base,
           "bg-[var(--ds-surface-2)]",

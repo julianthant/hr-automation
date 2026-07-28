@@ -84,7 +84,7 @@ export function runBulkCommand(rows: DemoRow[], command: DemoCommandKey, label: 
 export const toolbarControl = (): string =>
   cn(
     "inline-flex shrink-0 cursor-pointer items-center border",
-    "h-[var(--ds-h-sm)] gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
+    "h-[var(--ds-h-toolbar)] gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
     dsRadius.md,
     dsText.meta,
     dsFocus,
@@ -196,7 +196,7 @@ export function DemoQueueToolbar({
             title={DEMO_SORTS.find((s) => s.key === sort)?.note}
             className={cn(
               "cursor-pointer appearance-none border pl-[var(--ds-space-section)] pr-[var(--ds-space-base)]",
-              "h-[var(--ds-h-sm)]",
+              "h-[var(--ds-h-toolbar)]",
               dsRadius.md,
               dsText.meta,
               dsFocus,

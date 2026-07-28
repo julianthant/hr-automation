@@ -348,6 +348,13 @@
   --ds-h-lg: 32px; /* primary dialog actions, search fields */
   --ds-h-row: 32px; /* one queue/table row */
   --ds-h-bar: 36px; /* status bar, panel toolbar */
+  /* EVERY control in the queue's action bar is this tall — the launcher, the
+     run starter, the eight status pills, the two composites' container, the
+     sort select and the select toggle. Operator: "all of these should have the
+     same height." It is named rather than repeated as `--ds-h-sm` at eight call
+     sites so a control added later cannot quietly drift by 6px, which is
+     exactly how the composites' bordered box came to be 30 in a row of 24. */
+  --ds-h-toolbar: var(--ds-h-sm);
   --ds-h-topbar: 44px; /* the app top bar */
   /* The Session Card's micro step pipeline. It is a RESERVED band, not a
      measured one: every card gives the bar the same slot whether or not it
