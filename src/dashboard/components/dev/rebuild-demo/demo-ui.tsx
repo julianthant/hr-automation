@@ -184,12 +184,6 @@ export {
   useToasts,
   useDsModalPresence,
   useDsModalOpen,
-  /**
-   * The class a surface wears to sit ABOVE the toast stack in the same
-   * bottom-right corner. It lifts by exactly the stack's measured height, so
-   * both tenants keep one fixed x and neither can cover the other.
-   */
-  dsToastStackLift,
 } from "./ds/primitives-overlay";
 export type {
   DsDialogSize,

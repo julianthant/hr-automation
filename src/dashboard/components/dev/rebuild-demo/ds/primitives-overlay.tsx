@@ -116,68 +116,47 @@ export function useDsModalOpen(): boolean {
 }
 
 /* -------------------------------------------------------------------------
- * BOTTOM-RIGHT OCCUPANCY — one corner, two tenants, stacked VERTICALLY.
+ * TWO COORDINATE SPACES, SO THERE IS NOTHING TO ARBITRATE.
  *
- * The toast viewport is `fixed bottom-right` and a `danger` toast never
- * auto-dismisses. The decision notice wants the same corner — anchored to the
- * DETAIL PANEL, whose bottom-right lands inside the viewport's — and "we will
- * position them so they miss" is not a fix: the two live in different
- * coordinate systems and the panel's width changes with the rail.
+ * Operator, on a frame where the decision notice had been pushed to the far
+ * left while a toast sat bottom-right: *"these 2 should not be affecting each
+ * other."*
  *
- * TWO WRONG ANSWERS WERE TRIED FIRST, and they are worth naming so neither
- * comes back:
+ * THE RULE, and it is absolute: **neither element's position may be a function
+ * of the other's presence.** Not horizontally, not vertically, not
+ * conditionally. The notice renders in exactly the same place at zero toasts
+ * and at five, and the toast stack renders in exactly the same place whether a
+ * notice exists or not.
  *
- *   1. The TOAST stepped aside for the notice. That put a persistent failure
- *      alert somewhere it had never been — an alert that moves is one the
- *      operator learns to look for in two places.
- *   2. The NOTICE stepped aside for the toast, right to left. Operator:
- *      *"moves from right to left when there is toast on the left. dont do
- *      that. just stay on right."* Right: a surface whose position depends on
- *      whether some OTHER element happens to exist is one you reach for and
- *      find gone, for a reason that is invisible from where you are standing.
+ * THREE WRONG ANSWERS WERE TRIED FIRST, and all three are the same mistake —
+ * one surface reading the other's state to decide where to go:
  *
- * THE ANSWER IS THE OTHER AXIS. Both stay at bottom-right, at the same x,
- * forever. The toast stack owns the floor; the notice rides directly above it,
- * lifted by exactly the stack's height. Order is fixed and never swaps —
- * transient below, persistent above — so nothing trades places with anything.
+ *   1. The TOAST stepped aside for the notice (right → left). An alert that
+ *      moves is one the operator learns to look for in two places.
+ *   2. The NOTICE stepped aside for the toast (right → left). Same defect,
+ *      other tenant: you reach for it and it is gone, for a reason invisible
+ *      from where you are standing.
+ *   3. The notice was LIFTED by the toast stack's measured height, published
+ *      as a custom property and consumed as a transform. Quieter than the
+ *      first two and still the same bug: the notice's y was a function of how
+ *      many toasts happened to be on screen.
  *
- * The lift is published as a CSS custom property rather than React state on
- * purpose: it changes on every toast add, dismiss and collapse, and a state
- * update there would re-render every surface that reads it several times a
- * second. It is also why the notice moves by TRANSFORM and not by `bottom` —
- * transform and opacity only, and it stays interruptible.
+ * WHAT REPLACES IT is not arbitration, it is geometry. The two belong to
+ * different boxes and always did:
+ *
+ *   - The **decision notice** is about the RUN YOU ARE LOOKING AT, so it is
+ *     positioned inside the run-detail panel's own box — `absolute`, clipped
+ *     by that panel, never portalled to the body.
+ *   - The **toast stack** is app-level (it reports command outcomes, not the
+ *     selected run), so it stays at the VIEWPORT's bottom-right.
+ *
+ * At the three-column layout the context rail already separates the centre
+ * column's right edge from the viewport's, so the two are disjoint by
+ * construction. The ONE case where the anchors converge is a collapsed rail,
+ * and it is handled by a CONSTANT: `--ds-toast-inset-bottom` clears the band
+ * the notice occupies. A constant gap is predictable; a conditional one is
+ * exactly what the operator objected to.
  * ---------------------------------------------------------------------- */
-
-/**
- * The var the corner's upper tenant reads. Always defined (`0px` when the
- * stack is empty), so a consumer never needs a fallback branch.
- */
-const TOAST_STACK_VAR = "--ds-toast-stack-h";
-
-/**
- * A ceiling on the lift. Six toasts plus a notice would otherwise climb the
- * whole panel and put the reminder off the top of its own container — at which
- * point the fix for one occlusion has created another. Past the cap the stack
- * simply overlaps itself, which is the right failure: the newest alert is on
- * top, and the corner has stopped being a place anything can be read anyway.
- */
-const TOAST_STACK_MAX = "40vh";
-
-/**
- * Spread onto a surface that shares the bottom-right corner with the toast
- * stack. It rides directly ABOVE the stack, lifted by the stack's own measured
- * height — a TRANSFORM, never a `bottom`, so the reflow animates on the
- * compositor and `prefers-reduced-motion` removes it by zeroing
- * `--ds-dur-move` (there is no separate branch to keep in step).
- */
-export const dsToastStackLift = "translate-y-[calc(-1*var(--ds-toast-stack-h,0px))]";
-
-function publishToastStackHeight(px: number): void {
-  document.documentElement.style.setProperty(
-    TOAST_STACK_VAR,
-    px <= 0 ? "0px" : `min(${Math.round(px)}px, ${TOAST_STACK_MAX})`,
-  );
-}
 
 /** Is any Dialog or Drawer open right now? */
 function useModalOpen(): boolean {
@@ -1034,48 +1013,26 @@ export function ToastProvider({ children }: { children: ReactNode }) {
  */
 function ToastViewport({ toasts, onDismiss }: { toasts: DsToast[]; onDismiss: (id: string) => void }) {
   const modalOpen = useModalOpen();
-  // ONE reason to leave bottom-right, and it is the ratified one: a Dialog or
-  // Drawer is open, whose footer this viewport would otherwise sit on. Nothing
-  // else moves it. A notice that wants this corner yields instead — see the
-  // occupancy registry above.
+  // THE ONLY reason this viewport ever leaves bottom-right, and it is the
+  // ratified one: a Dialog or Drawer is open, whose footer it would otherwise
+  // sit on. Nothing else moves it — in particular it does not know, and may
+  // never know, whether a decision notice exists.
   const aside = modalOpen;
-  /*
-    THE STACK'S HEIGHT IS MEASURED, not counted. Toasts are of wildly unequal
-    height — a `danger` card with a description and an action is four times a
-    one-line success, and a collapsed danger chip is smaller than either — so
-    `count × assumed height` would put the notice through the middle of the top
-    card the first time anything was not the assumed size. A `ResizeObserver`
-    is exact and re-fires on the collapse as well as on the add.
-  */
-  const stackRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const node = stackRef.current;
-    if (!node) {
-      publishToastStackHeight(0);
-      return;
-    }
-    const measure = () => publishToastStackHeight(node.getBoundingClientRect().height);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => {
-      observer.disconnect();
-      publishToastStackHeight(0);
-    };
-  });
   if (toasts.length === 0) return null;
   return (
     <div
-      ref={stackRef}
       role="region"
       aria-label="Notifications"
       data-ds-toast-viewport={aside ? "aside" : "default"}
       className={cn(
-        // `--ds-toast-inset-bottom` rather than a bare space token: the demo's
-        // Session bar is pinned to the bottom of the viewport, so a toast at
-        // `bottom: 16px` sat ON it. The shell raises the inset to clear
-        // whatever it has parked down there; the default is the plain gutter,
-        // so a surface with nothing at the bottom is unchanged.
+        // `--ds-toast-inset-bottom` rather than a bare space token, and it is a
+        // CONSTANT the shell sets once. It clears two things that are parked at
+        // the bottom of this app: the Session bar, and the band the run-detail
+        // panel's decision notice occupies when a collapsed context rail brings
+        // the centre column out to the viewport edge. It is never computed from
+        // whether a notice is currently on screen — see the note at the top of
+        // this file. A surface with nothing parked at the bottom does not set
+        // it and gets the plain gutter.
         "pointer-events-none fixed bottom-[var(--ds-toast-inset-bottom,var(--ds-space-loose))]",
         aside ? "left-[var(--ds-space-loose)] items-start" : "right-[var(--ds-space-loose)] items-end",
         "flex w-[360px] max-w-[calc(100vw-var(--ds-space-section))] flex-col gap-[var(--ds-space-base)]",

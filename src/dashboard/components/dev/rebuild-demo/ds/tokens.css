@@ -374,6 +374,13 @@
      the same space as a group of 13, so a queue full of groups keeps a
      predictable height and the row never has to change SHAPE to hold more. */
   --ds-h-member-well: 136px;
+  /* The band the run-detail panel's DECISION NOTICE occupies at the bottom of
+     its own box. It exists as a token because one other surface has to clear
+     it: the toast viewport's `--ds-toast-inset-bottom` is a CONSTANT built from
+     this, so the two never overlap and — the load-bearing part — neither one's
+     position is ever a function of whether the other is on screen. Two lines
+     plus the notice's own padding, measured. */
+  --ds-h-decision-notice: 68px;
   /* The two FIXED columns of a member line, in the well and in the drill-in.
      They are fixed so the names down the left and the EIDs down the right land
      on the same edge in every group — a member list whose third column sizes

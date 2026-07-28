@@ -74,7 +74,6 @@ import {
   dsRadius,
   dsSize,
   dsText,
-  dsToastStackLift,
   useDsEnterTransition,
 } from "./demo-ui";
 import { ReceiptView, runReceiptFor } from "./DemoReceipt";
@@ -795,24 +794,25 @@ function PanelKindInfo({
  * It deliberately sits at `dsLayer.sticky`, BELOW the toast layer: a `danger`
  * toast never auto-dismisses, and a reminder must never cover a failure.
  *
- * WHERE IT SITS, and why that took a registry. It used to be pinned TOP-right
- * of the tab body, where it covered the People tab's own filter controls and
- * clipped the detail column underneath it — floating over the work the operator
- * had just switched tabs to reach. Bottom-right is where a floating reminder
- * belongs, and it is also the corner the TOAST viewport owns; a `danger` toast
- * never auto-dismisses, so "we will position them so they miss" is not a fix
- * when the two live in different coordinate systems and the panel's width
- * changes with the context rail.
+ * WHERE IT SITS, and the rule that finally settled it. It used to be pinned
+ * TOP-right of the tab body, where it covered the People tab's own filter
+ * controls — floating over the work the operator had just switched tabs to
+ * reach. Bottom-right is where a floating reminder belongs.
  *
- * IT NEVER MOVES SIDEWAYS. An earlier revision had it step right-to-left while
- * a toast was on screen, and the operator was right to reject that: a surface
- * whose position depends on whether some OTHER element happens to exist is one
- * you reach for and find gone, for a reason invisible from where you are
- * standing. So the anchor is fixed — same corner, same x, at zero toasts and at
- * three — and the collision is resolved on the OTHER axis: `dsToastStackLift`
- * raises it by exactly the toast stack's measured height, so the two are a
- * vertical stack in one corner with a fixed order (transient below, persistent
- * above) rather than two things negotiating for the same pixels.
+ * IT IS ANCHORED TO THIS PANEL AND TO NOTHING ELSE. `absolute`, inside the tab
+ * body, clipped by it, never portalled. Its x and its y are constants of the
+ * run-detail panel's own box — the SAME two numbers at zero toasts and at five,
+ * because it does not know how many toasts exist and may never be given a way
+ * to find out.
+ *
+ * Three earlier revisions all broke that rule in the same way and the operator
+ * rejected each: the toast stepped aside for the notice, then the notice
+ * stepped aside for the toast, then the notice was lifted by the toast stack's
+ * measured height. *"these 2 should not be affecting each other."* They do not:
+ * the toast stack lives in the VIEWPORT's coordinate space and this lives in
+ * the PANEL's, and the one case where those converge (a collapsed context rail)
+ * is cleared by a constant inset on the toast viewport. See the note at the top
+ * of `ds/primitives-overlay.tsx`.
  */
 function DecisionNotice({
   row,
@@ -843,10 +843,8 @@ function DecisionNotice({
     <FloatingSurface
       role="status"
       className={cn(
+        // Two constants of THIS panel's box. Nothing else feeds them.
         "absolute bottom-[var(--ds-space-cozy)] right-[var(--ds-space-cozy)] overflow-hidden",
-        // Above the toast stack, never beside it. See the note on the component.
-        dsToastStackLift,
-        dsMotion.move,
         // `md`, not `sm`. At 240px the ask truncated mid-word — `approve the
         // pe…` — which is the one line on this surface that has to survive: the
         // status is already on the header pill, so what is left here is WHAT IS
