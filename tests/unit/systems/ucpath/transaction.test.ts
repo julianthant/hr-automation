@@ -1,6 +1,6 @@
 import { describe, test } from "vitest";
 import assert from "node:assert/strict";
-import type { Locator } from "playwright";
+import type { FrameLocator, Locator, Page } from "playwright";
 import {
   extractSmartHrTransactionNumber,
   rowMatchesTerminationEid,
@@ -10,6 +10,7 @@ import {
   interpretPostSubmitTxnReadback,
   assertTerminationLastDateWorkedReadback,
   requirePeopleSoftControlRefresh,
+  fillTerminationLastDateWorked,
 } from "../../../../src/systems/ucpath/transaction.js";
 
 describe("requirePeopleSoftControlRefresh", () => {
@@ -67,6 +68,131 @@ describe("requirePeopleSoftControlRefresh", () => {
       /did not detach\/hide.*no-rerender/i,
     );
     assert.equal(disposed, true);
+  });
+});
+
+/**
+ * The two termination controls need OPPOSITE waits, live-verified 2026-07-28 on
+ * the editable UC_VOL_TERM form:
+ *   - the override checkbox's onclick runs `submitAction_win0` → the fragment
+ *     re-renders and the old node detaches, so the check must wait for it;
+ *   - the Last Date Worked input's only handler is `addchg_win0` (dirty flag,
+ *     no round-trip) → after fill + Tab the SAME node is still connected, so
+ *     requiring a detach there could only ever time out.
+ * Gating the date write on a refresh is exactly the bug this pins.
+ */
+describe("fillTerminationLastDateWorked", () => {
+  function terminationPageFake(opts: { initiallyChecked: boolean; readbackValue?: string }) {
+    const events: string[] = [];
+    let checked = opts.initiallyChecked;
+    let value = "";
+
+    const handle = {
+      waitForElementState: async (state: string) => {
+        events.push(`checkbox:awaitState:${state}`);
+      },
+      dispose: async () => {},
+    };
+
+    const checkbox = {
+      isChecked: async () => checked,
+      check: async () => {
+        checked = true;
+        events.push("checkbox:check");
+      },
+      elementHandle: async () => {
+        events.push("checkbox:elementHandle");
+        return handle;
+      },
+    } as unknown as Locator;
+
+    const dateInput = {
+      fill: async (v: string) => {
+        value = v;
+        events.push("date:fill");
+      },
+      press: async (key: string) => {
+        events.push(`date:press:${key}`);
+      },
+      waitFor: async () => {
+        events.push("date:waitFor");
+      },
+      inputValue: async () => opts.readbackValue ?? value,
+      elementHandle: async () => {
+        // Reaching here means the date write was gated on a fragment refresh.
+        events.push("date:elementHandle");
+        return null;
+      },
+    } as unknown as Locator;
+
+    // No spinner in the fake — waitForPeopleSoftProcessing swallows the miss.
+    const spinner = {
+      first: () => ({ waitFor: async () => { throw new Error("no spinner (fake)"); } }),
+    } as unknown as Locator;
+
+    const frame = {
+      locator: (selector: string): Locator => {
+        if (selector.includes("CHK2")) return checkbox;
+        if (selector.includes("_DATE$")) return dateInput;
+        return spinner;
+      },
+    } as unknown as FrameLocator;
+
+    const page = { evaluate: async () => undefined } as unknown as Page;
+
+    return { page, frame, events, readValue: () => value };
+  }
+
+  test("writes and verifies without gating the date field on a fragment refresh", async () => {
+    const fake = terminationPageFake({ initiallyChecked: true });
+
+    await fillTerminationLastDateWorked(fake.page, fake.frame, "06/09/2026");
+
+    assert.equal(fake.readValue(), "06/09/2026");
+    assert.ok(fake.events.includes("date:fill"));
+    assert.ok(fake.events.includes("date:press:Tab"), "blur commits the value (change → addchg_win0)");
+    assert.ok(
+      !fake.events.includes("date:elementHandle"),
+      "the date input must NOT be required to detach — it has no PeopleSoft round-trip",
+    );
+    // Already checked → no redundant click/round-trip on the override.
+    assert.ok(!fake.events.includes("checkbox:check"));
+  });
+
+  test("waits for the override's fragment refresh when it starts unchecked", async () => {
+    const fake = terminationPageFake({ initiallyChecked: false });
+
+    await fillTerminationLastDateWorked(fake.page, fake.frame, "06/09/2026");
+
+    // The detach-wait is ARMED before the click — a fragment that re-renders
+    // faster than the await is set up would otherwise be missed.
+    assert.deepEqual(
+      fake.events.filter((e) => e.startsWith("checkbox:")),
+      ["checkbox:elementHandle", "checkbox:awaitState:hidden", "checkbox:check"],
+    );
+    // …and the date is only written once that refresh has settled.
+    assert.ok(
+      fake.events.indexOf("checkbox:awaitState:hidden") < fake.events.indexOf("date:fill"),
+    );
+  });
+
+  test("fails loud when the readback does not match what was written", async () => {
+    const fake = terminationPageFake({ initiallyChecked: true, readbackValue: "06/12/2026" });
+
+    await assert.rejects(
+      fillTerminationLastDateWorked(fake.page, fake.frame, "06/09/2026"),
+      /readback mismatch: expected "06\/09\/2026", got "06\/12\/2026"/,
+    );
+  });
+
+  test("rejects a malformed date before touching the page", async () => {
+    const fake = terminationPageFake({ initiallyChecked: true });
+
+    await assert.rejects(
+      fillTerminationLastDateWorked(fake.page, fake.frame, "2026-06-09"),
+      /malformed \(expected MM\/DD\/YYYY\)/,
+    );
+    assert.deepEqual(fake.events, []);
   });
 });
 

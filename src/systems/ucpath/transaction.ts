@@ -566,7 +566,23 @@ export async function requirePeopleSoftControlRefresh(
 
 /**
  * Check the termination override, write Last Date Worked, then re-resolve and
- * positively verify both controls after PeopleSoft's fragment refreshes.
+ * positively verify both controls before the transaction is submitted.
+ *
+ * The two controls behave DIFFERENTLY, live-verified 2026-07-28 on the editable
+ * UC_VOL_TERM form (Smart HR → Enter Transaction Information):
+ * - The override checkbox's `onclick` runs `submitAction_win0(...)` — a real
+ *   PeopleSoft round-trip that re-renders the fragment and DETACHES the old
+ *   checkbox node. So checking it must wait for that refresh, or the readback
+ *   races a fragment that is still being replaced.
+ * - The Last Date Worked input's only handler is `onchange="addchg_win0(this)"`
+ *   — dirty-tracking, NO round-trip. After fill + Tab the SAME input node is
+ *   still connected, so this write must NOT require a detach/hide (that wait
+ *   could only ever time out). Its posted value IS the input's DOM value, which
+ *   the readback below asserts exactly.
+ *
+ * On this template UCPath pre-checks the override and pre-fills the date with
+ * (effective date − 1); we still write and verify our own reconciled date
+ * rather than trusting the default.
  */
 export async function fillTerminationLastDateWorked(
   page: Page,
@@ -581,7 +597,7 @@ export async function fillTerminationLastDateWorked(
   await dismissPeopleSoftModalMask(page);
 
   const initialOverride = terminationSelectors.overrideLastDateWorkedCheckbox(frame);
-  if (!(await initialOverride.isChecked())) {
+  if (!(await initialOverride.isChecked({ timeout: 10_000 }))) {
     await requirePeopleSoftControlRefresh(
       initialOverride,
       () => initialOverride.check({ timeout: 10_000 }),
@@ -590,16 +606,17 @@ export async function fillTerminationLastDateWorked(
     await waitForPeopleSoftProcessing(frame, 30_000);
   }
 
+  // Re-resolved AFTER the override's fragment refresh above — the pre-refresh
+  // input node would be stale on the check-it-ourselves path.
   const input = terminationSelectors.lastDateWorkedInput(frame);
   await safeFill(input, expectedDate, {
     timeout: 10_000,
     label: "ucpath termination last date worked",
   });
-  await requirePeopleSoftControlRefresh(
-    input,
-    () => input.press("Tab"),
-    "Last Date Worked",
-  );
+  // Blur commits the value: `fill` raises `input`, only the blur raises the
+  // `change` that runs `addchg_win0` and marks the field dirty for the post.
+  // No detach wait here — see the header note (this field has no round-trip).
+  await input.press("Tab");
   await waitForPeopleSoftProcessing(frame, 30_000);
 
   const refreshedOverride = terminationSelectors.overrideLastDateWorkedCheckbox(frame);

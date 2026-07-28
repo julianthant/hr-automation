@@ -1,7 +1,22 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import type { Locator, Page } from "playwright";
-import { hrTasks } from "../../../../src/systems/ucpath/selectors.js";
+import type { FrameLocator, Locator, Page } from "playwright";
+import { hrTasks, termination } from "../../../../src/systems/ucpath/selectors.js";
+
+/** Captures the raw CSS a selector hands to `frame.locator(...)`. */
+function captureFrameSelector(build: (f: FrameLocator) => Locator): string {
+  const seen: string[] = [];
+  const frame = {
+    locator(selector: string): Locator {
+      seen.push(selector);
+      return {} as Locator;
+    },
+  } as unknown as FrameLocator;
+
+  build(frame);
+  assert.equal(seen.length, 1, "expected exactly one frame.locator() call");
+  return seen[0]!;
+}
 
 describe("UCPath hrTasks selectors", () => {
   it("targets the exact Smart HR Transactions leaf, not SS Smart HR Transactions", () => {
@@ -26,5 +41,34 @@ describe("UCPath hrTasks selectors", () => {
         options: { name: "Smart HR Transactions", exact: true },
       },
     ]);
+  });
+});
+
+/**
+ * Live regression (2026-07-28, editable UC_VOL_TERM form): PeopleSoft renders
+ * each checkbox as the visible input PLUS a hidden `<FIELD>$chk$<row>`
+ * companion carrying the posted Y/N value. A bare `id^="…CHK2$"` prefix matched
+ * BOTH `HR_TBH_SCR_WRK_TBH_CHK2$3` and `HR_TBH_SCR_WRK_TBH_CHK2$chk$3`, so
+ * every `isChecked()` threw a strict-mode violation and no separation could
+ * write its Last Date Worked. The element-type constraint is what keeps these
+ * at one match — dropping it re-breaks the write.
+ */
+describe("UCPath termination selectors", () => {
+  it("constrains the override to a real checkbox, not PeopleSoft's hidden $chk$ companion", () => {
+    const selector = captureFrameSelector(termination.overrideLastDateWorkedCheckbox);
+
+    assert.match(selector, /^input\[type="checkbox"\]/);
+    // Prefix-matched so the PeopleSoft row suffix ($3 today) stays free.
+    assert.match(selector, /\[id\^="HR_TBH_SCR_WRK_TBH_CHK2\$"\]/);
+  });
+
+  it("constrains Last Date Worked to the input, not its calendar anchor/icon", () => {
+    // `HR_TBH_SCR_WRK_TBH_DATE$prompt$3` (<a>) and `…$prompt$img$3` (<img>)
+    // share the prefix; `input` is what keeps this a single match, and it also
+    // makes a read-only transaction fail closed rather than look editable.
+    const selector = captureFrameSelector(termination.lastDateWorkedInput);
+
+    assert.match(selector, /^input\[/);
+    assert.match(selector, /\[id\^="HR_TBH_SCR_WRK_TBH_DATE\$"\]/);
   });
 });
