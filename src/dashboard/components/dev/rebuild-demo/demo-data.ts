@@ -1370,7 +1370,7 @@ const wsPriya: DemoRowSpec = {
   dryRun: true,
   enqueuedAt: at("14:24:01"),
   evidence: { confidence: "unknown" },
-  queueNote: "in queue 3m · 2 ahead",
+  queueNote: "3m waiting · 2 ahead",
   outcome: { tone: "muted", text: "Queued — 2 items ahead · a worker picks this up next" },
   steps: [
     { label: "UCPath auth", state: "pending", system: "ucpath" },
@@ -1457,7 +1457,7 @@ const spRefresh: DemoRowSpec = {
   version: 2,
   enqueuedAt: at("14:23:10"),
   evidence: { confidence: "unknown" },
-  queueNote: "in queue 2m · 1 ahead",
+  queueNote: "2m waiting · 1 ahead",
   outcome: { tone: "muted", text: "Queued — a start that asked for a fresh roster is waiting behind this one" },
   steps: [
     { label: "SharePoint auth", state: "pending", system: "crm" },
@@ -1720,8 +1720,8 @@ function i9Member(i: number): DemoRowSpec {
         ...base,
         startedAt: undefined,
         memberFact: "—",
-        queueNote: `in queue · position ${i - 37}`,
-        outcome: { tone: "muted", text: "Queued behind the running member" },
+        queueNote: `#${i - 37} in line`,
+        outcome: { tone: "muted", text: "Not started" },
         steps: [
           { label: "Person match", state: "pending", system: "ucpath" },
           { label: "Person lookup", state: "pending", system: "ucpath" },
@@ -2324,7 +2324,6 @@ function ouSigner(i: number): DemoRowSpec {
     startedAt: s.startedAt,
     endedAt: signedAt,
     evidence: done ? { receiptId: `rcpt-os-s${pad(i, 3)}`, confidence: "verified" } : { confidence: "unknown" },
-    queueNote: s.status === "queued" ? "in queue · behind the running signer" : undefined,
     liveText: running ? "Signing oath — UCPath signature canvas" : undefined,
     outcome: done
       ? { tone: "success", text: `Oath signed ${signedClock} — CRM verified` }
@@ -2544,8 +2543,8 @@ function wsMember(i: number): DemoRowSpec {
       ...base,
       startedAt: undefined,
       memberFact: "—",
-      queueNote: `in queue · position ${i - 15}`,
-      outcome: { tone: "muted", text: "Queued behind the running person" },
+      queueNote: `#${i - 15} in line`,
+      outcome: { tone: "muted", text: "Not started" },
       steps: [
         { label: "UCPath auth", state: "pending", system: "ucpath" },
         { label: "Transaction", state: "pending", system: "ucpath" },
@@ -2723,7 +2722,7 @@ const ecPacket: DemoRowSpec = {
   warnings: { count: 1, first: "1 page could not be turned into work" },
   outcome: {
     tone: "warning",
-    text: "5 done · 1 rejected — the packet stays at Done with warnings until the rejected page is deleted or acknowledged.",
+    text: "5 done · 1 rejected page still unresolved",
   },
   steps: [
     { label: "OCR extraction", state: "done", system: "i9", durationSec: 88, keyLines: ["6 pages · 5 with a contact block"] },
@@ -3401,7 +3400,7 @@ function sepListMember(i: number): DemoRowSpec {
     return {
       ...base,
       memberFact: "—",
-      queueNote: "in queue · position 1",
+      queueNote: "#1 in line",
       outcome: { tone: "muted", text: "Queued — one worker, five people; this one is last in line" },
       steps: SEP_LIST_STEPS.map((label) => step(label, "pending")),
       lines: [{ ts: "1:49:40", kind: "event", text: "Fanned out from the typed list", step: "Queued" }],

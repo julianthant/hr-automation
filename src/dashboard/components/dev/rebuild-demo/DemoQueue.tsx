@@ -686,6 +686,11 @@ export function DemoRowCard({
   const StatusIcon = PROPOSED_STATUS[status].icon;
   const linked = linkedGroupSummary(row);
   const settled = isSettledRow(row);
+  // Whether the member LINES are on screen right now — the same condition
+  // `GroupMemberList` uses to decide whether to draw the well. A settled group
+  // shut by the operator draws none, so its name preview is still the only
+  // place its composition appears.
+  const membersVisible = isGroup && memberCount > 0 && !(settled && !state.expandedGroups.has(row.id));
 
   return (
     <div className="px-[var(--ds-space-cozy)] pt-[var(--ds-space-snug)] first:pt-[var(--ds-space-cozy)]">
@@ -925,7 +930,8 @@ export function DemoRowCard({
                   {!settled && (
                     <span
                       className="col-start-4 inline-flex items-center justify-end gap-[var(--ds-space-tight)] text-[color:var(--ds-success-fg)]"
-                      aria-label="checked progress"
+                      aria-label={`${[...(row.memberIds ?? [])].filter((id) => state.checkedIds.has(id)).length} of ${memberCount} checked by you`}
+                      title="How many of these you have marked checked"
                     >
                       <CheckCircle2 aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
                       <span className={dsText.nums}>
@@ -1154,9 +1160,12 @@ function PersonWell({ children }: { children: ReactNode }) {
   return (
     <div
       className={cn(
-        "divide-y overflow-y-auto border",
+        // The recessed plane, plus the ONE case allowed to draw its edge: this
+        // well SCROLLS, and the half-cut row at its bottom is only readable as
+        // "there is more" if the container has a boundary to be cut by.
+        "divide-y overflow-hidden overflow-y-auto border bg-[var(--ds-recess-bg)]",
         dsRadius.md,
-        dsBorder.base,
+        dsBorder.subtle,
         "divide-[color:var(--ds-border-subtle)]",
         "max-h-[var(--ds-h-member-well)]",
       )}
@@ -1207,7 +1216,6 @@ function PersonLine({
     "w-full items-center text-left",
     "h-[var(--ds-h-sm)] gap-x-[var(--ds-space-base)] px-[var(--ds-space-base)]",
     dsText.body,
-    "bg-[var(--ds-surface-1)]",
   );
   if (!onClick) {
     return (

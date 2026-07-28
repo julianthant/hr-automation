@@ -18,6 +18,7 @@ import {
   FileText,
   GitBranch,
   ImageOff,
+  Info,
   Loader2,
   Pause,
   Receipt,
@@ -59,6 +60,10 @@ import {
   IconButton,
   Kbd,
   LockedValue,
+  MetaLine,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   ValueField,
   dsBorder,
   dsFocus,
@@ -700,6 +705,42 @@ function SharedPipelineStrip({ row }: { row: DemoRow }) {
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * The panel's own ⓘ — where the demo's scaffolding vocabulary lives now.
+ *
+ * The row VARIANT and the panel KIND are how this demo talks about itself; they
+ * are not facts about the run in front of the operator, so they cost the header
+ * a 20px glyph at rest and nothing else. Same size, same slot and same
+ * behaviour as the ⓘ on every queue row, so the two read as one affordance.
+ */
+function PanelKindInfo({
+  row,
+  variantName,
+  panelName,
+}: {
+  row: DemoRow;
+  variantName: string;
+  panelName: string;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <IconButton
+          size="xs"
+          variant="ghost"
+          label={`What kind of row and panel this is — ${variantName} in a ${panelName}`}
+          icon={<Info aria-hidden className={dsIcon.sm} />}
+          onClick={(e) => e.stopPropagation()}
+          className="shrink-0 data-[state=open]:bg-[var(--ds-surface-3)] data-[state=open]:text-[color:var(--ds-fg)]"
+        />
+      </PopoverTrigger>
+      <PopoverContent title={variantName} description={`Opens in a ${panelName}`} side="bottom" align="end" width="md">
+        <MetaLine items={[row.wfLabel, row.trace]} tone="faint" />
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -2181,23 +2222,15 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
               {elapsed}
             </span>
           )}
-          <span
-            title={`${variant.name} → ${panel.name}`}
-            className={cn(
-              // The narrow-width casualty, on purpose. The panel kind is also
-              // named on the tab bar below, and the row's own title is worth
-              // more than a second copy of it — without this the title was
-              // truncating to a single letter. Keyed to the COLUMN now, since
-              // the column's width no longer follows the window's.
-              "ml-auto hidden shrink-0 border px-[var(--ds-space-snug)] @min-[34rem]:inline-flex",
-              dsRadius.sm,
-              dsText.caps,
-              dsBorder.base,
-              "text-[color:var(--ds-fg-muted)]",
-            )}
-          >
-            {panel.name}
-          </span>
+          {/* THE PANEL KIND MOVED INTO THE ⓘ. It was drawn twice on this one
+              surface — a chip here beside the trace id, and again at the right
+              of the tab bar below — and both were the demo naming its own panel
+              KIND, which is scaffolding, not a fact about this run. A
+              production dashboard does not label its own panels; a demo that
+              needs to teach what a panel kind is has one sanctioned place to do
+              it, and this is it. */}
+          <span className="ml-auto" />
+          <PanelKindInfo row={row} variantName={variant.name} panelName={panel.name} />
           <span className={cn(dsText.meta, dsText.nums, "shrink-0 text-[color:var(--ds-fg-muted)]")}>{row.trace}</span>
         </div>
       )}
@@ -2287,13 +2320,13 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
             </button>
           );
         })}
-        <span className={cn(dsText.caps, "ml-auto min-w-0 truncate pl-[var(--ds-space-base)] text-[color:var(--ds-fg-faint)]")}>
-          {/* The panel's NAME, and nothing else. It used to append
-              `· state default` when the operator had not picked a tab, which
-              is the UI narrating its own tab-selection rule to the person
-              standing in it — a fact about the product, not about this run. */}
-          {panel.name}
-        </span>
+        {/* NOTHING SITS AT THE END OF THE TAB BAR. This slot held the panel's
+            own kind — the second of the two copies on this surface. An earlier
+            pass stripped the other half of the same strip (`· state default`)
+            and left this, which is how a duplicate survives a cleanup: the
+            sweep removes the words it can defend removing and keeps the label
+            that felt like information. It was not; the ⓘ in the header carries
+            it now. */}
       </div>
 
       {/* The tab body, and the positioning context for the floating notice. The
