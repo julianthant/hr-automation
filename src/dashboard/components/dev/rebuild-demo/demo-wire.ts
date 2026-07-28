@@ -180,7 +180,7 @@ export const DEMO_CATEGORY_OTHER = "Other";
  * find?" — which is a different question from "did you run?".
  *
  * Status and outcome are orthogonal and must never be conflated: a member can
- * be `Verified done` with the outcome `Not found`, because looking and finding
+ * be `Done` with the outcome `Not found`, because looking and finding
  * nothing is a successful run with a negative answer. The demo used to cram
  * both axes plus the evidence ("S1 + S2 · retain 3y", "no UCPath match") into
  * one free-text detail string, which truncated to `S1 + S2 · ret…` in a column
@@ -1491,11 +1491,36 @@ export function panelKindOf(row: Pick<DemoRow, "rowType" | "records">): PanelKin
  *    rail's, not a tab's, so it can be read WHILE the stream runs.
  */
 export function tabsFor(row: Pick<DemoRow, "rowType" | "records">): DemoTab[] {
-  const kind = panelKindOf(row);
+  return tabsForPanelKind(panelKindOf(row));
+}
+
+/**
+ * The same derivation, addressed by KIND rather than by a row.
+ *
+ * It exists because the row-and-panel catalog documents the panel kinds without
+ * holding a row of each, and a catalog that keeps its own copy of this list is
+ * a catalog that documents a UI which no longer exists — which is exactly what
+ * happened: it still declared a `Data` tab a wave after Data moved to the
+ * context rail. There is one list now, and the catalog reads it.
+ */
+export function tabsForPanelKind(kind: PanelKind): DemoTab[] {
   if (kind === "review") return ["review", "logs", "receipt"];
   if (kind === "group") return ["people", "logs", "receipt"];
   return ["logs", "receipt"];
 }
+
+/**
+ * The word each tab is drawn with. It lives beside the derivation, not in the
+ * panel component, so the catalog can name a tab without importing the panel
+ * (and without re-typing the word, which is the other half of the same drift).
+ * `TAB_META` in `DemoLogPanel` composes this with the tab's icon.
+ */
+export const TAB_LABEL: Record<DemoTab, string> = {
+  people: "People",
+  review: "Review",
+  logs: "Logs",
+  receipt: "Receipt",
+};
 
 // ---------------------------------------------------------------------------
 // Actions — the ONE protocol
