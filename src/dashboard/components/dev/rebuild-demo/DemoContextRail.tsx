@@ -810,73 +810,85 @@ function DataSection({
           {(saveAction || rerunAction) && (
             <div className="flex flex-col gap-[var(--ds-space-snug)] border-t border-[color:var(--ds-border-subtle)] pt-[var(--ds-space-snug)]">
               {/*
-                ONE ACTION ROW, in the house order: quiet meta on the left, then
-                the dismissive verb, then the affirmative one last.
+                ONE GRID, TWO ROWS, TWO COLUMNS — and every edge is a column.
 
-                It used to be four `Button`s on a bare `flex-wrap`, which at
-                348px put three on one line and stranded the fourth — the
-                widest, most consequential of them — alone underneath, flush
-                left, reading as a button that had fallen off the row. That is
-                not a wrap, it is an accident.
+                It was two rows that had each decided their own shape: a `mr-auto`
+                pair of BORDERLESS buttons pinned left, an OUTLINED save and a
+                FILLED rerun pinned right, on a `flex-wrap` that broke wherever
+                348px ran out. Three button treatments, four widths, and no two
+                of the four sharing a left or a right edge. Four buttons genuinely
+                do not fit on one line in this rail — which is an argument for
+                laying out two rows on purpose, not for letting a wrap do it.
 
-                So the row is TWO CLUSTERS: data-in and reset on the left,
-                the two commit arms on the right. If the width runs out the
-                CLUSTERS break, not the buttons — the quiet pair takes line one
-                and the commit pair stays right-aligned on line two, both with
-                deliberate edges. Nothing lands where it landed by chance.
+                So: `grid-cols-2`, every button `w-full`. Column one is a left
+                edge, column two is a right edge, both rows land on both, and
+                the four cells are the same size whatever the labels say. Reading
+                order is the house order — the quiet, undoable pair first, the
+                two commit arms last — so the eye still ends on the verb.
+
+                ONE CONTROL FAMILY. `ghost` is gone: these are four peers on one
+                grid, so they are `secondary` and exactly one of them is
+                `primary`. The SERVER picks which — on a run with work left to
+                release, continuing it is the affirmative action; on one with
+                nothing left, starting a new run is — and a `primary` in the
+                bottom-right cell of a grid of equals is unmistakable in a way
+                that a filled button beside a borderless one never was.
+
+                THE STATE LINE went into the grid's own quiet meta slot: row
+                zero, spanning both columns, at `meta` weight. It is a note about
+                the form, not a fifth control, and it was sitting at the same
+                weight and the same left edge as the buttons underneath it.
               */}
-              <p className={cn(dsText.meta, "text-[color:var(--ds-fg-secondary)]")}>
-                {changed.length > 0
-                  ? `${changed.length} value${changed.length === 1 ? "" : "s"} changed, not saved yet.`
-                  : seededFrom !== null
-                    ? `Loaded the values from run #${seededFrom} — they match what this run holds.`
-                    : "Nothing is changed yet."}
-              </p>
-              <div className="flex flex-wrap items-center justify-end gap-[var(--ds-space-snug)]">
-                <span className="mr-auto flex shrink-0 items-center gap-[var(--ds-space-tight)]">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    icon={<History aria-hidden className={dsIcon.sm} />}
-                    onClick={() => {
-                      setSeededFrom(Math.max(row.run - 1, 1));
-                      setEdits(
-                        Object.fromEntries(
-                          reads
-                            .filter((f) => editPolicyFor(row, f).editable)
-                            .slice(0, 2)
-                            .map((f) => [f.field, baseValue(f)]),
-                        ),
-                      );
-                    }}
-                  >
-                    Prior run
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    icon={<RotateCcw aria-hidden className={dsIcon.sm} />}
-                    disabled={changed.length === 0 && seededFrom === null}
-                    onClick={() => {
-                      setEdits({});
-                      setSeededFrom(null);
-                    }}
-                  >
-                    Reset
-                  </Button>
-                </span>
-                {/* The commit pair is ONE cluster, so the row breaks between
-                    the two GROUPS and never between these two — a dismissive
-                    verb alone on a line above the affirmative one reads as two
-                    unrelated rows. Exactly one of them carries `primary`, and
-                    the SERVER picks which: on a run with work left to release,
-                    continuing it is the affirmative action; on one with nothing
-                    left, starting a new run is. */}
-                <span className="flex shrink-0 items-center gap-[var(--ds-space-snug)]">
+              <div className="grid grid-cols-2 gap-[var(--ds-space-snug)]">
+                <p className={cn(dsText.meta, "col-span-2 text-[color:var(--ds-fg-muted)]")}>
+                  {changed.length > 0
+                    ? `${changed.length} value${changed.length === 1 ? "" : "s"} changed, not saved yet.`
+                    : seededFrom !== null
+                      ? `Loaded the values from run #${seededFrom} — they match what this run holds.`
+                      : "Nothing is changed yet."}
+                </p>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="w-full"
+                  icon={<History aria-hidden className={dsIcon.sm} />}
+                  onClick={() => {
+                    setSeededFrom(Math.max(row.run - 1, 1));
+                    setEdits(
+                      Object.fromEntries(
+                        reads
+                          .filter((f) => editPolicyFor(row, f).editable)
+                          .slice(0, 2)
+                          .map((f) => [f.field, baseValue(f)]),
+                      ),
+                    );
+                  }}
+                >
+                  Prior run
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="w-full"
+                  icon={<RotateCcw aria-hidden className={dsIcon.sm} />}
+                  disabled={changed.length === 0 && seededFrom === null}
+                  onClick={() => {
+                    setEdits({});
+                    setSeededFrom(null);
+                  }}
+                >
+                  Reset
+                </Button>
                 {saveAction && (
                   <Button
                     size="sm"
                     variant={saveAction.intent === "primary" ? "primary" : "secondary"}
+                    // A lone commit arm takes the RIGHT-HAND cell, never the
+                    // left: the primary's place on this surface is the bottom
+                    // right corner, and a grid that lets it slide to column one
+                    // when its partner is absent has moved the one control the
+                    // operator aims at without saying so.
+                    className={cn("w-full", !rerunAction && "col-start-2")}
                     icon={continues ? <Play aria-hidden className={dsIcon.sm} /> : <Save aria-hidden className={dsIcon.sm} />}
                     disabled={changed.length === 0}
                     title={saveAction.detail}
@@ -889,6 +901,7 @@ function DataSection({
                   <Button
                     size="sm"
                     variant={rerunAction.intent === "primary" ? "primary" : "secondary"}
+                    className={cn("w-full", !saveAction && "col-start-2")}
                     icon={<Play aria-hidden className={dsIcon.sm} />}
                     title={rerunAction.detail}
                     onClick={() => (fresh.stale ? setFreshnessPending(rerunAction) : submitRerun({ freshness: "within-limit" }))}
@@ -896,7 +909,6 @@ function DataSection({
                     {rerunAction.label}
                   </Button>
                 )}
-                </span>
               </div>
             </div>
           )}
