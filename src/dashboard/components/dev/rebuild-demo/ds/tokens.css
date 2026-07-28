@@ -360,6 +360,15 @@
      a shape. The whole point of the outlined state is that a queued run shows
      you how many steps it has and how it is laid out before it starts. */
   --ds-h-timeline-bar: 10px;
+  /* The evidence lightbox's capture box. The viewer is TWO COLUMNS of equal
+     height — the capture on the left, its metadata on the right — so this is
+     the height BOTH columns are cut to, and the capture's width falls out of
+     its own served aspect ratio inside it. It is a viewport fraction because
+     the dialog itself is (`max-h-[86vh]`), minus the header, the thumbnail
+     strip and the footer the box shares the dialog with. */
+  --ds-h-capture-box: 46vh;
+  /* the thumbnail strip along the capture column's bottom */
+  --ds-h-capture-thumb: 44px;
   /* The scroll well a Group Row shows its members in. This is the value that
      makes scale presentational: at ~5.5 lines a group of 50 occupies exactly
      the same space as a group of 13, so a queue full of groups keeps a
