@@ -37,10 +37,26 @@ export interface ReportSpan {
   days: string[];
 }
 
-export const REPORT_SPANS: ReportSpan[] = [
-  { key: "today", label: dayLabel(DEMO_DAYS[DEMO_DAYS.length - 1]), days: [DEMO_DAYS[DEMO_DAYS.length - 1]] },
-  { key: "all", label: `Every day the tracker holds (${DEMO_DAYS.length})`, days: DEMO_DAYS },
-];
+/** the key of the span that scopes the report to ONE day */
+export const REPORT_DAY_SPAN = "day";
+
+/**
+ * The spans on offer for the day the app is looking at.
+ *
+ * **The single-day span is a function of the selected day, not a constant.**
+ * It used to be pinned to `DEMO_DAY`, so the report answered for Saturday while
+ * the nav said Thursday and nothing on the surface admitted the two were
+ * different numbers — a supervisor-facing artifact quoting a day the operator
+ * is not looking at. It now takes the day from the same place the queue and the
+ * rail badges take it, and reaches the rows through the same
+ * `topLevelRowsForDay` partition, so the three cannot disagree.
+ */
+export function reportSpansForDay(day: string): ReportSpan[] {
+  return [
+    { key: REPORT_DAY_SPAN, label: dayLabel(day), days: [day] },
+    { key: "all", label: `Every day the tracker holds (${DEMO_DAYS.length})`, days: DEMO_DAYS },
+  ];
+}
 
 // ---------------------------------------------------------------------------
 // The one operator-entered number in the whole report
