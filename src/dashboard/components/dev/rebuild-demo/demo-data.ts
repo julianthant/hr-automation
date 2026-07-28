@@ -1041,7 +1041,8 @@ const oathBatch: DemoRowSpec = {
   priority: "bulk",
   enqueuedAt: at("11:05:22"),
   startedAt: at("11:05:31"),
-  endedAt: at("11:24:11"),
+  // span covers the steps — see the rule on the oath member factory
+  endedAt: at("11:24:20"),
   evidence: { receiptId: "rcpt-os-c2f0", failureId: "fail-os-c2f0-m2", confidence: "partial" },
   warnings: { count: 1, first: "1 signer failed — signature field never rendered" },
   memberIds: oathMemberIds,
@@ -1790,7 +1791,14 @@ function oathMember(i: number): DemoRowSpec {
     priority: "bulk",
     enqueuedAt: at("11:12:02"),
     startedAt,
-    endedAt: plusSeconds(startedAt, failed ? 62 : 35 + (i % 6)),
+    // THE SPAN COVERS THE STEPS. A run's total is derived from
+    // `startedAt`→`endedAt` and its step durations are authored on the steps —
+    // two independent sources for one fact, and they had drifted: several
+    // members reported finishing in less time than the work they say they did.
+    // A wall clock may legitimately EXCEED the sum of the steps (handoffs,
+    // launches, lease waits belong to no step); it may never fall short of it.
+    // Pinned for every fixture by `rebuild-demo-duration-reconciles.test.ts`.
+    endedAt: plusSeconds(startedAt, failed ? 62 : 41 + (i % 6)),
     evidence: failed
       ? { failureId: `fail-os-m${pad(i, 3)}`, confidence: "unknown" }
       : { receiptId: `rcpt-os-m${pad(i, 3)}`, confidence: "verified" },
@@ -2575,7 +2583,14 @@ function wsMember(i: number): DemoRowSpec {
   }
   return {
     ...base,
-    endedAt: plusSeconds(startedAt, 24 + (i % 7)),
+    // THE SPAN COVERS THE STEPS. A run's total is derived from
+    // `startedAt`→`endedAt` and its step durations are authored on the steps —
+    // two independent sources for one fact, and they had drifted: several
+    // members reported finishing in less time than the work they say they did.
+    // A wall clock may legitimately EXCEED the sum of the steps (handoffs,
+    // launches, lease waits belong to no step); it may never fall short of it.
+    // Pinned for every fixture by `rebuild-demo-duration-reconciles.test.ts`.
+    endedAt: plusSeconds(startedAt, 31 + (i % 7)),
     evidence: { receiptId: `rcpt-ws-w${pad(i, 3)}`, confidence: "verified" },
     memberFact: `award $${2000 + i * 100}`,
     outcome: { tone: "success", text: `Work-study award saved and read back — $${2000 + i * 100}` },
@@ -3049,7 +3064,8 @@ const plSummer: DemoRowSpec = {
   linkedParentId: "ocr-summer",
   enqueuedAt: at("14:23:12"),
   startedAt: at("14:23:18"),
-  endedAt: at("14:23:56"),
+  // span covers the steps — see the rule on the oath member factory
+  endedAt: at("14:24:02"),
   evidence: { confidence: "verified" },
   memberIds: PL_SUMMER_IDS,
   feedsInto: {
@@ -3409,7 +3425,8 @@ function sepListMember(i: number): DemoRowSpec {
   }
   return {
     ...base,
-    endedAt: plusSeconds(startedAt, 214 + i * 9),
+    // span covers the steps — see the rule on the oath member factory
+    endedAt: plusSeconds(startedAt, 226 + i * 9),
     evidence: { receiptId: `rcpt-se-l${pad(i, 2)}`, confidence: "verified" },
     memberFact: `TXN-09${pad(11400 + i * 13, 5)}`,
     outcome: { tone: "success", text: `Terminated 07/31/2026 · TXN-09${pad(11400 + i * 13, 5)} read back` },
