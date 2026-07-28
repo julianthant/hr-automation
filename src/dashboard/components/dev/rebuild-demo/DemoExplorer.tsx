@@ -40,6 +40,7 @@ import {
   dsFocus,
   dsIcon,
   dsMotion,
+  dsStatusText,
   dsText,
 } from "./demo-ui";
 import {
@@ -152,7 +153,11 @@ export function DemoExplorerPage({ onBack, onOpenSettings }: { onBack: () => voi
   const overlay = useMemo(() => (graph && run ? overlayForRun(graph, run) : null), [graph, run]);
 
   const [nodeId, setNodeId] = useState("");
-  const node = graph ? (graph.nodes.find((n) => n.id === nodeId) ?? graph.nodes[0]) : undefined;
+  // Until the operator picks one, the panel opens on the node the run is
+  // ACTUALLY sitting on — where it stopped, else the last node it got to. The
+  // first node of the array is where a graph starts, not where the run is, and
+  // on a fan-out graph it is a lane this run never entered.
+  const node = graph ? (graph.nodes.find((n) => n.id === nodeId) ?? defaultNode(graph, overlay)) : undefined;
   const nodeOverlay = overlay?.nodes.find((n) => n.nodeId === node?.id);
 
   return (
@@ -222,6 +227,24 @@ export function DemoExplorerPage({ onBack, onOpenSettings }: { onBack: () => voi
       </div>
     </div>
   );
+}
+
+/**
+ * Which node the panel opens on before the operator picks one.
+ *
+ * With a run over the graph it is the node the run is on — `stoppedAtNodeId`
+ * when it is waiting, failed, cancelled or running, else the last node it
+ * reached. Without a run it is the graph's first node, because then the
+ * question really is "what shape is this".
+ */
+export function defaultNode(graph: ExplorerGraph, overlay: ExplorerOverlay | null): ExplorerNode {
+  if (!overlay) return graph.nodes[0];
+  if (overlay.stoppedAtNodeId) {
+    const stopped = graph.nodes.find((node) => node.id === overlay.stoppedAtNodeId);
+    if (stopped) return stopped;
+  }
+  const reached = [...overlay.nodes].reverse().find((node) => ON_PATH.includes(node.state));
+  return graph.nodes.find((node) => node.id === reached?.nodeId) ?? graph.nodes[0];
 }
 
 /* =========================================================================
@@ -360,45 +383,53 @@ function GraphPanel({
     <Panel className="min-h-0">
       <PanelHeader
         title={`${graph.label} ${fmtVersionTag({ major: graph.version, minor: graph.minorVersion })}`}
-        meta={`${graph.nodes.length} nodes · ${totals.reads} read · ${totals.writes} write`}
+        meta={[
+          `${graph.nodes.length} nodes`,
+          `${totals.reads} read`,
+          totals.writes > 0 ? `${totals.writes} write` : undefined,
+          totals.files > 0 ? `${totals.files} file` : undefined,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
         actions={<GraphInfo graph={graph} posture={posture} />}
       />
 
       <PanelToolbar label="Lay a run over the graph">
         <span className={cn(dsText.meta, "shrink-0 text-[color:var(--ds-fg-muted)]")}>Run</span>
-        <Select
-          aria-label="Run to lay over the graph"
-          value={run ? run.id : NO_RUN}
-          disabled={runs.length === 0}
-          onChange={(event) => onSelectRun(event.target.value)}
-          className="min-w-0 max-w-[26ch] shrink"
-        >
-          {runs.length === 0 ? (
-            <option value={NO_RUN}>No run in the corpus</option>
-          ) : (
-            <>
-              <option value={NO_RUN}>Descriptor only — no run</option>
-              {runs.map((option) => (
-                <option key={option.row.id} value={option.row.id}>
-                  {runOptionLabel(option)}
-                </option>
-              ))}
-            </>
-          )}
-        </Select>
+        {/* The width lives on the WRAPPER, not on the `<select>`: the primitive's
+            own shell is `flex min-w-0`, so a width set on the control alone
+            overflows a shell that is free to shrink — and the pill beside it
+            ends up sitting on top of the run's name. */}
+        <span className="w-[36ch] shrink-0">
+          <Select
+            aria-label="Run to lay over the graph"
+            value={run ? run.id : NO_RUN}
+            disabled={runs.length === 0}
+            onChange={(event) => onSelectRun(event.target.value)}
+            className="w-full"
+          >
+            {runs.length === 0 ? (
+              <option value={NO_RUN}>No run in the corpus</option>
+            ) : (
+              <>
+                <option value={NO_RUN}>Descriptor only — no run</option>
+                {runs.map((option) => (
+                  <option key={option.row.id} value={option.row.id}>
+                    {runOptionLabel(option)}
+                  </option>
+                ))}
+              </>
+            )}
+          </Select>
+        </span>
         {run && overlay && (
           <>
             <StatusPill status={effectiveStatus(run)} size="sm" />
-            <MetaLine
-              className="min-w-0 shrink"
-              items={[
-                `${overlay.reached} of ${overlay.total} nodes`,
-                overlay.stoppedAtNodeId
-                  ? `${overlay.inFlight ? "at" : "stopped at"} ${overlay.stoppedAtNodeId}`
-                  : undefined,
-                overlay.traceId,
-              ]}
-            />
+            {/* The trace id, and nothing else. Coverage is already in the
+                option the operator is reading, and WHERE the run stopped is on
+                the graph three inches below — both restated here would only be
+                a bar that truncates the one fact nothing else carries. */}
+            <MetaLine className="min-w-0 shrink truncate" items={[overlay.traceId]} />
             {run.dryRun && <Chip tone="info">dry run</Chip>}
           </>
         )}
@@ -462,12 +493,19 @@ function GraphPanel({
   );
 }
 
-/** `Maria Lopez-Garcia · waiting · 2:02 PM` — a selectable line, not a truncated chip */
+/**
+ * `Maria Lopez-Garcia · Waiting on you · 5/7 · 2:02 PM` — a selectable line,
+ * not a truncated chip.
+ *
+ * The status word is `dsStatusText`, the SAME label the pill beside it renders.
+ * Reaching for the raw key instead put `doneWarnings` in a control an operator
+ * reads — the one place a status vocabulary must never leak.
+ */
 export function runOptionLabel(option: { row: DemoRow; reached: number; total: number; offGraph: boolean }): string {
   const name = option.row.displayName ?? option.row.title;
   const when = option.row.startedAt ? fmtClock(option.row.startedAt) : fmtClock(option.row.enqueuedAt);
-  const shape = option.offGraph ? " · off this shape" : ` · ${option.reached}/${option.total}`;
-  return `${name} · ${effectiveStatus(option.row) === "verifiedDone" ? "done" : effectiveStatus(option.row)}${shape} · ${when}`;
+  const shape = option.offGraph ? "off this shape" : `${option.reached}/${option.total}`;
+  return `${name} · ${dsStatusText(effectiveStatus(option.row))} · ${shape} · ${when}`;
 }
 
 function writeSystems(graph: ExplorerGraph): string {
@@ -597,7 +635,7 @@ function GraphNodeRow({
           )}
           {overlay && overlay.recorded.length > 0 && (
             <span className={cn(dsText.micro, dsText.nums, "text-[color:var(--ds-fg-muted)]")}>
-              {overlay.recorded.length} values
+              {overlay.recorded.length === 1 ? "1 value" : `${overlay.recorded.length} values`}
             </span>
           )}
           {overlay?.hasEvidence && (

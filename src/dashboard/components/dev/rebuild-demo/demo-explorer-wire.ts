@@ -215,17 +215,26 @@ export function systemsOf(graph: ExplorerGraph): SystemKey[] {
   return seen;
 }
 
-/** how many contract rows across the whole graph move a value in each direction */
-export function contractTotals(graph: ExplorerGraph): { reads: number; writes: number } {
+/**
+ * How many contract rows the whole graph moves, split by where they LAND.
+ *
+ * `writes` and `files` are counted apart on purpose: a graph that says
+ * "changes no system of record" beside a header reading "1 write" reads as a
+ * contradiction, and it is not one — that write is a row appended to a file on
+ * disk. Counting them together would make the honest chip look like a lie.
+ */
+export function contractTotals(graph: ExplorerGraph): { reads: number; writes: number; files: number } {
   let reads = 0;
   let writes = 0;
+  let files = 0;
   for (const node of graph.nodes) {
     for (const row of node.contract) {
       if (row.dir === "read") reads += 1;
+      else if (node.kind === "output") files += 1;
       else writes += 1;
     }
   }
-  return { reads, writes };
+  return { reads, writes, files };
 }
 
 // ---------------------------------------------------------------------------
@@ -1867,9 +1876,28 @@ export function overlayForRun(graph: ExplorerGraph, row: DemoRow): ExplorerOverl
     const recorded = recordedFor(row.data, node);
 
     if (node.kind === "gate") {
-      // A gate is a descriptor node with no recorded step of its own — its state
-      // is the run's own gate, which is why a run with no gate shows it skipped
-      // rather than pending: the condition was evaluated and came back false.
+      // A RECORDED STEP ALWAYS WINS. Most gates have no step of their own and
+      // are inferred from the run's `gate`, but some workflows do record one
+      // (an approval a packet walked through and closed) — and inferring from a
+      // gate object that is no longer there reported a step the run
+      // demonstrably ran as "off this path".
+      const gateStep = stepFor(row.steps, node);
+      if (gateStep) {
+        matched += 1;
+        if (gateStep.state !== "pending") reached += 1;
+        return {
+          nodeId: node.id,
+          state: gateStep.state,
+          durationSec: gateStep.durationSec,
+          attempts: gateStep.attempts,
+          keyLines: gateStep.keyLines ?? (row.gate ? [row.gate.title] : undefined),
+          hasEvidence: gateStep.hasShot,
+          recorded,
+        };
+      }
+      // No step: the state is the run's own gate, which is why a run with no
+      // gate shows it skipped rather than pending — the condition was evaluated
+      // and came back false.
       const touched = row.steps.some((step) => step.state !== "pending");
       if (gateOpen) {
         reached += 1;
