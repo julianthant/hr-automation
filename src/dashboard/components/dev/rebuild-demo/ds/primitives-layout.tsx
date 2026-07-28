@@ -72,12 +72,13 @@ export function PanelHeader({
       className={cn(
         "flex shrink-0 items-center gap-[var(--ds-space-base)] border-b px-[var(--ds-space-cozy)]",
         "min-h-[var(--ds-h-bar)] border-[color:var(--ds-border)]",
+        subtitle && "py-[var(--ds-space-base)]",
         className,
       )}
     >
       {icon && <span className="shrink-0 text-[color:var(--ds-fg-muted)]">{icon}</span>}
-      <span className="flex min-w-0 flex-col">
-        <span className={cn(dsText.title, "truncate font-semibold text-[color:var(--ds-fg)]")}>
+      <span className={cn("flex min-w-0 flex-col", subtitle && "gap-[var(--ds-space-hair)]")}>
+        <span className={cn(subtitle ? dsText.section : dsText.title, "truncate font-semibold text-[color:var(--ds-fg)]")}>
           {title}
         </span>
         {subtitle && (

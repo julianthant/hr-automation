@@ -13,6 +13,7 @@ import {
   Lock,
   Monitor,
   ShieldAlert,
+  Table2,
   TriangleAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -46,11 +47,20 @@ import {
   THead,
   TR,
   Well,
+  dsClip,
   dsFocus,
   dsIcon,
   dsMotion,
   dsText,
 } from "./demo-ui";
+import {
+  CAPABILITY_SPECS,
+  CAPABILITY_STATE_LABEL,
+  capabilityDryRunPosture,
+  capabilityMatrix,
+  type CapabilityCell,
+  type CapabilityKey,
+} from "./demo-capability-wire";
 import {
   DEMO_BUDGETS,
   DEMO_ENVIRONMENT_FACTS,
@@ -114,6 +124,7 @@ export type SettingsSectionKey =
   | "system-urls"
   | "budgets"
   | "storage"
+  | "capabilities"
   | "keyboard";
 
 interface SectionSpec {
@@ -175,15 +186,33 @@ const STATUS_SECTIONS: SectionSpec[] = [
     blurb: "Authority generation, integrity, backup age, and the read-only degraded mode.",
     status: true,
   },
+  {
+    key: "capabilities",
+    label: "Workflow capabilities",
+    icon: Table2,
+    blurb: "What each workflow can do — and, where it cannot, whether that is a decision or a gap.",
+    status: true,
+  },
 ];
+
+/**
+ * Blurbs BY KEY, not by index.
+ *
+ * `STATUS_SECTIONS[1]` and `[2]` were read straight out of the array by three
+ * panels, which made the array's ORDER load-bearing and turned "add a section"
+ * into "silently retitle two others". Adding the capability section is exactly
+ * the insert that comment was warning about, so the lookup is a lookup now.
+ */
+function blurbOf(key: SettingsSectionKey): string {
+  const found = SECTIONS.find((entry) => entry.key === key);
+  if (!found) throw new Error(`settings: no section "${key}"`);
+  return found.blurb;
+}
 
 /**
  * HELP — its own nav group, not a sixth Status entry.
  *
- * Two reasons it is separated rather than appended. `STATUS_SECTIONS` is read
- * BY INDEX for its blurbs (`STATUS_SECTIONS[1]`, `[2]`), so appending is a trap
- * waiting for the next insert; and Help answers a different question from the
- * rest of the page — Status says what the deployment IS, Help says what the
+ * It answers a different question from the rest of the page — Status says what the deployment IS, Help says what the
  * product DOES — which is exactly the kind of distinction a nav group exists to
  * make.
  */
@@ -525,7 +554,7 @@ function EnvironmentSection({
     <Panel className="min-h-0 flex-1">
       <PanelHeader
         title="Environment & identity"
-        subtitle={STATUS_SECTIONS[0].blurb}
+        subtitle={blurbOf("environment")}
         icon={<Lock aria-hidden className={dsIcon.lg} />}
         meta={`${plural(DEMO_ENVIRONMENT_FACTS.length, "value")}`}
       />
@@ -614,7 +643,7 @@ function BehaviourSection() {
     <Panel className="min-h-0 flex-1">
       <PanelHeader
         title="System behaviour"
-        subtitle={STATUS_SECTIONS[1].blurb}
+        subtitle={blurbOf("behaviour")}
         icon={<Camera aria-hidden className={dsIcon.lg} />}
         meta={`${DEMO_SYSTEM_BEHAVIOUR.length} constants`}
       />
@@ -650,6 +679,145 @@ function BehaviourSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Status: workflow capabilities
+// ---------------------------------------------------------------------------
+
+/**
+ * A CELL. Three states, told apart by SHAPE and by WORD, never by colour: a
+ * filled chip for yes with the thing it is beside it, a hairline chip reading
+ * `N/A` for a decision, and a warning-toned `Not built` for a gap.
+ *
+ * Nothing here is pressable. This is a page that STATES; the place to change
+ * any of it is the run modal, and a toggle here would be a second control for a
+ * decision that belongs to a start.
+ */
+function CapabilityCellView({ cell }: { cell: CapabilityCell }) {
+  if (cell.state === "available") {
+    return (
+      <span title={cell.detail} className="flex min-w-0">
+        <Chip tone="info">
+          <span className={dsClip.text}>{cell.detail}</span>
+        </Chip>
+      </span>
+    );
+  }
+  return (
+    <span title={cell.reason} className="flex min-w-0 items-center gap-[var(--ds-space-tight)]">
+      <Chip tone={cell.state === "not-built" ? "warning" : "neutral"}>{CAPABILITY_STATE_LABEL[cell.state]}</Chip>
+      <span className={cn(dsText.meta, dsClip.text, "min-w-0 text-[color:var(--ds-fg-muted)]")}>{cell.reason}</span>
+    </span>
+  );
+}
+
+/**
+ * WHAT EACH WORKFLOW CAN DO — one row per workflow, one section per capability.
+ *
+ * It is drawn CAPABILITY-MAJOR rather than as a grid of sixteen columns by
+ * thirteen rows, and that is the whole design decision. A true matrix at this
+ * size is a horizontal scroll with a header the eye loses, and its cells can
+ * only hold a tick — which throws away the half of the answer that matters,
+ * namely WHICH methods, WHICH presets, WHICH systems, and WHY not. Read down a
+ * capability instead and the comparison the operator actually asked for ("which
+ * ones have dry run?") is a single glance, with the reason attached to every no.
+ *
+ * Every value on this page is derived in `demo-capability-wire.ts` from the
+ * served descriptors. There is no table here to fall out of date.
+ */
+function CapabilitiesSection() {
+  const matrix = useMemo(() => capabilityMatrix(), []);
+  const counts = useMemo(() => {
+    const map = new Map<CapabilityKey, number>();
+    for (const row of matrix) {
+      for (const cell of row.cells) {
+        if (cell.state === "available") map.set(cell.key, (map.get(cell.key) ?? 0) + 1);
+      }
+    }
+    return map;
+  }, [matrix]);
+
+  return (
+    <Panel className="min-h-0 flex-1">
+      <PanelHeader
+        title="Workflow capabilities"
+        subtitle={blurbOf("capabilities")}
+        icon={<Table2 aria-hidden className={dsIcon.lg} />}
+        meta={`${matrix.length} workflows · ${CAPABILITY_SPECS.length} capabilities`}
+      />
+      <PanelBody className="flex flex-col gap-[var(--ds-space-cozy)] p-[var(--ds-space-cozy)]">
+        <Banner tone="info" title="Read from the descriptors, not from a list somebody kept up to date">
+          Every cell is derived from the same served descriptor the run modal and the Explorer read. A workflow that gains a
+          dry run gains it here on the same deploy.
+        </Banner>
+
+        {CAPABILITY_SPECS.map((spec) => (
+          <div key={spec.key} className="flex min-w-0 flex-col gap-[var(--ds-space-snug)]">
+            <div className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
+              <SectionLabel className="min-w-0 truncate">{spec.label}</SectionLabel>
+              <Badge tone="neutral">
+                {counts.get(spec.key) ?? 0} of {matrix.length}
+              </Badge>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <IconButton size="xs" label={`What ${spec.label} means`} icon={<Info aria-hidden className={dsIcon.sm} />} />
+                </PopoverTrigger>
+                <PopoverContent title={spec.label}>
+                  <p className={cn(dsText.meta, "text-[color:var(--ds-fg-secondary)]")}>{spec.meaning}</p>
+                </PopoverContent>
+              </Popover>
+            </div>
+            <Table label={`${spec.label} by workflow`}>
+              <THead>
+                <TR>
+                  <TH>Workflow</TH>
+                  <TH>{spec.label}</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {matrix.map((row) => {
+                  const cell = row.cells.find((c) => c.key === spec.key);
+                  if (!cell) return null;
+                  return (
+                    <TR key={row.workflowId}>
+                      <TD className="w-[190px]">{row.label}</TD>
+                      <TD>
+                        <CapabilityCellView cell={cell} />
+                      </TD>
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
+          </div>
+        ))}
+
+        {/* The one fact that is NOT a yes/no, so it is not a capability row: a
+            workflow can honour a rehearsal, have nothing to rehearse, or write
+            and refuse one — and the third is the answer worth reading. */}
+        <div className="flex min-w-0 flex-col gap-[var(--ds-space-snug)]">
+          <SectionLabel>Where a dry run stops</SectionLabel>
+          <Table label="Dry-run posture by workflow">
+            <THead>
+              <TR>
+                <TH>Workflow</TH>
+                <TH>Posture</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {matrix.map((row) => (
+                <TR key={row.workflowId}>
+                  <TD className="w-[190px]">{row.label}</TD>
+                  <TD>{capabilityDryRunPosture(row.workflowId)}</TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        </div>
+      </PanelBody>
+    </Panel>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Status: system hosts
 // ---------------------------------------------------------------------------
 
@@ -659,7 +827,7 @@ function SystemUrlsSection() {
     <Panel className="min-h-0 flex-1">
       <PanelHeader
         title="System hosts"
-        subtitle={STATUS_SECTIONS[2].blurb}
+        subtitle={blurbOf("system-urls")}
         icon={<Link2 aria-hidden className={dsIcon.lg} />}
         meta={`${withTest} of ${DEMO_SYSTEM_URLS.length} have a test host`}
       />
@@ -1028,6 +1196,8 @@ export function DemoSettingsPage({
           <BudgetsSection />
         ) : section.key === "storage" ? (
           <StorageSection storage={storage} />
+        ) : section.key === "capabilities" ? (
+          <CapabilitiesSection />
         ) : section.key === "keyboard" ? (
           <KeyboardSection />
         ) : (

@@ -13,10 +13,10 @@ import {
  * DEV-ONLY (`?view=rebuild-demo`) — the Session Panel's `+`, which was a NOOP.
  *
  * The contract worth pinning is not "it starts workers", it is **what it says
- * when it cannot**. Capacity here is nearly always short — UCPath allows one
- * concurrent session, so a second Separations worker is refused by the SYSTEM,
- * not by a policy — which makes partial success the ORDINARY outcome. These
- * tests hold three things:
+ * when it cannot**. Capacity here is nearly always short — the operator session
+ * gets one shared UCPath window, so a second Separations worker is refused by
+ * the SYSTEM, not by a workflow-local policy — which makes partial success the
+ * ORDINARY outcome. These tests hold three things:
  *
  *  1. the answer is a per-worker VECTOR, never an aggregate;
  *  2. nothing is ever rounded up to success;
@@ -29,9 +29,9 @@ const ROOMY: DemoLaneBudget = {
   executorCap: 6,
   executorInUse: 0,
   systems: [
-    { system: "ucpath", inUse: 1, cap: 1, heldBy: ["Separations"] },
-    { system: "kuali", inUse: 0, cap: 2, heldBy: [] },
-    { system: "i9", inUse: 0, cap: 1, heldBy: [] },
+    { system: "ucpath", inUse: 1, cap: 1, scope: "session", heldBy: ["Separations"] },
+    { system: "kuali", inUse: 0, cap: 2, scope: "workflow", heldBy: [] },
+    { system: "i9", inUse: 0, cap: 1, scope: "workflow", heldBy: [] },
   ],
 };
 
@@ -70,7 +70,8 @@ describe("rebuild demo — spawning N workers answers for each of them", () => {
     for (const o of result.outcomes) {
       expect(o.state).toBe("refused");
       expect(o.code).toBe("system-at-cap");
-      expect(o.reason).toContain("ucpath allows 1 concurrent session");
+      expect(o.reason).toContain("This session gets 1 ucpath window");
+      expect(o.reason).toContain("shared by every workflow");
       expect(o.reason).toContain("Separations");
     }
   });
@@ -79,7 +80,7 @@ describe("rebuild demo — spawning N workers answers for each of them", () => {
     // person-lookup drives ucpath only; give it a free one
     const budget: DemoLaneBudget = {
       ...ROOMY,
-      systems: [{ system: "ucpath", inUse: 0, cap: 1, heldBy: [] }],
+      systems: [{ system: "ucpath", inUse: 0, cap: 1, scope: "session", heldBy: [] }],
     };
     const result = planWorkerSpawn("separations", 3, budget);
     expect(result.outcomes[0].state).toBe("started");
@@ -97,7 +98,10 @@ describe("rebuild demo — spawning N workers answers for each of them", () => {
   });
 
   it("never rounds a partial up to success", () => {
-    const budget: DemoLaneBudget = { ...ROOMY, systems: [{ system: "ucpath", inUse: 0, cap: 1, heldBy: [] }] };
+    const budget: DemoLaneBudget = {
+      ...ROOMY,
+      systems: [{ system: "ucpath", inUse: 0, cap: 1, scope: "session", heldBy: [] }],
+    };
     const result = planWorkerSpawn("separations", 5, budget);
     expect(result.headline).toContain("1 of 5 started");
     expect(result.headline).toContain("4 refused");

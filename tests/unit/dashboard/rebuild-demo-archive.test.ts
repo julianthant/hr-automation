@@ -386,7 +386,7 @@ test("a single-workflow bump names the workflow, not the category", () => {
 });
 
 test("an app update says it reached every workflow, and is marked as an app update", () => {
-  const record = changeRecordFor("chg-app-2026073");
+  const record = changeRecordFor("chg-app-3-0");
   assert.ok(record);
   const target = bumpTargetLabel(record);
   assert.equal(target.appUpdate, true);

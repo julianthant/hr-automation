@@ -26,13 +26,14 @@
  *     re-checks doc 12's rule (verified-done requires verified confidence, every
  *     mandatory criterion met and zero failed members) and the surface refuses
  *     to print a green verdict it cannot justify.
- *  4. **Nothing here is an image.** The demo corpus has no capture bytes, so the
- *     lightbox renders the SERVED metadata of a capture and says the frame is a
- *     placeholder. A fabricated screenshot of a UCPath page is the one thing a
- *     trust surface must never show.
+ *  4. **No live document becomes a demo asset.** The real corpus is used only
+ *     to learn record shape and page geometry. Evidence pages are synthetic
+ *     facsimiles derived from synthetic fixture values and marked as such; a
+ *     browser capture without a facsimile renders its served metadata, never a
+ *     fabricated screenshot of a live system.
  */
 
-import { DEMO_ROWS, type DemoRow, type SystemKey } from "./demo-data";
+import { DEMO_ROWS, type DemoRecord, type DemoRow, type SystemKey } from "./demo-data";
 import { effectiveStatus } from "./demo-data";
 import type { ProposedStatus } from "./demo-status";
 import { at, type DemoWorkflowId } from "./demo-wire";
@@ -279,6 +280,68 @@ type DemoFailureSpec = Omit<DemoFailureRecord, "runId" | "rowId" | "traceId" | "
  */
 export type DemoCaptureKind = "step" | "error" | "form" | "confirmation";
 
+/**
+ * WHAT THE PAGE GAVE UP — one extracted field, as the extractor reports it.
+ *
+ * The shape is taken from this repo's own extraction output
+ * (`data/i9/extracted/*.records.json`: `lastName`, `firstName`, `middleInitial`,
+ * `dateOfBirth`, `ssn`, `hireDate`, `documentType`, plus the three arrays
+ * `originallyMissing` / `illegible` / `notes`). The STRUCTURE and the VOCABULARY
+ * are real; every VALUE here is synthetic. Nothing in this file is copied from a
+ * scan — those are live HR documents with live PII, and they are read for their
+ * schema and nothing else.
+ */
+export interface DemoExtractedField {
+  key: string;
+  /** absent when the extractor nulled it — see `state` for why */
+  value?: string;
+  /** `read` = on the page; `missing` = the page left it blank; `illegible` = it is there and could not be trusted */
+  state: "read" | "missing" | "illegible";
+  /** 0–1, as the model reported it. Absent on a field that was not read. */
+  confidence?: number;
+  /** what the value was taken from — `PAPER` for handwriting, a system for a looked-up value */
+  source: string;
+  /** why a field is missing or illegible, in the extractor's own words */
+  reason?: string;
+}
+
+/**
+ * ONE PAGE'S EXTRACTION RECORD — the thing the `What was recorded` panel exists
+ * to show, and the thing it had nothing of. A packet capture served no metadata
+ * at all, so 70% of a full-screen viewer was empty beside a frame that said the
+ * bytes were missing.
+ */
+export interface DemoPageExtraction {
+  formKind: string;
+  sourcePdf: string;
+  sourcePage: number;
+  pageCount: number;
+  fields: DemoExtractedField[];
+  /** the extractor's free-text observations — the real corpus carries these verbatim */
+  notes: string[];
+}
+
+/**
+ * A DEMO-ONLY, SYNTHETIC rendering of the page — never a picture of a real one.
+ *
+ * The rule this respects is the one already written into `CaptureFrame`: a drawn
+ * approximation of a REAL system page on an evidence surface is a fabrication,
+ * and the demo must not commit scans of live HR documents either. So this is
+ * neither: it is a facsimile built from the SYNTHETIC record beside it, marked
+ * as synthetic on its face, and it stands in for the page's LAYOUT so the viewer
+ * can be designed and judged at full size. A capture with no facsimile keeps the
+ * honest "no bytes here" frame.
+ */
+export interface DemoPageFacsimile {
+  /** the printed heading across the top of the form */
+  formTitle: string;
+  agency: string;
+  /** the boxed sections, each with its own printed fields */
+  sections: { heading: string; fields: { label: string; value: string; hand?: boolean }[] }[];
+  /** the signature block along the bottom */
+  signatures: { label: string; signedBy?: string; date?: string }[];
+}
+
 export interface DemoCapture {
   id: string;
   label: string;
@@ -295,6 +358,8 @@ export interface DemoCapture {
   urlRedacted?: string;
   size?: { w: number; h: number };
   note?: string;
+  extraction?: DemoPageExtraction;
+  facsimile?: DemoPageFacsimile;
 }
 
 interface DemoCaptureMeta {
@@ -307,6 +372,8 @@ interface DemoCaptureMeta {
   urlRedacted?: string;
   size?: { w: number; h: number };
   note?: string;
+  extraction?: DemoPageExtraction;
+  facsimile?: DemoPageFacsimile;
 }
 
 // ===========================================================================
@@ -1001,7 +1068,344 @@ function i9MemberFailure(row: DemoRow, failureId: string): DemoFailureSpec {
  * wrong image by position. A capture with no entry still renders — it just shows
  * only what the row itself serves, rather than inventing the rest.
  */
+/**
+ * PAGE COUNTS for the two packets the demo pages through. Named because the
+ * facsimile, the extraction record and the review pane all print them, and a
+ * capture that says "page 2 of 8" beside a strip of three is the kind of
+ * disagreement a fixture is supposed to make impossible.
+ */
+const SUMMER_PACKET_PAGES = 8;
+
+/**
+ * The oath form as it is PRINTED — the layout every page of a summer packet
+ * shares. The per-person values are filled in beside it; this is the paper.
+ */
+function oathFacsimile(person: { name: string; eid: string; date: string }): DemoPageFacsimile {
+  return {
+    formTitle: "Oath or Affirmation of Allegiance",
+    agency: "University of California · State of California",
+    sections: [
+      {
+        heading: "Employee",
+        fields: [
+          { label: "Printed name", value: person.name, hand: true },
+          { label: "Employee ID", value: person.eid, hand: true },
+          { label: "Department", value: "000371 · Student Health" },
+          { label: "Payroll title", value: "Blank Assistant 3" },
+        ],
+      },
+      {
+        heading: "Declaration",
+        fields: [
+          { label: "I solemnly swear", value: "…that I will support and defend the Constitution of the United States and the Constitution of the State of California against all enemies, foreign and domestic…" },
+        ],
+      },
+    ],
+    signatures: [
+      { label: "Employee signature", signedBy: person.name, date: person.date },
+      { label: "Officer / witness", signedBy: "R. Okonkwo, HR", date: person.date },
+    ],
+  };
+}
+
+/**
+ * The page beside an OCR review record.
+ *
+ * Every value comes from the synthetic record already being reviewed. Paper
+ * fields become printed form rows; system lookups stay in the extracted-data
+ * column and never get painted onto the page. The builder throws when a review
+ * record serves no paper facts, because an empty facsimile would put the old
+ * placeholder back under a more reassuring name.
+ */
+export function reviewPageFacsimile(record: DemoRecord): DemoPageFacsimile {
+  const paperFields = record.fields.filter((field) => field.source === "paper");
+  if (paperFields.length === 0) {
+    throw new Error(`Review record ${record.id} (${record.name}) has no paper fields for its page facsimile`);
+  }
+
+  const formKind = record.pageNote.split("·").slice(1).join("·").trim();
+  if (!formKind) {
+    throw new Error(`Review record ${record.id} (${record.name}) has no form kind in pageNote '${record.pageNote}'`);
+  }
+
+  const date = paperFields.find((field) => field.label.toLowerCase().includes("date"))?.value;
+  const employeeSigned = record.checks.find((check) => check.label === "Employee signed")?.value.startsWith("yes");
+  const officerSigned = record.checks.find((check) => check.label === "Officer signed")?.value.startsWith("yes");
+
+  return {
+    formTitle: formKind,
+    agency: `Synthetic review record · page ${record.page}`,
+    sections: [
+      {
+        heading: "Fields on this page",
+        fields: paperFields.map((field) => ({
+          label: field.label,
+          value: field.value,
+          hand: true,
+        })),
+      },
+    ],
+    signatures: [
+      ...(employeeSigned === undefined
+        ? []
+        : [{ label: "Employee signature", signedBy: employeeSigned ? record.name : undefined, date }]),
+      ...(officerSigned === undefined
+        ? []
+        : [{ label: "Officer / witness", signedBy: officerSigned ? "R. Okonkwo, HR" : undefined, date }]),
+    ],
+  };
+}
+
 const CAPTURE_META: Record<string, DemoCaptureMeta> = {
+  // -------------------------------------------------------------------------
+  // THE PACKET PAGES. These carried NO metadata at all, which is why the
+  // lightbox's `What was recorded` panel opened empty on the one capture the
+  // operator was most likely to open. They now serve the same things a real
+  // extraction serves — and the SHAPE of that record is this repo's own
+  // (`data/i9/extracted/*.records.json`: per-field values, the three
+  // `originallyMissing` / `illegible` / `notes` arrays, `sourcePdf`,
+  // `sourcePage`). Every VALUE is synthetic; the scans are live HR documents
+  // and are read for their schema and never for their contents.
+  // -------------------------------------------------------------------------
+  "oath-summer::Packet page 1": {
+    step: "OCR extraction",
+    system: "i9",
+    capturedAt: at("14:20:31"),
+    ref: "sha256:7c11…9ad4",
+    screen: "packet.page",
+    pageState: "extracted",
+    size: { w: 612, h: 792 },
+    note: "The packet's cover page — the batch header the extractor keys the run to, before any person's page is read.",
+    extraction: {
+      formKind: "oath packet cover",
+      sourcePdf: "Oath_Packet_Summer.pdf",
+      sourcePage: 1,
+      pageCount: SUMMER_PACKET_PAGES,
+      fields: [
+        { key: "Packet title", value: "Summer 2026 · Student Health", state: "read", confidence: 0.99, source: "PAPER" },
+        { key: "Prepared by", value: "R. Okonkwo, HR", state: "read", confidence: 0.96, source: "PAPER" },
+        { key: "Prepared on", value: "07/21/2026", state: "read", confidence: 0.98, source: "PAPER" },
+        { key: "Forms enclosed", value: "6", state: "read", confidence: 0.94, source: "PAPER" },
+        { key: "Department", value: "000371 · Student Health", state: "read", confidence: 0.91, source: "PAPER" },
+        { key: "Cover sheet signature", state: "missing", source: "PAPER", reason: "the cover sheet signature line was left blank — a cover page is not a form, so nothing is blocked by it" },
+      ],
+      notes: [
+        "Cover page; no employee fields on this sheet — the six oath forms begin on page 2.",
+        "Enclosure count read as 6 and reconciled against the 6 person pages found in the packet.",
+      ],
+    },
+    facsimile: {
+      formTitle: "Oath packet — cover sheet",
+      agency: "UC San Diego · Student Health · Summer 2026",
+      sections: [
+        {
+          heading: "Batch",
+          fields: [
+            { label: "Prepared by", value: "R. Okonkwo, HR", hand: true },
+            { label: "Prepared on", value: "07/21/2026", hand: true },
+            { label: "Forms enclosed", value: "6", hand: true },
+            { label: "Department", value: "000371 · Student Health" },
+          ],
+        },
+      ],
+      signatures: [{ label: "Cover sheet signature" }],
+    },
+  },
+  "oath-summer::Roster match report": {
+    step: "Roster match",
+    system: "i9",
+    capturedAt: at("14:21:06"),
+    ref: "sha256:be40…2f18",
+    screen: "roster.match.report",
+    pageState: "complete",
+    size: VIEWPORT,
+    note: "Every extracted person against the roster row that claimed them. 5 matched on EID, 1 on name + department.",
+    extraction: {
+      formKind: "roster match report",
+      sourcePdf: "Summer_Roster_0721.xlsx",
+      sourcePage: 1,
+      pageCount: 1,
+      fields: [
+        { key: "Roster rows", value: "6", state: "read", confidence: 1, source: "ROSTER" },
+        { key: "Matched on EID", value: "5", state: "read", confidence: 1, source: "ROSTER" },
+        { key: "Matched on name + dept", value: "1", state: "read", confidence: 0.88, source: "ROSTER" },
+        { key: "Unmatched", value: "0", state: "read", confidence: 1, source: "ROSTER" },
+        { key: "Roster file hash", value: "sha256:0d5c…71bb", state: "read", confidence: 1, source: "ROSTER" },
+      ],
+      notes: [
+        "One person matched on name + department rather than EID — the EID written on their form is a digit short.",
+        "No roster row was consumed twice; each match is one-to-one.",
+      ],
+    },
+    facsimile: {
+      formTitle: "Roster match report",
+      agency: "Synthetic reconciliation · Summer_Roster_0721.xlsx",
+      sections: [
+        {
+          heading: "Match summary",
+          fields: [
+            { label: "Roster rows", value: "6" },
+            { label: "Matched on EID", value: "5" },
+            { label: "Name + dept", value: "1" },
+            { label: "Unmatched", value: "0" },
+          ],
+        },
+        {
+          heading: "Integrity",
+          fields: [
+            { label: "One-to-one", value: "6 of 6 rows consumed once" },
+            { label: "Roster hash", value: "sha256:0d5c…71bb" },
+          ],
+        },
+      ],
+      signatures: [],
+    },
+  },
+  "ocr-summer::Page 2 · Alvarez": {
+    step: "OCR extraction",
+    system: "i9",
+    capturedAt: at("14:20:44"),
+    ref: "sha256:1d77…04ae",
+    screen: "packet.page",
+    pageState: "extracted",
+    size: { w: 612, h: 792 },
+    note: "Typed name block, handwritten signature and date. Every field read on the first pass.",
+    extraction: {
+      formKind: "oath form",
+      sourcePdf: "Oath_Packet_Summer.pdf",
+      sourcePage: 2,
+      pageCount: SUMMER_PACKET_PAGES,
+      fields: [
+        { key: "Printed name", value: "Ana Alvarez", state: "read", confidence: 0.97, source: "PAPER" },
+        { key: "Employee ID", value: "10510221", state: "read", confidence: 0.93, source: "PAPER" },
+        { key: "Signature date", value: "07/21/2026", state: "read", confidence: 0.95, source: "PAPER" },
+        { key: "Employee signed", value: "yes — on paper", state: "read", confidence: 0.99, source: "PAPER" },
+        { key: "Officer signed", value: "yes — on paper", state: "read", confidence: 0.98, source: "PAPER" },
+        { key: "Department", value: "000371 · Student Health", state: "read", confidence: 1, source: "UCPATH" },
+        { key: "Payroll title", value: "Blank Assistant 3", state: "read", confidence: 1, source: "UCPATH" },
+      ],
+      notes: [
+        "Name block is typed, not handwritten.",
+        "Signature date matches the packet's preparation date within tolerance.",
+      ],
+    },
+    facsimile: oathFacsimile({ name: "Ana Alvarez", eid: "10510221", date: "07/21/2026" }),
+  },
+  "ocr-summer::Page 3 · Brooks": {
+    step: "OCR extraction",
+    system: "i9",
+    capturedAt: at("14:20:51"),
+    ref: "sha256:33e0…c5b2",
+    screen: "packet.page",
+    pageState: "extracted-with-flags",
+    size: { w: 612, h: 792 },
+    note: "The EID on this page is a digit short of the roster's; the match fell back to name + department.",
+    extraction: {
+      formKind: "oath form",
+      sourcePdf: "Oath_Packet_Summer.pdf",
+      sourcePage: 3,
+      pageCount: SUMMER_PACKET_PAGES,
+      fields: [
+        { key: "Printed name", value: "Ben Brooks", state: "read", confidence: 0.95, source: "PAPER" },
+        { key: "Employee ID", value: "1053874", state: "illegible", confidence: 0.52, source: "PAPER", reason: "seven digits where UCPath EIDs are eight — the final digit is written over the ruled line and could not be trusted" },
+        { key: "Signature date", value: "07/21/2026", state: "read", confidence: 0.9, source: "PAPER" },
+        { key: "Employee signed", value: "yes — on paper", state: "read", confidence: 0.97, source: "PAPER" },
+        { key: "Officer signed", value: "yes — on paper", state: "read", confidence: 0.96, source: "PAPER" },
+        { key: "Department", value: "000371 · Student Health", state: "read", confidence: 1, source: "UCPATH" },
+        { key: "Payroll title", value: "Blank Assistant 3", state: "read", confidence: 1, source: "UCPATH" },
+      ],
+      notes: [
+        "Employee ID transcribed as written and flagged rather than corrected — an EID guessed to eight digits is how the wrong person gets an oath filed.",
+        "Roster matched this person on name + department instead; the EID above is what the PAGE says, not what was used.",
+      ],
+    },
+    facsimile: oathFacsimile({ name: "Ben Brooks", eid: "1053874_", date: "07/21/2026" }),
+  },
+  "ocr-summer::Page 5 · Diaz": {
+    step: "OCR extraction",
+    system: "i9",
+    capturedAt: at("14:21:02"),
+    ref: "sha256:a904…7e63",
+    screen: "packet.page",
+    pageState: "extracted-blocked",
+    size: { w: 612, h: 792 },
+    note: "Read cleanly. It is UCPath that blocks this one — the person is separated, so the packet cannot file an oath for them.",
+    extraction: {
+      formKind: "oath form",
+      sourcePdf: "Oath_Packet_Summer.pdf",
+      sourcePage: 5,
+      pageCount: SUMMER_PACKET_PAGES,
+      fields: [
+        { key: "Printed name", value: "Diego Diaz", state: "read", confidence: 0.96, source: "PAPER" },
+        { key: "Employee ID", value: "10499310", state: "read", confidence: 0.94, source: "PAPER" },
+        { key: "Signature date", value: "07/20/2026", state: "read", confidence: 0.92, source: "PAPER" },
+        { key: "Employee signed", value: "yes — on paper", state: "read", confidence: 0.98, source: "PAPER" },
+        { key: "Officer signed", state: "missing", source: "PAPER", reason: "the officer line is blank on this sheet" },
+        { key: "Employment status", value: "Inactive — separated 06/30/2026", state: "read", confidence: 1, source: "UCPATH" },
+      ],
+      notes: [
+        "Extraction is clean; the block is an employment-status fact from UCPath, not a reading problem.",
+        "Officer signature missing — this would block the filing on its own even if the person were active.",
+      ],
+    },
+    facsimile: {
+      ...oathFacsimile({ name: "Diego Diaz", eid: "10499310", date: "07/20/2026" }),
+      signatures: [
+        { label: "Employee signature", signedBy: "Diego Diaz", date: "07/20/2026" },
+        { label: "Officer / witness" },
+      ],
+    },
+  },
+  // An I-9 SECTION 1 page, so the viewer is exercised against the other form
+  // kind the corpus knows. Same synthetic-values rule.
+  "i9-m-19::Section 1 p22": {
+    step: "Roster match",
+    system: "i9",
+    capturedAt: at("13:52:18"),
+    ref: "sha256:5ab2…8c40",
+    screen: "packet.page",
+    pageState: "extracted-with-flags",
+    size: { w: 612, h: 792 },
+    note: "Section 1 only. No Section 2 sheet for this person appears in the batch, which is what the retention tracker is flagged with.",
+    extraction: {
+      formKind: "i9 section 1",
+      sourcePdf: "I9_Supporting_0724.pdf",
+      sourcePage: 22,
+      pageCount: 62,
+      fields: [
+        { key: "Last name", value: "Okafor", state: "read", confidence: 0.97, source: "PAPER" },
+        { key: "First name", value: "Ngozi", state: "read", confidence: 0.95, source: "PAPER" },
+        { key: "Middle initial", state: "missing", source: "PAPER", reason: "field left blank on the form" },
+        { key: "Date of birth", state: "illegible", confidence: 0.41, source: "PAPER", reason: "written with a 2-digit year and the final digit is ambiguous (4 vs 7), so the field was nulled rather than guessed" },
+        { key: "SSN", value: "•••-••-4182", state: "read", confidence: 0.88, source: "PAPER" },
+        { key: "Hire date", value: "03/07/2024", state: "read", confidence: 0.93, source: "PAPER" },
+        { key: "Telephone", state: "missing", source: "PAPER", reason: "telephone number field left blank" },
+      ],
+      notes: [
+        "Section 1 fields are typed, not handwritten.",
+        "No Section 2 sheet for this employee appears in this batch.",
+        "SSN is stored masked; the full value never leaves the extractor.",
+      ],
+    },
+    facsimile: {
+      formTitle: "Employment Eligibility Verification — Section 1",
+      agency: "U.S. Citizenship and Immigration Services · Form I-9",
+      sections: [
+        {
+          heading: "Employee information and attestation",
+          fields: [
+            { label: "Last name", value: "Okafor" },
+            { label: "First name", value: "Ngozi" },
+            { label: "Middle initial", value: "—" },
+            { label: "Date of birth", value: "—  (illegible)", hand: true },
+            { label: "SSN", value: "•••-••-4182", hand: true },
+            { label: "Telephone", value: "—" },
+          ],
+        },
+      ],
+      signatures: [{ label: "Employee signature", signedBy: "N. Okafor", date: "03/07/2024" }],
+    },
+  },
   "onb-jordan::CRM record": {
     step: "CRM extraction",
     system: "crm",

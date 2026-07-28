@@ -54,8 +54,15 @@ export { fmtElapsed } from "./demo-wire";
  * four status hues already in play — and the chip says the system's NAME, so
  * the colour was carrying nothing the label did not. One treatment, and the
  * live palette gets four hues back.
+ *
+ * It carries the hairline too (item 3). This is the densest chip in the
+ * product — it sits INSIDE a log line, inline with the text — and it was the
+ * one place a borderless recessed fill genuinely disappeared: a four-letter
+ * tinted block mid-sentence with no edge reads as a highlight on the words,
+ * not as a token you can point at.
  */
-export const SYSTEM_CHIP = "bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg)]";
+export const SYSTEM_CHIP =
+  "border border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg)]";
 
 export const SYSTEM_ACCENT: Record<SystemKey, string> = {
   kuali: SYSTEM_CHIP,

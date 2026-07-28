@@ -121,7 +121,7 @@ import { SOURCE_SHEETS } from "./demo-data-intake";
 export function DemoRunStartButton({ onOpen }: { onOpen: () => void }) {
   return (
     <Button
-      size="sm"
+      size="toolbar"
       variant="primary"
       onClick={onOpen}
       icon={<Play aria-hidden className={dsIcon.sm} />}
@@ -132,10 +132,6 @@ export function DemoRunStartButton({ onOpen }: { onOpen: () => void }) {
       // end the eye's travel. The binding is unchanged and still discoverable
       // where every other one is: the keyboard page.
       title="Start a run — any workflow, from anywhere (r)"
-      // Pinned to the bar's own constant rather than to whatever `sm` happens
-      // to be, so the one primary in the row can never end up a different
-      // height from the pills beside it.
-      className="h-[var(--ds-h-toolbar)]"
     >
       Start a run
     </Button>

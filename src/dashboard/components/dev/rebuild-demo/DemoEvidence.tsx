@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Camera, ChevronDown, ChevronLeft, ChevronRight, Copy, Download, FileJson, FileText, ImageOff, Info } from "lucide-react";
+import { Camera, ChevronDown, ChevronLeft, ChevronRight, Copy, Download, FileJson, FileText, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
+  Badge,
   Banner,
   BulletList,
   Button,
@@ -33,6 +34,8 @@ import {
   exportRunLogsText,
   type DemoCapture,
   type DemoCaptureKind,
+  type DemoPageExtraction,
+  type DemoPageFacsimile,
 } from "./demo-evidence-wire";
 
 /**
@@ -139,12 +142,189 @@ function captureAspectValue(capture: DemoCapture): number {
   return capture.size ? capture.size.w / capture.size.h : 612 / 792;
 }
 
+/**
+ * THE PAGE, DRAWN FROM THE RECORD BESIDE IT — and marked, on its face, as a
+ * demo rendering.
+ *
+ * The rule the placeholder frame protects is that an evidence surface never
+ * draws an approximation of a REAL system page. This does not break it: it is
+ * not a picture of anyone's document, it is the SYNTHETIC record rendered on
+ * the synthetic form's layout, with a `synthetic` marker in the corner that
+ * scrolls with it. The demo needed one so the viewer could be designed at its
+ * real size — a full-screen lightbox judged entirely on an empty grey box tells
+ * you nothing about the proportions of the thing that ships.
+ *
+ * The real scans are not an option and never were: they are live HR documents
+ * with live PII, and this repo will not commit them into a demo bundle.
+ */
+export function PageFacsimile({ page }: { page: DemoPageFacsimile }) {
+  return (
+    <div className="flex h-full w-full flex-col gap-[var(--ds-space-snug)] overflow-hidden bg-[var(--ds-paper-bg)] p-[var(--ds-space-cozy)] text-[color:var(--ds-paper-fg)]">
+      <div className="flex shrink-0 items-start justify-between gap-[var(--ds-space-snug)] border-b border-[color:var(--ds-paper-rule)] pb-[var(--ds-space-snug)]">
+        <span className="flex min-w-0 flex-col">
+          <span className={cn(dsText.body, "font-semibold uppercase tracking-wide")}>{page.formTitle}</span>
+          <span className={cn(dsText.meta, "text-[color:var(--ds-paper-fg-quiet)]")}>{page.agency}</span>
+        </span>
+        {/* The one piece of chrome on the page, and it is a REFUSAL to be
+            mistaken for the artefact — allowed prose under the design rule for
+            exactly that reason. */}
+        <span
+          className={cn(
+            dsText.meta,
+            dsRadius.sm,
+            "shrink-0 border border-[color:var(--ds-paper-rule)] px-[var(--ds-space-tight)] uppercase tracking-wide",
+            "text-[color:var(--ds-paper-fg-quiet)]",
+          )}
+        >
+          synthetic
+        </span>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col gap-[var(--ds-space-snug)] overflow-hidden">
+        {page.sections.map((section) => (
+          <div key={section.heading} className="flex min-w-0 flex-col gap-[var(--ds-space-tight)]">
+            <span className={cn(dsText.meta, "font-semibold uppercase tracking-wide text-[color:var(--ds-paper-fg-quiet)]")}>
+              {section.heading}
+            </span>
+            {section.fields.map((f) => (
+              <span
+                key={f.label}
+                className="flex min-w-0 items-baseline gap-[var(--ds-space-snug)] border-b border-[color:var(--ds-paper-rule)] pb-[var(--ds-space-hair)]"
+              >
+                <span className={cn(dsText.meta, "w-[12ch] shrink-0 text-[color:var(--ds-paper-fg-quiet)]")}>{f.label}</span>
+                <span className={cn(dsText.meta, "min-w-0 flex-1 truncate", f.hand && "font-medium italic")}>{f.value}</span>
+              </span>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex shrink-0 flex-wrap items-end gap-[var(--ds-space-cozy)] border-t border-[color:var(--ds-paper-rule)] pt-[var(--ds-space-snug)]">
+        {page.signatures.map((s) => (
+          <span key={s.label} className="flex min-w-[16ch] flex-1 flex-col">
+            <span className={cn(dsText.meta, "truncate italic", !s.signedBy && "text-[color:var(--ds-paper-fg-quiet)]")}>
+              {s.signedBy ?? "—"}
+            </span>
+            <span className="border-t border-[color:var(--ds-paper-rule)]" />
+            <span className={cn(dsText.meta, "truncate text-[color:var(--ds-paper-fg-quiet)]")}>
+              {s.label}
+              {s.date ? ` · ${s.date}` : ""}
+            </span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * WHAT THE PAGE GAVE UP, beside the page.
+ *
+ * The panel this joins was, on a packet capture, entirely empty — the viewer
+ * gave 40% of a full-screen dialog to a column headed `What was recorded` that
+ * recorded nothing, because no metadata was served for those captures. The fix
+ * is not layout: it is that a page capture now serves its EXTRACTION, which is
+ * the only thing an operator opens a packet page to check.
+ *
+ * A field that was NOT read is as load-bearing as one that was — `missing` and
+ * `illegible` are the extractor's two ways of saying "do not trust a value
+ * here", and each carries the reason it said it. They are told apart by a
+ * pill's tone and by the word in it, never by colour alone.
+ */
+function ExtractionRecord({ extraction }: { extraction: DemoPageExtraction }) {
+  const unread = extraction.fields.filter((f) => f.state !== "read");
+  return (
+    <div className="flex min-w-0 flex-col gap-[var(--ds-space-snug)]">
+      <div className="flex items-center gap-[var(--ds-space-snug)]">
+        <SectionLabel className="min-w-0 truncate">Extracted fields</SectionLabel>
+        <Badge tone={unread.length > 0 ? "warning" : "neutral"}>
+          {unread.length > 0 ? `${extraction.fields.length - unread.length}/${extraction.fields.length}` : extraction.fields.length}
+        </Badge>
+      </div>
+      <MetaLine
+        items={[
+          extraction.formKind,
+          extraction.sourcePdf,
+          `page ${extraction.sourcePage} of ${extraction.pageCount}`,
+        ]}
+      />
+      <div
+        className={cn(
+          "flex flex-col divide-y overflow-hidden border",
+          dsRadius.md,
+          "divide-[color:var(--ds-border-subtle)] border-[color:var(--ds-border)]",
+        )}
+      >
+        {extraction.fields.map((f) => (
+          <div
+            key={f.key}
+            className="flex min-w-0 flex-col gap-[var(--ds-space-hair)] bg-[var(--ds-recess-bg)] px-[var(--ds-space-snug)] py-[var(--ds-space-tight)]"
+          >
+            <div className="flex min-w-0 items-baseline gap-[var(--ds-space-snug)]">
+              <span className={cn(dsText.meta, "min-w-0 flex-1 truncate text-[color:var(--ds-recess-fg-quiet)]")}>
+                {f.key}
+              </span>
+              {f.state === "read" ? (
+                <span className={cn(dsText.meta, dsClip.text, "min-w-0 max-w-[18ch] text-[color:var(--ds-fg)]")}>
+                  {f.value}
+                </span>
+              ) : (
+                <Badge tone={f.state === "illegible" ? "warning" : "neutral"}>{f.state}</Badge>
+              )}
+            </div>
+            <MetaLine
+              tone="faint"
+              items={[
+                f.source,
+                f.confidence !== undefined ? `${Math.round(f.confidence * 100)}% confident` : undefined,
+              ]}
+            />
+            {f.reason && (
+              <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>{f.reason}</span>
+            )}
+          </div>
+        ))}
+      </div>
+      {extraction.notes.length > 0 && (
+        <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+          <BulletList items={extraction.notes} />
+        </span>
+      )}
+    </div>
+  );
+}
+
 function CaptureFrame({ capture, className }: { capture: DemoCapture; className?: string }) {
   const [ruleOpen, setRuleOpen] = useState(false);
+
+  if (capture.facsimile) {
+    return (
+      <div
+        role="img"
+        aria-label={`${capture.label} — a synthetic rendering of the ${capture.extraction?.formKind ?? capture.kind} page, drawn from the extraction record beside it. Not a photograph of a real document.`}
+        style={{
+          aspectRatio: captureAspect(capture),
+          maxHeight: "var(--ds-h-capture-box)",
+          width: `min(100%, calc(var(--ds-h-capture-box) * ${captureAspectValue(capture)}))`,
+        }}
+        className={cn(
+          "mx-auto overflow-hidden border",
+          dsRadius.lg,
+          capture.failure
+            ? "border-[length:var(--ds-border-w-rail)] border-[color:var(--ds-danger)]"
+            : "border-[color:var(--ds-border)]",
+          className,
+        )}
+      >
+        <PageFacsimile page={capture.facsimile} />
+      </div>
+    );
+  }
+
   return (
     <div
       role="img"
-      aria-label={`${capture.label} — ${capture.failure ? "failure capture" : `${capture.kind} capture`}${capture.screen ? ` of ${capture.screen}` : ""}${capture.size ? `, ${capture.size.w} × ${capture.size.h}` : ""}. Image bytes are not part of the demo corpus.`}
+      aria-label={`${capture.label} — ${capture.failure ? "failure capture" : `${capture.kind} capture`}${capture.screen ? ` of ${capture.screen}` : ""}${capture.size ? `, ${capture.size.w} × ${capture.size.h}` : ""}. The demo serves capture metadata for this frame, without a preview.`}
       // WIDTH IS DERIVED FROM THE HEIGHT BUDGET, never clamped after the fact —
       // `aspect-ratio` + `width: 100%` + `max-height` is a conflict the browser
       // resolves by dropping the RATIO, which is how a 612 × 792 page came to
@@ -165,7 +345,7 @@ function CaptureFrame({ capture, className }: { capture: DemoCapture; className?
         className,
       )}
     >
-      <ImageOff aria-hidden className={cn(dsIcon.lg, "text-[color:var(--ds-fg-faint)]")} />
+      <Camera aria-hidden className={cn(dsIcon.lg, "text-[color:var(--ds-fg-faint)]")} />
       {/* A STATEMENT AND AN ⓘ, not a paragraph.
 
           It was three lines of prose in the middle of every capture frame in
@@ -178,7 +358,7 @@ function CaptureFrame({ capture, className }: { capture: DemoCapture; className?
           THE RULE ITSELF DOES NOT MOVE: nothing here ever draws an
           approximation of a real system page on an evidence surface. */}
       <span className={cn(dsText.body, "flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-fg-muted)]")}>
-        Image bytes are not in this corpus
+        Capture metadata only
         {/* An IN-PLACE disclosure, not a `Popover`. This frame's main home is
             INSIDE the capture lightbox, and a Popover portals at `dsLayer.menu`
             (z-20) under a Dialog at z-40 — it would open behind the very dialog
@@ -196,7 +376,7 @@ function CaptureFrame({ capture, className }: { capture: DemoCapture; className?
         <span className={cn(dsText.meta, "max-w-[46ch] text-left text-[color:var(--ds-fg-muted)]")}>
           <BulletList
             items={[
-              "The capture is a PNG in content-addressed storage; this corpus carries its metadata, not its bytes.",
+              "The capture preview lives in content-addressed storage; this demo fixture carries the capture record, not that preview.",
               "Drawing a stand-in of a real system page on an evidence surface is the one thing this view must never do — a picture of a UCPath page that was never taken is exactly the fabrication the rebuild exists to stop.",
               "Everything the backend does serve about this capture is listed beside it.",
             ]}
@@ -416,6 +596,7 @@ export function CaptureLightbox({
               {capture.note && (
                 <p className={cn(dsText.body, "text-[color:var(--ds-fg-secondary)]")}>{capture.note}</p>
               )}
+              {capture.extraction && <ExtractionRecord extraction={capture.extraction} />}
             </div>
           </div>
         </DialogBody>
@@ -513,6 +694,13 @@ export function EvidenceSection({ row }: { row: DemoRow }) {
     <section aria-label="Evidence" className="flex flex-col gap-[var(--ds-space-snug)]">
       <div className="flex items-center gap-[var(--ds-space-snug)]">
         <SectionLabel className="min-w-0 truncate">Evidence</SectionLabel>
+        {/* HOW MANY THERE ARE, at the top. The section used to say only what it
+            was; whether a run carried one capture or nine could be told apart
+            only by counting tiles, and the filter chips that print the counts
+            appear only when a run has more than one KIND. */}
+        {captures.length > 0 && (
+          <Badge tone={captures.some((c) => c.failure) ? "danger" : "neutral"}>{captures.length}</Badge>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -589,7 +777,26 @@ export function EvidenceSection({ row }: { row: DemoRow }) {
             : "No captures of that kind on this run."}
         </p>
       ) : (
-        <div className="grid grid-cols-2 gap-[var(--ds-space-snug)]">
+        /* A FULL-WIDTH LIST, not a two-column grid of tall tiles.
+           Operator: *"this needs to be designed better too."* The grid was
+           built for a wall of thumbnails and this rail never has one — the
+           common run carries ONE capture, which took a third of the column and
+           left two thirds empty, and the tile spent its height on a large icon
+           well above a two-line label that then truncated. A row spends the
+           width instead: the shape on the left at a fixed height, the label and
+           its provenance filling the rest, and every row the same height so
+           three of them read as a list rather than as three cards.
+           It scales in the one direction that matters — the well caps at four
+           rows and scrolls, clipping on a whole row (see the token), so a
+           nine-capture run cannot push Data off the rail. */
+        <div
+          className={cn(
+            "flex flex-col divide-y overflow-hidden overflow-y-auto border",
+            "max-h-[var(--ds-h-evidence-well)]",
+            dsRadius.md,
+            "divide-[color:var(--ds-border-subtle)] border-[color:var(--ds-border)]",
+          )}
+        >
           {shown.map((c) => (
             <button
               key={c.id}
@@ -597,31 +804,31 @@ export function EvidenceSection({ row }: { row: DemoRow }) {
               onClick={() => setOpen(captures.indexOf(c))}
               aria-label={`Open capture — ${c.label}${c.failure ? " (failure capture)" : ""}`}
               className={cn(
-                // The recessed plane. A capture tile is a thing that sits BACK
+                // The recessed plane. A capture row is a thing that sits BACK
                 // from the section, and it was the last one drawing its own
                 // lighter fill inside a surface that had already stepped down.
-                "flex min-w-0 flex-col items-start gap-[var(--ds-space-hair)] border bg-[var(--ds-recess-bg)] text-left",
-                "px-[var(--ds-space-snug)] py-[var(--ds-space-snug)] rounded-[var(--ds-radius-md)]",
+                "flex min-w-0 shrink-0 items-center gap-[var(--ds-space-base)] bg-[var(--ds-recess-bg)] text-left",
+                "h-[var(--ds-h-evidence-row)] px-[var(--ds-space-snug)]",
                 dsFocus,
                 dsMotion.fast,
                 // it opens the lightbox — a real command, so it dips like every
                 // other pressable in the system
                 "active:translate-y-px",
                 c.failure
-                  ? "border-[length:var(--ds-border-w-rail)] border-[color:var(--ds-danger)]"
-                  : "border-[color:var(--ds-border)] hover:border-[color:var(--ds-border-loud)] hover:bg-[var(--ds-surface-3)]",
+                  ? "bg-[var(--ds-danger-quiet)] hover:brightness-125"
+                  : "hover:bg-[var(--ds-surface-3)]",
               )}
             >
               {/* The thumbnail is the capture's own SHAPE at a shared height —
                   a portrait document page and a landscape browser viewport
                   read as different things before either is opened, which is the
                   one true thing a byte-less placeholder can offer. Fixed
-                  height, derived width, so the row still lands on one baseline. */}
+                  height, derived width, so the rows still land on one grid. */}
               <span
                 aria-hidden
                 style={{ aspectRatio: captureAspect(c) }}
                 className={cn(
-                  "flex h-[var(--ds-h-evidence-thumb)] shrink-0 items-center justify-center self-center border bg-[var(--ds-surface-1)] rounded-[var(--ds-radius-sm)]",
+                  "flex h-[var(--ds-h-evidence-thumb)] shrink-0 items-center justify-center border bg-[var(--ds-surface-1)] rounded-[var(--ds-radius-sm)]",
                   c.failure ? "border-[color:var(--ds-danger-border)]" : "border-[color:var(--ds-border-subtle)]",
                 )}
               >
@@ -629,18 +836,28 @@ export function EvidenceSection({ row }: { row: DemoRow }) {
                   className={cn(dsIcon.md, c.failure ? "text-[color:var(--ds-danger)]" : "text-[color:var(--ds-fg-muted)]")}
                 />
               </span>
-              <span
-                className={cn(
-                  "w-full truncate",
-                  dsText.meta,
-                  c.failure ? "text-[color:var(--ds-danger)]" : "text-[color:var(--ds-fg-secondary)]",
-                )}
-              >
-                {c.label}
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span
+                  className={cn(
+                    "truncate",
+                    dsText.body,
+                    c.failure
+                      ? "font-semibold text-[color:var(--ds-danger)]"
+                      : "font-medium text-[color:var(--ds-fg)]",
+                  )}
+                >
+                  {c.label}
+                </span>
+                {/* WHERE IT CAME FROM, and `Steps` is not in it. The kind was
+                    printed here as the plural FILTER label — a capture whose
+                    subtitle read `Steps` was not telling you it came from a
+                    step, it was echoing the name of the chip that would filter
+                    it. The chips above own the kind; the row owns the step it
+                    was taken on and the clock, which is what tells two captures
+                    of the same page apart. */}
+                <MetaLine items={[c.step, c.system?.toUpperCase(), c.capturedAt ? fmtClock(c.capturedAt) : undefined]} />
               </span>
-              <span className={cn("w-full truncate", dsText.micro, "text-[color:var(--ds-fg-muted)]")}>
-                {[CAPTURE_KIND_LABEL[c.kind], c.step, c.capturedAt && fmtClock(c.capturedAt)].filter(Boolean).join(" · ")}
-              </span>
+              <ChevronRight aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-faint)]")} />
             </button>
           ))}
         </div>

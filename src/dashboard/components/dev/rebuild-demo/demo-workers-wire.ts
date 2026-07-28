@@ -189,10 +189,47 @@ export const DEMO_SESSIONS: DemoSession[] = [
  */
 export const DEMO_EXECUTOR_CAP = 6;
 
+/**
+ * WHOSE budget a system's cap is, and it is the distinction the operator caught
+ * the model getting wrong: *"uc path 1/1 does not make any sense. uc path 1/1
+ * should mean that for each session there can only be 1 ucpath window. not for
+ * each workflow."*
+ *
+ *   `session`  — ONE window for the whole app, shared by every workflow. UCPath
+ *                is the case: authenticating a second PeopleSoft session
+ *                invalidates the first, so the cap is a fact about the SYSTEM,
+ *                the count is global, and "in use" means some workflow —
+ *                possibly not the one you are looking at — is holding it.
+ *   `workflow` — an ordinary pool this workflow draws from, where the cap is a
+ *                tuning choice and two workflows can each hold their own.
+ *
+ * Both used to render as the same `1/1` chip in a dialog scoped to one
+ * workflow, which made a session-wide singleton read as that workflow's own
+ * allowance — so `Onboarding … ucpath 1/1` looked like Onboarding had used up
+ * its UCPath budget when in fact Separations was holding the only window there
+ * is. The accounting was already global (the fold sums every executor); what
+ * was missing was any way for the surface to SAY so.
+ */
+export type LeaseScope = "session" | "workflow";
+
+/**
+ * A system's cap is a fact about the system, so the scope is declared here and
+ * never inferred from a count. `cap === 1` is NOT the test — a pool of one is
+ * still a pool.
+ */
+export const SYSTEM_LEASE_SCOPE: Record<string, LeaseScope> = {
+  ucpath: "session",
+};
+
+export function leaseScopeOf(system: string): LeaseScope {
+  return SYSTEM_LEASE_SCOPE[system] ?? "workflow";
+}
+
 export interface DemoSystemLease {
   system: string;
   inUse: number;
   cap: number;
+  scope: LeaseScope;
   /** the workflows currently holding a lease on it — named, so a refusal can be */
   heldBy: string[];
 }
@@ -218,7 +255,13 @@ export function laneBudgetOf(sessions: DemoSession[]): DemoLaneBudget {
     if (s.crashed) continue;
     executorInUse += 1;
     for (const b of s.budgets ?? []) {
-      const slot = systems.get(b.system) ?? { system: b.system, inUse: 0, cap: b.cap, heldBy: [] };
+      const slot = systems.get(b.system) ?? {
+        system: b.system,
+        inUse: 0,
+        cap: b.cap,
+        scope: leaseScopeOf(b.system),
+        heldBy: [],
+      };
       slot.inUse += b.inUse;
       // The cap is a property of the system, so every executor reports the same
       // one. Taking the smallest is the fail-safe read if a fixture disagrees.
@@ -309,13 +352,22 @@ export function planWorkerSpawn(
     if (blocked) {
       const held = holders.get(blocked) ?? [];
       const cap = budget.systems.find((s) => s.system === blocked)?.cap ?? 0;
+      const holder =
+        held.length > 0
+          ? ` ${held.join(", ")} ${held.length === 1 ? "has" : "have"} ${cap === 1 ? "it" : "them"}.`
+          : "";
       outcomes.push({
         index: i,
         state: "refused",
         code: "system-at-cap",
-        reason: `${blocked} allows ${cap} concurrent session${cap === 1 ? "" : "s"}${
-          held.length > 0 ? ` and ${held.join(", ")} ${held.length === 1 ? "holds" : "hold"} ${cap === 1 ? "it" : "them"}` : ""
-        }.`,
+        // A SESSION singleton's refusal must not read as this workflow's budget
+        // being spent — the whole app shares the one window, and the sentence
+        // has to name that or the operator goes looking for their own runs to
+        // cancel.
+        reason:
+          leaseScopeOf(blocked) === "session"
+            ? `This session gets ${cap} ${blocked} window${cap === 1 ? "" : "s"}, shared by every workflow.${holder}`
+            : `${blocked} allows ${cap} concurrent session${cap === 1 ? "" : "s"}.${holder}`,
       });
       continue;
     }

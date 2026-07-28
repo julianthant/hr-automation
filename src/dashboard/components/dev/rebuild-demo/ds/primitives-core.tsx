@@ -77,6 +77,19 @@ const buttonVariants = cva(
         sm: cn("h-[var(--ds-h-sm)] px-[var(--ds-space-snug)] gap-[var(--ds-space-tight)]", dsText.meta),
         md: cn("h-[var(--ds-h-md)] px-[var(--ds-space-cozy)] gap-[var(--ds-space-snug)]", dsText.ui),
         lg: cn("h-[var(--ds-h-lg)] px-[var(--ds-space-loose)] gap-[var(--ds-space-snug)]", dsText.ui),
+        /**
+         * A control in an ACTION BAR. Identical box to `toolbarControl()` in
+         * DemoBulkBar — same height token, same inset, same gap, same type —
+         * because the one primary in the queue's bar sits a hairline from ten
+         * toggles that are not Buttons, and the operator reads a 2px padding
+         * difference as two different control sizes. It was `sm` plus a pinned
+         * height at the call site, which fixed the height and left the padding
+         * to drift.
+         */
+        toolbar: cn(
+          "h-[var(--ds-h-toolbar)] px-[var(--ds-space-base)] gap-[var(--ds-space-snug)]",
+          dsText.meta,
+        ),
       },
       block: { true: "w-full", false: "" },
     },
