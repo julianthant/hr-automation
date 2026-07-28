@@ -825,7 +825,10 @@ function WorkflowEntryList({
         className={cn(
           "my-[var(--ds-space-snug)] w-[var(--ds-border-w-rail)] rounded-r-full",
           dsMotion.base,
-          on ? "bg-[var(--ds-accent)]" : "bg-transparent group-hover:bg-[var(--ds-border-loud)]",
+          // The selection ink, not the action ink: on the dark theme the accent
+          // is near-white, and a rail that bright made "which panel am I in"
+          // the loudest mark in the sidebar.
+          on ? "bg-[var(--ds-ring)]" : "bg-transparent group-hover:bg-[var(--ds-border-loud)]",
         )}
       />
       <span className="flex min-w-0 flex-1 items-center">
