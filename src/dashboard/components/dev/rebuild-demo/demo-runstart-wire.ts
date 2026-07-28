@@ -42,6 +42,7 @@ import {
   DEMO_OPERATOR,
   DEMO_WORKFLOWS,
   agoSeconds,
+  at,
   fmtClockSec,
   startContractToken,
   type CoordinatorShape,
@@ -346,26 +347,192 @@ export const UPLOAD_FILES: UploadFileFixture[] = [
 /**
  * A phone capture session, as the server would serve it back to the desktop.
  *
- * The demo runs no capture server, so these are fixtures of sessions that have
- * already had photos pushed into them — which is exactly what the desktop sees
- * either way, since the desktop never touches the phone. What the demo will not
- * do is draw a QR code that scans to nothing.
+ * The demo runs no capture server, so these are fixtures of sessions the phone
+ * has already pushed pages into — which is exactly what the desktop sees either
+ * way, since the desktop never touches the phone. Two things the demo will not
+ * do: draw a QR code that scans to nothing, and draw a stand-in of a page it
+ * does not hold the bytes of.
  */
+
+/** why a page cannot be used — the flag the reader raised, and what it saw */
+export interface CapturePhotoDefect {
+  /** one line the operator can act on */
+  reason: string;
+  /** the focus score the phone reported — the number the flag was raised on */
+  focusScore: number;
+}
+
+export interface CapturePhotoFixture {
+  /**
+   * 1-based, in the ORDER THE PHONE PUSHED IT. Nothing has read the page yet,
+   * so it is a page and never a person — the same discipline the plan keeps.
+   */
+  page: number;
+  filename: string;
+  mime: string;
+  /** the instant the desktop was told about it */
+  arrivedAt: string;
+  sizeLabel: string;
+  /** the served pixel size — the placeholder's SHAPE comes from this, never a guess */
+  width: number;
+  height: number;
+  /** the reader could not use it. A page that cannot be read is not a page. */
+  unreadable?: CapturePhotoDefect;
+}
+
 export interface CaptureSessionFixture {
   id: string;
   workflow: DemoWorkflowId;
-  photoCount: number;
-  openedLabel: string;
-  deviceLabel: string;
+  /** the code the phone types. This demo serves no QR — see the panel's ⓘ. */
+  pairingCode: string;
+  openedAt: string;
+  /** the idle expiry the server stamped */
+  expiresAt: string;
+  /** unset until the phone first asks the server for the manifest */
+  connectedAt?: string;
+  deviceLabel?: string;
+  /** the phone has not stopped — more pages may still land on this session */
+  stillUploading: boolean;
+  photos: CapturePhotoFixture[];
 }
 
+/** 200 dpi US Letter — the shape every page in the corpus was photographed at */
+const LETTER_200 = { width: 1700, height: 2200 } as const;
+/** 300 dpi US Letter — the same page, one phone held closer */
+const LETTER_300 = { width: 2550, height: 3300 } as const;
+
 export const CAPTURE_SESSIONS: CaptureSessionFixture[] = [
-  { id: "cap-os-3f21", workflow: "oath-signature", photoCount: 8, openedLabel: "2:19 PM", deviceLabel: "iPhone · operator" },
-  { id: "cap-ec-9b04", workflow: "emergency-contact", photoCount: 3, openedLabel: "2:24 PM", deviceLabel: "iPhone · operator" },
+  {
+    // READY — eight pages in, nothing wrong with any of them.
+    id: "cap-os-3f21",
+    workflow: "oath-signature",
+    pairingCode: "QK2-841",
+    openedAt: at("14:18:40"),
+    connectedAt: at("14:19:06"),
+    expiresAt: at("14:37:58"),
+    deviceLabel: "iPhone 15 · operator",
+    stillUploading: false,
+    photos: [
+      { page: 1, filename: "page-01.jpg", mime: "image/jpeg", arrivedAt: at("14:19:22"), sizeLabel: "1.4 MB", ...LETTER_200 },
+      { page: 2, filename: "page-02.jpg", mime: "image/jpeg", arrivedAt: at("14:19:51"), sizeLabel: "1.3 MB", ...LETTER_200 },
+      { page: 3, filename: "page-03.jpg", mime: "image/jpeg", arrivedAt: at("14:20:18"), sizeLabel: "1.5 MB", ...LETTER_200 },
+      { page: 4, filename: "page-04.jpg", mime: "image/jpeg", arrivedAt: at("14:20:47"), sizeLabel: "2.6 MB", ...LETTER_300 },
+      { page: 5, filename: "page-05.jpg", mime: "image/jpeg", arrivedAt: at("14:21:15"), sizeLabel: "1.2 MB", ...LETTER_200 },
+      { page: 6, filename: "page-06.jpg", mime: "image/jpeg", arrivedAt: at("14:21:44"), sizeLabel: "1.4 MB", ...LETTER_200 },
+      { page: 7, filename: "page-07.jpg", mime: "image/jpeg", arrivedAt: at("14:22:20"), sizeLabel: "1.3 MB", ...LETTER_200 },
+      { page: 8, filename: "page-08.jpg", mime: "image/jpeg", arrivedAt: at("14:22:58"), sizeLabel: "1.1 MB", ...LETTER_200 },
+    ],
+  },
+  {
+    // BLOCKED — five pages in, and one of them cannot be read.
+    id: "cap-os-8b17",
+    workflow: "oath-signature",
+    pairingCode: "TR9-330",
+    openedAt: at("14:23:10"),
+    connectedAt: at("14:23:31"),
+    expiresAt: at("14:40:12"),
+    deviceLabel: "iPhone 15 · operator",
+    stillUploading: false,
+    photos: [
+      { page: 1, filename: "page-01.jpg", mime: "image/jpeg", arrivedAt: at("14:23:44"), sizeLabel: "1.2 MB", ...LETTER_200 },
+      { page: 2, filename: "page-02.jpg", mime: "image/jpeg", arrivedAt: at("14:24:09"), sizeLabel: "1.3 MB", ...LETTER_200 },
+      { page: 3, filename: "page-03.jpg", mime: "image/jpeg", arrivedAt: at("14:24:35"), sizeLabel: "1.1 MB", ...LETTER_200 },
+      {
+        page: 4,
+        filename: "page-04.jpg",
+        mime: "image/jpeg",
+        arrivedAt: at("14:24:58"),
+        sizeLabel: "640 KB",
+        ...LETTER_200,
+        unreadable: { reason: "Out of focus — the reader could not lift a line off it.", focusScore: 0.28 },
+      },
+      { page: 5, filename: "page-05.jpg", mime: "image/jpeg", arrivedAt: at("14:25:12"), sizeLabel: "1.4 MB", ...LETTER_200 },
+    ],
+  },
+  {
+    // RECEIVING — three pages in and the phone has not stopped.
+    id: "cap-ec-9b04",
+    workflow: "emergency-contact",
+    pairingCode: "MP6-118",
+    openedAt: at("14:24:02"),
+    connectedAt: at("14:24:20"),
+    expiresAt: at("14:40:54"),
+    deviceLabel: "iPhone 13 · operator",
+    stillUploading: true,
+    photos: [
+      { page: 1, filename: "page-01.jpg", mime: "image/jpeg", arrivedAt: at("14:24:35"), sizeLabel: "980 KB", ...LETTER_200 },
+      { page: 2, filename: "page-02.jpg", mime: "image/jpeg", arrivedAt: at("14:25:11"), sizeLabel: "1.1 MB", ...LETTER_200 },
+      { page: 3, filename: "page-03.jpg", mime: "image/jpeg", arrivedAt: at("14:25:54"), sizeLabel: "1.0 MB", ...LETTER_200 },
+    ],
+  },
+  {
+    // AWAITING THE PHONE — opened on the desktop, never picked up.
+    id: "cap-ec-4d52",
+    workflow: "emergency-contact",
+    pairingCode: "HJ4-207",
+    openedAt: at("14:25:48"),
+    expiresAt: at("14:40:48"),
+    stillUploading: false,
+    photos: [],
+  },
 ];
 
+export type CaptureSessionPhase =
+  | "awaiting-phone"
+  | "awaiting-pages"
+  | "receiving"
+  | "blocked"
+  | "ready";
+
+export interface CaptureSessionSummary {
+  phase: CaptureSessionPhase;
+  received: number;
+  unreadable: number;
+  /** what stops a start, in the operator's words. Empty means it may start. */
+  blockers: string[];
+  /** the last page's arrival — what makes "still landing" a fact, not a mood */
+  lastArrivedAt?: string;
+}
+
+/**
+ * The state of a session, DERIVED from what the server serves about it rather
+ * than stamped alongside it — a stamped phase and a photo list can disagree,
+ * and the one that would be believed is the stamp.
+ */
+export function summarizeCaptureSession(session: CaptureSessionFixture): CaptureSessionSummary {
+  const received = session.photos.length;
+  const unreadable = session.photos.filter((p) => p.unreadable);
+  const blockers: string[] = [];
+  if (received === 0) blockers.push("No page has arrived yet.");
+  for (const photo of unreadable) blockers.push(`Page ${photo.page} could not be read.`);
+
+  const phase: CaptureSessionPhase = !session.connectedAt
+    ? "awaiting-phone"
+    : received === 0
+      ? "awaiting-pages"
+      : unreadable.length > 0
+        ? "blocked"
+        : session.stillUploading
+          ? "receiving"
+          : "ready";
+
+  return {
+    phase,
+    received,
+    unreadable: unreadable.length,
+    blockers,
+    lastArrivedAt: session.photos[received - 1]?.arrivedAt,
+  };
+}
+
+/** every session the phone has open against this workflow, oldest first */
+export function captureSessionsFor(workflow: DemoWorkflowId): CaptureSessionFixture[] {
+  return CAPTURE_SESSIONS.filter((s) => s.workflow === workflow);
+}
+
+/** the session a start defaults to — the first one open for the workflow */
 export function captureSessionFor(workflow: DemoWorkflowId): CaptureSessionFixture | undefined {
-  return CAPTURE_SESSIONS.find((s) => s.workflow === workflow);
+  return captureSessionsFor(workflow)[0];
 }
 
 /**
@@ -478,9 +645,10 @@ export function deriveStartPlan(subject: StartSubject): EnqueuePlan {
     case "capture": {
       const session = subject.capture;
       if (!session) return emptyPlan("No capture session — nothing to start");
+      const received = session.photos.length;
       return deriveDocumentPlan(subject.workflow, subject.method.coordinator, {
-        title: `${session.photoCount} captured page${session.photoCount === 1 ? "" : "s"}`,
-        pageCount: session.photoCount,
+        title: `${received} captured page${received === 1 ? "" : "s"}`,
+        pageCount: received,
         documentNoun: subject.method.documentNoun,
         source: `Capture session ${session.id}`,
       });
