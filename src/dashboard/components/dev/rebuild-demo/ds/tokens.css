@@ -413,19 +413,30 @@
      a truncated timestamp is the one column nothing else on the row recovers. */
   --ds-w-archive-when: 124px;
   --ds-w-archive-duration: 76px;
-  /* The two tracks only a bump header has: the version pair and its kind.
-     196px is the widest pair the registry can produce — `app 2026.07.2 → app
-     2026.07.3` — measured, not guessed. It is the section's IDENTITY, so it is
-     the one cell in the row that may never truncate; every other fact on the
-     line is recoverable from the ⓘ. */
-  --ds-w-bump-version: 196px;
-  --ds-w-bump-kind: 60px;
+  /* The bump header used to own two tracks of its own here — a version pair and
+     a kind. They are GONE, and that is the fix rather than a tidy-up: a second
+     set of tracks inside the archive table is what put a sweep's date 42px left
+     of the `When` column it names. The header is six real `<td>`s on the
+     `<colgroup>` above, so it has no widths to keep in sync. */
   /* A queue row's HANGING INDENT — the leading column its status tick sits in,
      and the left edge every line under the title aligns to. It is a real grid
      track, so the row's rhythm comes from ONE gap instead of a hand-picked
      `ml-5` on each of the six things that can appear under a title. 14px icon +
      the 4px that binds the tick to the name it belongs to. */
   --ds-w-row-indent: 18px;
+  /* THE ROW'S CENTRE BELONGS TO THE ROW.
+     A queue row is one big select target with smaller targets nested in it, and
+     a nested target that LEAVES the panel — a delegation chip, a back link —
+     must never sit under the row's middle: `elementFromPoint` at a row's centre
+     was returning `Oath Upload · Signed_Oaths_0724.pdf`, so a click in the
+     middle of a queued row opened a different workflow instead of selecting it.
+     This is the widest such chip may be, and it is EXACT rather than guessed.
+     Used on a band inside the row's content column, `50%` resolves to half that
+     column; the row's own centre sits half an indent to the LEFT of that (the
+     leading track is inside the row but outside the column), so the indent term
+     is what makes the two agree at any queue width. The last term is clearance,
+     so the edge is never ON the centre. */
+  --ds-w-row-link-max: calc(50% - var(--ds-w-row-indent) / 2 - var(--ds-space-cozy));
   --ds-w-rail: 200px; /* the workflow rail */
   /* The run's CONTEXT RAIL — the third column of the detail region, where the
      Data ledger, the evidence and the run's provenance live so the log stream
