@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Camera, ChevronDown, ChevronLeft, ChevronRight, Copy, Download, FileJson, FileText, ImageOff } from "lucide-react";
+import { Camera, ChevronDown, ChevronLeft, ChevronRight, Copy, Download, FileJson, FileText, ImageOff, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   Banner,
+  BulletList,
   Button,
   Chip,
   Dialog,
   DialogBody,
+  DialogClose,
   DialogContent,
   DialogFooter,
+  IconButton,
   KeyValueList,
+  MetaLine,
   SectionLabel,
   dsClip,
   dsFocus,
@@ -136,17 +140,22 @@ function captureAspectValue(capture: DemoCapture): number {
 }
 
 function CaptureFrame({ capture, className }: { capture: DemoCapture; className?: string }) {
+  const [ruleOpen, setRuleOpen] = useState(false);
   return (
     <div
       role="img"
       aria-label={`${capture.label} — ${capture.failure ? "failure capture" : `${capture.kind} capture`}${capture.screen ? ` of ${capture.screen}` : ""}${capture.size ? `, ${capture.size.w} × ${capture.size.h}` : ""}. Image bytes are not part of the demo corpus.`}
-      // WIDTH IS DERIVED FROM THE HEIGHT BUDGET, not clamped after the fact.
+      // WIDTH IS DERIVED FROM THE HEIGHT BUDGET, never clamped after the fact —
       // `aspect-ratio` + `width: 100%` + `max-height` is a conflict the browser
-      // resolves by DROPPING the ratio — the frame measured 499 × 342 on a
-      // 612 × 792 capture, i.e. a portrait page drawn landscape, which is the
-      // exact defect this change exists to fix. Computing the width from the
-      // served ratio means the shape can never be the thing that gives.
-      style={{ aspectRatio: captureAspect(capture), width: `min(100%, calc(52vh * ${captureAspectValue(capture)}))` }}
+      // resolves by dropping the RATIO, which is how a 612 × 792 page came to
+      // be drawn landscape. `--ds-h-capture-box` is the box the column gives
+      // it; the width falls out of the served ratio, so the SHAPE is never the
+      // thing that gives.
+      style={{
+        aspectRatio: captureAspect(capture),
+        maxHeight: "var(--ds-h-capture-box)",
+        width: `min(100%, calc(var(--ds-h-capture-box) * ${captureAspectValue(capture)}))`,
+      }}
       className={cn(
         "mx-auto flex flex-col items-center justify-center gap-[var(--ds-space-base)] border p-[var(--ds-space-loose)]",
         "rounded-[var(--ds-radius-lg)] bg-[var(--ds-surface-2)]",
@@ -157,12 +166,42 @@ function CaptureFrame({ capture, className }: { capture: DemoCapture; className?
       )}
     >
       <ImageOff aria-hidden className={cn(dsIcon.lg, "text-[color:var(--ds-fg-faint)]")} />
-      <span className={cn(dsText.body, "text-center text-[color:var(--ds-fg-muted)]")}>
-        The capture itself is a PNG in content-addressed storage. The demo corpus carries its metadata, not its bytes —
-        drawing a stand-in of a real system page on an evidence surface is the one thing this view must never do.
+      {/* A STATEMENT AND AN ⓘ, not a paragraph.
+
+          It was three lines of prose in the middle of every capture frame in
+          the product, and two of those lines were the RULE (why a stand-in is
+          never drawn) rather than the fact (there are no bytes here). The rule
+          is worth keeping and it is worth keeping ONCE, behind a press; the
+          fact is four words and stays on the surface, because "this is not the
+          image" is the one thing the frame has to say.
+
+          THE RULE ITSELF DOES NOT MOVE: nothing here ever draws an
+          approximation of a real system page on an evidence surface. */}
+      <span className={cn(dsText.body, "flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-fg-muted)]")}>
+        Image bytes are not in this corpus
+        {/* An IN-PLACE disclosure, not a `Popover`. This frame's main home is
+            INSIDE the capture lightbox, and a Popover portals at `dsLayer.menu`
+            (z-20) under a Dialog at z-40 — it would open behind the very dialog
+            that contains it. Anything disclosed from inside a dialog is
+            disclosed inside the dialog. */}
+        <IconButton
+          size="xs"
+          label="Why there is no image here"
+          aria-expanded={ruleOpen}
+          onClick={() => setRuleOpen((v) => !v)}
+          icon={<Info aria-hidden className={dsIcon.sm} />}
+        />
       </span>
-      {capture.ref && (
-        <span className={cn(dsText.meta, dsText.nums, "text-[color:var(--ds-fg-faint)]")}>{capture.ref}</span>
+      {ruleOpen && (
+        <span className={cn(dsText.meta, "max-w-[46ch] text-left text-[color:var(--ds-fg-muted)]")}>
+          <BulletList
+            items={[
+              "The capture is a PNG in content-addressed storage; this corpus carries its metadata, not its bytes.",
+              "Drawing a stand-in of a real system page on an evidence surface is the one thing this view must never do — a picture of a UCPath page that was never taken is exactly the fabrication the rebuild exists to stop.",
+              "Everything the backend does serve about this capture is listed beside it.",
+            ]}
+          />
+        </span>
       )}
     </div>
   );
@@ -234,81 +273,199 @@ export function CaptureLightbox({
         title={`${capture.label} — capture ${index + 1} of ${captures.length}`}
         description={`${capture.failure ? "Failure capture" : `${capture.kind} capture`} · ${subject.label} · ${subject.trace}`}
       >
-        <DialogBody className="flex flex-col gap-[var(--ds-space-cozy)]">
+        {/*
+          TWO COLUMNS, AND THE CAPTURE GETS THE ROOM.
+
+          It was a single stack — image, then eleven metadata rows, then the
+          capture chips, then the footer — so the thing the viewer exists to
+          show got about a third of the height and every one of its facts was
+          below the fold. A viewer whose subject is the smallest element on it
+          is not a viewer.
+
+          Left column (wider) is the CAPTURE, right column (narrower) is what
+          the backend serves about it, with a hairline between them, and both
+          are cut to `--ds-h-capture-box` so the two columns END ON THE SAME
+          LINE. The metadata scrolls inside its own column rather than pushing
+          the image shorter — the capture's height is a constant, which is what
+          makes paging through a set feel like paging rather than reflowing.
+
+          `@container`, not a media query: this is inside a dialog whose width
+          is a token, so what decides whether the two columns fit is the
+          DIALOG's width and never the window's.
+        */}
+        <DialogBody className="@container flex min-h-0 flex-col gap-[var(--ds-space-cozy)]">
           {capture.failure && (
             <Banner tone="danger" title="This is the frame captured at the failure">
-              A red frame means the run was already broken when this was taken. It is the page the failure record points at.
+              The run was already broken when this was taken. It is the page the failure record points at.
             </Banner>
           )}
 
-          <CaptureFrame capture={capture} />
-
-          <KeyValueList
-            items={[
-              { key: "Label", value: capture.label },
-              { key: "Kind", value: capture.failure ? "error — failure capture" : capture.kind },
-              ...(capture.step ? [{ key: "Step", value: capture.step }] : []),
-              ...(capture.system ? [{ key: "System", value: capture.system.toUpperCase() }] : []),
-              ...(capture.capturedAt ? [{ key: "Captured", value: fmtClock(capture.capturedAt) }] : []),
-              ...(capture.screen ? [{ key: "Screen", value: capture.screen }] : []),
-              ...(capture.pageState ? [{ key: "Page state", value: capture.pageState }] : []),
-              ...(capture.urlRedacted ? [{ key: "URL (redacted)", value: capture.urlRedacted }] : []),
-              ...(capture.size ? [{ key: "Viewport", value: `${capture.size.w} × ${capture.size.h}` }] : []),
-              ...(capture.ref ? [{ key: "Content ref", value: capture.ref }] : []),
-              { key: "Run", value: subject.trace },
-            ]}
-          />
-          {capture.note && (
-            <p className={cn(dsText.body, "text-[color:var(--ds-fg-secondary)]")}>{capture.note}</p>
-          )}
-
-          {captures.length > 1 && (
-            <div className="flex flex-col gap-[var(--ds-space-tight)]">
-              <SectionLabel>All captures on this run</SectionLabel>
-              <div role="tablist" aria-label="Captures" className="flex flex-wrap gap-[var(--ds-space-snug)]">
-                {captures.map((c, i) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={i === index}
-                    aria-label={`Show capture ${i + 1} of ${captures.length} — ${c.label}`}
-                    onClick={() => onIndex(i)}
-                    className={cn(
-                      "flex h-[var(--ds-h-lg)] items-center gap-[var(--ds-space-tight)] border px-[var(--ds-space-base)]",
-                      "rounded-[var(--ds-radius-md)]",
-                      dsText.meta,
-                      dsFocus,
-                      i === index
-                        ? "border-[color:var(--ds-border-loud)] bg-[var(--ds-surface-selected)] text-[color:var(--ds-fg)]"
-                        : "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
-                      c.failure && "border-[color:var(--ds-danger)] text-[color:var(--ds-danger)]",
-                    )}
-                  >
-                    <Camera aria-hidden className={dsIcon.sm} />
-                    {c.label}
-                  </button>
-                ))}
+          <div className="grid min-h-0 grid-cols-1 gap-[var(--ds-space-cozy)] @min-[52rem]:grid-cols-[minmax(0,1.6fr)_1px_minmax(0,1fr)]">
+            {/* ---- the capture, with its nav in FIXED gutters -------------- */}
+            <div className="flex min-w-0 flex-col gap-[var(--ds-space-snug)]">
+              <div className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
+                {/*
+                  THE ARROWS LIVE IN GUTTERS OF A FIXED WIDTH, flanking a box of
+                  a fixed height. Production shipped the bug this avoids: the
+                  chrome was positioned on a frame that hugged each image, so
+                  the arrows MOVED between two differently-sized captures and
+                  paging through a set became a game of chasing the button. A
+                  gutter is a column; a column does not move.
+                */}
+                <CaptureNavButton
+                  dir="prev"
+                  disabled={captures.length < 2}
+                  onClick={() => step(-1)}
+                />
+                <div
+                  className="flex min-w-0 flex-1 items-center justify-center"
+                  style={{ height: "var(--ds-h-capture-box)" }}
+                >
+                  <CaptureFrame capture={capture} />
+                </div>
+                <CaptureNavButton
+                  dir="next"
+                  disabled={captures.length < 2}
+                  onClick={() => step(1)}
+                />
               </div>
+
+              {/*
+                THE THUMBNAIL STRIP, along the bottom of the column it belongs
+                to. It was a wrapping row of labelled chips below the metadata,
+                three bands away from the image it cycles — so the control that
+                changes the capture was nowhere near the capture. Here it is
+                part of the same column, it scrolls sideways rather than
+                wrapping (a second row of thumbnails would change the column's
+                height, and the two columns are supposed to end level), and the
+                current one is marked by a fill and a ring rather than by
+                colour alone.
+              */}
+              {captures.length > 1 && (
+                <div
+                  role="tablist"
+                  aria-label="Captures on this run"
+                  className={cn(
+                    "flex shrink-0 items-center gap-[var(--ds-space-tight)] overflow-x-auto",
+                    "h-[var(--ds-h-capture-thumb)]",
+                  )}
+                >
+                  {captures.map((c, i) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={i === index}
+                      aria-label={`Show capture ${i + 1} of ${captures.length} — ${c.label}`}
+                      title={c.label}
+                      onClick={() => onIndex(i)}
+                      className={cn(
+                        "flex h-full shrink-0 items-center gap-[var(--ds-space-tight)] border",
+                        "px-[var(--ds-space-base)]",
+                        dsRadius.md,
+                        dsText.meta,
+                        dsClip.token,
+                        dsFocus,
+                        dsMotion.fast,
+                        "active:translate-y-px",
+                        i === index
+                          ? "border-[color:var(--ds-border-loud)] bg-[var(--ds-surface-selected)] text-[color:var(--ds-fg)]"
+                          : "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
+                        c.failure && "border-[color:var(--ds-danger)] text-[color:var(--ds-danger)]",
+                      )}
+                    >
+                      <span className={cn(dsText.nums, "shrink-0")}>{i + 1}</span>
+                      <Camera aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
+                      <span className={dsClip.text}>{c.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
+
+            {/* the divider is a GRID TRACK, so it is exactly as tall as the
+                taller column and needs no height of its own */}
+            <span aria-hidden className="hidden bg-[color:var(--ds-border)] @min-[52rem]:block" />
+
+            {/* ---- what the backend serves about it ----------------------- */}
+            <div
+              className="flex min-w-0 flex-col gap-[var(--ds-space-snug)] overflow-y-auto"
+              style={{ maxHeight: "calc(var(--ds-h-capture-box) + var(--ds-h-capture-thumb))" }}
+            >
+              <SectionLabel>What was recorded</SectionLabel>
+              {/*
+                THE DIALOG'S OWN HEADER ALREADY SAID THREE OF THESE. `Label`,
+                `Kind` and `Run` were in the title and the description a
+                centimetre above, and the content ref was printed inside the
+                frame as well as here. A metadata column that opens by
+                repeating the title is a column the eye learns to start
+                halfway down.
+              */}
+              <KeyValueList
+                items={[
+                  ...(capture.step ? [{ key: "Step", value: capture.step }] : []),
+                  ...(capture.system ? [{ key: "System", value: capture.system.toUpperCase() }] : []),
+                  ...(capture.capturedAt ? [{ key: "Captured", value: fmtClock(capture.capturedAt) }] : []),
+                  ...(capture.screen ? [{ key: "Screen", value: capture.screen }] : []),
+                  ...(capture.pageState ? [{ key: "Page state", value: capture.pageState }] : []),
+                  ...(capture.urlRedacted ? [{ key: "URL (redacted)", value: capture.urlRedacted }] : []),
+                  ...(capture.size ? [{ key: "Viewport", value: `${capture.size.w} × ${capture.size.h}` }] : []),
+                  ...(capture.ref ? [{ key: "Content ref", value: capture.ref }] : []),
+                ]}
+              />
+              {capture.note && (
+                <p className={cn(dsText.body, "text-[color:var(--ds-fg-secondary)]")}>{capture.note}</p>
+              )}
+            </div>
+          </div>
         </DialogBody>
 
-        <DialogFooter className="justify-between">
-          <span className={cn(dsText.meta, dsText.nums, "text-[color:var(--ds-fg-muted)]")}>
-            ← → to page through · Esc to close
-          </span>
-          <span className="flex items-center gap-[var(--ds-space-base)]">
-            <Button variant="secondary" icon={<ChevronLeft aria-hidden className={dsIcon.md} />} onClick={() => step(-1)} disabled={captures.length < 2}>
-              Previous
-            </Button>
-            <Button variant="secondary" iconAfter={<ChevronRight aria-hidden className={dsIcon.md} />} onClick={() => step(1)} disabled={captures.length < 2}>
-              Next
-            </Button>
-          </span>
+        {/* The gutters and the strip carry the paging, so the footer stops
+            re-offering it as two more buttons. What is left is the keyboard
+            route (quiet, left) and the one way out. */}
+        <DialogFooter
+          meta={
+            <MetaLine
+              tone="faint"
+              items={[`${index + 1} of ${captures.length}`, "← → to page through", "Esc to close"]}
+            />
+          }
+        >
+          <DialogClose asChild>
+            <Button variant="secondary">Close</Button>
+          </DialogClose>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The prev/next control, in a gutter of its own. A fixed width is the whole
+ * point — see the note at its call site.
+ */
+function CaptureNavButton({ dir, disabled, onClick }: { dir: "prev" | "next"; disabled: boolean; onClick: () => void }) {
+  const Icon = dir === "prev" ? ChevronLeft : ChevronRight;
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      aria-label={dir === "prev" ? "Previous capture" : "Next capture"}
+      className={cn(
+        "flex w-[var(--ds-h-lg)] shrink-0 items-center justify-center self-stretch border",
+        "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)]",
+        dsRadius.md,
+        dsFocus,
+        dsMotion.fast,
+        "cursor-pointer text-[color:var(--ds-fg-secondary)]",
+        "hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]",
+        "active:translate-y-px",
+        "disabled:pointer-events-none disabled:opacity-40",
+      )}
+    >
+      <Icon aria-hidden className={dsIcon.lg} />
+    </button>
   );
 }
 
