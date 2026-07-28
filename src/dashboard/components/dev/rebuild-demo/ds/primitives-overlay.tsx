@@ -115,6 +115,57 @@ export function useDsModalOpen(): boolean {
   return useModalOpen();
 }
 
+/* -------------------------------------------------------------------------
+ * BOTTOM-RIGHT OCCUPANCY — one corner, one claimant.
+ *
+ * The toast viewport is `fixed bottom-right` and a `danger` toast never
+ * auto-dismisses, so anything else that wants that corner is competing with an
+ * alert that will not go away on its own. The decision notice wants exactly
+ * that corner — anchored to the DETAIL PANEL, whose bottom-right lands inside
+ * the viewport's — and "we will position them so they miss" is not a fix: the
+ * two live in different coordinate systems and the panel's width changes with
+ * the rail.
+ *
+ * So it is a CLAIM, not a calculation. While anything holds the corner the
+ * toast viewport steps to bottom-LEFT, the same move it already makes for a
+ * modal — but it stays fully LIVE (a reminder does not outrank a failure, and
+ * making the alert inert for one would be exactly the inversion this registry
+ * exists to prevent). Neither can cover the other, at any width, by
+ * construction rather than by arithmetic.
+ * ---------------------------------------------------------------------- */
+
+let cornerClaimCount = 0;
+const cornerListeners = new Set<() => void>();
+
+function subscribeCorner(listener: () => void): () => void {
+  cornerListeners.add(listener);
+  return () => cornerListeners.delete(listener);
+}
+
+/**
+ * Claim the viewport's bottom-right corner for as long as this component is
+ * mounted. Call it from the floating surface itself, never from its parent —
+ * the claim is keyed to mount, exactly like `useDsModalPresence`.
+ */
+export function useDsBottomRightClaim(): void {
+  useEffect(() => {
+    cornerClaimCount += 1;
+    cornerListeners.forEach((listener) => listener());
+    return () => {
+      cornerClaimCount -= 1;
+      cornerListeners.forEach((listener) => listener());
+    };
+  }, []);
+}
+
+function useCornerClaimed(): boolean {
+  return useSyncExternalStore(
+    subscribeCorner,
+    () => cornerClaimCount > 0,
+    () => false,
+  );
+}
+
 /** Is any Dialog or Drawer open right now? */
 function useModalOpen(): boolean {
   return useSyncExternalStore(
@@ -966,16 +1017,26 @@ export function ToastProvider({ children }: { children: ReactNode }) {
  */
 function ToastViewport({ toasts, onDismiss }: { toasts: DsToast[]; onDismiss: (id: string) => void }) {
   const modalOpen = useModalOpen();
+  // A modal AND a corner claim both push the viewport aside; only a modal makes
+  // it inert. The claimant is a reminder, and a reminder does not get to
+  // disable a failure alert — it only gets to not be covered by one.
+  const cornerClaimed = useCornerClaimed();
+  const aside = modalOpen || cornerClaimed;
   if (toasts.length === 0) return null;
   return (
     <div
       role="region"
       aria-label="Notifications"
-      data-ds-toast-viewport={modalOpen ? "aside" : "default"}
+      data-ds-toast-viewport={aside ? "aside" : "default"}
       className={cn(
         "pointer-events-none fixed bottom-[var(--ds-space-loose)]",
-        modalOpen ? "left-[var(--ds-space-loose)] items-start" : "right-[var(--ds-space-loose)] items-end",
+        aside ? "left-[var(--ds-space-loose)] items-start" : "right-[var(--ds-space-loose)] items-end",
         "flex w-[360px] max-w-[calc(100vw-var(--ds-space-section))] flex-col gap-[var(--ds-space-base)]",
+        // The step aside is a MOVE, not a jump: the viewport is a fixed box
+        // changing which edge it hangs off, and seeing it travel is what tells
+        // the operator the same alert is still there rather than a new one
+        // having appeared on the other side.
+        dsMotion.move,
         dsLayer.toast,
       )}
     >
