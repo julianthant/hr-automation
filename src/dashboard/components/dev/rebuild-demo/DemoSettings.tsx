@@ -74,6 +74,7 @@ import {
   type StorageMode,
 } from "./demo-settings-wire";
 import { DEMO_SHORTCUTS, DemoShortcutsLegend } from "./demo-shortcuts";
+import { plural } from "./demo-wire";
 
 /**
  * DEV-ONLY — the rebuild demo's SETTINGS surface.
@@ -526,7 +527,7 @@ function EnvironmentSection({
         title="Environment & identity"
         subtitle={STATUS_SECTIONS[0].blurb}
         icon={<Lock aria-hidden className={dsIcon.lg} />}
-        meta={`${DEMO_ENVIRONMENT_FACTS.length} values`}
+        meta={`${plural(DEMO_ENVIRONMENT_FACTS.length, "value")}`}
       />
       <PanelBody className="flex flex-col gap-[var(--ds-space-cozy)] p-[var(--ds-space-cozy)]">
         {DEMO_ENVIRONMENT_FACTS.map((fact) => (

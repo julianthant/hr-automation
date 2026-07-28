@@ -50,7 +50,7 @@ import {
 } from "./demo-ui";
 import { EvidenceSection, SystemChip } from "./DemoEvidence";
 import { RunSelector } from "./DemoRunIdentity";
-import { actionsAt, fmtClock, type ActionDescriptorWire } from "./demo-wire";
+import { actionsAt, fmtClock, plural, type ActionDescriptorWire } from "./demo-wire";
 import {
   appliedCorrectionsFor,
   checkpointAge,
@@ -1005,7 +1005,7 @@ function DelegationLinks({ row, onOpenPanel }: { row: DemoRow; onOpenPanel: (wor
           <ClipboardList aria-hidden className={cn(dsIcon.md, "mt-px shrink-0")} />
           <span className="min-w-0 flex-1">
             {row.reviewRunId
-              ? `Records live on the OCR review row — open the OCR panel (${DEMO_ROWS[row.reviewRunId]?.records?.length ?? 0} people)`
+              ? `Records live on the OCR review row — open the OCR panel (${plural(DEMO_ROWS[row.reviewRunId]?.records?.length ?? 0, "person", "people")})`
               : row.reviewOf
                 ? `Delegated by ${DEMO_ROWS[row.reviewOf]?.title ?? "the packet"} — open the packet row`
                 : // one level of back, no breadcrumb trail: `← OCR · <packet>`

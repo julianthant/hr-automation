@@ -43,7 +43,7 @@ import {
   type OutstandingBucket,
   type WorkflowLine,
 } from "./demo-report-wire";
-import { fmtClock, DEMO_NOW, DEMO_APP_VERSION, DEMO_OPERATOR } from "./demo-wire";
+import { fmtClock, plural, DEMO_NOW, DEMO_APP_VERSION, DEMO_OPERATOR } from "./demo-wire";
 
 /**
  * DEV-ONLY — the ACTIVITY REPORT: the one artifact in this product that leaves
@@ -102,7 +102,7 @@ export function DemoActivityReportPage({
           <PanelHeader
             title="Automation activity"
             subtitle={span.label}
-            meta={`${report.totals.runs} runs · ${report.totals.people} people`}
+            meta={`${plural(report.totals.runs, "run")} · ${plural(report.totals.people, "person", "people")}`}
             actions={
               <span className="flex items-center gap-[var(--ds-space-snug)]">
                 <Popover>
@@ -274,7 +274,7 @@ export function DemoActivityReportPage({
                 DEMO_OPERATOR,
                 `app ${DEMO_APP_VERSION}`,
                 span.label,
-                `${report.totals.runs} runs`,
+                plural(report.totals.runs, "run"),
               ]}
             />
           </PanelFooter>
@@ -368,7 +368,7 @@ function OutstandingRow({ bucket }: { bucket: OutstandingBucket }) {
                   All {bucket.rows.length}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent title={bucket.label} description={`${bucket.rows.length} runs`} width="lg" align="end">
+              <PopoverContent title={bucket.label} description={plural(bucket.rows.length, "run")} width="lg" align="end">
                 <ul className="flex flex-col gap-[var(--ds-space-tight)]">
                   {bucket.rows.map((row) => (
                     <li key={row.id} className="flex min-w-0 items-baseline gap-[var(--ds-space-snug)]">
@@ -408,7 +408,7 @@ function CategoryBody({ block, total }: { block: CategoryBlock; total: number })
           <span className="flex min-w-0 items-baseline gap-[var(--ds-space-snug)]">
             <SectionLabel>{block.label}</SectionLabel>
             <span className={cn(dsText.micro, dsText.nums, "text-[color:var(--ds-fg-muted)]")}>
-              {block.lines.length} workflow{block.lines.length === 1 ? "" : "s"}
+              {plural(block.lines.length, "workflow")}
             </span>
           </span>
         </TD>

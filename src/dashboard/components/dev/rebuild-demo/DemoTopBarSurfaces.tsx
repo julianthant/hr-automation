@@ -50,7 +50,7 @@ import {
   dsText,
   useToasts,
 } from "./demo-ui";
-import { DEMO_DAY, fmtClock } from "./demo-wire";
+import { DEMO_DAY, fmtClock, plural } from "./demo-wire";
 import {
   ALL_DEMO_ROWS,
   DEMO_DAYS,
@@ -251,7 +251,7 @@ function DateCalendar({ day, onPick }: { day: string; onPick: (day: string) => v
               tabIndex={i === focus ? 0 : -1}
               onFocus={() => setFocus(i)}
               onClick={() => onPick(c.day)}
-              aria-label={`${dayLabelWithToday(c.day)}${c.available ? ` — ${c.count} rows` : " — the tracker holds no rows"}`}
+              aria-label={`${dayLabelWithToday(c.day)}${c.available ? ` — ${plural(c.count, "row")}` : " — the tracker holds no rows"}`}
               title={c.available ? undefined : "The tracker holds no partition for this day"}
               className={cn(
                 "relative flex cursor-pointer flex-col items-center justify-center",
@@ -342,8 +342,8 @@ export function DemoDateNav({ day, onDay }: { day: string; onDay: (day: string) 
         <PopoverTrigger asChild>
           <button
             type="button"
-            aria-label={`Pick a day — showing ${dayLabelWithToday(day)}, ${counts[day] ?? 0} rows`}
-            title={`${counts[day] ?? 0} rows on this day · the tracker holds ${DEMO_DAYS.length} days`}
+            aria-label={`Pick a day — showing ${dayLabelWithToday(day)}, ${plural(counts[day] ?? 0, "row")}`}
+            title={`${plural(counts[day] ?? 0, "row")} on this day · the tracker holds ${plural(DEMO_DAYS.length, "day")}`}
             className={cn(
               "inline-flex cursor-pointer items-center border border-transparent",
               "h-[var(--ds-h-sm)] gap-1.5 px-1.5",
@@ -478,7 +478,7 @@ function SearchOutcomeView({ outcome, onPick }: { outcome: DemoSearchOutcome; on
       <EmptyState
         icon={<SearchX aria-hidden className={dsIcon.lg} />}
         title="Nothing typed yet"
-        description={`Search reads every run the tracker holds — ${DEMO_DAYS.length} days. Pick one of the examples above to see a result set, a genuine zero-hit answer, and a lookup that fails.`}
+        description={`Search reads every run the tracker holds — ${plural(DEMO_DAYS.length, "day")}. Pick one of the examples above to see a result set, a genuine zero-hit answer, and a lookup that fails.`}
       />
     );
   }
@@ -505,7 +505,7 @@ function SearchOutcomeView({ outcome, onPick }: { outcome: DemoSearchOutcome; on
       <EmptyState
         icon={<SearchX aria-hidden className={dsIcon.lg} />}
         title={`No run matches “${outcome.query}”`}
-        description={`This is an answer, not a failure: ${outcome.scan.rows} rows across ${outcome.scan.days} days were read and none matched. If the lookup itself had failed you would see a red error instead.`}
+        description={`This is an answer, not a failure: ${plural(outcome.scan.rows, "row")} across ${plural(outcome.scan.days, "day")} were read and none matched. If the lookup itself had failed you would see a red error instead.`}
       />
     );
   }
@@ -515,8 +515,8 @@ function SearchOutcomeView({ outcome, onPick }: { outcome: DemoSearchOutcome; on
       <div className="px-[var(--ds-space-loose)] py-[var(--ds-space-base)]">
         <MetaLine
           items={[
-            `${outcome.hits.length} match${outcome.hits.length === 1 ? "" : "es"}`,
-            `${outcome.scan.rows} rows read across ${outcome.scan.days} days`,
+            plural(outcome.hits.length, "match", "matches"),
+            `${plural(outcome.scan.rows, "row")} read across ${plural(outcome.scan.days, "day")}`,
           ]}
         />
       </div>

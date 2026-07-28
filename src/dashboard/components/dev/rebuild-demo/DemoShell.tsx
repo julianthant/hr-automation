@@ -36,6 +36,7 @@ import {
   DEMO_WORKFLOW_LIST,
   DEMO_WORKFLOWS,
   fmtClockSec,
+  plural,
   type DemoWorkflowCategory,
   type DemoWorkflowId,
 } from "./demo-wire";
@@ -775,7 +776,7 @@ export function DemoWorkflowPanelToggle({
   // The scope has to survive somewhere, and with the word gone it lives here.
   // Both numbers, both nouns, and the span they cover — an operator who hovers
   // or listens gets the full sentence; the face of the control gets the pair.
-  const scope = `${needsYou} of ${all} rows across every workflow need you today`;
+  const scope = `${needsYou} of ${plural(all, "row")} across every workflow need you today`;
   return (
     <button
       id={WORKFLOW_PANEL_TOGGLE_ID}

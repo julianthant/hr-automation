@@ -31,7 +31,7 @@ import {
   dsIcon,
   dsText,
 } from "./demo-ui";
-import { DEMO_NOW, DEMO_WORKFLOWS, startContractToken } from "./demo-wire";
+import { DEMO_NOW, DEMO_WORKFLOWS, plural, startContractToken } from "./demo-wire";
 import {
   INTAKE_FIELDS,
   PRIOR_MANIFESTS,
@@ -375,7 +375,7 @@ export function DemoIntakeDialog({
           </Button>
           {stage === "mapping" && (
             <Button variant="primary" onClick={() => goto("validate")} disabled={bindings.length === 0}>
-              Validate {validation ? `${validation.manifest.totals.sourceRows} rows` : "rows"}
+              Validate {validation ? plural(validation.manifest.totals.sourceRows, "row") : "rows"}
             </Button>
           )}
           {stage === "validate" && (
@@ -394,7 +394,7 @@ export function DemoIntakeDialog({
                 disabled={Boolean(validation?.block) || result?.state === "applied"}
                 onClick={startRun}
               >
-                Start {validation?.manifest.totals.valid ?? 0} runs
+                Start {plural(validation?.manifest.totals.valid ?? 0, "run")}
               </Button>
             </>
           )}
@@ -434,7 +434,7 @@ function FileStage({ onPick, selectedId }: { onPick: (sheet: SourceSheet) => voi
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className={cn(dsText.ui, "truncate", dsFg.base)}>{sheet.fileName}</span>
                 <span className={cn(dsText.meta, dsText.nums, dsFg.muted)}>
-                  {sheet.sizeLabel} · {sheet.grid.length} rows read · sha {sheet.sha256.slice(0, 8)}
+                  {sheet.sizeLabel} · {plural(sheet.grid.length, "row")} read · sha {sheet.sha256.slice(0, 8)}
                 </span>
               </span>
               <Chip label="target">{DEMO_WORKFLOWS[sheet.workflow].label}</Chip>
@@ -968,7 +968,7 @@ function ManifestStage({ manifest, block }: { manifest: IntakePlanManifest; bloc
           { key: "created", value: manifest.createdAt },
           {
             key: "totals",
-            value: `${manifest.totals.sourceRows} rows · ${manifest.totals.valid} valid · ${manifest.totals.rejected} rejected · ${manifest.totals.excluded} excluded · ${manifest.totals.corrected} corrected`,
+            value: `${plural(manifest.totals.sourceRows, "row")} · ${manifest.totals.valid} valid · ${manifest.totals.rejected} rejected · ${manifest.totals.excluded} excluded · ${manifest.totals.corrected} corrected`,
           },
         ]}
       />

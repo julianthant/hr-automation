@@ -45,6 +45,7 @@ import {
   agoSeconds,
   buildRecordCorrections,
   fmtClock,
+  plural,
   tabsFor as tabsForKind,
   TAB_LABEL,
   type ActionDescriptorWire,
@@ -730,7 +731,7 @@ function SharedPipelineStrip({ row }: { row: DemoRow }) {
         )}
       >
         Shared member pipeline
-        <span className={cn(dsText.nums, "normal-case tracking-normal")}>{fills[0].total} people · identical steps</span>
+        <span className={cn(dsText.nums, "normal-case tracking-normal")}>{plural(fills[0].total, "person", "people")} · identical steps</span>
       </div>
       <div className="flex items-stretch gap-[3px]">
         {fills.map((f) => (
@@ -1132,7 +1133,7 @@ function LogsTab({
         />
         {q && (
           <span className="font-mono text-[10.5px] tabular-nums">
-            {matchCount} match{matchCount === 1 ? "" : "es"}
+            {plural(matchCount, "match", "matches")}
           </span>
         )}
         {/* `System ▾` WAS HERE AND IT DID NOTHING. It was a bordered `<span>`
@@ -1301,7 +1302,7 @@ function ReviewTab({
         </span>
         <span className="text-[11px] text-muted-foreground">
           {readOnly
-            ? `${gaps} completeness ${gaps === 1 ? "gap" : "gaps"} across ${records.length} people`
+            ? `${plural(gaps, "completeness gap")} across ${plural(records.length, "person", "people")}`
             : `${approved.size} approved · ${blocked > 0 ? `${blocked} blocked` : "none blocked"}`}
         </span>
         {/* Corrections are counted here, on the control that sends them, so the
@@ -1309,7 +1310,7 @@ function ReviewTab({
             machine's reading. */}
         {corrections.length > 0 && (
           <Badge tone="warning" title={corrections.map((c) => `${c.field}: ${c.from} → ${c.to}`).join(" · ")}>
-            {`${corrections.length} correction${corrections.length === 1 ? "" : "s"}`}
+            {plural(corrections.length, "correction")}
           </Badge>
         )}
         {/* No approve control exists on a standalone run — it is not disabled,
@@ -1670,7 +1671,7 @@ function ExtractedPeoplePreview({ row, onOpenPanel }: { row: DemoRow; onOpenPane
       <div className="sticky top-[var(--ds-panel-head-h,0px)] flex flex-wrap items-center gap-2 border-b border-border/60 bg-card px-3 py-1.5 text-[11px]">
         <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
           <Users aria-hidden className="size-3 text-muted-foreground" />
-          {records.length} people extracted
+          {plural(records.length, "person", "people")} extracted
         </span>
         {reviewRow && (
           <button
