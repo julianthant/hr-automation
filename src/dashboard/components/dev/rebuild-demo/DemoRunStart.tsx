@@ -23,7 +23,6 @@ import {
   DialogFooter,
   EmptyState,
   Field,
-  Kbd,
   MetaLine,
   SectionLabel,
   Select,
@@ -124,8 +123,13 @@ export function DemoRunStartButton({ onOpen }: { onOpen: () => void }) {
       variant="primary"
       onClick={onOpen}
       icon={<Play aria-hidden className={dsIcon.sm} />}
-      iconAfter={<Kbd>r</Kbd>}
-      title="Start a run — any workflow, from anywhere"
+      // No `r` hint on the face of it. A shortcut badge on a control the
+      // operator presses with the pointer is a permanent reminder of a key
+      // they either already know or are not going to learn from a 10px chip —
+      // and it sits on the ONE primary in the toolbar, where the verb should
+      // end the eye's travel. The binding is unchanged and still discoverable
+      // where every other one is: the keyboard page.
+      title="Start a run — any workflow, from anywhere (r)"
     >
       Start a run
     </Button>

@@ -60,7 +60,6 @@ import {
   Badge,
   Button,
   ChipRow,
-  CountBadge,
   DEMO_THEME_LABEL,
   DS_STATUS,
   IconButton,
@@ -178,17 +177,23 @@ export function countRowsByWorkflow(rows: DemoRow[]): Map<string, Record<StatusB
 }
 
 /**
- * The day's `Needs you` in every panel EXCEPT the one on screen.
+ * The whole day, as the pair the launcher renders: `needs you` of `all`.
  *
- * The launcher sits inches from the Status Bar's `Needs you N`, wearing the
- * same eye. Read as the same quantity, a global 6 beside a scoped 1 is a
- * contradiction; scoped to ELSEWHERE, the pair reads `1 here, 5 elsewhere` and
- * sums to the 6 the day actually holds. It stays a cross-panel signal — which
- * is the whole point of a control that survives the panel being minimised — and
- * stops being a second opinion about the panel you are already looking at.
+ * The launcher used to carry ONE number with the word `elsewhere` beside it —
+ * the day's attention minus the panel on screen. That scoping was correct and
+ * it cost a word to say so, and the word was the only thing standing between
+ * this control and the Status Bar's `Needs you N` two controls away.
+ *
+ * A PAIR needs no word. `3 | 5` is not the same shape as `Needs you 1`, so the
+ * two cannot be read as one quantity rendered twice however close they sit, and
+ * the launcher can go back to spanning every workflow — which is the whole
+ * point of a control that survives the rail being minimised. It is exactly the
+ * rail's own two badges summed down its length, off the same counting path, so
+ * the rail and the launcher cannot disagree.
  */
-export function needsYouElsewhere(rows: DemoRow[], activeWorkflow: string): number {
-  return countRows(rows).needsYou - (countRowsByWorkflow(rows).get(activeWorkflow)?.needsYou ?? 0);
+export function attentionAcrossWorkflows(rows: DemoRow[]): { needsYou: number; all: number } {
+  const totals = countRows(rows);
+  return { needsYou: totals.needsYou, all: totals.all };
 }
 
 export function countRows(rows: DemoRow[]): Record<StatusBucket, number> {
@@ -716,11 +721,19 @@ function WorkflowPanelControls({ mode, onMode }: PanelModeProps) {
  * because relabelling one of two incompatible quantities does not make them
  * compatible.
  *
- * Both ends are fixed, at the counting layer. The rail's badge IS attention now
- * (`countRowsByWorkflow`), so the numbers are the same KIND of thing; and this
- * one is scoped to the panels the rail is NOT showing you, so the launcher plus
- * the Status Bar's `Needs you` for the current panel is the whole day, with no
- * overlap. `1 here, 5 elsewhere` cannot be misread as `1 here, 6 here`.
+ * Both ends are fixed at the counting layer: the rail's badge IS attention now
+ * (`countRowsByWorkflow`), so the two numbers are the same KIND of thing, and
+ * this control renders the rail's own pair summed down its length.
+ *
+ * WHY IT IS A PAIR AND NOT A LABELLED NUMBER. The previous fix scoped this to
+ * the panels the rail is not showing and spent a word — `elsewhere` — saying
+ * so. The word was doing all the work of keeping it apart from the Status Bar's
+ * `Needs you N`, and a word is a fragile place to keep a distinction. `3 | 5`
+ * is a different SHAPE from `Needs you 1`; two quantities cannot be read as one
+ * quantity rendered twice, however close they sit. So the scope goes back to
+ * the whole day (which is what a control that outlives the rail should carry),
+ * the eye and the word both go, and the amber falls on the one number that is
+ * a demand — the other recedes, exactly as a zero does in the toolbar.
  *
  * It still carries the workflow's 2-char code — the prefix of every one of its
  * trace ids — so the control is never an anonymous glyph.
@@ -735,23 +748,29 @@ export function DemoWorkflowPanelToggle({
   /** the day's corpus — every panel's rows, not the active panel's */
   rows: DemoRow[];
 }) {
-  const elsewhere = useMemo(() => needsYouElsewhere(rows, active), [rows, active]);
+  const { needsYou, all } = useMemo(() => attentionAcrossWorkflows(rows), [rows]);
   const showing = mode !== "icon";
   const code = WORKFLOW_CODE[active] ?? "";
+  // The scope has to survive somewhere, and with the word gone it lives here.
+  // Both numbers, both nouns, and the span they cover — an operator who hovers
+  // or listens gets the full sentence; the face of the control gets the pair.
+  const scope = `${needsYou} of ${all} rows across every workflow need you today`;
   return (
     <button
       id={WORKFLOW_PANEL_TOGGLE_ID}
       type="button"
       aria-expanded={showing}
       aria-controls={mode === "floating" ? WORKFLOW_PANEL_ID : undefined}
-      // The count goes in the LABEL, not only in the badge: an `aria-label`
-      // replaces a button's contents outright, so the badge's own number was
-      // being announced to nobody — the one number this control exists for.
-      aria-label={`Workflow Panel — ${active}${showing ? `, ${WORKFLOW_PANEL_MODE_LABEL[mode]}` : ", minimised"}. Needs you in other panels: ${elsewhere}`}
-      title={`Workflow Panel — ${active} (${code})\n${elsewhere} row${elsewhere === 1 ? "" : "s"} need you in OTHER panels · this panel's own count is the Needs you pill\nw cycles floating · icon · sidebar`}
+      // The counts go in the LABEL, not only in the badges: an `aria-label`
+      // replaces a button's contents outright, so the numbers were being
+      // announced to nobody — the thing this control exists to carry.
+      aria-label={`Workflow Panel — ${active}${showing ? `, ${WORKFLOW_PANEL_MODE_LABEL[mode]}` : ", minimised"}. ${scope}`}
+      title={`Workflow Panel — ${active} (${code})\n${scope}\nThe Needs you pill counts this panel only\nw cycles floating · icon · sidebar`}
       onClick={() => onMode(showing ? "icon" : "floating")}
       className={cn(
         toolbarControl(),
+        dsMotion.fast,
+        "active:translate-y-px",
         showing
           ? cn(dsBorder.loud, "bg-[var(--ds-surface-selected)] font-semibold text-[color:var(--ds-fg)]")
           : cn(dsBorder.base, dsSurface.card, "text-[color:var(--ds-fg-muted)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]"),
@@ -763,26 +782,21 @@ export function DemoWorkflowPanelToggle({
         <PanelLeftOpen aria-hidden className={dsIcon.sm} />
       )}
       <span className={dsText.nums}>{code}</span>
-      {/* The rule separates the panel you are IN from a count that belongs to
-          the panels you are not. It sits on the control's OWN surface, where
+      {/* The rule separates the panel you are IN from a pair that belongs to
+          the whole day. It sits on the control's OWN surface, where
           `--ds-border` against a white card is not a line anybody sees. */}
       <span aria-hidden className={cn("mx-[var(--ds-space-hair)] h-4 w-px shrink-0", "bg-[var(--ds-border-loud)]")} />
-      <Eye
-        aria-hidden
-        className={cn(
-          dsIcon.sm,
-          "shrink-0",
-          elsewhere > 0 ? "text-[color:var(--ds-status-waiting-fg)]" : "text-[color:var(--ds-fg-faint)]",
-        )}
-      />
-      {/* It DIMS at zero rather than vanishing — a badge that disappears
-          reflows the whole bar under it every time the count crosses zero — and
-          its tone steps down to neutral there, because a zero is not a demand. */}
-      <CountBadge value={elsewhere} tone={elsewhere > 0 ? "attention" : "neutral"} zeroStyle="dim" />
-      {/* The one word that makes this number a different quantity from the pill
-          two controls away. It is SCOPE, not an explanation: without it the two
-          eyes read as one count rendered twice. */}
-      <span className={cn(dsText.micro, "shrink-0 text-[color:var(--ds-fg-muted)]")}>elsewhere</span>
+      {/* THE PAIR. Amber on the demand, and only there: at zero it steps down
+          to the same neutral its denominator wears, because a zero is not a
+          demand and a standing amber 0 is the definition of an alarm nobody
+          reads. The `/` is a hairline, not a glyph — a slash in `dsText.nums`
+          sits off the numerals' baseline and reads as punctuation inside a
+          number rather than a divider between two. */}
+      <span className={cn(dsText.nums, "shrink-0 tabular-nums", dsMotion.base, needsYou > 0 ? "font-semibold text-[color:var(--ds-status-waiting-fg)]" : "text-[color:var(--ds-fg-faint)]")}>
+        {needsYou}
+      </span>
+      <span aria-hidden className="mx-[var(--ds-space-hair)] h-2.5 w-px shrink-0 bg-[var(--ds-border)]" />
+      <span className={cn(dsText.nums, "shrink-0 tabular-nums text-[color:var(--ds-fg-muted)]")}>{all}</span>
     </button>
   );
 }
@@ -1298,8 +1312,6 @@ interface DemoSession {
   budgets?: DemoBudgetSlot[];
   /** present when the executor is alive and NOT progressing */
   waiting?: DemoLeaseWait;
-  /** a deliberate pause between tasks — a rate guard, not idleness */
-  sleepPerTaskSec?: number;
 }
 
 const DEMO_SESSIONS: DemoSession[] = [
@@ -1355,7 +1367,6 @@ const DEMO_SESSIONS: DemoSession[] = [
       { system: "i9", inUse: 1, cap: 1 },
     ],
     waiting: { system: "ucpath", sinceSec: 264, heldByWorkflow: "Separations", heldByTrace: "se-140211-9f3a" },
-    sleepPerTaskSec: 12,
     browsers: [{ id: "b4", label: "ucpath", health: "unknown", url: "ucpath…/PersonSearch" }],
   },
   {
@@ -1734,9 +1745,22 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
             "gap-[var(--ds-space-snug)] pt-[var(--ds-space-snug)]",
           )}
         >
-          <span className={dsText.nums}>{s.elapsedSec > 0 ? fmtElapsed(s.elapsedSec + tick) : "—"}</span>
-          <span className="min-w-0 flex-1 truncate" title={s.sleepPerTaskSec ? `Sleeps ${s.sleepPerTaskSec}s between tasks` : undefined}>
-            {s.sleepPerTaskSec ? `${s.step ?? ""} · ${s.sleepPerTaskSec}s/task sleep` : (s.step ?? "")}
+          {/* STEP first, hard left. It is the one thing on this line that
+              answers "what is this worker doing", and it was sitting in the
+              middle behind a clock. The elapsed time is a QUALIFIER on it, so
+              it now sits right-aligned against the verb that can end it —
+              `Filling the form · 4m 12s · Stop` reads as one sentence, and the
+              row of cards can be scanned down its left edge.
+
+              `12s/task sleep` is gone. A pacing constant the operator cannot
+              change from here and would not act on if they could is a
+              diagnostic wearing a status line; it belonged to whoever tunes the
+              daemon, not to whoever is watching it work. */}
+          <span className="min-w-0 flex-1 truncate" title={s.step ?? undefined}>
+            {s.step ?? ""}
+          </span>
+          <span className={cn(dsText.nums, "shrink-0 tabular-nums")}>
+            {s.elapsedSec > 0 ? fmtElapsed(s.elapsedSec + tick) : "—"}
           </span>
           <Button size="sm" variant="outline" onClick={NOOP} className="shrink-0">
             Stop
