@@ -75,11 +75,11 @@ export function validateEmployeeData(
  * Input schema for the onboarding kernel workflow. `email` is the
  * operator-supplied field.
  *
- * - `dryRun` — when true, the workflow runs the full extraction / search /
- *   I-9 chain but SKIPS the irreversible UCPath Smart HR transaction submit
- *   (`clickSaveAndSubmit`). Mirrors the `dryRun` flag on oath-signature /
- *   emergency-contact. The I-9 profile create still runs (it is search-first,
- *   so idempotent for a fixed identity).
+ * - `dryRun` — when true, the workflow completes the read-only CRM extraction
+ *   and UCPath identity checks, then stops before the combined I-9
+ *   search/create step and before Smart HR. A rehearsal writes to no system of
+ *   record. Mirrors the strict no-write meaning of `dryRun` on the other
+ *   dashboard-launched workflows that expose it.
  */
 export const OnboardingInputSchema = z.object({
   email: z.string().email(),

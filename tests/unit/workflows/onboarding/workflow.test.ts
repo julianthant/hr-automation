@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { defineWorkflow, runWorkflowBatch } from "../../../../src/core/index.js";
@@ -32,6 +32,36 @@ function cleanupWorkflow(workflow: string) {
     if (existsSync(path)) rmSync(path);
   }
 }
+
+test("onboarding dry run stops before every system-of-record write", () => {
+  const source = readFileSync(
+    new URL("../../../../src/workflows/onboarding/workflow.ts", import.meta.url),
+    "utf8",
+  );
+  const personSearch = source.indexOf('ctx.step("person-search"');
+  const boundary = source.indexOf('label: "onboarding-dry-run-before-writes"');
+  const i9Step = source.indexOf('ctx.step("i9-creation"');
+  const i9Create = source.indexOf("createI9Employee(i9Page");
+  const transactionStep = source.indexOf('ctx.step("transaction"');
+  const smartHrSubmit = source.indexOf("await plan.execute()");
+
+  for (const [label, index] of [
+    ["person search", personSearch],
+    ["dry-run boundary", boundary],
+    ["I-9 step", i9Step],
+    ["I-9 create", i9Create],
+    ["Smart HR step", transactionStep],
+    ["Smart HR submit", smartHrSubmit],
+  ] as const) {
+    assert.notEqual(index, -1, `${label} marker must remain present`);
+  }
+
+  assert.ok(personSearch < boundary, "the rehearsal still performs the read-only identity check");
+  assert.ok(boundary < i9Step, "the boundary must precede the combined I-9 search/create step");
+  assert.ok(boundary < i9Create, "a dry run must never create an I-9 profile");
+  assert.ok(boundary < transactionStep, "a dry run must never enter the Smart HR transaction step");
+  assert.ok(boundary < smartHrSubmit, "a dry run must never reach the Smart HR submit");
+});
 
 test("runWorkflowBatch (pool): onboarding-shaped onPreEmitPending paired with runId per email", async (t) => {
   const wfName = `onboarding-pool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
