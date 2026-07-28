@@ -42,14 +42,28 @@ import {
   THead,
   TR,
   Table,
+  dsBorder,
   dsFocus,
   dsIcon,
   dsMotion,
+  dsRadius,
   dsText,
   useToasts,
 } from "./demo-ui";
 import { DEMO_DAY, fmtClock } from "./demo-wire";
-import { ALL_DEMO_ROWS, DEMO_DAYS, dayCounts, dayIndex, dayLabelWithToday } from "./demo-days";
+import {
+  ALL_DEMO_ROWS,
+  DEMO_DAYS,
+  buildDemoMonth,
+  dayCounts,
+  dayIndex,
+  dayLabelWithToday,
+  demoMonthRange,
+  monthLabel,
+  monthOfDay,
+  moveCalendarFocus,
+  shiftMonth,
+} from "./demo-days";
 import {
   DEMO_NOTIFICATIONS,
   NOTIFICATION_FILTERS,
@@ -143,17 +157,178 @@ export function DemoShortcutsPopover({ onOpenHelp }: { onOpenHelp?: () => void }
 // Date navigation
 // ===========================================================================
 
+const WEEKDAY_HEADS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+
 /**
- * ‹ Fri, Jul 25 · today ›. The date is not decoration: it selects the day
- * partition the whole app reads. The rail badges, the Status Bar pills and the
- * rows all recompute from `topLevelRowsForDay(day)`, so they move together —
- * there is no second corpus for any of them to disagree about.
+ * The month grid behind the date pill.
+ *
+ * It is a real picker and it is honest about what it can offer: the queue is
+ * day-partitioned on disk, so a day the tracker holds no file for is DRAWN and
+ * DISABLED with its reason rather than skipped — a calendar with holes in it
+ * teaches the operator that the month is missing days.
+ *
+ * Every enabled cell carries its own row count, off `topLevelRowsForDay` — the
+ * same function the pill's badge, the rail badges and the Status Bar all read.
+ * The number you press and the number you land on cannot differ.
+ *
+ * Keyboard: one roving tab stop, arrows move within the grid (clamped, never
+ * wrapped), Home/End take the week's edges, Enter/Space select. Radix owns
+ * Escape and returning focus to the trigger.
+ */
+function DateCalendar({ day, onPick }: { day: string; onPick: (day: string) => void }) {
+  const [month, setMonth] = useState(() => monthOfDay(day));
+  const cells = useMemo(() => buildDemoMonth(month), [month]);
+  const range = useMemo(() => demoMonthRange(), []);
+  const prev = month > range.first ? shiftMonth(month, -1) : undefined;
+  const next = month < range.last ? shiftMonth(month, 1) : undefined;
+
+  // The roving tab stop starts on the selected day when it is in view, and on
+  // the first selectable cell otherwise — never on a disabled one, which would
+  // put the caret somewhere Enter does nothing.
+  const initial = cells.findIndex((c) => c.day === day);
+  const [focus, setFocus] = useState(initial >= 0 ? initial : cells.findIndex((c) => c.available));
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  const moveTo = (index: number) => {
+    setFocus(index);
+    // The cells are real buttons in DOM order, so the nth button IS the nth cell.
+    gridRef.current?.querySelectorAll<HTMLButtonElement>("button[data-demo-day]")[index]?.focus();
+  };
+
+  return (
+    <div className="flex flex-col gap-[var(--ds-space-snug)]">
+      <div className="flex items-center gap-[var(--ds-space-snug)]">
+        <IconButton
+          size="sm"
+          disabled={!prev}
+          label={prev ? `Previous month — ${monthLabel(prev)}` : `The tracker holds nothing before ${monthLabel(range.first)}`}
+          onClick={() => prev && setMonth(prev)}
+          icon={<ChevronLeft aria-hidden className={dsIcon.md} />}
+        />
+        <span className={cn(dsText.ui, "min-w-0 flex-1 text-center font-semibold text-[color:var(--ds-fg)]")}>
+          {monthLabel(month)}
+        </span>
+        <IconButton
+          size="sm"
+          disabled={!next}
+          label={next ? `Next month — ${monthLabel(next)}` : `The tracker holds nothing after ${monthLabel(range.last)}`}
+          onClick={() => next && setMonth(next)}
+          icon={<ChevronRight aria-hidden className={dsIcon.md} />}
+        />
+      </div>
+
+      <div aria-hidden className={cn(dsText.caps, "grid grid-cols-7 text-center text-[color:var(--ds-fg-muted)]")}>
+        {WEEKDAY_HEADS.map((w) => (
+          <span key={w} className="py-[var(--ds-space-hair)]">
+            {w}
+          </span>
+        ))}
+      </div>
+
+      <div
+        ref={gridRef}
+        role="grid"
+        aria-label="Pick a day"
+        onKeyDown={(e) => {
+          const to = moveCalendarFocus(focus, e.key);
+          if (to === null) return;
+          e.preventDefault();
+          moveTo(to);
+        }}
+        className="grid grid-cols-7 gap-[var(--ds-space-hair)]"
+      >
+        {cells.map((c, i) => {
+          const selected = c.day === day;
+          return (
+            <button
+              key={c.day}
+              type="button"
+              data-demo-day={c.day}
+              role="gridcell"
+              aria-selected={selected}
+              aria-current={c.isToday ? "date" : undefined}
+              disabled={!c.available}
+              tabIndex={i === focus ? 0 : -1}
+              onFocus={() => setFocus(i)}
+              onClick={() => onPick(c.day)}
+              aria-label={`${dayLabelWithToday(c.day)}${c.available ? ` — ${c.count} rows` : " — the tracker holds no rows"}`}
+              title={c.available ? undefined : "The tracker holds no partition for this day"}
+              className={cn(
+                "relative flex cursor-pointer flex-col items-center justify-center",
+                "h-[var(--ds-h-md)] w-full",
+                dsRadius.sm,
+                dsText.meta,
+                dsText.nums,
+                dsFocus,
+                dsMotion.fast,
+                "disabled:cursor-default",
+                selected
+                  ? cn(dsBorder.loud, "border bg-[var(--ds-surface-selected)] font-semibold text-[color:var(--ds-fg)]")
+                  : c.available
+                    ? "text-[color:var(--ds-fg)] hover:bg-[var(--ds-surface-3)]"
+                    : c.inMonth
+                      ? "text-[color:var(--ds-fg-faint)]"
+                      : "text-[color:var(--ds-fg-faint)] opacity-50",
+              )}
+            >
+              {c.dayOfMonth}
+              {/* A DOT, not the count: 42 numbers plus 42 counts is a wall, and
+                  the count the operator is acting on is already on the pill.
+                  It is `--ds-accent-mark` — a mark, never text. */}
+              {c.available && (
+                <span
+                  aria-hidden
+                  className={cn(
+                    "absolute bottom-[var(--ds-space-hair)] size-1 rounded-full",
+                    c.count > 0 ? "bg-[var(--ds-accent-mark)]" : "bg-[var(--ds-fg-faint)]",
+                  )}
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* TODAY IN ONE ACTION, from anywhere in the calendar. It moves the month
+          AND the day, so a picker parked three months out is one press from
+          live rather than three. */}
+      <div className={cn("flex items-center border-t pt-[var(--ds-space-snug)]", dsBorder.subtle)}>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={day === DEMO_DAY}
+          onClick={() => {
+            setMonth(monthOfDay(DEMO_DAY));
+            onPick(DEMO_DAY);
+          }}
+        >
+          Today
+        </Button>
+        <span className={cn(dsText.meta, "ml-auto text-[color:var(--ds-fg-muted)]")}>
+          <span className={dsText.nums}>{DEMO_DAYS.length}</span> days on disk
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ‹ 📅 Fri, Jul 25 · today [38] ›. The date is not decoration: it selects the
+ * day partition the whole app reads. The rail badges, the Status Bar pills and
+ * the rows all recompute from `topLevelRowsForDay(day)`, so they move together
+ * — there is no second corpus for any of them to disagree about.
+ *
+ * The pill in the middle used to be a `<span>`: a calendar glyph, a date and a
+ * count, none of which did anything. It is the picker's trigger now, and the
+ * ‹ › day steps stay beside it because stepping one day is the common move and
+ * should not cost an overlay.
  */
 export function DemoDateNav({ day, onDay }: { day: string; onDay: (day: string) => void }) {
   const idx = dayIndex(day);
   const counts = useMemo(() => dayCounts(), []);
   const older = DEMO_DAYS[idx - 1];
   const newer = DEMO_DAYS[idx + 1];
+  const [open, setOpen] = useState(false);
   return (
     <span className="flex shrink-0 items-center gap-0.5">
       <IconButton
@@ -163,14 +338,38 @@ export function DemoDateNav({ day, onDay }: { day: string; onDay: (day: string) 
         onClick={() => older && onDay(older)}
         icon={<ChevronLeft aria-hidden className={dsIcon.md} />}
       />
-      <span
-        title={`${counts[day]} rows on this day · the tracker holds ${DEMO_DAYS.length} days`}
-        className={cn("inline-flex items-center gap-1.5 px-1.5", dsText.ui, "text-[color:var(--ds-fg)]")}
-      >
-        <Calendar aria-hidden className={cn(dsIcon.sm, "text-[color:var(--ds-fg-muted)]")} />
-        {dayLabelWithToday(day)}
-        <CountBadge value={counts[day] ?? 0} tone={day === DEMO_DAY ? "info" : "neutral"} />
-      </span>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label={`Pick a day — showing ${dayLabelWithToday(day)}, ${counts[day] ?? 0} rows`}
+            title={`${counts[day] ?? 0} rows on this day · the tracker holds ${DEMO_DAYS.length} days`}
+            className={cn(
+              "inline-flex cursor-pointer items-center border border-transparent",
+              "h-[var(--ds-h-sm)] gap-1.5 px-1.5",
+              dsRadius.md,
+              dsText.ui,
+              dsFocus,
+              dsMotion.fast,
+              "text-[color:var(--ds-fg)] hover:bg-[var(--ds-surface-3)] active:translate-y-px",
+              "data-[state=open]:border-[color:var(--ds-border-loud)] data-[state=open]:bg-[var(--ds-surface-selected)]",
+            )}
+          >
+            <Calendar aria-hidden className={cn(dsIcon.sm, "text-[color:var(--ds-fg-muted)]")} />
+            {dayLabelWithToday(day)}
+            <CountBadge value={counts[day] ?? 0} tone={day === DEMO_DAY ? "info" : "neutral"} />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent title="Pick a day" hideTitle width="md" align="center" side="bottom">
+          <DateCalendar
+            day={day}
+            onPick={(next) => {
+              setOpen(false);
+              if (next !== day) onDay(next);
+            }}
+          />
+        </PopoverContent>
+      </Popover>
       <IconButton
         label={newer ? `Next day — ${dayLabelWithToday(newer)}` : "Today is the newest day"}
         size="sm"

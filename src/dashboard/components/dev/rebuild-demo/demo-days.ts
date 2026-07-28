@@ -378,3 +378,111 @@ export function topLevelRowsForDay(day: string): DemoRow[] {
 export function dayCounts(): Record<string, number> {
   return Object.fromEntries(DEMO_DAYS.map((d) => [d, topLevelRowsForDay(d).length]));
 }
+
+// ---------------------------------------------------------------------------
+// The month grid behind the date navigator's calendar
+//
+// It is pure and it is derived: a cell's COUNT is `topLevelRowsForDay`, the one
+// corpus function every badge in the app already goes through, so the number in
+// a calendar cell and the number the queue shows after pressing it are the same
+// number by construction rather than by agreement.
+//
+// A day the tracker holds no partition for is rendered and DISABLED with its
+// reason, never hidden: the queue is day-partitioned on disk, so "there is no
+// file for Sunday" is a fact about the tracker, and a calendar that silently
+// skips those days teaches the operator the month has holes in it.
+// ---------------------------------------------------------------------------
+
+export interface DemoCalendarCell {
+  /** `YYYY-MM-DD` */
+  day: string;
+  dayOfMonth: number;
+  /** false for the leading/trailing cells that belong to a neighbouring month */
+  inMonth: boolean;
+  /** rows the tracker holds on this day — the `topLevelRowsForDay` path */
+  count: number;
+  /** the tracker holds a partition for this day, so it can be selected */
+  available: boolean;
+  isToday: boolean;
+}
+
+/** `2026-07-25` → `2026-07` */
+export function monthOfDay(day: string): string {
+  return day.slice(0, 7);
+}
+
+/** `2026-07` → `July 2026` */
+export function monthLabel(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** `2026-07` shifted by whole months, staying a `YYYY-MM` */
+export function shiftMonth(month: string, delta: number): string {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** the months the tracker has partitions in, oldest first — the browsable range */
+export function demoMonthRange(): { first: string; last: string } {
+  return { first: monthOfDay(DEMO_DAYS[0]), last: monthOfDay(DEMO_DAYS[DEMO_DAYS.length - 1]) };
+}
+
+const MS_DAY = 86_400_000;
+
+function ymd(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * Six Sunday-first weeks, always — 42 cells.
+ *
+ * A grid whose ROW COUNT changes with the month reflows the popover (and the
+ * button under the pointer) every time you step a month, which is the one thing
+ * a date picker must not do.
+ */
+export function buildDemoMonth(month: string): DemoCalendarCell[] {
+  const [y, m] = month.split("-").map(Number);
+  const first = Date.UTC(y, m - 1, 1);
+  const start = first - new Date(first).getUTCDay() * MS_DAY;
+  const held = new Set(DEMO_DAYS);
+  const cells: DemoCalendarCell[] = [];
+  for (let i = 0; i < 42; i += 1) {
+    const ms = start + i * MS_DAY;
+    const day = ymd(ms);
+    const available = held.has(day);
+    cells.push({
+      day,
+      dayOfMonth: new Date(ms).getUTCDate(),
+      inMonth: day.slice(0, 7) === month,
+      count: available ? topLevelRowsForDay(day).length : 0,
+      available,
+      isToday: day === DEMO_DAY,
+    });
+  }
+  return cells;
+}
+
+/**
+ * Arrow-key movement inside the grid, clamped to the 42 cells it holds.
+ *
+ * Pure so the keyboard contract is a test rather than a thing somebody checks
+ * by pressing keys — and it is a CLAMP, not a wrap: running off the right edge
+ * of the last week should stop, not teleport to the first.
+ */
+export function moveCalendarFocus(index: number, key: string): number | null {
+  const delta =
+    key === "ArrowRight" ? 1 : key === "ArrowLeft" ? -1 : key === "ArrowDown" ? 7 : key === "ArrowUp" ? -7 : null;
+  if (delta === null) {
+    if (key === "Home") return index - (index % 7);
+    if (key === "End") return index - (index % 7) + 6;
+    return null;
+  }
+  const next = index + delta;
+  return next < 0 || next > 41 ? index : next;
+}
