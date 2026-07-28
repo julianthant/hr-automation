@@ -624,10 +624,19 @@ export function projectRow(spec: DemoRowSpec, rawById: Map<string, DemoRowSpec>)
   const stagedWrites = spec.data.filter((d) => d.dir === "write" && d.staged).length;
 
   // A counted anchor titles itself from the member set it actually holds —
-  // "5 separations", "6 lookups · Oath_Packet_Summer.pdf". The number is never
-  // typed into a fixture, so a title cannot drift from the group.
+  // "5 separations", "6 lookups". The number is never typed into a fixture, so
+  // a title cannot drift from the group.
+  //
+  // THE PARENT'S NAME IS NOT PART OF THE TITLE WHEN THE CARD ALREADY DRAWS IT.
+  // A delegated group carries a back chip one line below the title
+  // (`← OCR · Oath_Packet_Summer.pdf`), so `6 lookups · Oath_Packet_Summer.pdf`
+  // printed the packet twice on one card — and, at a 400px queue, the copy that
+  // truncated (`6 lookups · Oath_Packet_S…`) was the redundant one. Same rule
+  // the member preview and the group subline were held to: two truncations on a
+  // card is one too many, and the second is a duplicate rather than a fact.
+  const namedByBackChip = Boolean(spec.linkedParentId);
   const title = spec.groupNoun
-    ? [`${realMembers.length} ${spec.groupNoun}`, spec.title].filter(Boolean).join(" · ")
+    ? [`${realMembers.length} ${spec.groupNoun}`, namedByBackChip ? undefined : spec.title].filter(Boolean).join(" · ")
     : spec.title;
   const previewNames = realMembers.slice(0, 3).map((m) => m.title);
   const memberPreview =
