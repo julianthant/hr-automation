@@ -23,6 +23,13 @@ import "./ds/tokens.css";
 export {
   dsText,
   dsSurface,
+  /**
+   * The one truncation vocabulary — `dsClip.token` on a single-line token's
+   * shell, `dsClip.text` on the child that may be too long. Reach for the PAIR:
+   * either half on its own is the defect (overflow with no ellipsis, or a
+   * `truncate` that can never shrink because its flex parent said `min-w:auto`).
+   */
+  dsClip,
   dsFg,
   dsBorder,
   dsRadius,

@@ -7,7 +7,7 @@ import {
 import { cva, type VariantProps } from "class-variance-authority";
 import { Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { dsFocus, dsIcon, dsMotion, dsRadius, dsText } from "./tokens";
+import { dsClip, dsFocus, dsIcon, dsMotion, dsRadius, dsText } from "./tokens";
 
 /**
  * DEV-ONLY — core interactive primitives for the rebuild demo.
@@ -213,7 +213,13 @@ export const IconButton = forwardRef<HTMLButtonElement, DsIconButtonProps>(
 
 const badgeVariants = cva(
   cn(
-    "inline-flex w-fit shrink-0 items-center border",
+    // `text-ellipsis` rides `dsClip.token` here rather than living on a child,
+    // because a Badge's content is usually a bare text node with no element to
+    // hang the cut on. `shrink-0` stays — a badge is not squeezed by its
+    // neighbours — but `max-w-full` means it can never exceed its parent
+    // either, which is what it used to do.
+    "inline-flex w-fit shrink-0 items-center border text-ellipsis",
+    dsClip.token,
     dsRadius.sm,
     dsText.micro,
     "h-[var(--ds-h-xs)] px-[var(--ds-space-snug)] gap-[var(--ds-space-tight)] font-medium",
@@ -221,8 +227,11 @@ const badgeVariants = cva(
   {
     variants: {
       tone: {
+        // The recessed plane, the same one `Chip`'s neutral tone reads. It was
+        // outlined-with-its-own-fill a hundred lines above the chip that had
+        // already been migrated off exactly that treatment.
         neutral:
-          "bg-[var(--ds-surface-2)] border-[color:var(--ds-border)] text-[color:var(--ds-fg-secondary)]",
+          "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg)]",
         info: "bg-[var(--ds-info-bg)] border-[color:var(--ds-info-border)] text-[color:var(--ds-info-fg)]",
         success:
           "bg-[var(--ds-success-bg)] border-[color:var(--ds-success-border)] text-[color:var(--ds-success-fg)]",
@@ -374,11 +383,12 @@ export function Chip({
       {label && (
         <span className="shrink-0 text-[color:var(--ds-fg-muted)]">{label}</span>
       )}
-      <span className={cn(dsText.nums, "min-w-0 truncate whitespace-nowrap")}>{children}</span>
+      <span className={cn(dsText.nums, dsClip.text)}>{children}</span>
     </>
   );
   const shell = cn(
-    "inline-flex w-fit max-w-full items-center border",
+    "inline-flex w-fit items-center border",
+    dsClip.token,
     dsRadius.sm,
     dsText.meta,
     "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
@@ -441,7 +451,14 @@ export function Kbd({ children, className }: { children: ReactNode; className?: 
   return (
     <kbd
       className={cn(
-        "inline-flex h-4 min-w-4 items-center justify-center border px-1",
+        // KEPT OUTLINED, deliberately, while every other `surface-2 + border`
+        // token moved to the recessed plane: this one is drawing a KEY. The
+        // outline plus the fill is the whole cue that says "a thing you press",
+        // and a border-less keycap reads as a word in a slightly different
+        // colour. Its raw `h-4 min-w-4 px-1` went on the scale, though — those
+        // were three literals with no argument behind them.
+        "inline-flex items-center justify-center border",
+        "h-[var(--ds-h-xs)] min-w-[var(--ds-h-xs)] px-[var(--ds-space-tight)]",
         dsRadius.xs,
         dsText.micro,
         "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] font-mono text-[color:var(--ds-fg-muted)]",

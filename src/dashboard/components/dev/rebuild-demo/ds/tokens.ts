@@ -45,13 +45,44 @@ export const dsSurface = {
   page: "bg-[var(--ds-surface-page)]",
   /** the default plane: panels, cards, bars */
   card: "bg-[var(--ds-surface-1)]",
-  /** inset wells, table headers, code blocks */
-  inset: "bg-[var(--ds-surface-2)]",
+  /**
+   * THE RECESSED PLANE — "this sits back from the card". Wells, chips, footers,
+   * table headers. (This was `inset`, pointing at the raw `--ds-surface-2`; it
+   * had no importers and its value pre-dated the recess token, so it was a dead
+   * alias to a stale answer. Renamed and repointed rather than deleted, because
+   * the *concept* is the one every band on a card needs.)
+   */
+  recess: "bg-[var(--ds-recess-bg)]",
   /** hover / pressed / selected fill */
   raised: "bg-[var(--ds-surface-3)]",
   overlay: "bg-[var(--ds-surface-overlay)]",
   scrim: "bg-[var(--ds-surface-scrim)]",
   selected: "bg-[var(--ds-surface-selected)]",
+} as const;
+
+/**
+ * THE ONE TRUNCATION VOCABULARY.
+ *
+ * A single-line token — a chip, a badge, a pill, a status — has to answer two
+ * questions, and answering only one of them is the defect: `whitespace-nowrap`
+ * alone overflows its border, `overflow-hidden` alone cuts with no signal that
+ * anything was cut, and `truncate` on a flex child with no `min-w-0` never
+ * shrinks in the first place (a flex item's default `min-width: auto` refuses
+ * to go below its content).
+ *
+ * So the pair is named once and spread everywhere:
+ *
+ *   `dsClip.token` on the SHELL  — one line, cut inside its own border
+ *   `dsClip.text`  on the CHILD  — allowed to shrink, then ellipsised
+ *
+ * The full value is never lost: `text-overflow` clips the PAINT, not the DOM,
+ * so the accessible name stays whole and a `title` covers the sighted read.
+ */
+export const dsClip = {
+  /** the shell of a single-line token */
+  token: "max-w-full overflow-hidden whitespace-nowrap",
+  /** the child inside it that may be too long */
+  text: "min-w-0 truncate",
 } as const;
 
 export const dsFg = {

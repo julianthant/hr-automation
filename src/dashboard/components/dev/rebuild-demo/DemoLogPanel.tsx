@@ -66,6 +66,7 @@ import {
   PopoverTrigger,
   ValueField,
   dsBorder,
+  dsClip,
   dsFocus,
   dsIcon,
   dsLayer,
@@ -220,14 +221,22 @@ function Pill({ dir, label, value }: { dir: "read" | "write"; label: string; val
   return (
     <span
       className={cn(
-        "mr-1 inline-flex items-center gap-1 rounded-[5px] border px-1.5 py-px text-[10.5px]",
+        // Was `rounded-[5px] px-1.5 py-px text-[10.5px]` and able to WRAP — the
+        // most-drifted token in the folder, on a radius, a space and a type size
+        // that exist nowhere else in the system. It is a chip; it is now shaped
+        // like every other chip.
+        "mr-[var(--ds-space-tight)] inline-flex shrink-0 items-center border",
+        dsClip.token,
+        "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
+        dsRadius.sm,
+        dsText.micro,
         read
           ? "border-[color:var(--ds-read-border)] bg-[var(--ds-read-bg)] text-[color:var(--ds-read-fg)]"
           : "border-[color:var(--ds-write-border)] bg-[var(--ds-write-bg)] text-[color:var(--ds-write-fg)]",
       )}
     >
-      <Icon aria-hidden className="size-2.5" />
-      {label} <span className="font-mono">{value}</span>
+      <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
+      {label} <span className={cn(dsText.nums, dsClip.text)}>{value}</span>
     </span>
   );
 }
@@ -2411,7 +2420,7 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
       {isMember && row.containment !== "rejected" && (
         <div
           className={cn(
-            "mt-auto flex items-center border-t bg-[var(--ds-surface-2)]",
+            "mt-auto flex items-center border-t bg-[var(--ds-recess-bg)]",
             dsBorder.subtle,
             "gap-[var(--ds-space-snug)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
           )}
