@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -1022,25 +1022,50 @@ function LogsTab({
     ((line.text ?? "").toLowerCase().includes(q) || (line.pills ?? []).some((p) => `${p.label} ${p.value}`.toLowerCase().includes(q)));
   const matchCount = q ? lines.filter(matches).length : 0;
 
-  let lastStep: string | undefined;
+  /*
+    THE STREAM IS GROUPED BY STEP, and that is what makes the step heading
+    STICK. It used to be emitted inline in a flat list, each one wrapped in the
+    same `<div>` as the single line that followed it — and `position: sticky` is
+    bounded by its own parent, so a heading could travel about one line's height
+    before it was pushed out. It looked sticky and was not.
+    A group per step gives the heading the whole run of lines it names to stick
+    across, which is the thing an operator scrolling 400 lines actually wants.
+  */
+  const groups: { step?: string; from: number; lines: DemoLine[] }[] = [];
+  lines.forEach((line, i) => {
+    const last = groups[groups.length - 1];
+    if (last && (line.step ?? last.step) === last.step) last.lines.push(line);
+    else groups.push({ step: line.step, from: i, lines: [line] });
+  });
+
   return (
     <>
-      <div className="min-h-0 flex-1 overflow-y-auto pb-2 pt-1">
-        {lines.map((line, i) => {
-          const divider = line.step && line.step !== lastStep;
-          lastStep = line.step ?? lastStep;
+      {/* NO SCROLLER OF ITS OWN. The panel body is one region now — see the
+          note on `DemoLogPanel`'s return — so the stream is plain content in it
+          and the track beside it runs the whole panel. */}
+      <div className="pb-2 pt-1">
+        {groups.map((group) => (
+        <div key={group.from}>
+          {group.step && (
+            /* NO `z-index`. It sticks BELOW the panel head, and the head is
+               earlier in the DOM — so an equal z made every heading paint OVER
+               the header, the outcome line and the tab bar as it passed them.
+               A positioned element with `z-index: auto` still paints above the
+               static lines it belongs to and below the head that owns z-10,
+               which is exactly the order this needs. */
+            <div className="sticky top-[var(--ds-panel-head-h,0px)] flex items-center gap-2 bg-card px-3 pb-1 pt-2 text-[11px] font-semibold text-secondary-foreground">
+              {group.step}
+              <span aria-hidden className="h-px flex-1 bg-border/60" />
+            </div>
+          )}
+          {group.lines.map((line, li) => {
+          const i = group.from + li;
           const spec = LINE_ICON[line.kind];
           const Icon = spec.icon;
           const hit = matches(line);
           const dim = q.length > 0 && !hit;
           return (
             <div key={i}>
-              {divider && (
-                <div className="sticky top-0 z-10 flex items-center gap-2 bg-card px-3 pb-1 pt-2 text-[11px] font-semibold text-secondary-foreground">
-                  {line.step}
-                  <span aria-hidden className="h-px flex-1 bg-border/60" />
-                </div>
-              )}
               <div className={cn("flex items-start gap-2 px-3 py-[3px] pl-5 text-[12px]", line.kind === "pause" && "bg-info/6", dim && "opacity-35")}>
                 <span className="mt-0.5 shrink-0 font-mono text-[10.5px] text-muted-foreground tabular-nums">{line.ts}</span>
                 <span className="mt-0.5 w-3.5 shrink-0 text-center">
@@ -1072,6 +1097,8 @@ function LogsTab({
             </div>
           );
         })}
+        </div>
+        ))}
         {failure && failureLine < 0 && (
           <InlineFailureRecord
             failure={failure}
@@ -1088,7 +1115,10 @@ function LogsTab({
           </div>
         )}
       </div>
-      <div className="flex items-center gap-2 border-t border-border/60 px-3 py-1.5 text-[11.5px] text-muted-foreground">
+      {/* Pinned to the FLOOR of the same scroller, not parked below it: a
+          search you have to scroll a 400-line stream to reach is a search
+          nobody uses, and a bar outside the region would cut the track short. */}
+      <div className="sticky bottom-0 mt-auto flex items-center gap-2 border-t border-border/60 bg-card px-3 py-1.5 text-[11.5px] text-muted-foreground">
         <label className="sr-only" htmlFor="demo-log-search">
           Search logs
         </label>
@@ -1251,7 +1281,7 @@ function ReviewTab({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex flex-col">
       {/* approve bar — the gate on the whole set, and the review row's own
           decision anchor: this is what the floating notice jumps to on a panel
           whose decision surface is Review rather than the log stream. */}
@@ -1363,7 +1393,7 @@ function ReviewTab({
           Stacking is the last resort, not the 1280px default it became: an
           extraction the operator has to scroll to reach is the exact complaint
           this surface exists to answer. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-y-auto @min-[29rem]:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)] @min-[42.5rem]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-0 @min-[29rem]:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)] @min-[42.5rem]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="flex flex-col gap-1.5 border-b border-border/60 p-3 @min-[29rem]:border-b-0 @min-[29rem]:border-r">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{rec.pageNote}</span>
           {/* THE SHAPE OF THE REAL DOCUMENT. US Letter, 612 × 792 pt, held as a
@@ -1635,8 +1665,8 @@ function ExtractedPeoplePreview({ row, onOpenPanel }: { row: DemoRow; onOpenPane
   const records = reviewRow?.records ?? [];
   if (records.length === 0) return <EmptyTab icon={Users} text="No people yet — this group has not fanned out." />;
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b border-border/60 px-3 py-1.5 text-[11px]">
+    <div className="flex flex-col">
+      <div className="sticky top-[var(--ds-panel-head-h,0px)] flex flex-wrap items-center gap-2 border-b border-border/60 bg-card px-3 py-1.5 text-[11px]">
         <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
           <Users aria-hidden className="size-3 text-muted-foreground" />
           {records.length} people extracted
@@ -1652,7 +1682,7 @@ function ExtractedPeoplePreview({ row, onOpenPanel }: { row: DemoRow; onOpenPane
           </button>
         )}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div>
         {records.map((r) => (
           <div key={r.id} className="flex w-full items-center gap-2 border-b border-border/40 px-3 py-1.5">
             <FileText aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
@@ -1708,8 +1738,11 @@ function PeopleTab({
     // which is 414px with the context rail open and 728px with it collapsed at
     // the SAME 1280px viewport. A media query would fold the Detail column at
     // the wrong moment in both directions.
-    <div className="@container flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
+    <div className="@container flex flex-col">
+      {/* The filter row and the column heads are ONE sticky block, offset by the
+          panel head above them — two sticky layers, in a fixed order, in one
+          scroller. */}
+      <div className={cn("sticky flex items-center gap-2 border-b border-border/60 bg-card px-3 py-1.5", "top-[var(--ds-panel-head-h,0px)]")}>
         <div className="inline-flex rounded-md border border-border bg-secondary/40 p-0.5">
           {PEOPLE_FILTERS.map((f) => (
             <button
@@ -1780,7 +1813,8 @@ function PeopleTab({
           place. */}
       <div
         className={cn(
-          "flex items-center gap-2 border-b px-3 py-1",
+          "sticky flex items-center gap-2 border-b px-3 py-1",
+          "top-[calc(var(--ds-panel-head-h,0px)+var(--ds-h-bar))]",
           "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)]",
         )}
       >
@@ -1797,7 +1831,7 @@ function PeopleTab({
         </span>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div>
         {shown.map((id) => {
           const m = DEMO_ROWS[id];
           const rejected = m.containment === "rejected";
@@ -1871,7 +1905,7 @@ function ReceiptTab({ row }: { row: DemoRow }) {
   const staged = row.data.filter((d) => d.staged || d.unconfirmed);
   if (full) {
     return (
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div>
         <ReceiptView receipt={full} row={row} />
         {staged.length > 0 && <StagedBlock points={staged} />}
       </div>
@@ -1916,7 +1950,7 @@ function ShortReceipt({ row }: { row: DemoRow }) {
     r.tone === "success" ? "text-success" : r.tone === "warning" ? "text-warning" : r.tone === "destructive" ? "text-destructive" : "text-secondary-foreground";
   const staged = row.data.filter((d) => d.staged || d.unconfirmed);
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div>
       <div className="flex flex-col gap-3 px-3 py-3">
         <div className={cn("rounded-lg border px-3 py-2.5", toneCls)}>
           <div className={cn("flex items-center gap-2 text-[12px] font-semibold", headCls)}>
@@ -1976,7 +2010,7 @@ function ShortReceipt({ row }: { row: DemoRow }) {
 
 function EmptyTab({ icon: Icon, text }: { icon: typeof Camera; text: string }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+    <div className="flex min-h-[14rem] flex-col items-center justify-center gap-2 px-6 py-10 text-center">
       <Icon aria-hidden className="size-5 text-muted-foreground/60" />
       <p className="max-w-[36ch] text-[11.5px] text-muted-foreground">{text}</p>
     </div>
@@ -2193,7 +2227,12 @@ function PanelRegion({
           // same 1280px window gives it 414px with the rail open and 728px
           // with it collapsed — so any layout inside that used to switch on a
           // `min-[Npx]:` viewport query would switch at the wrong moment.
-          "@container flex min-h-[24rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card",
+          //
+          // `relative` because the DECISION NOTICE anchors to this box and must
+          // NOT scroll with the body: an `absolute` child of a scroller is
+          // positioned against the scrolled content, so the reminder would
+          // slide away the moment the operator moved the stream.
+          "@container relative flex min-h-[24rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card",
           "min-[1280px]:col-start-1 min-[1280px]:row-start-2 min-[1280px]:min-h-0",
         )}
       >
@@ -2334,6 +2373,31 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
     }
     return onAction(target, action);
   };
+  /**
+   * The panel body is ONE scroller with a sticky head, and two things inside it
+   * also stick — the log stream's step dividers and the People tab's column
+   * heads. They need to land BELOW the head rather than under it, and
+   * `scrollIntoView` must not park its target behind it either.
+   *
+   * There is no CSS way to say "below whatever is sticky above me", so the
+   * head's own height is published as a custom property on the scroller. This
+   * is one element measuring its OWN child for its OWN layout — not the
+   * cross-surface measurement deleted this wave, where a panel's position
+   * depended on how many toasts existed somewhere else.
+   */
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const headRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const head = headRef.current;
+    const scroller = scrollRef.current;
+    if (!head || !scroller) return;
+    const publish = () => scroller.style.setProperty("--ds-panel-head-h", `${Math.round(head.getBoundingClientRect().height)}px`);
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(head);
+    return () => observer.disconnect();
+  }, [row.id, effectiveTab]);
+
   const panel = panelKindSpec(row);
   const variant = rowVariantSpec(row);
   const isMember = row.rowType === "member";
@@ -2343,6 +2407,34 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
 
   return (
     <PanelRegion row={row} tick={tick} onOpenPanel={onOpenPanel} onAction={handleAction}>
+      {/*
+        ONE SCROLLING REGION FOR THE WHOLE PANEL BODY.
+
+        Operator: *"the scroll wheel on the side of the log panel should be one
+        piece and not separated by dividers."* It was three boxes deep — the
+        header, the outcome line and the tab bar sat OUTSIDE the scroller, each
+        tab body owned a scroller of its own, and the member action bar sat
+        outside again — so the track started a third of the way down the panel,
+        stopped short of the bottom, and read as a segment rather than a rail.
+
+        Now the card's whole interior is the scroller and its track runs the
+        full height. Nothing was lost from the top: the header, the outcome line
+        and the tabs are a single STICKY block at `top: 0`, so the status pill
+        and the route to the decision are exactly as permanent as they were —
+        they are now inside the region they head instead of stacked above it.
+
+        `--ds-panel-head-h` is that block's measured height, published on the
+        scroller so the two things that also stick — the log stream's step
+        dividers and the People tab's column heads — land BELOW it instead of
+        under it, and so `scrollIntoView` (the decision and failure jumps) does
+        not park its target behind it. It measures ONE element's own child, for
+        its own layout; it is not the cross-surface coupling deleted this wave.
+      */}
+      <div
+        ref={scrollRef}
+        className="scroll-pt-[var(--ds-panel-head-h,0px)] flex min-h-0 flex-1 flex-col overflow-y-auto"
+      >
+      <div ref={headRef} className={cn("sticky top-0 shrink-0 bg-card", dsLayer.sticky)}>
       {isMember ? (
         <>
           <ConveyorHeader row={row} onSelect={onSelect} checkedIds={checkedIds} />
@@ -2489,44 +2581,39 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
             that felt like information. It was not; the ⓘ in the header carries
             it now. */}
       </div>
-
-      {/* The tab body, and the positioning context for the floating notice. The
-          notice belongs to the BODY rather than to the whole panel so it can
-          never sit over the header, the outcome line or the tab bar — the three
-          bands that are already telling the operator the same thing. */}
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        {effectiveTab === "logs" && (
-          <LogsTab
-            row={row}
-            liveCount={liveCount}
-            onAction={handleAction}
-            onSelect={onSelect}
-            failure={failure}
-            failureOpen={failureOpen}
-            onFailureOpen={setFailureOpen}
-            failureRef={setFailureNode}
-            tick={tick}
-            decisionRef={setDecisionNode}
-          />
-        )}
-        {effectiveTab === "review" && (
-          <ReviewTab row={row} tick={tick} onAction={handleAction} decisionRef={setDecisionNode} />
-        )}
-        {effectiveTab === "people" && <PeopleTab row={row} onSelect={onSelect} onOpenPanel={onOpenPanel} checkedIds={checkedIds} />}
-        {effectiveTab === "receipt" && <ReceiptTab row={row} />}
-
-        {noticeShown && (
-          <DecisionNotice row={row} tick={tick} onGo={goToDecision} onDismiss={() => setNoticeDismissed(true)} />
-        )}
       </div>
+
+      {/* THE TAB BODY, in the same scroller as the head above it. */}
+      {effectiveTab === "logs" && (
+        <LogsTab
+          row={row}
+          liveCount={liveCount}
+          onAction={handleAction}
+          onSelect={onSelect}
+          failure={failure}
+          failureOpen={failureOpen}
+          onFailureOpen={setFailureOpen}
+          failureRef={setFailureNode}
+          tick={tick}
+          decisionRef={setDecisionNode}
+        />
+      )}
+      {effectiveTab === "review" && (
+        <ReviewTab row={row} tick={tick} onAction={handleAction} decisionRef={setDecisionNode} />
+      )}
+      {effectiveTab === "people" && <PeopleTab row={row} onSelect={onSelect} onOpenPanel={onOpenPanel} checkedIds={checkedIds} />}
+      {effectiveTab === "receipt" && <ReceiptTab row={row} />}
 
       {/* member action bar — a rejected row gets none of it: there is no task
           behind it to retry, so the buttons are structurally absent, not
-          disabled. Delete lives on the row footer. */}
+          disabled. Delete lives on the row footer.
+          It STICKS to the bottom of the one scroller rather than sitting below
+          it: outside, it would have cut the track short of the panel's floor,
+          which is the segmentation this pass removed. */}
       {isMember && row.containment !== "rejected" && (
         <div
           className={cn(
-            "mt-auto flex items-center border-t bg-[var(--ds-recess-bg)]",
+            "sticky bottom-0 mt-auto flex items-center border-t bg-[var(--ds-recess-bg)]",
             dsBorder.subtle,
             "gap-[var(--ds-space-snug)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
           )}
@@ -2563,6 +2650,13 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
             <Kbd>c</Kbd> checks · <Kbd>n</Kbd> next attention
           </span>
         </div>
+      )}
+      </div>
+
+      {/* The locator, anchored to the PANEL's box rather than to the scrolled
+          content — see the note on `DecisionNotice`. */}
+      {noticeShown && (
+        <DecisionNotice row={row} tick={tick} onGo={goToDecision} onDismiss={() => setNoticeDismissed(true)} />
       )}
 
       {/* The two typed exits from Write parked. There is no third. */}

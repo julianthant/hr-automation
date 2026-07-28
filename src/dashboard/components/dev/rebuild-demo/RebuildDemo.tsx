@@ -434,18 +434,18 @@ export function RebuildDemo() {
     [select],
   );
 
+  // The theme attribute rides the demo's own root so the DOM says which of the
+  // pair is showing; `useDemoTheme` has already stamped <html> and <body> for
+  // the portalled overlays (see `ds/theme.ts`).
+  //
+  // THAT ROOT IS ALSO THE OUTERMOST NODE, above both providers, and that is
+  // load-bearing rather than tidy: `ToastProvider` renders its viewport as a
+  // FRAGMENT sibling of its children, so with the providers on the outside the
+  // viewport was not a descendant of this element and inherited none of its
+  // custom properties. `--ds-toast-inset-bottom` therefore resolved to nothing
+  // and every toast sat on top of the Sessions bar — visible the moment the
+  // page was booted, and invisible to typecheck.
   return (
-    <ToastProvider>
-    {/* ONE `TooltipProvider` FOR THE WHOLE DEMO, and it is not optional: Radix
-        throws `Tooltip must be used within TooltipProvider` and the error
-        boundary swallows the entire page. It is a provider rather than a
-        per-tooltip wrapper because the shared delay is the point — the first
-        tooltip in a group waits, the ones you sweep onto afterwards do not,
-        which is what makes a hovered toolbar feel fast instead of sticky. */}
-    <TooltipProvider>
-    {/* The theme attribute rides the demo's own root so the DOM says which of
-        the pair is showing; `useDemoTheme` has already stamped <html> and
-        <body> for the portalled overlays (see `ds/theme.ts`). */}
     <div
       data-demo-theme={theme}
       // THE TOAST FLOOR, and it is a CONSTANT.
@@ -472,6 +472,14 @@ export function RebuildDemo() {
       }
       className="flex h-screen flex-col bg-background text-foreground"
     >
+      <ToastProvider>
+      {/* ONE `TooltipProvider` FOR THE WHOLE DEMO, and it is not optional: Radix
+          throws `Tooltip must be used within TooltipProvider` and the error
+          boundary swallows the entire page. It is a provider rather than a
+          per-tooltip wrapper because the shared delay is the point — the first
+          tooltip in a group waits, the ones you sweep onto afterwards do not,
+          which is what makes a hovered toolbar feel fast instead of sticky. */}
+      <TooltipProvider>
       <DemoTopBar
         view={shellView}
         onView={setShellView}
@@ -669,8 +677,8 @@ export function RebuildDemo() {
           select(p.row.id);
         }}
       />
+      </TooltipProvider>
+      </ToastProvider>
     </div>
-    </TooltipProvider>
-    </ToastProvider>
   );
 }
