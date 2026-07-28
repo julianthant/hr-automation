@@ -55,7 +55,7 @@ import {
 import { FooterActions, OutcomeActionButton, RowContextMenu, type DemoActionHandler } from "./DemoActions";
 import { rowInBucket, type StatusBucket } from "./DemoShell";
 import { DEMO_DAY, dayLabel } from "./demo-days";
-import { demoNowMs, fmtVersionTag, workflowVersionTag } from "./demo-wire";
+import { demoNowMs, fmtDayLabel, fmtVersionTag, plural, workflowVersionTag } from "./demo-wire";
 import {
   bandsFor,
   DEMO_ROWS,
@@ -394,13 +394,13 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): 
         <span
           title={
             stream.streaming
-              ? `${lookups} delegated person lookups so far — one per person read. The rest arrive as the extraction reports them.`
-              : `${lookups} delegated person lookups — one per record. Reachable only from this review row; the packet never lists them.`
+              ? `${plural(lookups, "delegated person lookup")} so far — one per person read. The rest arrive as the extraction reports them.`
+              : `${plural(lookups, "delegated person lookup")} — one per record. Reachable only from this review row; the packet never lists them.`
           }
           className={rowChip("neutral")}
         >
           <GitBranch aria-hidden className={dsIcon.sm} />
-          {stream.streaming ? `${lookups} of ${stream.total} lookups` : `${lookups} lookups`}
+          {stream.streaming ? `${lookups} of ${plural(stream.total, "lookup")}` : plural(lookups, "lookup")}
         </span>
       )}
       {/* a run started against a TEST instance can never be mistaken for a
@@ -935,9 +935,10 @@ export function DemoRowCard({
                 not a member list: each signer is an Oath Signature run with its
                 own row in that panel, counted there exactly once. */}
             {linked && (
-              <div className="col-start-2">
+              <div className={ROW_LINK_BAND}>
                 <button
                   type="button"
+                  data-demo-row-link
                   onClick={(e) => {
                     e.stopPropagation();
                     handlers.onOpenPanel(linked.panel, linked.targetId);
@@ -965,21 +966,24 @@ export function DemoRowCard({
                 delegated paths share ONE back chip: an arrow that points left,
                 naming the panel and the row it returns to. */}
             {row.linkedParentId && DEMO_ROWS[row.linkedParentId] && (
-              <div className="col-start-2">
+              <div className={ROW_LINK_BAND}>
                 <button
                   type="button"
+                  data-demo-row-link
                   onClick={(e) => {
                     e.stopPropagation();
                     const parent = DEMO_ROWS[row.linkedParentId as string];
                     handlers.onOpenPanel(parent.wfLabel, parent.id);
                   }}
+                  /* The chip names the PANEL it returns to; the run it returns
+                     to is on the title, because every row in this panel shares
+                     that parent and the filename is what the cap would eat. */
                   title={`Back to ${DEMO_ROWS[row.linkedParentId].wfLabel} · ${DEMO_ROWS[row.linkedParentId].title} — the run that delegated this one`}
+                  aria-label={`Back to ${DEMO_ROWS[row.linkedParentId].wfLabel} · ${DEMO_ROWS[row.linkedParentId].title}`}
                   className={linkChip("neutral")}
                 >
                   <ArrowLeft aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
-                  <span className="min-w-0 truncate">
-                    {DEMO_ROWS[row.linkedParentId].wfLabel} · {DEMO_ROWS[row.linkedParentId].title}
-                  </span>
+                  <span className="min-w-0 truncate">{DEMO_ROWS[row.linkedParentId].wfLabel}</span>
                 </button>
               </div>
             )}
@@ -1083,7 +1087,7 @@ export function DemoRowCard({
                 clickable: a bordered chip with a hover lift and the ↗ that
                 means "this changes panel". */}
             {row.reviewRunId && (
-              <div className="col-start-2">
+              <div className={ROW_LINK_BAND}>
                 <LinkedReviewChip row={row} handlers={handlers} />
               </div>
             )}
@@ -1095,6 +1099,31 @@ export function DemoRowCard({
     </div>
   );
 }
+
+/**
+ * THE BAND A CROSS-PANEL CHIP LIVES IN — capped to the left of the row's centre.
+ *
+ * A queue row is one large select target with smaller targets nested inside it,
+ * and the nested ones were winning the middle: `elementFromPoint` at the centre
+ * of every queued Oath Signature row returned the `Oath Upload ·
+ * Signed_Oaths_0724.pdf` back chip, 226px wide and straddling the row's axis,
+ * so a click in the middle of a row OPENED A DIFFERENT WORKFLOW rather than
+ * selecting the row it landed on.
+ *
+ * Two things fix it together, and neither is enough alone. The band is capped
+ * by `--ds-w-row-link-max`, which is derived from the row's own geometry rather
+ * than picked, so the cap holds at 400px and at 470px and at any width after.
+ * And the chip says less: the PANEL it returns to, with the run's full identity
+ * on the `title`, because a chip narrow enough to clear the centre and still
+ * carrying a filename would only truncate the filename.
+ *
+ * `data-demo-row-link` marks it as a target that LEAVES this row. That is what
+ * makes the rule checkable instead of eyeballed: no element carrying it may
+ * contain its row's centre point, at any row variant. A row's own commands are
+ * deliberately not marked — Approve acts on the row you are pointing at, and a
+ * member line selects one of that row's own people.
+ */
+const ROW_LINK_BAND = "col-start-2 flex min-w-0 max-w-[var(--ds-w-row-link-max)]";
 
 /**
  * A chip that CHANGES PANEL. Three of these existed as three copies of the same
@@ -1134,9 +1163,10 @@ function LinkedReviewChip({ row, handlers }: { row: DemoRow; handlers: DemoQueue
   const target = row.reviewRunId ? DEMO_ROWS[row.reviewRunId] : undefined;
   if (!target) return null;
   return (
-    <div>
+    <div className="flex min-w-0">
       <button
         type="button"
+        data-demo-row-link
         onClick={(e) => {
           e.stopPropagation();
           handlers.onOpenPanel(target.wfLabel, target.id);
@@ -1176,7 +1206,7 @@ function PacketBeforeFanout({ row, handlers }: { row: DemoRow; handlers: DemoQue
       <div className={cn(dsText.meta, "flex flex-wrap items-center gap-[var(--ds-space-base)]")}>
         <span className={rowChip("neutral", "font-medium")}>
           <Users aria-hidden className={cn(dsIcon.sm, "text-[color:var(--ds-fg-muted)]")} />
-          {row.extractedCount} people
+          {plural(row.extractedCount, "person", "people")}
         </span>
         {/* `member rows appear when you approve` was here. It described what
             the button beside it does, which the row's ⓘ already says once, for
@@ -1202,15 +1232,22 @@ function PacketBeforeFanout({ row, handlers }: { row: DemoRow; handlers: DemoQue
             >
               Approve {bulk.approvable} of {bulk.total}
             </Button>
+            {/* GROUPED BY WHAT IT DOES, and that grouping is also the hit-area
+                fix: `Approve` acts on this row, `Open review` leaves for
+                another panel, so they are pushed to opposite ends and the row's
+                own centre falls in the gap between them. It used to sit a gap
+                from Approve, directly under the row's axis, where a click meant
+                to select the packet navigated away from it. */}
             <Button
               size="sm"
               variant="secondary"
+              data-demo-row-link
               onClick={(e) => {
                 e.stopPropagation();
                 if (row.reviewRunId) handlers.onOpenPanel(DEMO_ROWS[row.reviewRunId].wfLabel, row.reviewRunId);
               }}
               iconAfter={<ArrowUpRight aria-hidden className={dsIcon.sm} />}
-              className="shrink-0"
+              className="ml-auto shrink-0"
             >
               Open review
             </Button>
@@ -1837,7 +1874,12 @@ export function DemoQueue({
           >
             <span className={cn(dsText.ui, "inline-flex items-center gap-[var(--ds-space-snug)] font-semibold text-[color:var(--ds-fg)]")}>
               <FileText aria-hidden className={cn(dsIcon.md, "text-[color:var(--ds-fg-muted)]")} />
-              {state.filter === "all" ? `No ${workflowLabel} runs on Jul 25` : `No ${workflowLabel} runs are ${filterWord(state.filter)}`}
+              {/* The day comes from the same `day` prop the header reads. It
+                  used to be a hardcoded `Jul 25`, so an empty Wednesday panel
+                  said it was an empty Saturday one. */}
+              {state.filter === "all"
+                ? `No ${workflowLabel} runs on ${fmtDayLabel(`${day}T12:00:00`)}`
+                : `No ${workflowLabel} runs are ${filterWord(state.filter)}`}
             </span>
             {/* An empty state still owes the operator three things — what would
                 be here, why it is not, and what to do — and no more. The two
