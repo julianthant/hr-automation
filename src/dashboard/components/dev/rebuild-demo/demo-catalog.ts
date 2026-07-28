@@ -14,7 +14,7 @@
  */
 
 import { DEMO_ROWS, MEMBER_LIST_SHAPE, ROLLUP_PRECEDENCE, type Containment, type DemoRow } from "./demo-data";
-import { panelKindOf as panelKind, type PanelKind as PanelKindKey } from "./demo-wire";
+import { panelKindOf as panelKind, tabsForPanelKind, TAB_LABEL, type PanelKind as PanelKindKey } from "./demo-wire";
 import { PROPOSED_STATUS } from "./demo-status";
 
 // ---------------------------------------------------------------------------
@@ -240,31 +240,41 @@ export interface PanelKindSpec {
   key: PanelKindKey;
   name: string;
   forRows: string;
-  tabs: string[];
+  /**
+   * DERIVED from `tabsForPanelKind` — the same function the panel itself calls
+   * — and labelled from `TAB_LABEL`, the same map the tab bar draws with. It is
+   * not a field a spec may author, because the version of this catalog that let
+   * one still declared a `Data` tab a wave after Data moved to the context rail,
+   * and a catalog that documents a UI which no longer exists is worse than none.
+   */
+  readonly tabs: readonly string[];
   defaultTab: string;
   pinned: string[];
   specifics: string[];
   exampleId?: string;
 }
 
-export const PANEL_KINDS: PanelKindSpec[] = [
+/** the tab words for one panel kind, straight off the panel's own derivation */
+export function tabNamesForPanelKind(kind: PanelKindKey): string[] {
+  return tabsForPanelKind(kind).map((tab) => TAB_LABEL[tab]);
+}
+
+const PANEL_KIND_SPECS: Omit<PanelKindSpec, "tabs">[] = [
   {
     key: "run",
     name: "Run Panel",
     forRows: "Person Run Row · Document Run Row · Catalog Run Row",
-    tabs: ["Logs", "Data", "Receipt"],
-    defaultTab: "Running → Logs · terminal → Receipt · gated → Logs with the gate pinned open",
+    defaultTab: "Running → Logs · terminal → Receipt · failed → Logs, on the record it left behind",
     pinned: [
-      "Header: title · status · elapsed · trace id",
-      "Outcome bar",
-      "Gate banner when waiting on you",
-      "Timeline — each step sized by its real duration, hover for detail",
-      "Evidence bar",
+      "Header: title · status with its own age · trace id",
+      "Outcome line — one sentence of what it means, and its one verb",
+      "Run shape: an equal-width timeline above the panel, one segment per step",
     ],
     specifics: [
       "No Review tab — this row has no records to review.",
-      "Data is one surface, not two: every value the run touched, with the read values editable in place, and a footer that starts a fresh run from them.",
-      "The 4-column detail grid of today's panel is gone; those fields live on the row as facts and in the Data ledger.",
+      "There is no gate banner. A decision renders inline in the log stream at the line that produced it, and a dismissable notice appears in the corner only while that decision is scrolled out of reach.",
+      "Data and Evidence are not tabs. Both are sections of the context rail beside the panel, so what the run read can be read WHILE the stream is still running.",
+      "The Data ledger corrects read values in place; a write is shown and never editable.",
     ],
     exampleId: "sep-maria",
   },
@@ -272,13 +282,17 @@ export const PANEL_KINDS: PanelKindSpec[] = [
     key: "review",
     name: "Review Panel",
     forRows: "Review Run Row only",
-    tabs: ["Review", "Logs", "Data", "Receipt"],
     defaultTab: "Review — always, this row exists to be reviewed",
-    pinned: ["Header with reviewed N of M", "Approve bar showing approvable vs blocked", "Timeline", "Evidence bar"],
+    pinned: [
+      "Header with reviewed N of M and its progress bar",
+      "Approve bar: how many are approvable, and the count of your own corrections",
+      "Run shape: the same equal-width timeline",
+    ],
     specifics: [
       "The ONLY panel with a Review tab.",
       "Review is one person at a time: the source page beside the fields read from it, never a collapsed table.",
       "Per-person approve/skip with prev · next · next-flagged, and a reviewed counter that gates Approve all.",
+      "A field you type over changes its provenance from PAPER to YOU and drops the model's confidence — a hand-typed value is not a paper read.",
       "Blocked records cannot be approved and say why in plain language.",
     ],
     exampleId: "ocr-summer",
@@ -287,12 +301,15 @@ export const PANEL_KINDS: PanelKindSpec[] = [
     key: "group",
     name: "Group Panel",
     forRows: "Packet Group Row · Roster Group Row",
-    tabs: ["People", "Logs", "Data", "Receipt"],
     defaultTab: "Anyone needing attention → People · otherwise Logs while running, Receipt when finished",
-    pinned: ["Header with member counts", "Outcome bar", "Coordinator timeline (extract → review → fan-out → rollup)", "Evidence bar"],
+    pinned: [
+      "Header with member counts",
+      "Outcome line",
+      "Run shape: the coordinator's own timeline (extract → review → fan-out → rollup)",
+    ],
     specifics: [
       "People is the per-person work surface: one filtered list, attention first, click into any person.",
-      "Before approval there are no members — People lists the people the OCR extracted, read-only, and says member rows appear when you approve.",
+      "Before approval there are no members — People lists the people the OCR extracted, read-only, with a route to the review that would release them.",
       "The group's Logs are the coordinator's own — member detail belongs to the member.",
       "The receipt carries every member's confirmation number inline, so filing a packet never means opening N rows.",
     ],
@@ -302,7 +319,6 @@ export const PANEL_KINDS: PanelKindSpec[] = [
     key: "member",
     name: "Member Panel",
     forRows: "Person Member Row · Rejected Member Row",
-    tabs: ["Logs", "Data", "Receipt"],
     defaultTab: "Running → Logs · terminal → Receipt",
     pinned: [
       "Conveyor header: prev · next · position in set · next needing attention",
@@ -317,6 +333,11 @@ export const PANEL_KINDS: PanelKindSpec[] = [
     exampleId: "i9-m-19",
   },
 ];
+
+export const PANEL_KINDS: PanelKindSpec[] = PANEL_KIND_SPECS.map((spec) => ({
+  ...spec,
+  tabs: tabNamesForPanelKind(spec.key),
+}));
 
 // ---------------------------------------------------------------------------
 // Row explanations — the ⓘ on every queue row

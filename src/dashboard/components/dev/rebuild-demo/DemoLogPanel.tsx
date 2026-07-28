@@ -46,6 +46,7 @@ import {
   buildRecordCorrections,
   fmtClock,
   tabsFor as tabsForKind,
+  TAB_LABEL,
   type ActionDescriptorWire,
   type DemoTab,
   type GateCandidateSpec,
@@ -2123,11 +2124,19 @@ function MemberSourceBlock({ row, onSelect }: { row: DemoRow; onSelect: (id: str
 // the panel
 // ---------------------------------------------------------------------------
 
+/** the icon per tab; the WORD comes from `TAB_LABEL`, which the catalog reads too */
+const TAB_ICON: Record<DemoTab, typeof ScrollText> = {
+  people: Users,
+  review: ClipboardList,
+  logs: ScrollText,
+  receipt: Receipt,
+};
+
 const TAB_META: Record<DemoTab, { label: string; icon: typeof ScrollText }> = {
-  people: { label: "People", icon: Users },
-  review: { label: "Review", icon: ClipboardList },
-  logs: { label: "Logs", icon: ScrollText },
-  receipt: { label: "Receipt", icon: Receipt },
+  people: { label: TAB_LABEL.people, icon: TAB_ICON.people },
+  review: { label: TAB_LABEL.review, icon: TAB_ICON.review },
+  logs: { label: TAB_LABEL.logs, icon: TAB_ICON.logs },
+  receipt: { label: TAB_LABEL.receipt, icon: TAB_ICON.receipt },
 };
 
 const OUTCOME_TONE: Record<DemoRow["outcome"]["tone"], { bar: string; dot: string; btn: string }> = {

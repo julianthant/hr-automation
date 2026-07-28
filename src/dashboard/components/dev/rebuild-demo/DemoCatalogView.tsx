@@ -241,8 +241,8 @@ export function DemoCatalogView({ onOpenExample }: { onOpenExample: (id: string)
         <section>
           <SectionHead
             icon={Layers}
-            title="Rollup precedence and the density ladder"
-            blurb="A group's status is never authored — it is rolled up from its members through one shared function. Its shape is never a new row type — it is a rung on a ladder driven by member count."
+            title="Rollup precedence and the one member shape"
+            blurb="A group's status is never authored — it is rolled up from its members through one shared function. Its shape is never a new row type, and it is no longer a rung on a ladder either: three people and fifty render the same way, and scale changes only how far the well scrolls."
           />
           <div className={specimenCard}>
             <div className={cn(dsText.ui, "font-semibold text-[color:var(--ds-fg)]")}>Rollup precedence</div>
@@ -280,7 +280,7 @@ export function DemoCatalogView({ onOpenExample }: { onOpenExample: (id: string)
           <SectionHead
             icon={PanelRight}
             title="Log Panels — 4 kinds, tabs derived not fixed"
-            blurb="One Log Panel surface, but the tab set comes from the row you selected. Screenshots is not a tab — evidence is a bar above the tabs. Review exists only where records exist."
+            blurb="One Log Panel surface, but the tab set comes from the row you selected — read here off the same derivation the panel calls, so this page cannot document a tab set the product does not have. Neither Data nor Evidence is a tab: both are context-rail sections beside the panel. Review exists only where records exist."
           />
           <div className="grid gap-2.5 min-[1100px]:grid-cols-2">
             {PANEL_KINDS.map((p) => (
