@@ -62,8 +62,9 @@ import {
   serverContractToken,
   UPLOAD_FILES,
   activeConflictFor,
-  captureSessionFor,
+  captureSessionsFor,
   deriveStartPlan,
+  summarizeCaptureSession,
   parseEntries,
   submitDemoEnqueue,
   testSystems,
@@ -80,6 +81,7 @@ import {
   StartChoiceControl,
   StartFlagControl,
 } from "./DemoRunStartKit";
+import { DemoCapturePanel } from "./DemoCapture";
 import { DemoIntakeDialog } from "./DemoIntake";
 import { SOURCE_SHEETS } from "./demo-data-intake";
 
@@ -499,6 +501,8 @@ export function DemoRunModal({
   const [text, setText] = useState("");
   const [fileIds, setFileIds] = useState<string[]>([]);
   const [sheetId, setSheetId] = useState("");
+  /** which of the workflow's open capture sessions this start is about */
+  const [captureId, setCaptureId] = useState("");
   const [policy, setPolicy] = useState<EnqueuePolicy>("reject-active");
   const [priority, setPriority] = useState<"interactive" | "bulk">("interactive");
   const [instances, setInstances] = useState<InstanceChoice>({});
@@ -518,6 +522,11 @@ export function DemoRunModal({
     setText("");
     setFileIds([]);
     setSheetId(SOURCE_SHEETS.find((s) => s.workflow === next)?.id ?? "");
+    // Reset rather than carry: a session id belongs to ONE workflow, so keeping
+    // the old one would leave the form pointing at a session this start could
+    // never use. A workflow with none is left holding "", which resolves to no
+    // session — the honest answer, not a substituted one.
+    setCaptureId(captureSessionsFor(next)[0]?.id ?? "");
     setResult(null);
   }, []);
 
@@ -544,7 +553,8 @@ export function DemoRunModal({
   const bad = entries.filter((e) => e.problem);
   const valid = entries.filter((e) => !e.problem);
   const files = useMemo(() => fileIds.map((id) => UPLOAD_FILES.find((f) => f.id === id)).filter((f): f is UploadFileFixture => Boolean(f)), [fileIds]);
-  const capture = captureSessionFor(workflowId);
+  const captureSessions = useMemo(() => captureSessionsFor(workflowId), [workflowId]);
+  const capture = captureSessions.find((s) => s.id === captureId);
   const sheets = useMemo(() => SOURCE_SHEETS.filter((s) => s.workflow === workflowId), [workflowId]);
 
   const plan = useMemo(
@@ -578,8 +588,12 @@ export function DemoRunModal({
         ? files.length === 0
           ? "Pick at least one document."
           : null
-        : methodWire.kind === "capture" && !capture
-          ? "No capture session is open for this workflow."
+        : methodWire.kind === "capture"
+          ? !capture
+            ? "No capture session is open for this workflow."
+            : // The panel's own blockers, unchanged — the footer and the panel
+              // cannot say different things about the same session.
+              (summarizeCaptureSession(capture).blockers[0] ?? null)
           : methodWire.kind === "spreadsheet" && !sheetId
             ? "Pick a sheet."
             : null;
@@ -677,33 +691,14 @@ export function DemoRunModal({
             )}
 
             {methodWire.kind === "capture" && (
-              <section className="flex flex-col gap-[var(--ds-space-snug)]">
-                <SectionLabel>Capture session</SectionLabel>
-                {capture ? (
-                  <Well className="flex flex-col gap-[var(--ds-space-snug)]">
-                    <div className="flex flex-wrap items-center gap-[var(--ds-space-base)]">
-                      <Camera aria-hidden className={cn(dsIcon.md, dsFg.muted)} />
-                      <span className={cn(dsText.ui, "font-semibold", dsFg.base)}>
-                        {capture.photoCount} page{capture.photoCount === 1 ? "" : "s"} photographed
-                      </span>
-                      <MetaLine items={[capture.id, capture.deviceLabel, `opened ${capture.openedLabel}`]} />
-                    </div>
-                    <p className={cn(dsText.body, dsFg.secondary, "max-w-[74ch]")}>
-                      The desktop never touches the phone — it is served the session and its page count, which is all a plan needs. This demo
-                      runs no capture server, so the session above is a fixture rather than a QR code that scans to nothing.
-                    </p>
-                  </Well>
-                ) : (
-                  <Well>
-                    <EmptyState
-                      className="p-[var(--ds-space-base)]"
-                      icon={<Camera aria-hidden className={dsIcon.lg} />}
-                      title="No capture session is open"
-                      description="A capture starts on the phone. Until one is open there is nothing to build a plan from, and nothing here will invent one."
-                    />
-                  </Well>
-                )}
-              </section>
+              <DemoCapturePanel
+                sessions={captureSessions}
+                sessionId={captureId}
+                onSessionId={(next) => {
+                  setCaptureId(next);
+                  setResult(null);
+                }}
+              />
             )}
 
             {methodWire.kind === "spreadsheet" && (
