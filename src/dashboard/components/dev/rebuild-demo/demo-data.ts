@@ -902,12 +902,12 @@ const sepRosa: DemoRowSpec = {
       {
         key: "confirmed-present",
         label: "Confirmed present",
-        detail: "You found the termination in UCPath. The run closes as Verified done and records the transaction you read.",
+        detail: "You found the termination in UCPath. The run closes as Done and records the transaction you read.",
         intent: "success",
         command: "resolve-write-present",
         confirm: {
           title: "Record the termination as PRESENT?",
-          body: "This closes Rosa Delgado as Verified done against a write you read with your own eyes, and files a ledger entry attributed to you. If you are wrong, the queue will show a termination that does not exist.",
+          body: "This closes Rosa Delgado as Done against a write you read with your own eyes, and files a ledger entry attributed to you. If you are wrong, the queue will show a termination that does not exist.",
           confirmLabel: "I saw it — record present",
           tone: "neutral",
         },
@@ -1145,7 +1145,7 @@ const onbJordan: DemoRowSpec = {
   ],
   receipt: {
     tone: "success",
-    headline: "Verified done · hire submitted",
+    headline: "Done · hire submitted",
     lines: [
       { label: "Wage", value: "$18.50/hr", verified: true },
       { label: "Effective date", value: "07/01/2026", verified: true },
@@ -1203,7 +1203,7 @@ const kpMarcus: DemoRowSpec = {
   ],
   receipt: {
     tone: "success",
-    headline: "Verified done · pay rule updated",
+    headline: "Done · pay rule updated",
     lines: [
       { label: "Pay rule", value: "SDCMP → SDCMP-WS", verified: true },
       { label: "Union", value: "CX" },
@@ -1444,7 +1444,7 @@ const spMorning: DemoRowSpec = {
   ],
   receipt: {
     tone: "success",
-    headline: "Verified done · roster on disk",
+    headline: "Done · roster on disk",
     lines: [
       { label: "File", value: "UCSD_Roster_2026-07-25.xlsx · 1.2 MB", verified: true },
       { label: "Rows", value: "4,182", verified: true },
@@ -1766,7 +1766,7 @@ function i9Member(i: number): DemoRowSpec {
         ],
         receipt: {
           tone: "success",
-          headline: "Verified done · retention recorded",
+          headline: "Done · retention recorded",
           lines: [
             { label: "UCPath", value: "found · separated 06/30/2026", verified: true },
             { label: "Sections", value: `S1 p${(i % 30) + 2} · S2 p${(i % 20) + 1}`, verified: true },
@@ -1841,7 +1841,7 @@ function oathMember(i: number): DemoRowSpec {
       ? { tone: "destructive", headline: "No receipt — oath not signed", note: "Retry replays just this signer; the PDF and other signers are untouched." }
       : {
           tone: "success",
-          headline: "Verified done · oath signed",
+          headline: "Done · oath signed",
           lines: [
             { label: "Signed", value: signTime, verified: true },
             { label: "CRM check", value: "onboarding record verified", verified: true },
@@ -2185,7 +2185,7 @@ const ocrSpring: DemoRowSpec = {
   ],
   receipt: {
     tone: "success",
-    headline: "Verified done · 12 of 12 approved",
+    headline: "Done · 12 of 12 approved",
     lines: [
       { label: "Read", value: "12 records · 12 pages", verified: true },
       { label: "Approved", value: "12 of 12 · 11:12 AM", verified: true },
@@ -2384,7 +2384,7 @@ function ouSigner(i: number): DemoRowSpec {
     receipt: done
       ? {
           tone: "success",
-          headline: "Verified done · oath signed",
+          headline: "Done · oath signed",
           lines: [
             { label: "Signed", value: signedClock, verified: true },
             { label: "From", value: "Signed_Oaths_0724.pdf" },
@@ -2607,7 +2607,7 @@ function wsMember(i: number): DemoRowSpec {
     lines: [{ ts, kind: "write", system: "ucpath", pills: [{ dir: "write", label: "award", value: `$${2000 + i * 100}` }], step: "Transaction" }],
     receipt: {
       tone: "success",
-      headline: "Verified done · award saved",
+      headline: "Done · award saved",
       lines: [
         { label: "Award", value: `$${2000 + i * 100}`, verified: true },
         { label: "Effective", value: "07/01/2026", verified: true },
@@ -2720,7 +2720,7 @@ function ecPacketMember(i: number): DemoRowSpec {
     data: [{ step: "Fill form", dir: "write", field: "Relationship", value: ["spouse", "parent", "sibling", "partner", "parent"][i], system: "ucpath", ts }],
     receipt: {
       tone: "success",
-      headline: "Verified done · contact saved",
+      headline: "Done · contact saved",
       lines: [{ label: "Relationship", value: ["spouse", "parent", "sibling", "partner", "parent"][i], verified: true }],
     },
     shots: [{ label: "Saved contact", kind: "step" }],
@@ -2762,7 +2762,7 @@ const ecPacket: DemoRowSpec = {
     {
       ts: "11:32:10",
       kind: "warn",
-      text: "Rollup — 5 of 5 real members verified, but 1 rejected page is unresolved, so the packet is Done with warnings, not Verified done",
+      text: "Rollup — 5 of 5 real members read back, but 1 rejected page is unresolved, so the packet closes Done with warnings rather than plain Done",
       step: "Rollup",
     },
   ],
@@ -2782,7 +2782,7 @@ const ecPacket: DemoRowSpec = {
       value: `EC-2026-${pad(7710 + i * 3, 4)}`,
       verified: true,
     })),
-    note: "A rejected page is not a failure and not a success — it is work that never existed. Delete it (or acknowledge it) and the packet settles to Verified done.",
+    note: "A rejected page is not a failure and not a success — it is work that never existed. Delete it (or acknowledge it) and the packet settles to Done.",
   },
   shots: [
     { label: "Packet page 1", kind: "step" },
@@ -2823,7 +2823,7 @@ const ecSingleMember: DemoRowSpec = {
   data: [{ step: "Fill form", dir: "write", field: "Relationship", value: "parent", system: "ucpath", ts: "12:05:31" }],
   receipt: {
     tone: "success",
-    headline: "Verified done · contact saved",
+    headline: "Done · contact saved",
     lines: [{ label: "Relationship", value: "parent", verified: true }],
   },
   shots: [{ label: "Saved contact", kind: "step" }],
@@ -2859,7 +2859,7 @@ const ecSingle: DemoRowSpec = {
   data: [{ step: "Member fan-out", dir: "write", field: "Contacts saved", value: "1 of 1", system: "ucpath", ts: "12:06:00" }],
   receipt: {
     tone: "success",
-    headline: "Verified done · 1 of 1 saved",
+    headline: "Done · 1 of 1 saved",
     lines: [{ label: "Source packet", value: "EC_Form_Ito.pdf · 1 page" }],
     members: [{ name: "Yara Ito", value: "EC-2026-7801", verified: true }],
     note: "One member is still a member: the person keeps her own run, receipt and retry, and the packet keeps the page she came from.",
@@ -3045,7 +3045,7 @@ function plSummerMember(i: number): DemoRowSpec {
     ],
     receipt: {
       tone: blocked ? "warning" : "success",
-      headline: blocked ? "Done with warnings · person is inactive" : "Verified done · person resolved",
+      headline: blocked ? "Done with warnings · person is inactive" : "Done · person resolved",
       lines: [
         { label: "Employee ID", value: p.eid, verified: true },
         { label: "HR status", value: blocked ? "Inactive — separated 06/30/2026" : "Active", verified: true },
@@ -3101,7 +3101,7 @@ const plSummer: DemoRowSpec = {
   ],
   receipt: {
     tone: "success",
-    headline: "Verified done · 6 lookups answered",
+    headline: "Done · 6 lookups answered",
     lines: [{ label: "Delegated by", value: "OCR · Oath_Packet_Summer.pdf" }],
     members: SUMMER_PEOPLE.map((p) => ({ name: p.name, value: p.eid, verified: p.state !== "blocked", failed: false })),
     note: "Nothing was written. These answers are consumed by the OCR run's records — this group exists so the work is visible in the panel that executed it.",
@@ -3457,7 +3457,7 @@ function sepListMember(i: number): DemoRowSpec {
     ],
     receipt: {
       tone: "success",
-      headline: "Verified done · termination submitted",
+      headline: "Done · termination submitted",
       lines: [
         { label: "Separation date", value: "07/31/2026", verified: true },
         { label: "Transaction", value: `TXN-09${pad(11400 + i * 13, 5)}`, verified: true },
@@ -3603,7 +3603,7 @@ function plVerifyMember(i: number): DemoRowSpec {
     data: [{ step: "Searching", dir: "read", field: "Employee ID", value: p.eid, system: "ucpath", ts }],
     receipt: {
       tone: "success",
-      headline: "Verified done · person resolved",
+      headline: "Done · person resolved",
       lines: [{ label: "Employee ID", value: p.eid, verified: true }],
     },
     shots: [],
@@ -3640,7 +3640,7 @@ const plVerify: DemoRowSpec = {
   data: [{ step: "Member fan-out", dir: "read", field: "People resolved", value: "3 of 3", system: "ucpath", ts: "2:09:23" }],
   receipt: {
     tone: "success",
-    headline: "Verified done · 3 lookups answered",
+    headline: "Done · 3 lookups answered",
     lines: [{ label: "Delegated by", value: "OCR · I9_Supporting_0724.pdf" }],
     members: VERIFY_PEOPLE.map((p) => ({ name: p.name, value: p.eid, verified: true })),
   },

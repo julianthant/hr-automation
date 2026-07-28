@@ -21,7 +21,7 @@
  *     a `readBack`, and every non-verified read-back is forced by the type to
  *     carry the reason it could not be verified. "We could not check" is a fact
  *     the operator gets told, never an absence they have to notice.
- *  3. **`Verified done` is earned, not typed.** `deriveReceiptResult` computes
+ *  3. **`Done` is earned, not typed.** `deriveReceiptResult` computes
  *     the verdict from the row's status and its members; `receiptInvariant`
  *     re-checks doc 12's rule (verified-done requires verified confidence, every
  *     mandatory criterion met and zero failed members) and the surface refuses
@@ -601,7 +601,7 @@ const RECEIPT_SPECS: Record<string, DemoReceiptSpec> = {
         criterion: "The keyword set matches the source page",
         method: "No method available — OnBase does not expose the stored keyword set to this workflow",
         result: "unverifiable",
-        note: "This is why the run is Done with warnings rather than Verified done. A green verdict here would be a claim nothing checked.",
+        note: "This is why the run is Done with warnings rather than plain Done. A green verdict here would be a claim nothing checked.",
       },
     ],
     reuse: [{ lane: "fresh-live", label: "Values read from the source page in this run", detail: "No checkpoint was reused." }],

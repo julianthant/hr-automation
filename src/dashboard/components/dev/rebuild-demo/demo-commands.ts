@@ -160,7 +160,7 @@ const APPLIED_COPY: Record<DemoCommandKey, (row: DemoRow) => { headline: string;
   }),
   "resolve-write-present": (row) => ({
     headline: "Write recorded as PRESENT",
-    detail: `${label(row)} closes as Verified done against what you read in UCPath, and a ledger entry is filed under your name. Retry stays locked — there is nothing left to run.`,
+    detail: `${label(row)} closes as Done against what you read in UCPath, and a ledger entry is filed under your name. Retry stays locked — there is nothing left to run.`,
   }),
   "resolve-write-absent": (row) => ({
     headline: "Write recorded as ABSENT",

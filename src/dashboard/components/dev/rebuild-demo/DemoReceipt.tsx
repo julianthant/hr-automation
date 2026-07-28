@@ -5,6 +5,7 @@ import {
   Badge,
   Banner,
   Chip,
+  DS_STATUS,
   KeyValueList,
   MetaLine,
   SectionLabel,
@@ -50,12 +51,32 @@ import {
  *    reported as a defect instead of printed as a result.
  */
 
+/**
+ * The receipt's verdict WORD, and where it comes from.
+ *
+ * Four of the five verdicts are the same verdict the row's chip renders, so
+ * they read their word from `DS_STATUS` rather than restating it. That is the
+ * whole point: a chip saying `Done` beside a receipt saying `Verified done` was
+ * two names for one verdict, and the only reason it could happen is that the
+ * word was typed twice. Now it is typed once — rename the status and the
+ * receipt follows.
+ *
+ * **The GUARANTEE did not shorten with the word.** `verified-done` is still the
+ * key, it is still only reachable through `deriveReceiptResult`, and
+ * `receiptInvariant` still refuses to print it without verified confidence,
+ * every criterion met and no unfinished member. The read-back column below is
+ * what earns it.
+ *
+ * `partial` is the one verdict with no status of its own — a run can be
+ * partially filed without the row being able to say so — so it carries its own
+ * word here, deliberately.
+ */
 const RESULT_COPY: Record<DemoRunReceipt["result"], { word: string; tone: "success" | "warning" | "danger" | "neutral" }> = {
-  "verified-done": { word: "Verified done", tone: "success" },
-  "done-with-warnings": { word: "Done with warnings", tone: "warning" },
+  "verified-done": { word: DS_STATUS.verifiedDone.label, tone: "success" },
+  "done-with-warnings": { word: DS_STATUS.doneWarnings.label, tone: "warning" },
   partial: { word: "Partial outcome", tone: "warning" },
-  failed: { word: "Failed", tone: "danger" },
-  cancelled: { word: "Cancelled", tone: "neutral" },
+  failed: { word: DS_STATUS.failed.label, tone: "danger" },
+  cancelled: { word: DS_STATUS.cancelled.label, tone: "neutral" },
 };
 
 const CONFIDENCE_COPY: Record<DemoRunReceipt["confidence"], string> = {

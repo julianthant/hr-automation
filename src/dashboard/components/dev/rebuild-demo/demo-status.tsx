@@ -87,10 +87,10 @@ export function StatusBadge({
  * A member's OUTCOME — what its run found — as a word in a column.
  *
  * Status and outcome are orthogonal axes and this is the component that keeps
- * them apart. A member can be `Verified done` with the outcome `Not found`,
+ * them apart. A member can be `Done` with the outcome `Not found`,
  * because looking and finding nothing is a successful run with a negative
  * answer, so an outcome is deliberately NEVER a `StatusPill`: putting a
- * negative answer in status chrome is exactly how `Verified done · Not found`
+ * negative answer in status chrome is exactly how `Done · Not found`
  * comes to read as a failure. It is a word, the word is always the
  * differentiator, and the tone only decides how loudly it is said.
  *

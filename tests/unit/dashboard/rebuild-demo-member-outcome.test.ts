@@ -11,7 +11,7 @@ import { DEMO_ROWS, orderedMemberIds } from "../../../src/dashboard/components/d
 /**
  * A member's STATUS answers "did it run"; its OUTCOME answers "what did it
  * find". They are orthogonal — the whole reason the outcome exists is that a
- * member is routinely `Verified done` with the outcome `Not found`, and the old
+ * member is routinely `Done` with the outcome `Not found`, and the old
  * free-text detail column crammed both axes plus the evidence into one string
  * that truncated to `S1 + S2 · ret…`.
  *

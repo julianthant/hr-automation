@@ -227,7 +227,7 @@ function StatusSection() {
     <Section
       id="status"
       title="The eight statuses"
-      note="Four separating channels per status: hue, emphasis tier, icon and label. Waiting on you and Failed are the only solid fills — the two loudest things the product can show. Verified done has no chip at all."
+      note="Four separating channels per status: hue, emphasis tier, icon and label. Waiting on you and Failed are the only solid fills — the two loudest things the product can show. Done has no chip at all."
     >
       <div className="grid grid-cols-2 gap-[var(--ds-space-base)]">
         {DS_STATUS_ORDER.map((status) => (

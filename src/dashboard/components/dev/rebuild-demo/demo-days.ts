@@ -96,7 +96,7 @@ const sepVictor: DemoRowSpec = {
   ],
   receipt: {
     tone: "success",
-    headline: "Verified done · termination filed",
+    headline: "Done · termination filed",
     lines: [
       { label: "Separation date", value: "07/10/2026", verified: true },
       { label: "Transaction", value: "TXN-0884019", verified: true },
@@ -170,7 +170,7 @@ const wsTomas: DemoRowSpec = {
   ],
   receipt: {
     tone: "success",
-    headline: "Verified done · award updated",
+    headline: "Done · award updated",
     lines: [
       { label: "Prior award", value: "$2,400" },
       { label: "New award", value: "$3,200", verified: true },
@@ -215,7 +215,7 @@ const sepLena: DemoRowSpec = {
   ],
   receipt: {
     tone: "success",
-    headline: "Verified done · termination filed",
+    headline: "Done · termination filed",
     lines: [
       { label: "Separation date", value: "07/15/2026", verified: true },
       { label: "Transaction", value: "TXN-0887730", verified: true },
@@ -337,7 +337,7 @@ const krThursday: DemoRowSpec = {
   data: [{ step: "Report run", dir: "read", field: "Row count", value: "214", system: "kronos", ts: "4:33:19" }],
   receipt: {
     tone: "success",
-    headline: "Verified done · report downloaded",
+    headline: "Done · report downloaded",
     lines: [
       { label: "Rows", value: "214", verified: true },
       { label: "Saved", value: "reports/2026-07-24-timecard-exceptions.xlsx" },
