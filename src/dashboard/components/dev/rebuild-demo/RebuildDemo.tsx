@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DemoLogPanel, tabsFor, type DemoTab } from "./DemoLogPanel";
 import { computeVisibleIds, DemoQueue, type DemoFilter, type DemoQueueState, type DemoView } from "./DemoQueue";
@@ -438,7 +439,17 @@ export function RebuildDemo() {
     {/* The theme attribute rides the demo's own root so the DOM says which of
         the pair is showing; `useDemoTheme` has already stamped <html> and
         <body> for the portalled overlays (see `ds/theme.ts`). */}
-    <div data-demo-theme={theme} className="flex h-screen flex-col bg-background text-foreground">
+    <div
+      data-demo-theme={theme}
+      // The Session bar is pinned to the bottom of this shell, and the toast
+      // viewport is `fixed` at the bottom of the VIEWPORT — so a toast landed
+      // on top of it. The viewport reads `--ds-toast-inset-bottom`, and the
+      // shell is the only thing that knows what it has parked down there:
+      // one bar plus the gutter. A surface with nothing at the bottom sets
+      // nothing and gets the plain gutter.
+      style={{ "--ds-toast-inset-bottom": "calc(var(--ds-h-bar) + var(--ds-space-loose))" } as CSSProperties}
+      className="flex h-screen flex-col bg-background text-foreground"
+    >
       <DemoTopBar
         view={shellView}
         onView={setShellView}

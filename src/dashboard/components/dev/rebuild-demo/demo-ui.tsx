@@ -185,12 +185,12 @@ export {
   useDsModalPresence,
   useDsModalOpen,
   /**
-   * Claim the viewport's bottom-right corner while a floating surface is
-   * mounted there. The toast viewport steps to bottom-left for as long as the
-   * claim is held — so a persistent `danger` toast and a panel-anchored notice
-   * can never occupy the same pixels, at any width, by construction.
+   * Is a toast occupying the viewport's bottom-right right now? Read it from
+   * any surface that would otherwise be drawn there and anchor somewhere else
+   * while it is true — the corner belongs to the alert, and the reminder is the
+   * one that yields.
    */
-  useDsBottomRightClaim,
+  useDsToastCornerBusy,
 } from "./ds/primitives-overlay";
 export type {
   DsDialogSize,

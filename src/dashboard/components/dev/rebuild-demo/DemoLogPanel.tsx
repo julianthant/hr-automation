@@ -74,7 +74,7 @@ import {
   dsRadius,
   dsSize,
   dsText,
-  useDsBottomRightClaim,
+  useDsToastCornerBusy,
   useDsEnterTransition,
 } from "./demo-ui";
 import { ReceiptView, runReceiptFor } from "./DemoReceipt";
@@ -772,16 +772,19 @@ function PanelKindInfo({
  *
  * WHERE IT SITS, and why that took a registry. It used to be pinned TOP-right
  * of the tab body, where it covered the People tab's own filter controls and
- * clipped the detail column underneath it — it was floating over the work the
- * operator had just switched tabs to do. Bottom-right is the corner a floating
- * reminder belongs in, and it is also the corner the TOAST viewport owns; a
- * `danger` toast never auto-dismisses, so "we will position them so they miss"
- * is not a fix when the two live in different coordinate systems and the
- * panel's width changes with the context rail. `useDsBottomRightClaim` makes
- * the miss STRUCTURAL: while this is mounted the toast viewport steps to
- * bottom-left — the same move it already makes for a modal — and stays fully
- * live, because a reminder does not outrank a failure. It only gets not to be
- * covered by one.
+ * clipped the detail column underneath it — floating over the work the operator
+ * had just switched tabs to reach. Bottom-right is where a floating reminder
+ * belongs, and it is also the corner the TOAST viewport owns; a `danger` toast
+ * never auto-dismisses, so "we will position them so they miss" is not a fix
+ * when the two live in different coordinate systems and the panel's width
+ * changes with the context rail.
+ *
+ * `useDsToastCornerBusy` makes the miss STRUCTURAL, and the yielding runs the
+ * way the hierarchy does: the corner belongs to the ALERT, because a failed
+ * write is the loudest thing this product may say and an alert that moves is
+ * one the operator learns to look for in two places. So while any toast is on
+ * screen this notice anchors bottom-LEFT of its own panel instead. It is the
+ * reminder, and its absence from one corner costs nothing.
  */
 function DecisionNotice({
   row,
@@ -794,11 +797,9 @@ function DecisionNotice({
   onGo: () => void;
   onDismiss: () => void;
 }) {
-  // Held for as long as this is mounted — keyed to mount, exactly like
-  // `useDsModalPresence`, so there is no open/closed flag to get out of step.
   // Both hooks run BEFORE the early return: a hook behind a conditional return
   // is a hook whose count changes between renders.
-  useDsBottomRightClaim();
+  const cornerBusy = useDsToastCornerBusy();
   const entering = useDsEnterTransition();
   const gate = row.gate;
   if (!gate) return null;
@@ -815,7 +816,12 @@ function DecisionNotice({
     <FloatingSurface
       role="status"
       className={cn(
-        "absolute bottom-[var(--ds-space-cozy)] right-[var(--ds-space-cozy)] overflow-hidden",
+        "absolute bottom-[var(--ds-space-cozy)] overflow-hidden",
+        // It YIELDS. The step is a MOVE, not a jump: the same reminder is still
+        // there, it has changed which edge it hangs off, and watching it travel
+        // is what says that rather than "a second notice appeared".
+        cornerBusy ? "left-[var(--ds-space-cozy)]" : "right-[var(--ds-space-cozy)]",
+        dsMotion.move,
         // `md`, not `sm`. At 240px the ask truncated mid-word — `approve the
         // pe…` — which is the one line on this surface that has to survive: the
         // status is already on the header pill, so what is left here is WHAT IS

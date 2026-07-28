@@ -340,10 +340,10 @@ const ROW_CHIP_TONE: Record<RowChipTone, string> = {
   // `--ds-recess-fg-quiet`, not a hand-picked `--ds-fg-muted`: a row chip is a
   // MARKER you scan past (`test`, `dry run`, `v3.1`), which is a different job
   // from the recessed plane's other ink, the one that carries a value you read.
-  neutral: "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
-  info: "border-transparent bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
-  warning: "border-transparent bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
-  violet: "border-transparent bg-[var(--ds-status-parked-bg)] text-[color:var(--ds-status-parked-fg)]",
+  neutral: "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
+  info: "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
+  warning: "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
+  violet: "border-[color:var(--ds-status-parked-border)] bg-[var(--ds-status-parked-bg)] text-[color:var(--ds-status-parked-fg)]",
 };
 
 const rowChip = (tone: RowChipTone, extra?: string): string =>
