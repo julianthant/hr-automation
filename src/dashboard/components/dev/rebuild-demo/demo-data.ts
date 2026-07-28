@@ -756,7 +756,7 @@ const sepMaria: DemoRowSpec = {
   ],
   gate: {
     kind: "identity",
-    title: "Waiting on you — identity approval",
+    title: "Which person is on this record?",
     openedAt: at("14:03:34"),
     candidates: [
       {
@@ -868,7 +868,7 @@ const sepRosa: DemoRowSpec = {
     {
       ts: "1:52:10",
       kind: "pause",
-      text: "Write parked — the transaction may or may not exist. Never auto-retried: a blind retry here is how you get two terminations.",
+      text: "The transaction may or may not exist. Never auto-retried: a blind retry here is how you get two terminations.",
       card: "gate",
       step: "UCPath transaction",
     },
@@ -883,7 +883,7 @@ const sepRosa: DemoRowSpec = {
   ],
   gate: {
     kind: "parked",
-    title: "Write parked — outcome unknown, resolve present or absent",
+    title: "Outcome unknown — resolve present or absent",
     openedAt: at("13:52:10"),
     staged: [
       { field: "Separation date", value: "07/18/2026", system: "ucpath", unconfirmed: true },
@@ -953,7 +953,7 @@ const plDaniel: DemoRowSpec = {
   startedAt: at("14:25:46"),
   evidence: { confidence: "unknown" },
   liveText: "Cross-verification — matching CRM record by start date",
-  outcome: { tone: "info", text: "Running — cross-verification · matching CRM record by start date" },
+  outcome: { tone: "info", text: "Cross-verification · matching the CRM record by start date" },
   steps: [
     { label: "Searching", state: "done", system: "ucpath", durationSec: 6, keyLines: ["1 active match · 10488213"] },
     { label: "Cross-verification", state: "current", system: "crm" },
@@ -1322,7 +1322,7 @@ const cdSamuel: DemoRowSpec = {
   },
   failShots: 3,
   error: "CRM search returned no record for samuel.ortiz@ucsd.edu — download step never reached",
-  outcome: { tone: "destructive", text: "Failed — CRM search returned no record for samuel.ortiz@ucsd.edu" },
+  outcome: { tone: "destructive", text: "CRM search returned no record for samuel.ortiz@ucsd.edu" },
   steps: [
     { label: "CRM auth", state: "done", system: "crm", durationSec: 19 },
     { label: "Search record", state: "failed", system: "crm", durationSec: 29, attempts: 2, keyLines: ["no record for samuel.ortiz@ucsd.edu", "attempt 1 (12:58) timed out"] },
@@ -1372,7 +1372,7 @@ const wsPriya: DemoRowSpec = {
   enqueuedAt: at("14:24:01"),
   evidence: { confidence: "unknown" },
   queueNote: "3m waiting · 2 ahead",
-  outcome: { tone: "muted", text: "Queued — 2 items ahead · a worker picks this up next" },
+  outcome: { tone: "muted", text: "Behind two items on this workflow" },
   steps: [
     { label: "UCPath auth", state: "pending", system: "ucpath" },
     { label: "Transaction", state: "pending", system: "ucpath" },
@@ -1459,7 +1459,7 @@ const spRefresh: DemoRowSpec = {
   enqueuedAt: at("14:23:10"),
   evidence: { confidence: "unknown" },
   queueNote: "2m waiting · 1 ahead",
-  outcome: { tone: "muted", text: "Queued — a start that asked for a fresh roster is waiting behind this one" },
+  outcome: { tone: "muted", text: "A start that asked for a fresh roster is waiting behind this one" },
   steps: [
     { label: "SharePoint auth", state: "pending", system: "crm" },
     { label: "Locate export", state: "pending", system: "crm" },
@@ -1618,7 +1618,7 @@ function i9Member(i: number): DemoRowSpec {
         ],
         gate: {
           kind: "identity",
-          title: "Waiting on you — which person is on the form?",
+          title: "Which person is on the form?",
           openedAt: plusSeconds(startedAt, 12),
           // THREE, not two. A name search returns what it returns, and a gate
           // that can only draw a pair would have to drop the third person.
@@ -1703,7 +1703,7 @@ function i9Member(i: number): DemoRowSpec {
         startedAt: agoSeconds(34),
         memberFact: "person-lookup…",
         liveText: "Person lookup — cross-verifying hire date",
-        outcome: { tone: "info", text: "Running — person lookup, cross-verifying hire date" },
+        outcome: { tone: "info", text: "Person lookup — cross-verifying the hire date" },
         steps: [
           { label: "Person match", state: "done", system: "ucpath", durationSec: 9 },
           { label: "Person lookup", state: "current", system: "ucpath" },
@@ -1971,7 +1971,7 @@ const oathSummer: DemoRowSpec = {
   reviewRunId: "ocr-summer",
   outcome: {
     tone: "warning",
-    text: "Waiting on you — approve 5 of 6 people, or open the review to work through them.",
+    text: "Approve 5 of 6 people, or open the review to work through them.",
   },
   steps: [
     { label: "OCR extraction", state: "done", system: "i9", durationSec: 128, keyLines: ["6 people on 8 pages", "2 pages had no form"] },
@@ -1986,7 +1986,7 @@ const oathSummer: DemoRowSpec = {
     { ts: "2:22:51", kind: "ok", system: "i9", text: "Roster re-match — 6/6 matched to July_Roster.xlsx", duration: "31s", step: "Roster match" },
     { ts: "2:22:54", kind: "warn", text: "Diego Diaz — UCPath status Inactive (separated 06/30/2026), record blocked", step: "Roster match" },
     { ts: "2:22:55", kind: "warn", text: "Ben Brooks — EID read at 0.44 confidence, flagged for your eyes", step: "Roster match" },
-    { ts: "2:22:56", kind: "pause", text: "Waiting on you — approve people to fan out signer tasks. Open the OCR review row to work through them.", card: "gate", step: "Your review" },
+    { ts: "2:22:56", kind: "pause", text: "Approve people to fan out signer tasks. Open the OCR review row to work through them.", card: "gate", step: "Your review" },
   ],
   data: [
     { step: "OCR extraction", dir: "read", field: "People found", value: "6 (8 pages)", system: "i9", ts: "2:22:20" },
@@ -1995,7 +1995,7 @@ const oathSummer: DemoRowSpec = {
   ],
   gate: {
     kind: "approval",
-    title: "Waiting on you — approve the people to sign",
+    title: "Approve the people to sign",
     openedAt: at("14:22:31"),
     note: "Approve straight from here if the packet reads clean; open the review to look at each person beside their page. Approving fans out one signer task per approved person — that is when member rows appear. Diego Diaz is blocked (inactive) and is excluded from the count.",
     options: [
@@ -2078,7 +2078,7 @@ const ocrSummer: DemoRowSpec = {
   ],
   gate: {
     kind: "approval",
-    title: "Waiting on you — 6 people to review",
+    title: "6 people to review",
     openedAt: at("14:22:34"),
     note: "Each person is shown beside the page they were read from. Approve per person; the packet fans out only what you approved.",
     options: [
@@ -2336,8 +2336,8 @@ function ouSigner(i: number): DemoRowSpec {
     outcome: done
       ? { tone: "success", text: `Oath signed ${signedClock} — CRM verified` }
       : running
-        ? { tone: "info", text: "Running — signing the oath in UCPath" }
-        : { tone: "muted", text: "Queued — a worker picks this signer up next" },
+        ? { tone: "info", text: "Signing the oath in UCPath" }
+        : { tone: "muted", text: "Behind the signers already in flight" },
     steps: done
       ? [
           { label: "CRM verify", state: "done", system: "crm", durationSec: 9 },
@@ -2471,7 +2471,7 @@ const krReports: DemoRowSpec = {
     { label: "selection", value: "7 reports" },
     { label: "period", value: "07/06 – 07/19" },
   ],
-  outcome: { tone: "info", text: "Running — 3 of 7 reports downloaded · 4 workers" },
+  outcome: { tone: "info", text: "3 of 7 reports downloaded · 4 workers" },
   steps: [
     { label: "Kronos auth", state: "done", system: "kronos", durationSec: 26 },
     { label: "Select reports", state: "done", system: "kronos", durationSec: 18, keyLines: ["7 of 34 catalog reports selected"] },
@@ -2537,7 +2537,7 @@ function wsMember(i: number): DemoRowSpec {
       startedAt: agoSeconds(51),
       memberFact: "filling transaction…",
       liveText: "UCPath transaction — effective 07/01/2026",
-      outcome: { tone: "info", text: "Running — filling the work-study transaction" },
+      outcome: { tone: "info", text: "Filling the work-study transaction" },
       steps: [
         { label: "UCPath auth", state: "done", system: "ucpath", durationSec: 8 },
         { label: "Transaction", state: "current", system: "ucpath" },
@@ -2932,7 +2932,7 @@ const obPacket: DemoRowSpec = {
   error: "OCR failed — 0 of 14 pages were readable (96 dpi fax scan)",
   outcome: {
     tone: "destructive",
-    text: "Failed — its OCR run could not read the packet: 0 of 14 pages readable (96 dpi fax scan)",
+    text: "Its OCR run could not read the packet: 0 of 14 pages readable (96 dpi fax scan)",
   },
   steps: [
     { label: "OCR extraction", state: "failed", system: "i9", durationSec: 72, keyLines: ["delegated to oc-155902-e440", "child failed — 0 of 14 pages readable"] },
@@ -3128,7 +3128,7 @@ const plNathan: DemoRowSpec = {
     label: "Nathan Cole · separations identity check → EID for the termination write",
     targetRunId: "sep-nathan",
   },
-  outcome: { tone: "info", text: "Running — resolving the EID the separations run needs before it can write" },
+  outcome: { tone: "info", text: "Resolving the EID the separations run needs before it can write" },
   steps: [
     { label: "Searching", state: "current", system: "ucpath" },
     { label: "Cross-verification", state: "pending", system: "crm" },
@@ -3159,7 +3159,7 @@ const sepNathan: DemoRowSpec = {
   // a set of one is still a set, and it still lives in its own panel.
   linkedGroup: { ids: ["pl-nathan"], noun: "person lookup", panel: "Person Lookup" },
   liveText: "Paused at Identity check — waiting on the delegated person lookup",
-  outcome: { tone: "info", text: "Running — handed the identity check to Person Lookup, waiting for the EID" },
+  outcome: { tone: "info", text: "Handed the identity check to Person Lookup, waiting for the EID" },
   steps: [
     { label: "Kuali extraction", state: "done", system: "kuali", durationSec: 27, keyLines: ["last day worked = 08/01/2026", "no employee ID on the document"] },
     { label: "Identity check", state: "current", system: "ucpath", keyLines: ["delegated to pl-142509-5b12", "this branch runs only when the document has no usable EID"] },
@@ -3207,7 +3207,7 @@ const plDana: DemoRowSpec = {
   },
   outcome: {
     tone: "destructive",
-    text: "Failed — 0 UCPath matches for “Dana Whitmore”; the separations run that asked for it is failed too",
+    text: "0 UCPath matches for “Dana Whitmore”; the separations run that asked for it is failed too",
   },
   steps: [
     { label: "Searching", state: "failed", system: "ucpath", durationSec: 39, attempts: 2, keyLines: ["0 matches on the full name", "0 matches on last name + department"] },
@@ -3254,7 +3254,7 @@ const sepDana: DemoRowSpec = {
   error: "Person lookup failed — UCPath person search returned 0 matches for “Dana Whitmore”",
   outcome: {
     tone: "destructive",
-    text: "Failed — its person lookup found nobody: 0 UCPath matches for “Dana Whitmore”",
+    text: "Its person lookup found nobody: 0 UCPath matches for “Dana Whitmore”",
   },
   steps: [
     { label: "Kuali extraction", state: "done", system: "kuali", durationSec: 24, hasShot: true },
@@ -3354,7 +3354,7 @@ function sepListMember(i: number): DemoRowSpec {
       data: [{ step: "Kuali extraction", dir: "read", field: "Last day worked", value: "07/28/2026", system: "kuali", ts }],
       gate: {
         kind: "identity",
-        title: "Waiting on you — identity approval",
+        title: "Which person is on this record?",
         openedAt: at("13:53:20"),
         candidates: [
           // No `captureId`, and that is the honest answer rather than an
@@ -3399,7 +3399,7 @@ function sepListMember(i: number): DemoRowSpec {
       memberFact: "job summary…",
       liveText: "Job summary — reading the active job record",
       evidence: { confidence: "unknown" },
-      outcome: { tone: "info", text: "Running — reading the job summary" },
+      outcome: { tone: "info", text: "Reading the job summary" },
       steps: [
         step("Kuali extraction", "done", "kuali", 28),
         step("Identity check", "done", "ucpath", 11),
@@ -3417,7 +3417,7 @@ function sepListMember(i: number): DemoRowSpec {
       ...base,
       memberFact: "—",
       queueNote: "#1 in line",
-      outcome: { tone: "muted", text: "Queued — one worker, five people; this one is last in line" },
+      outcome: { tone: "muted", text: "#1 in line behind the running member" },
       steps: SEP_LIST_STEPS.map((label) => step(label, "pending")),
       lines: [{ ts: "1:49:40", kind: "event", text: "Fanned out from the typed list", step: "Queued" }],
       receipt: { tone: "muted", headline: "Receipt — pending", note: "Nothing has run yet." },

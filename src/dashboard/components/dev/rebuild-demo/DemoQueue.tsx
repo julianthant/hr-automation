@@ -270,7 +270,16 @@ function MicroSteps({ row }: { row: DemoRow }) {
  * gives the name every pixel that is left and puts the outcomes and the EIDs on
  * two straight edges.
  */
-const MEMBER_GRID = "grid grid-cols-[1rem_minmax(0,1fr)_var(--ds-w-member-detail)_var(--ds-w-member-eid)]";
+/*
+  ITS LEADING TRACK IS THE CARD'S OWN `--ds-w-row-indent`, not a hand-picked
+  `1rem`. That one substitution is what puts a member's NAME on the same x as
+  the card's TITLE and a member's status glyph on the same x as the card's
+  status icon — because both are now "a glyph in the leading track, then the
+  subject". The well was inset ~20px from everything above it and read as a
+  foreign element pasted onto the card; it is part of the card's grid now.
+*/
+const MEMBER_GRID =
+  "grid grid-cols-[var(--ds-w-row-indent)_minmax(0,1fr)_var(--ds-w-member-detail)_var(--ds-w-member-eid)]";
 
 /**
  * What the detail column is CALLED for this group — `Outcome` when its workflow
@@ -426,19 +435,18 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): 
         </span>
       )}
       {row.attemptHistory && (
-        <span
-          title={row.attemptHistory.prior}
-          className={rowChip("warning", "font-semibold")}
-        >
+        <span title={row.attemptHistory.prior} className={rowChip("warning")}>
           <RotateCcw aria-hidden className={dsIcon.sm} />
           attempt {row.attemptHistory.n}
         </span>
       )}
+      {/* NOT `font-semibold`. Three weights were stacked in two rows of this
+          header — an emphasised warning chip, the filled status pill and a
+          bordered action — and only ONE of them is allowed to be loud. The
+          status is the loud thing; the count of warnings is a fact that
+          recedes, on the same matte chip every other fact on the row wears. */}
       {row.warnings && (
-        <span
-          title={row.warnings.first}
-          className={rowChip("warning", "font-semibold")}
-        >
+        <span title={row.warnings.first} className={rowChip("warning")}>
           <AlertTriangle aria-hidden className={dsIcon.sm} />
           {row.warnings.count}
         </span>
@@ -562,9 +570,17 @@ function sublineFor(row: DemoRow): { tone: string; text: string } | null {
   if (status === "waiting" && row.gate)
     return {
       tone: "text-[color:var(--ds-status-waiting-fg)]",
+      // NO PREFIX STRIP HERE ANY MORE. This branch used to do
+      // `.replace("Waiting on you — ", "")` on the gate title — on the identity
+      // arm only — because the FIXTURES opened every gate title and every
+      // outcome sentence with the status word the pill beside them was already
+      // showing. Papering over one of nine sites in the renderer left the other
+      // eight saying it twice; the prefixes are gone from the source instead,
+      // and a sentence next to a status now states WHAT IS NEEDED and nothing
+      // the pill has already said.
       text:
         row.gate.kind === "identity" && row.gate.candidates
-          ? `${row.gate.title.replace("Waiting on you — ", "")} — ${row.gate.candidates[0].name} vs ${row.gate.candidates[1].name}`
+          ? `${row.gate.title} — ${row.gate.candidates[0].name} vs ${row.gate.candidates[1].name}`
           : row.gate.title,
     };
   // Parked is an UNKNOWN outcome, never a hold you resume.
@@ -590,6 +606,23 @@ function sublineFor(row: DemoRow): { tone: string; text: string } | null {
       text: row.outcome.text,
     };
   return null;
+}
+
+/**
+ * A group with its MEMBER LIST on screen has no subtitle.
+ *
+ * On the failed spring packet it read `11/12 signed · Grace Egan failed —
+ * signature fi…`, cut mid-word, directly above a counts strip that says
+ * `✓11 ⚠1` and a list whose first line IS Grace Egan with her outcome in its
+ * own column. Three renderings of one fact, and the only one that truncates is
+ * the redundant one.
+ *
+ * There is nothing to keep: the counts strip carries the tally, the list names
+ * who, and the panel carries the failure detail in full. A row whose list is
+ * shut still gets its sentence — that is the case the sentence was written for.
+ */
+function groupSublineSuppressed(row: DemoRow, membersVisible: boolean): boolean {
+  return row.rowType === "group" && membersVisible;
 }
 
 // ---------------------------------------------------------------------------
@@ -737,7 +770,7 @@ export function DemoRowCard({
   const selected = state.selectedId === row.id;
   const status = effectiveStatus(row);
   const announcing = useAttentionAnnounce(status);
-  const sub = sublineFor(row);
+  const subline = sublineFor(row);
   const elapsed = row.elapsedSec !== undefined ? fmtElapsed(row.elapsedSec + state.tick) : undefined;
   const isGroup = row.rowType === "group";
   const counts = isGroup ? groupCounts(row.id) : null;
@@ -750,6 +783,7 @@ export function DemoRowCard({
   // shut by the operator draws none, so its name preview is still the only
   // place its composition appears.
   const membersVisible = isGroup && memberCount > 0 && !(settled && !state.expandedGroups.has(row.id));
+  const sub = groupSublineSuppressed(row, membersVisible) ? null : subline;
 
   return (
     <div className="px-[var(--ds-space-cozy)] pt-[var(--ds-space-snug)] first:pt-[var(--ds-space-cozy)]">
@@ -962,8 +996,12 @@ export function DemoRowCard({
               </ChipRow>
             )}
 
+            {/* FULL WIDTH, both tracks. The group's own grid supplies the
+                leading column, so its glyphs land under the card's status icon
+                and its text under the card's title — one left edge for the
+                whole card rather than a well indented inside column two. */}
             {isGroup && counts && (memberCount > 0 ? (
-              <div className="col-start-2 flex flex-col gap-[var(--ds-space-snug)]">
+              <div className="col-span-2 flex flex-col gap-[var(--ds-space-snug)]">
                 {/* THE COUNTS STRIP IS THE MEMBER LIST'S HEADER ROW, and it is
                     laid on the member list's OWN column tracks.
 
@@ -979,7 +1017,10 @@ export function DemoRowCard({
                   className={cn(
                     MEMBER_GRID,
                     dsText.meta,
-                    "items-center gap-x-[var(--ds-space-base)] px-[var(--ds-space-base)]",
+                    // No `px` compensation any more. It existed to line this
+                    // strip up with the well's INNER padding; the well has none
+                    // now, so both simply sit on the card's own tracks.
+                    "items-center gap-x-[var(--ds-space-base)]",
                   )}
                 >
                   <span aria-hidden className="col-start-1" />
@@ -1235,6 +1276,11 @@ function PersonWell({ children }: { children: ReactNode }) {
   return (
     <div
       className={cn(
+        // NO HORIZONTAL PADDING. The well's own inset was one of the card's
+        // four competing left edges; with the padding gone its lines inherit
+        // the card's grid tracks exactly, so a member name starts where the
+        // title starts and the EID column ends where the header badges end.
+        //
         // The recessed plane, plus the ONE case allowed to draw its edge: this
         // well SCROLLS, and the half-cut row at its bottom is only readable as
         // "there is more" if the container has a boundary to be cut by.
@@ -1304,7 +1350,7 @@ function PersonLine({
   const shape = cn(
     MEMBER_GRID,
     "w-full items-center text-left",
-    "h-[var(--ds-h-sm)] gap-x-[var(--ds-space-base)] px-[var(--ds-space-base)]",
+    "h-[var(--ds-h-sm)] gap-x-[var(--ds-space-base)]",
     dsText.body,
     // It comes from BELOW, because that is where the next person is coming
     // from: the list grows downward, so a line that slid down from above would
@@ -1492,7 +1538,15 @@ function GroupMemberList({ row, state, handlers }: { row: DemoRow; state: DemoQu
           it is the only way back to its members once it is shut — and the
           drill-in is always offered, because it is the same route into the same
           list whether that list is three people or fifty. */}
-      <div className={cn(visible.length > 0 && "mt-[var(--ds-space-snug)]", "flex items-center gap-[var(--ds-space-cozy)]")}>
+      {/* The links sit in the TEXT column — the same x as every member name
+          above them and the card title above that. They are about the list,
+          not entries in it, so they take no leading glyph. */}
+      <div
+        className={cn(
+          visible.length > 0 && "mt-[var(--ds-space-snug)]",
+          "flex items-center gap-[var(--ds-space-cozy)] pl-[var(--ds-w-row-indent)]",
+        )}
+      >
         {settled && (
           <button
             type="button"

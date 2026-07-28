@@ -74,7 +74,7 @@ import {
   dsRadius,
   dsSize,
   dsText,
-  useDsToastCornerBusy,
+  dsToastStackLift,
   useDsEnterTransition,
 } from "./demo-ui";
 import { ReceiptView, runReceiptFor } from "./DemoReceipt";
@@ -804,12 +804,15 @@ function PanelKindInfo({
  * when the two live in different coordinate systems and the panel's width
  * changes with the context rail.
  *
- * `useDsToastCornerBusy` makes the miss STRUCTURAL, and the yielding runs the
- * way the hierarchy does: the corner belongs to the ALERT, because a failed
- * write is the loudest thing this product may say and an alert that moves is
- * one the operator learns to look for in two places. So while any toast is on
- * screen this notice anchors bottom-LEFT of its own panel instead. It is the
- * reminder, and its absence from one corner costs nothing.
+ * IT NEVER MOVES SIDEWAYS. An earlier revision had it step right-to-left while
+ * a toast was on screen, and the operator was right to reject that: a surface
+ * whose position depends on whether some OTHER element happens to exist is one
+ * you reach for and find gone, for a reason invisible from where you are
+ * standing. So the anchor is fixed — same corner, same x, at zero toasts and at
+ * three — and the collision is resolved on the OTHER axis: `dsToastStackLift`
+ * raises it by exactly the toast stack's measured height, so the two are a
+ * vertical stack in one corner with a fixed order (transient below, persistent
+ * above) rather than two things negotiating for the same pixels.
  */
 function DecisionNotice({
   row,
@@ -822,9 +825,8 @@ function DecisionNotice({
   onGo: () => void;
   onDismiss: () => void;
 }) {
-  // Both hooks run BEFORE the early return: a hook behind a conditional return
-  // is a hook whose count changes between renders.
-  const cornerBusy = useDsToastCornerBusy();
+  // Runs BEFORE the early return: a hook behind a conditional return is a hook
+  // whose count changes between renders.
   const entering = useDsEnterTransition();
   const gate = row.gate;
   if (!gate) return null;
@@ -841,11 +843,9 @@ function DecisionNotice({
     <FloatingSurface
       role="status"
       className={cn(
-        "absolute bottom-[var(--ds-space-cozy)] overflow-hidden",
-        // It YIELDS. The step is a MOVE, not a jump: the same reminder is still
-        // there, it has changed which edge it hangs off, and watching it travel
-        // is what says that rather than "a second notice appeared".
-        cornerBusy ? "left-[var(--ds-space-cozy)]" : "right-[var(--ds-space-cozy)]",
+        "absolute bottom-[var(--ds-space-cozy)] right-[var(--ds-space-cozy)] overflow-hidden",
+        // Above the toast stack, never beside it. See the note on the component.
+        dsToastStackLift,
         dsMotion.move,
         // `md`, not `sm`. At 240px the ask truncated mid-word — `approve the
         // pe…` — which is the one line on this surface that has to survive: the
@@ -1574,13 +1574,23 @@ function ReviewTab({
           <Ban aria-hidden className="size-3" />
           Skip for now
         </button>
-        <span className="ml-auto text-[10.5px] text-muted-foreground">
-          {rec.state === "blocked"
-            ? "Blocked records are excluded from Approve."
-            : correctionsFor(rec.id).length > 0
-              ? `Approve releases only this person's work — with your ${correctionsFor(rec.id).length} correction${correctionsFor(rec.id).length === 1 ? "" : "s"}, not the machine's reading.`
-              : "Approve releases only this person's work."}
-        </span>
+        {/* WHAT `Approve` DOES was printed here, beside `Approve` — the exact
+            shape the no-prose rule names: a description under a control saying
+            what pressing it does, true of every person on every packet, drawn
+            once per record. The button's own label says it.
+
+            WHAT SURVIVES IS THE ONE THING THAT IS A FACT ABOUT THIS PERSON:
+            how many of the machine's readings you have overwritten, and that a
+            blocked record is not going out. Both are outcomes of THIS record,
+            not rules of the product. */}
+        {rec.state === "blocked" ? (
+          <span className={cn(dsText.meta, "ml-auto text-[color:var(--ds-status-failed-fg)]")}>Excluded</span>
+        ) : correctionsFor(rec.id).length > 0 ? (
+          <span className={cn(dsText.meta, "ml-auto text-[color:var(--ds-status-waiting-fg)]")}>
+            <span className={dsText.nums}>{correctionsFor(rec.id).length}</span>{" "}
+            correction{correctionsFor(rec.id).length === 1 ? "" : "s"} of yours
+          </span>
+        ) : null}
           </>
         )}
       </div>

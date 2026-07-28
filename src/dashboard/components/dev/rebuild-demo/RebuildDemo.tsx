@@ -44,7 +44,7 @@ import {
 // Row lookups go through the ALL-DAYS map: a row selected from a prior day must
 // open exactly like a row from today.
 import { ALL_DEMO_ROWS as DEMO_ROWS, DEMO_DAY } from "./demo-days";
-import { ToastProvider, openContextMenuFor, useDemoTheme, useDsModalOpen } from "./demo-ui";
+import { ToastProvider, TooltipProvider, openContextMenuFor, useDemoTheme, useDsModalOpen } from "./demo-ui";
 import {
   ATTENTION_STATUSES,
   type DemoRow,
@@ -436,6 +436,13 @@ export function RebuildDemo() {
 
   return (
     <ToastProvider>
+    {/* ONE `TooltipProvider` FOR THE WHOLE DEMO, and it is not optional: Radix
+        throws `Tooltip must be used within TooltipProvider` and the error
+        boundary swallows the entire page. It is a provider rather than a
+        per-tooltip wrapper because the shared delay is the point — the first
+        tooltip in a group waits, the ones you sweep onto afterwards do not,
+        which is what makes a hovered toolbar feel fast instead of sticky. */}
+    <TooltipProvider>
     {/* The theme attribute rides the demo's own root so the DOM says which of
         the pair is showing; `useDemoTheme` has already stamped <html> and
         <body> for the portalled overlays (see `ds/theme.ts`). */}
@@ -648,6 +655,7 @@ export function RebuildDemo() {
         }}
       />
     </div>
+    </TooltipProvider>
     </ToastProvider>
   );
 }
