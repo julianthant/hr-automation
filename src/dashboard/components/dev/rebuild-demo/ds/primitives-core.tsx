@@ -231,7 +231,7 @@ const badgeVariants = cva(
         // outlined-with-its-own-fill a hundred lines above the chip that had
         // already been migrated off exactly that treatment.
         neutral:
-          "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg)]",
+          "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg)]",
         info: "bg-[var(--ds-info-bg)] border-[color:var(--ds-info-border)] text-[color:var(--ds-info-fg)]",
         success:
           "bg-[var(--ds-success-bg)] border-[color:var(--ds-success-border)] text-[color:var(--ds-success-fg)]",
@@ -333,11 +333,11 @@ export interface DsChipProps {
  * genuinely needs an edge can draw one without anything shifting a pixel.
  */
 const CHIP_TONE: Record<NonNullable<DsChipProps["tone"]>, string> = {
-  neutral: "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg)]",
-  info: "border-transparent bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
+  neutral: "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg)]",
+  info: "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
   warning:
-    "border-transparent bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
-  danger: "border-transparent bg-[var(--ds-danger-quiet)] text-[color:var(--ds-danger)]",
+    "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
+  danger: "border-[color:var(--ds-danger-border)] bg-[var(--ds-danger-quiet)] text-[color:var(--ds-danger)]",
 };
 
 /**

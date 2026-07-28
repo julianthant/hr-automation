@@ -27,9 +27,9 @@ const TYPE_TONE: Record<RowVariantSpec["rowType"], string> = {
   // STRENGTH on a fill that was the same in all three — which is a distinction
   // nobody can see, drawn with the one channel the recessed plane does not use.
   // Ink weight is the channel that was already carrying it.
-  "Run Row": "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-fg)]",
-  "Group Row": "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg)]",
-  "Member Row": "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
+  "Run Row": "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-fg)]",
+  "Group Row": "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg)]",
+  "Member Row": "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
 };
 
 /**
@@ -68,7 +68,7 @@ const catalogChip = cn(
   dsText.micro,
   // The recessed plane. It was the last outlined-with-its-own-fill chip on a
   // page whose whole job is to show what the system's shapes ARE.
-  "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg)]",
+  "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg)]",
 );
 
 /** the bullet a spec list hangs on — 6px down so it sits on the x-height */

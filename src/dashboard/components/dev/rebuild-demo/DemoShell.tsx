@@ -1432,7 +1432,7 @@ const PHASE_TONE: Record<SessionPhase, { dot: string; label: string; text: strin
  */
 const HEALTH_TONE: Record<BrowserHealth, { cls: string; icon: typeof Activity; label: string }> = {
   healthy: {
-    cls: "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
+    cls: "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
     icon: CheckCircle2,
     label: "Ready",
   },
@@ -1572,8 +1572,8 @@ const capacityChip = (full: boolean): string =>
     dsRadius.sm,
     dsText.micro,
     full
-      ? "border-transparent bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]"
-      : "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
+      ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]"
+      : "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
   );
 
 function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {

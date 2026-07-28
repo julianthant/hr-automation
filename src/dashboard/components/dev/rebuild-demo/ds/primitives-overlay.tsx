@@ -116,52 +116,53 @@ export function useDsModalOpen(): boolean {
 }
 
 /* -------------------------------------------------------------------------
- * BOTTOM-RIGHT OCCUPANCY — one corner, one claimant.
+ * BOTTOM-RIGHT OCCUPANCY — one corner, and the ALERT owns it.
  *
  * The toast viewport is `fixed bottom-right` and a `danger` toast never
- * auto-dismisses, so anything else that wants that corner is competing with an
- * alert that will not go away on its own. The decision notice wants exactly
- * that corner — anchored to the DETAIL PANEL, whose bottom-right lands inside
- * the viewport's — and "we will position them so they miss" is not a fix: the
- * two live in different coordinate systems and the panel's width changes with
- * the rail.
+ * auto-dismisses. The decision notice wants the same corner — anchored to the
+ * DETAIL PANEL, whose bottom-right lands inside the viewport's — and "we will
+ * position them so they miss" is not a fix: the two live in different
+ * coordinate systems and the panel's width changes with the rail.
  *
- * So it is a CLAIM, not a calculation. While anything holds the corner the
- * toast viewport steps to bottom-LEFT, the same move it already makes for a
- * modal — but it stays fully LIVE (a reminder does not outrank a failure, and
- * making the alert inert for one would be exactly the inversion this registry
- * exists to prevent). Neither can cover the other, at any width, by
- * construction rather than by arithmetic.
+ * So it is a CLAIM, not a calculation — and the claim runs the way the
+ * hierarchy does. Bottom-right belongs to the toast, because a failed write is
+ * the loudest thing this product is allowed to say and moving it is how an
+ * operator comes to look for it in two places. The REMINDER yields: while any
+ * toast is on screen the notice anchors bottom-LEFT of its own panel instead.
+ * Neither can cover the other, at any width, by construction rather than by
+ * arithmetic — and the one that gives way is the one whose absence costs least.
+ *
+ * (An earlier revision had this backwards: the toast stepped aside for the
+ * notice. That put a persistent failure alert somewhere it had never been,
+ * which is worse than the overlap it was avoiding.)
  * ---------------------------------------------------------------------- */
 
-let cornerClaimCount = 0;
-const cornerListeners = new Set<() => void>();
+let liveToastCount = 0;
+const toastCornerListeners = new Set<() => void>();
 
-function subscribeCorner(listener: () => void): () => void {
-  cornerListeners.add(listener);
-  return () => cornerListeners.delete(listener);
+function publishToastCorner(n: number): void {
+  if (n === liveToastCount) return;
+  liveToastCount = n;
+  toastCornerListeners.forEach((listener) => listener());
+}
+
+function subscribeToastCorner(listener: () => void): () => void {
+  toastCornerListeners.add(listener);
+  return () => toastCornerListeners.delete(listener);
 }
 
 /**
- * Claim the viewport's bottom-right corner for as long as this component is
- * mounted. Call it from the floating surface itself, never from its parent —
- * the claim is keyed to mount, exactly like `useDsModalPresence`.
+ * Is the viewport's bottom-right corner occupied by a toast right now?
+ *
+ * Read it from any surface that would otherwise be drawn there, and anchor
+ * somewhere else while it is true. It is a subscription rather than a prop
+ * because the two surfaces have no common owner — the toast provider sits at
+ * the app root and the notice is mounted deep inside a panel body.
  */
-export function useDsBottomRightClaim(): void {
-  useEffect(() => {
-    cornerClaimCount += 1;
-    cornerListeners.forEach((listener) => listener());
-    return () => {
-      cornerClaimCount -= 1;
-      cornerListeners.forEach((listener) => listener());
-    };
-  }, []);
-}
-
-function useCornerClaimed(): boolean {
+export function useDsToastCornerBusy(): boolean {
   return useSyncExternalStore(
-    subscribeCorner,
-    () => cornerClaimCount > 0,
+    subscribeToastCorner,
+    () => liveToastCount > 0,
     () => false,
   );
 }
@@ -1021,11 +1022,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
  */
 function ToastViewport({ toasts, onDismiss }: { toasts: DsToast[]; onDismiss: (id: string) => void }) {
   const modalOpen = useModalOpen();
-  // A modal AND a corner claim both push the viewport aside; only a modal makes
-  // it inert. The claimant is a reminder, and a reminder does not get to
-  // disable a failure alert — it only gets to not be covered by one.
-  const cornerClaimed = useCornerClaimed();
-  const aside = modalOpen || cornerClaimed;
+  // ONE reason to leave bottom-right, and it is the ratified one: a Dialog or
+  // Drawer is open, whose footer this viewport would otherwise sit on. Nothing
+  // else moves it. A notice that wants this corner yields instead — see the
+  // occupancy registry above.
+  const aside = modalOpen;
+  // The corner is published for as long as a toast is on screen, so a surface
+  // that would be drawn here can step aside before it ever paints.
+  useEffect(() => {
+    publishToastCorner(toasts.length);
+    return () => publishToastCorner(0);
+  }, [toasts.length]);
   if (toasts.length === 0) return null;
   return (
     <div
@@ -1033,7 +1040,12 @@ function ToastViewport({ toasts, onDismiss }: { toasts: DsToast[]; onDismiss: (i
       aria-label="Notifications"
       data-ds-toast-viewport={aside ? "aside" : "default"}
       className={cn(
-        "pointer-events-none fixed bottom-[var(--ds-space-loose)]",
+        // `--ds-toast-inset-bottom` rather than a bare space token: the demo's
+        // Session bar is pinned to the bottom of the viewport, so a toast at
+        // `bottom: 16px` sat ON it. The shell raises the inset to clear
+        // whatever it has parked down there; the default is the plain gutter,
+        // so a surface with nothing at the bottom is unchanged.
+        "pointer-events-none fixed bottom-[var(--ds-toast-inset-bottom,var(--ds-space-loose))]",
         aside ? "left-[var(--ds-space-loose)] items-start" : "right-[var(--ds-space-loose)] items-end",
         "flex w-[360px] max-w-[calc(100vw-var(--ds-space-section))] flex-col gap-[var(--ds-space-base)]",
         // The step aside is a MOVE, not a jump: the viewport is a fixed box
@@ -1200,7 +1212,20 @@ function ToastCard({
   return (
     <div
       {...surfaceProps}
-      className={cn(shell, "flex w-full items-start gap-[var(--ds-space-base)] p-[var(--ds-space-cozy)]")}
+      // CLICK ANYWHERE DISMISSES. A toast is an interruption the operator has
+      // finished with the moment they have read it, and making them find a
+      // 20px × to say so is friction on the most common gesture the surface
+      // has. The × STAYS — it is the labelled, keyboard-reachable control, and
+      // this is a convenience layered over it, not a replacement for it. That
+      // is also why no `role="button"` goes on this element: it is a live
+      // region announcing an outcome, and re-labelling it as a control would
+      // cost the announcement to buy a route that already exists.
+      onClick={inert ? undefined : () => onDismiss(toast.id)}
+      className={cn(
+        shell,
+        "flex w-full items-start gap-[var(--ds-space-base)] p-[var(--ds-space-cozy)]",
+        !inert && "cursor-pointer",
+      )}
     >
       <Icon aria-hidden className={cn(dsIcon.lg, "mt-px shrink-0", spec.accent)} />
       <div className="flex min-w-0 flex-1 flex-col gap-[var(--ds-space-hair)]">
@@ -1212,7 +1237,10 @@ function ToastCard({
           <button
             type="button"
             disabled={inert}
-            onClick={() => {
+            onClick={(e) => {
+              // The card behind this dismisses on click; without stopping here
+              // the action would fire and the card would dismiss twice.
+              e.stopPropagation();
               toast.action?.onAction();
               onDismiss(toast.id);
             }}

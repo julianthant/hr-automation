@@ -281,7 +281,7 @@ export function CaptureLightbox({
                       dsFocus,
                       i === index
                         ? "border-[color:var(--ds-border-loud)] bg-[var(--ds-surface-selected)] text-[color:var(--ds-fg)]"
-                        : "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
+                        : "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
                       c.failure && "border-[color:var(--ds-danger)] text-[color:var(--ds-danger)]",
                     )}
                   >

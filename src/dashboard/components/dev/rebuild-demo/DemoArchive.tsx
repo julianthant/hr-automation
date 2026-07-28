@@ -236,7 +236,7 @@ export function DemoArchivePage({
           <span
             role="group"
             aria-label="Archive view"
-            className="inline-flex items-center gap-[var(--ds-space-hair)] rounded-[var(--ds-radius-md)] border border-transparent bg-[var(--ds-recess-bg)] p-[var(--ds-space-hair)]"
+            className="inline-flex items-center gap-[var(--ds-space-hair)] rounded-[var(--ds-radius-md)] border border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] p-[var(--ds-space-hair)]"
           >
             <Button size="sm" variant={view === "runs" ? "secondary" : "ghost"} aria-pressed={view === "runs"} onClick={() => setView("runs")}>
               Archived runs

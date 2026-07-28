@@ -54,7 +54,15 @@
   --ds-surface-3: var(--accent); /* hover / pressed / selected fill */
   --ds-surface-overlay: var(--popover); /* dialogs, drawers, menus, tooltips */
   --ds-surface-scrim: color-mix(in srgb, hsl(0 0% 0%) 66%, transparent);
-  --ds-surface-selected: color-mix(in srgb, var(--primary) 10%, transparent);
+  /* SELECTION — one shade off the card it sits on, and no more.
+     It was `color-mix(primary 10%, transparent)`, and on Graphite Warm the
+     accent is near-WHITE, so a selected row rendered as a light grey plate —
+     brighter than the amber `Waiting on you` fill two rows below it. Selection
+     is the lowest-stakes state on this screen: it says "the system is pointing
+     here", which needs to be findable and needs to be nothing else. Mixing
+     toward the FOREGROUND instead of toward the accent keeps it hueless and
+     keeps it one step, on either theme. */
+  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 5%, var(--ds-surface-1));
   --ds-surface-disabled: color-mix(in srgb, var(--muted) 60%, transparent);
 
   /* THE RECESSED PLANE — the ONE treatment for "this sits back from the card".
@@ -67,11 +75,20 @@
      and on the merits: a fill and no line means a row carrying six facts is a
      band of tones rather than a grid of little boxes.
 
-     `--ds-recess-border` is `transparent` rather than absent so a consumer
-     that genuinely needs an edge (a SCROLLING well, whose half-cut bottom row
-     is the depth cue) can set one without every other consumer inheriting a
-     line it does not want. Geometry is unchanged either way — the border box
-     is always there, so nothing shifts by a pixel when a surface opts in.
+     TWO SHAPES ON ONE PLANE, and the operator drew the line: *"all these types
+     of things should have a border and be matte."*
+
+       A BAND   — a footer, a bar, a strip that divides a panel — is a FILL and
+                  no line. It is a region, and a region with an outline reads as
+                  an object sitting in the panel rather than as part of it.
+       A CHIP   — a fact, a marker, a tile, a badge, anything that is an OBJECT
+                  you can point at — is a MATTE FILL *and* a hairline. A row
+                  carrying six borderless facts loses the edges between them:
+                  they read as one run of tinted text, not six things.
+
+     `--ds-recess-border` is that hairline, and every chip reads it rather than
+     picking its own. A band does not read it at all — its `border-t` comes from
+     `--ds-border-subtle`, which is the divider, not the object edge.
 
      TWO INKS ON ONE PLANE, and the split is the thing that was drifting: three
      chips were painting `--ds-fg-muted` by hand while the plane's own token
@@ -97,7 +114,7 @@
   --ds-recess-bg: var(--ds-surface-2);
   --ds-recess-fg: var(--ds-fg-secondary);
   --ds-recess-fg-quiet: var(--ds-fg-muted);
-  --ds-recess-border: transparent;
+  --ds-recess-border: var(--ds-border);
 
   /* ---------------------------------------------------------------------
      BORDER — one hairline weight for structure; strength carries meaning.
@@ -598,7 +615,7 @@ body[data-demo-theme="dark"] {
   --ds-surface-3: var(--accent);
   --ds-surface-overlay: var(--popover);
   --ds-surface-scrim: rgba(0, 0, 0, 0.66);
-  --ds-surface-selected: color-mix(in srgb, var(--primary) 10%, transparent);
+  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 5%, var(--ds-surface-1));
   --ds-surface-disabled: color-mix(in srgb, var(--muted) 60%, transparent);
 
   /* --- border ----------------------------------------------------------- */
@@ -779,7 +796,7 @@ body[data-demo-theme="light"] {
   --ds-surface-3: var(--accent);
   --ds-surface-overlay: var(--popover);
   --ds-surface-scrim: rgba(16, 24, 40, 0.45);
-  --ds-surface-selected: color-mix(in srgb, #4f46e5 9%, transparent);
+  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 6%, var(--ds-surface-1));
   --ds-surface-disabled: color-mix(in srgb, var(--muted) 70%, transparent);
 
   /* --- border ----------------------------------------------------------- */
