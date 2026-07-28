@@ -30,7 +30,7 @@ import { dsClip, dsIcon, dsRadius, dsText } from "./tokens";
  * `waiting` and `failed` are the only ones with a SOLID fill, which on a
  * near-black UI reads as a lit block from across the room. `verifiedDone` is
  * deliberately the quietest: no fill, no border, a green check and muted text.
- * Most rows in a healthy day are verified done; they must recede.
+ * Most rows in a healthy day are done; they must recede.
  *
  * Colour never carries meaning alone — an operator with a red/green deficiency
  * still reads emphasis tier, icon shape and the label.
