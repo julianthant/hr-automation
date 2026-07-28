@@ -37,6 +37,7 @@ import {
   DEMO_WORKFLOWS,
   fmtClockSec,
   type DemoWorkflowCategory,
+  type DemoWorkflowId,
 } from "./demo-wire";
 import {
   DEMO_PREFLIGHT,
@@ -47,6 +48,19 @@ import {
   type StorageMode,
 } from "./demo-settings-wire";
 import { DEMO_DAY, topLevelRowsForDay } from "./demo-days";
+import {
+  DEMO_LANE_BUDGET,
+  DEMO_SESSIONS,
+  MAX_WORKER_SPAWN,
+  WORKER_SPAWN_WORKFLOWS,
+  planWorkerSpawn,
+  workerSpawnCapacity,
+  type BrowserHealth,
+  type DemoBrowser,
+  type DemoSession,
+  type SessionPhase,
+  type WorkerSpawnResult,
+} from "./demo-workers-wire";
 import {
   DemoDateNav,
   DemoNotificationBell,
@@ -62,10 +76,16 @@ import {
   ChipRow,
   DEMO_THEME_LABEL,
   DS_STATUS,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  Field,
   IconButton,
   Popover,
   PopoverContent,
   PopoverTrigger,
+  Select,
   type DemoTheme,
   dsBorder,
   dsElev,
@@ -1260,156 +1280,13 @@ export function DemoStatusFilters({
 // Session Panel (bottom drawer)
 // ---------------------------------------------------------------------------
 
-/** `unknown` = never probed. It must NOT read as healthy — that is a live bug today. */
-type BrowserHealth = "healthy" | "refreshing" | "unhealthy" | "failed" | "paused" | "unknown";
-type SessionPhase = "authenticating" | "running" | "idle" | "keepalive" | "complete" | "failed";
-
-interface DemoBrowser {
-  id: string;
-  label: string;
-  health: BrowserHealth;
-  url: string;
-}
-
 /**
- * One system's lease budget as this executor sees it (doc 05's BudgetSnapshot).
- * `cap` is a property of the SYSTEM — UCPath invalidates the older session when
- * a second one authenticates, so its cap of 1 is not a tuning choice.
+ * The executor fixture, its lane budget and the spawn command all moved to
+ * `demo-workers-wire.ts` when the Session Panel's `+` became real. The dialog
+ * has to answer "can I start five more" from the SAME array these cards render,
+ * or the refusal it prints and the capacity the panel shows are two derivations
+ * of one fact.
  */
-interface DemoBudgetSlot {
-  system: string;
-  inUse: number;
-  cap: number;
-}
-
-/**
- * Why this executor is not progressing. This is the single most valuable thing
- * the Session Panel can say: a card that shows a healthy browser and a spinning
- * status while six items sit queued teaches the operator that the panel is
- * decorative. Naming the lease AND its holder turns "nothing is happening" into
- * "Separations has the one UCPath session, and it has had it for 18 minutes".
- */
-interface DemoLeaseWait {
-  system: string;
-  sinceSec: number;
-  heldByWorkflow: string;
-  heldByTrace: string;
-}
-
-interface DemoSession {
-  id: string;
-  workflow: string;
-  phase: SessionPhase;
-  /** shown only while an item is in flight — a retained trace id on an idle card reads as stale */
-  traceId?: string;
-  step?: string;
-  subline: string;
-  elapsedSec: number;
-  browsers: DemoBrowser[];
-  /** items waiting in the shared queue for this workflow */
-  queued?: number;
-  /** micro pipeline — one dot per step of the item in flight */
-  steps?: { label: string; state: "done" | "current" | "pending" }[];
-  crashed?: boolean;
-  /** items this executor may hold in flight at once */
-  lanes?: { inUse: number; cap: number };
-  /** the system leases it holds, and what each system allows */
-  budgets?: DemoBudgetSlot[];
-  /** present when the executor is alive and NOT progressing */
-  waiting?: DemoLeaseWait;
-}
-
-const DEMO_SESSIONS: DemoSession[] = [
-  {
-    id: "s-sep",
-    workflow: "Separations",
-    phase: "running",
-    traceId: "se-140211-9f3a",
-    step: "UCPath transaction",
-    subline: "se-140211-9f3a",
-    elapsedSec: 1112,
-    queued: 2,
-    steps: [
-      { label: "Kuali extraction", state: "done" },
-      { label: "Identity check", state: "done" },
-      { label: "Job summary", state: "done" },
-      { label: "Kronos search", state: "done" },
-      { label: "UCPath transaction", state: "current" },
-      { label: "Kuali finalization", state: "pending" },
-    ],
-    lanes: { inUse: 1, cap: 1 },
-    budgets: [
-      { system: "ucpath", inUse: 1, cap: 1 },
-      { system: "kuali", inUse: 1, cap: 2 },
-      { system: "kronos", inUse: 1, cap: 2 },
-    ],
-    browsers: [
-      { id: "b1", label: "kuali", health: "healthy", url: "kuali.ucsd.edu/space/HR" },
-      { id: "b2", label: "ucpath", health: "healthy", url: "ucpath.universityofcalifornia.edu" },
-      { id: "b3", label: "kronos", health: "refreshing", url: "kronos.ucsd.edu/timekeeping" },
-    ],
-  },
-  {
-    // The card the whole upgrade exists for. Alive, healthy, "running", six
-    // items queued — and not moving, because Separations holds the one UCPath
-    // session. Without the waiting note this card is a lie told with a spinner.
-    id: "s-i9",
-    workflow: "I-9 Check",
-    phase: "running",
-    traceId: "ic-134001-m31",
-    step: "Person lookup",
-    subline: "ic-134001-m31",
-    elapsedSec: 2410,
-    queued: 6,
-    steps: [
-      { label: "Person match", state: "done" },
-      { label: "Person lookup", state: "current" },
-      { label: "Roster match", state: "pending" },
-    ],
-    lanes: { inUse: 1, cap: 2 },
-    budgets: [
-      { system: "ucpath", inUse: 0, cap: 1 },
-      { system: "i9", inUse: 1, cap: 1 },
-    ],
-    waiting: { system: "ucpath", sinceSec: 264, heldByWorkflow: "Separations", heldByTrace: "se-140211-9f3a" },
-    browsers: [{ id: "b4", label: "ucpath", health: "unknown", url: "ucpath…/PersonSearch" }],
-  },
-  {
-    id: "s-ocr",
-    workflow: "OCR",
-    phase: "idle",
-    subline: "idle — waiting for work",
-    elapsedSec: 384,
-    lanes: { inUse: 0, cap: 3 },
-    budgets: [{ system: "i9", inUse: 0, cap: 1 }],
-    browsers: [{ id: "b5", label: "i9", health: "healthy", url: "i9.ucsd.edu" }],
-  },
-  {
-    id: "s-oath",
-    workflow: "Oath Signature",
-    phase: "authenticating",
-    subline: "Authenticating 1/2",
-    elapsedSec: 41,
-    lanes: { inUse: 1, cap: 2 },
-    budgets: [
-      { system: "crm", inUse: 1, cap: 2 },
-      { system: "ucpath", inUse: 0, cap: 1 },
-    ],
-    browsers: [
-      { id: "b6", label: "crm", health: "unhealthy", url: "stuck on the SSO login page" },
-      { id: "b7", label: "ucpath", health: "paused", url: "auto-recovery paused by you" },
-    ],
-  },
-  {
-    id: "s-crm",
-    workflow: "CRM Doc Download",
-    phase: "failed",
-    subline: "Check the queue row for details",
-    elapsedSec: 0,
-    crashed: true,
-    browsers: [{ id: "b8", label: "crm", health: "failed", url: "about:blank" }],
-  },
-];
 
 /**
  * A worker's phase. Same hue ramp as everything else in the demo, so "this
@@ -1783,7 +1660,221 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
   );
 }
 
+/**
+ * ADD WORKERS — one press, N executors, and an honest answer for each of them.
+ *
+ * Operator: *"make this plus icon work in the session panel and it should have
+ * the functionality to spawn n amount of parallel workflows. not one at a
+ * time."* So the count is part of the ASK, not something you arrive at by
+ * pressing a button five times: a repeat-click affordance would fire five
+ * independent commands, five results and five chances for the third one to be
+ * refused while the operator was still clicking.
+ *
+ * THE PART THAT MATTERS IS THE PARTIAL. Capacity is nearly always short here —
+ * UCPath allows exactly one concurrent session, so a second Separations worker
+ * is refused by the SYSTEM rather than by a policy — and `3 of 5 started ·
+ * 2 refused` is the ordinary outcome, not the error case. It is never rounded
+ * up to success, the refused workers are listed individually with the
+ * constraint that stopped each one, and both the preview and the result walk
+ * the same budget so the dialog cannot promise a count the command then
+ * refuses.
+ */
+function AddWorkersDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const [workflowId, setWorkflowId] = useState<DemoWorkflowId>(WORKER_SPAWN_WORKFLOWS[0].id);
+  const [count, setCount] = useState(1);
+  const [result, setResult] = useState<WorkerSpawnResult | null>(null);
+  const capacity = useMemo(() => workerSpawnCapacity(workflowId), [workflowId]);
+  const workflow = DEMO_WORKFLOWS[workflowId];
+
+  // A fresh open is a fresh ask. Leaving the previous vector on screen would
+  // put an answer above a question that has not been asked yet.
+  useEffect(() => {
+    if (!open) return;
+    setResult(null);
+    setCount(1);
+  }, [open]);
+  useEffect(() => setResult(null), [workflowId]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="md" title="Add workers" description={`Start parallel executors for one workflow`}>
+        <DialogBody>
+          <div className="flex flex-col gap-[var(--ds-space-loose)]">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-[var(--ds-space-base)]">
+              <Field label="Workflow">
+                <Select value={workflowId} onChange={(e) => setWorkflowId(e.target.value as DemoWorkflowId)}>
+                  {WORKER_SPAWN_WORKFLOWS.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              {/* THE COUNT IS THE ASK. A stepper, not a repeat press.
+                  It is NOT wrapped in `Field`: `Field` labels one form control
+                  through its context, and this is a group of three. Its label
+                  row mirrors `Field`'s exactly — same type class, same gap — so
+                  the two controls sit on one baseline. */}
+              <div role="group" aria-label="How many workers to start" className="flex min-w-0 flex-col gap-[var(--ds-space-tight)]">
+                <span className={cn(dsText.meta, "font-medium text-[color:var(--ds-fg-secondary)]")}>Workers</span>
+                <span className="flex items-center gap-[var(--ds-space-tight)]">
+                  <IconButton
+                    size="md"
+                    label="One fewer worker"
+                    disabled={count <= 1}
+                    onClick={() => setCount((n) => Math.max(1, n - 1))}
+                    icon={<Minus aria-hidden className={dsIcon.md} />}
+                  />
+                  <span
+                    aria-live="polite"
+                    className={cn(dsText.section, dsText.nums, "w-8 text-center font-semibold text-[color:var(--ds-fg)]")}
+                  >
+                    {count}
+                  </span>
+                  <IconButton
+                    size="md"
+                    label="One more worker"
+                    disabled={count >= MAX_WORKER_SPAWN}
+                    onClick={() => setCount((n) => Math.min(MAX_WORKER_SPAWN, n + 1))}
+                    icon={<Plus aria-hidden className={dsIcon.md} />}
+                  />
+                </span>
+              </div>
+            </div>
+
+            {/* WHAT THE MACHINE CAN ACTUALLY TAKE, before the press. Same walk
+                as the command, so the two cannot disagree. */}
+            <div
+              className={cn(
+                "flex flex-col gap-[var(--ds-space-snug)] border p-[var(--ds-space-cozy)]",
+                dsRadius.md,
+                dsBorder.base,
+                "bg-[var(--ds-recess-bg)]",
+              )}
+            >
+              <span className={cn(dsText.meta, "flex items-center gap-[var(--ds-space-snug)]")}>
+                <Gauge aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+                <span className={cn(dsText.nums, "font-semibold text-[color:var(--ds-fg)]")}>
+                  {DEMO_LANE_BUDGET.executorInUse}/{DEMO_LANE_BUDGET.executorCap}
+                </span>
+                <span className="text-[color:var(--ds-fg-muted)]">workers up</span>
+                <span aria-hidden className="h-3 w-px bg-[var(--ds-border)]" />
+                <span className={cn(dsText.nums, "font-semibold text-[color:var(--ds-fg)]")}>{capacity.canStart}</span>
+                <span className="text-[color:var(--ds-fg-muted)]">
+                  more {workflow.label} {capacity.canStart === 1 ? "worker" : "workers"} can start now
+                </span>
+              </span>
+              {/* Per-system leases, because that is what refuses a worker. */}
+              <ChipRow>
+                {workflow.systems.map((s) => {
+                  const lease = DEMO_LANE_BUDGET.systems.find((l) => l.system === s);
+                  const full = lease !== undefined && lease.inUse >= lease.cap;
+                  return (
+                    <span
+                      key={s}
+                      title={
+                        lease
+                          ? `${s}: ${lease.inUse} of ${lease.cap} concurrent sessions in use${lease.heldBy.length > 0 ? ` · held by ${lease.heldBy.join(", ")}` : ""}`
+                          : `${s}: no lease recorded — nothing is holding it`
+                      }
+                      className={cn(
+                        "inline-flex min-w-0 items-center border",
+                        dsClip.token,
+                        "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
+                        dsRadius.sm,
+                        dsText.micro,
+                        full
+                          ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]"
+                          : "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
+                      )}
+                    >
+                      <span className={dsClip.text}>{s}</span>
+                      <span className={dsText.nums}>
+                        {lease ? `${lease.inUse}/${lease.cap}` : "0/—"}
+                      </span>
+                    </span>
+                  );
+                })}
+              </ChipRow>
+            </div>
+
+            {/* THE VECTOR. Every worker answers for itself; nothing is folded. */}
+            {result && (
+              <div className="flex flex-col gap-[var(--ds-space-snug)]" aria-live="polite" data-demo-spawn-result="">
+                <span className={cn(dsText.ui, "font-semibold text-[color:var(--ds-fg)]")}>{result.headline}</span>
+                <div className={cn("flex flex-col overflow-hidden border", dsRadius.md, dsBorder.base)}>
+                  {result.outcomes.map((o) => (
+                    <span
+                      key={o.index}
+                      className={cn(
+                        "flex min-w-0 items-center border-b last:border-b-0",
+                        dsBorder.subtle,
+                        "h-[var(--ds-h-row)] gap-[var(--ds-space-base)] px-[var(--ds-space-base)]",
+                        dsText.meta,
+                      )}
+                    >
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "size-1.5 shrink-0 rounded-full",
+                          o.state === "started" ? "bg-[var(--ds-success-fg)]" : "bg-[var(--ds-status-waiting-fg)]",
+                        )}
+                      />
+                      <span className={cn(dsText.nums, "w-12 shrink-0 text-[color:var(--ds-fg-muted)]")}>
+                        #{o.index}
+                      </span>
+                      <span
+                        className={cn(
+                          dsText.caps,
+                          "w-16 shrink-0",
+                          o.state === "started"
+                            ? "text-[color:var(--ds-success-fg)]"
+                            : "text-[color:var(--ds-status-waiting-fg)]",
+                        )}
+                      >
+                        {o.state}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-[color:var(--ds-fg-muted)]" title={o.reason}>
+                        {o.state === "started" ? `holds ${o.claimed?.join(" · ")}` : o.reason}
+                      </span>
+                      {o.instance && (
+                        <span className={cn(dsText.nums, "shrink-0 text-[color:var(--ds-fg-secondary)]")}>{o.instance}</span>
+                      )}
+                      {o.code && (
+                        <span className={cn(dsText.micro, dsText.nums, "shrink-0 text-[color:var(--ds-fg-faint)]")}>
+                          {o.code}
+                        </span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogBody>
+        <DialogFooter
+          meta={
+            result
+              ? `${result.started} started · ${result.refused} refused`
+              : capacity.canStart < count
+                ? `${count - capacity.canStart} of these will be refused`
+                : undefined
+          }
+        >
+          <Button variant="secondary" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+          <Button variant="primary" onClick={() => setResult(planWorkerSpawn(workflowId, count))}>
+            Start {count} {count === 1 ? "worker" : "workers"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function DemoSessionPanel({ tick }: { tick: number }) {
+  const [addOpen, setAddOpen] = useState(false);
   const [open, setOpen] = useState(false);
   const running = DEMO_SESSIONS.filter((s) => s.phase === "running").length;
   const auth = DEMO_SESSIONS.filter((s) => s.phase === "authenticating").length;
@@ -1867,7 +1958,16 @@ export function DemoSessionPanel({ tick }: { tick: number }) {
           )}
         </button>
         <span className="flex shrink-0 items-center gap-[var(--ds-space-snug)]">
-          <IconButton size="sm" label="Add a worker" onClick={NOOP} icon={<Plus aria-hidden className={dsIcon.md} />} />
+          {/* N AT ONCE, never one at a time. The dialog owns the count and the
+              per-worker answer; this is only its door. */}
+          <IconButton
+            size="sm"
+            label="Add workers"
+            title="Start parallel executors — pick a workflow and how many"
+            aria-haspopup="dialog"
+            onClick={() => setAddOpen(true)}
+            icon={<Plus aria-hidden className={dsIcon.md} />}
+          />
           {/* The APP's version, stated ONCE for the whole dashboard.
               It used to ride the context rail's Provenance chips, i.e. on every
               run — and the app build is not a property of a run, it is a
@@ -1911,6 +2011,8 @@ export function DemoSessionPanel({ tick }: { tick: number }) {
           ))}
         </div>
       )}
+
+      <AddWorkersDialog open={addOpen} onOpenChange={setAddOpen} />
     </section>
   );
 }
