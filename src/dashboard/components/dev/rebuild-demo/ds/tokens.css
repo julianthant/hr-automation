@@ -408,10 +408,17 @@
   --ds-w-archive-status: 124px;
   --ds-w-archive-trace: 132px;
   --ds-w-archive-workflow: 168px;
-  --ds-w-archive-when: 104px;
+  /* 124px because the stored clock runs to `Jun 17, 12:22 PM` — the widest the
+     corpus produces. At 104 every date in the table cut to `Jun 17, 12:…`, and
+     a truncated timestamp is the one column nothing else on the row recovers. */
+  --ds-w-archive-when: 124px;
   --ds-w-archive-duration: 76px;
-  /* the two tracks only a bump header has: the version pair and its kind */
-  --ds-w-bump-version: 168px;
+  /* The two tracks only a bump header has: the version pair and its kind.
+     196px is the widest pair the registry can produce — `app 2026.07.2 → app
+     2026.07.3` — measured, not guessed. It is the section's IDENTITY, so it is
+     the one cell in the row that may never truncate; every other fact on the
+     line is recoverable from the ⓘ. */
+  --ds-w-bump-version: 196px;
   --ds-w-bump-kind: 60px;
   /* A queue row's HANGING INDENT — the leading column its status tick sits in,
      and the left edge every line under the title aligns to. It is a real grid
