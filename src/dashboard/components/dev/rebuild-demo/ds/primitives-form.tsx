@@ -3,6 +3,7 @@ import {
   forwardRef,
   useContext,
   useId,
+  useRef,
   type InputHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
@@ -11,7 +12,7 @@ import {
 import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
 import { Check, ChevronDown, Lock, Minus, Pencil, Search, TriangleAlert, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { dsFocus, dsFocusWithin, dsIcon, dsMotion, dsRadius, dsText } from "./tokens";
+import { dsBorder, dsFocus, dsFocusWithin, dsIcon, dsMotion, dsRadius, dsText } from "./tokens";
 
 /**
  * DEV-ONLY — form primitives.
@@ -182,34 +183,81 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<H
  * A native `<select>` — deliberately. The OS picker is keyboard-perfect, works
  * on a touch device, and never traps focus. Reach for a custom listbox only
  * when you need multi-select or per-option rendering, and say why.
+ *
+ * **The wrapper is a FLEX box, and that is load-bearing.** A `<select>` is
+ * `inline-block` with `vertical-align: baseline`, so in a normal-flow wrapper
+ * it sits on the baseline of a line box built from the inherited line-height —
+ * a 24px control inside a 26.5px line box lands 1.25px low. Beside a row of
+ * flex-aligned buttons of exactly the same height, that reads as one control
+ * sagging for no reason. `flex` + `items-center` removes the line box entirely,
+ * which is why the toolbar variant exists here rather than being hand-rolled at
+ * the call site: the height token was already shared, and it was still wrong.
+ *
+ * `variant="toolbar"` is the `--ds-h-toolbar` control that lives in an action bar;
+ * `icon` puts a glyph in the leading gutter so a sort control is ONE control
+ * rather than a glyph sitting a gap away from the select it belongs to.
  */
 export const Select = forwardRef<
   HTMLSelectElement,
-  SelectHTMLAttributes<HTMLSelectElement> & { children: ReactNode }
->(function Select({ className, children, ...props }, ref) {
+  SelectHTMLAttributes<HTMLSelectElement> & {
+    children: ReactNode;
+    variant?: "field" | "toolbar";
+    /** a leading glyph inside the control — pass an already-sized lucide icon */
+    icon?: ReactNode;
+  }
+>(function Select({ className, children, variant = "field", icon, ...props }, ref) {
   const field = useFieldControl();
+  const toolbar = variant === "toolbar";
   return (
-    <span className="relative flex min-w-0 items-center">
+    <span className={cn("relative flex min-w-0 items-center", toolbar && "shrink-0")}>
+      {icon && (
+        <span
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute left-[var(--ds-space-snug)] flex items-center",
+            "text-[color:var(--ds-fg-muted)]",
+          )}
+        >
+          {icon}
+        </span>
+      )}
       <select
         ref={ref}
         {...field}
         {...props}
         className={cn(
-          controlShell,
-          "h-[var(--ds-h-md)] cursor-pointer appearance-none pl-[var(--ds-space-base)] pr-[var(--ds-space-section)]",
-          dsText.ui,
+          toolbar
+            ? cn(
+                "w-full min-w-0 border bg-[var(--ds-surface-1)]",
+                dsBorder.base,
+                "text-[color:var(--ds-fg-secondary)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]",
+                dsRadius.md,
+                dsFocus,
+                dsMotion.fast,
+                "h-[var(--ds-h-toolbar)]",
+                dsText.meta,
+              )
+            : cn(controlShell, "h-[var(--ds-h-md)]", dsText.ui),
+          "cursor-pointer appearance-none",
+          icon ? "pl-[var(--ds-space-section)]" : "pl-[var(--ds-space-base)]",
+          toolbar ? "pr-[var(--ds-space-base)]" : "pr-[var(--ds-space-section)]",
           className,
         )}
       >
         {children}
       </select>
-      <ChevronDown
-        aria-hidden
-        className={cn(
-          dsIcon.sm,
-          "pointer-events-none absolute right-[var(--ds-space-base)] text-[color:var(--ds-fg-muted)]",
-        )}
-      />
+      {/* The toolbar variant carries its meaning in the LEADING icon, so a
+          trailing chevron would be a second glyph on a 24px control saying
+          nothing the first one did not. */}
+      {!toolbar && (
+        <ChevronDown
+          aria-hidden
+          className={cn(
+            dsIcon.sm,
+            "pointer-events-none absolute right-[var(--ds-space-base)] text-[color:var(--ds-fg-muted)]",
+          )}
+        />
+      )}
     </span>
   );
 });
@@ -474,6 +522,22 @@ export function ValueField({
   title?: string;
   className?: string;
 }) {
+  /**
+   * CLICKING A RECORDED VALUE SELECTS IT.
+   *
+   * This field is not a blank form input — it already holds something the run
+   * OBSERVED, and the operator opens it to CORRECT that value, not to append to
+   * it. Dropping the caret at the end turned `6 (8 pages)` into
+   * `6 (8 pages)7 (8 pages)` on the first keystroke, which is a wrong value
+   * typed with no wrong keystroke.
+   *
+   * `onFocus` selects; the `onMouseUp` guard is what makes it survive a mouse
+   * click, because the browser collapses the selection to the click point on
+   * release. The guard is armed only on a click that FOCUSES the field, so an
+   * operator who comes back to drag-select part of an already-focused value
+   * still can — replace-on-entry, refine afterwards.
+   */
+  const selectOnRelease = useRef(false);
   return (
     <span className={cn("relative flex min-w-0 items-center", className)}>
       <input
@@ -482,6 +546,15 @@ export function ValueField({
         title={title}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onMouseDown={(e) => {
+          selectOnRelease.current = e.currentTarget !== document.activeElement;
+        }}
+        onFocus={(e) => e.currentTarget.select()}
+        onMouseUp={(e) => {
+          if (!selectOnRelease.current) return;
+          selectOnRelease.current = false;
+          e.preventDefault();
+        }}
         className={cn(
           // The right padding is the pencil's 12px plus its 4px offset plus 4px of
           // air, composed from tokens rather than guessed — at `loose` the value
