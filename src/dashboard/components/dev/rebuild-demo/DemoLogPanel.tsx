@@ -1658,7 +1658,32 @@ function PeopleTab({
               )}
             >
               {f.label}
-              {f.key === "attention" && attention.length > 0 && <span className="ml-1 font-mono text-warning">{attention.length}</span>}
+              {/* A DOT, not the number.
+
+                  The number was the third rendering of one fact: the tab
+                  itself carries an amber dot when this group needs you, this
+                  chip printed `Needs you 3`, and pressing it shows a list whose
+                  length IS the three. A count above a list of exactly that
+                  length is not information — and it moved the chip's own width
+                  every time a member settled, so the filter row reflowed while
+                  the operator was reading it.
+
+                  The dot is the same mark the tab carries, so "there is
+                  something here" reads identically in both places, and the
+                  quantity comes from the list. `--ds-status-waiting-mark` is
+                  the swatch token: this is a dot, never text. */}
+              {f.key === "attention" && attention.length > 0 && (
+                <span
+                  aria-hidden
+                  className="ml-[var(--ds-space-tight)] inline-block size-1.5 shrink-0 rounded-full bg-[var(--ds-status-waiting-mark)] align-middle"
+                />
+              )}
+              {/* Colour is never the only encoding, and a dot has no text for a
+                  screen reader to read. The count survives here, where it costs
+                  the surface nothing. */}
+              {f.key === "attention" && attention.length > 0 && (
+                <span className="sr-only">{`, ${attention.length} need you`}</span>
+              )}
             </button>
           ))}
         </div>

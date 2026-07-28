@@ -1,18 +1,14 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, ChevronLeft, ChevronRight, FlaskConical, History, Info, Pencil, TriangleAlert } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, FlaskConical, History, Info, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   Badge,
   BulletList,
   Button,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
   Field,
   IconButton,
   Input,
@@ -22,9 +18,9 @@ import {
   PopoverContent,
   PopoverTrigger,
   SectionLabel,
+  Well,
   dsIcon,
   dsText,
-  useDsModalPresence,
 } from "./demo-ui";
 import { StatusBadge } from "./demo-status";
 import { attemptDuration, attemptTrace, fmtElapsed, type DemoRerunDiffEntry, type DemoRow } from "./demo-data";
@@ -315,13 +311,11 @@ export interface PendingRename {
  * `#run` ordinal all stay exactly as they were. That is the whole reason a
  * rename is safe to offer on a row that has already written to UCPath.
  *
- * Built on the APP's dialog primitive (`@/components/ui/dialog`), not `ds`'s —
- * on purpose. That primitive does not know about `ds`'s modal registry, so a
- * persistent `danger` toast used to sit at the toast layer directly over this
- * footer and swallow every click on "Save the name", with nothing on screen to
- * explain why. `RenameDialogBody` calls `useDsModalPresence()`, which joins the
- * registry and makes the toast viewport step aside and go inert exactly as it
- * does for a `ds` Dialog. `ConfirmCommandDialog` needs the same one-line fix.
+ * ON `ds`'s Dialog NOW, not the app's. It was on `@/components/ui/dialog` with
+ * `useDsModalPresence()` bolted on to join the modal registry by hand — which
+ * worked, and which also meant hand-rolling the house footer and re-deriving
+ * the header. The `ds` primitive registers itself, gives `DialogFooter` its
+ * `meta` slot, and is the thing every other dialog in this demo already is.
  */
 export function RenameRunDialog({
   pending,
@@ -334,17 +328,15 @@ export function RenameRunDialog({
 }) {
   return (
     <Dialog open={Boolean(pending)} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent size="sm">
-        {pending && <RenameDialogBody pending={pending} onCancel={onCancel} onConfirm={onConfirm} />}
-      </DialogContent>
+      {pending && (
+        <DialogContent size="sm" title={pending.row.displayName ? "Rename this run" : "Name this run"}>
+          <RenameDialogBody pending={pending} onCancel={onCancel} onConfirm={onConfirm} />
+        </DialogContent>
+      )}
     </Dialog>
   );
 }
 
-/**
- * Mounts only while the dialog is open — which is what makes the modal-presence
- * registration correct: the count is keyed to mount, not to an `open` prop.
- */
 function RenameDialogBody({
   pending,
   onCancel,
@@ -354,26 +346,44 @@ function RenameDialogBody({
   onCancel: () => void;
   onConfirm: (pending: PendingRename, name: string) => void;
 }) {
-  useDsModalPresence();
   const row = pending.row;
   const [name, setName] = useState(row.displayName ?? "");
+  const [ruleOpen, setRuleOpen] = useState(false);
   const trimmed = name.trim();
 
   return (
     <>
-      <DialogHeader>
-        <DialogTitle className={cn("flex items-center gap-[var(--ds-space-snug)]", dsText.section)}>
-          <Pencil aria-hidden className={cn(dsIcon.lg, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
-          {row.displayName ? "Rename this run" : "Name this run"}
-        </DialogTitle>
-        <DialogDescription className={cn(dsText.body, "text-[color:var(--ds-fg-muted)]")}>
-          A name for your own use — it rides the queue row and the receipt. The subject, the trace id and the run number are
-          untouched, so everything in history still matches.
-        </DialogDescription>
-      </DialogHeader>
+      <DialogBody className="flex flex-col gap-[var(--ds-space-snug)]">
+        <Field
+          label={
+            <span className="flex items-center gap-[var(--ds-space-tight)]">
+              Name
+              {/*
+                WHAT A NAME DOES went behind an ⓘ. It was three lines of
+                description under the title: a rule of the product, true of
+                every rename in the surface, drawn in full every time the
+                dialog opened whether or not anyone had ever wondered. The rule
+                is real and worth keeping — the subject, the trace and the
+                `#run` staying put is exactly what makes a rename safe on a row
+                that has already written to UCPath — so it is one press away
+                rather than deleted.
 
-      <div className="flex flex-col gap-[var(--ds-space-snug)] px-px">
-        <Field label="Name">
+                It is NOT a `Popover`. A Popover portals at `dsLayer.menu`
+                (z-20) and a Dialog is z-40, so one opened from inside a dialog
+                renders BEHIND it: the accessibility tree says it opened and
+                the screen says nothing happened. Anything disclosed from
+                inside a dialog is disclosed inside the dialog.
+              */}
+              <IconButton
+                size="xs"
+                label="What a name does"
+                aria-expanded={ruleOpen}
+                onClick={() => setRuleOpen((v) => !v)}
+                icon={<Info aria-hidden className={dsIcon.sm} />}
+              />
+            </span>
+          }
+        >
           <Input
             value={name}
             autoFocus
@@ -384,20 +394,50 @@ function RenameDialogBody({
             placeholder={row.title || "Friday exception pack"}
           />
         </Field>
-        <MetaLine
-          tone="faint"
-          items={[
-            `subject ${row.title || "—"}`,
-            row.trace,
-            `#${row.run}`,
-            row.elapsedSec !== undefined && fmtElapsed(row.elapsedSec),
-          ]}
-        />
-      </div>
+        {ruleOpen && (
+          <Well>
+            <BulletList
+              items={[
+                "It rides the queue row and the receipt.",
+                "The subject, the trace id and the run number are untouched, so everything in history still matches.",
+                "It is yours — nothing downstream reads it.",
+              ]}
+            />
+          </Well>
+        )}
+      </DialogBody>
 
-      <DialogFooter>
+      {/*
+        THE HOUSE FOOTER: `meta (quiet, left) · Cancel · [primary]`.
+
+        The provenance line used to float between the input and the buttons —
+        the one place on a dialog that belongs to neither, so the eye crossed it
+        on the way to the verb every single time. `DialogFooter`'s `meta` slot
+        is where a quiet left-hand note goes, and has been since the polish
+        pass; this dialog was hand-rolling around it.
+
+        `Keep the name it has` is `Cancel`. The long form was a sentence doing a
+        dismiss verb's job, and at that length the two buttons read as two peers
+        rather than as a dismissal and a commit — the primary was not
+        unmistakable, which on the one surface with exactly two exits is the
+        whole job of the footer. `Cancel` and not `Close`, because this surface
+        was building something that will not now exist.
+      */}
+      <DialogFooter
+        meta={
+          <MetaLine
+            tone="faint"
+            items={[
+              `subject ${row.title || "—"}`,
+              row.trace,
+              `#${row.run}`,
+              row.elapsedSec !== undefined && fmtElapsed(row.elapsedSec),
+            ]}
+          />
+        }
+      >
         <Button variant="secondary" onClick={onCancel}>
-          Keep the name it has
+          Cancel
         </Button>
         <Button variant="primary" disabled={!trimmed} onClick={() => onConfirm(pending, trimmed)}>
           Save the name
