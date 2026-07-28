@@ -10,7 +10,7 @@ import {
   UserRoundSearch,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { dsIcon, dsRadius, dsText } from "./tokens";
+import { dsClip, dsIcon, dsRadius, dsText } from "./tokens";
 
 /**
  * DEV-ONLY — the eight ratified queue statuses.
@@ -292,7 +292,12 @@ export function StatusPill({
     <span
       title={spec.meaning}
       className={cn(
+        // `dsClip.token` gives the pill a ceiling of its parent's width. Without
+        // it the label's `truncate` was decorative: a flex child defaults to
+        // `min-width: auto` and refuses to shrink, so the pill simply overflowed
+        // whatever it sat in rather than cutting.
         "inline-flex w-fit shrink-0 items-center border",
+        dsClip.token,
         dsRadius.sm,
         dsText.meta,
         PILL_SIZE[size],
@@ -312,11 +317,14 @@ export function StatusPill({
           )}
         />
       )}
-      <span className={cn("truncate", label === undefined && spec.labelDecoration)}>
+      <span className={cn(dsClip.text, label === undefined && spec.labelDecoration)}>
         {label ?? spec.label}
       </span>
+      {/* The AGE never gives. `Waiting on you` is a state and `Waiting on you ·
+          10m` is a priority — if one of the two has to be cut it is the word,
+          which the icon and the fill are already carrying. */}
       {age && (
-        <span className={cn(dsText.nums, "opacity-80")} aria-label={`for ${age}`}>
+        <span className={cn(dsText.nums, "shrink-0 opacity-80")} aria-label={`for ${age}`}>
           · {age}
         </span>
       )}

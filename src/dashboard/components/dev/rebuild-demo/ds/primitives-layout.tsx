@@ -136,7 +136,11 @@ export function PanelFooter({ className, children }: { className?: string; child
     <footer
       className={cn(
         "flex shrink-0 items-center gap-[var(--ds-space-base)] border-t px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
-        "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)]",
+        // The recessed plane, the same solid band the queue row's own footer
+        // draws. It was `surface-2` + a full-strength border — a second answer
+        // to "this sits back from the panel" living in a primitive, which is
+        // the worst place for one to live: every consumer inherits it.
+        "border-[color:var(--ds-border-subtle)] bg-[var(--ds-recess-bg)]",
         className,
       )}
     >

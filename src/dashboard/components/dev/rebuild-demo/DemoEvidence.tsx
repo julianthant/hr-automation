@@ -12,9 +12,11 @@ import {
   DialogFooter,
   KeyValueList,
   SectionLabel,
+  dsClip,
   dsFocus,
   dsIcon,
   dsMotion,
+  dsRadius,
   dsText,
   useToasts,
 } from "./demo-ui";
@@ -55,7 +57,13 @@ export function SystemChip({ system, className }: { system: SystemKey; className
   return (
     <span
       className={cn(
-        "mr-1.5 inline-block rounded px-1 align-[1px] text-[9px] font-bold tracking-wider",
+        // 9px is below the type floor — the system a line came from is a fact
+        // the operator reads, not a watermark. `micro` (10px) is the smallest
+        // size in the system and the one every other count badge uses.
+        "mr-[var(--ds-space-tight)] inline-block px-[var(--ds-space-tight)] align-[1px] font-bold",
+        dsClip.token,
+        dsRadius.xs,
+        dsText.caps,
         SYSTEM_ACCENT[system],
         className,
       )}
@@ -273,7 +281,7 @@ export function CaptureLightbox({
                       dsFocus,
                       i === index
                         ? "border-[color:var(--ds-border-loud)] bg-[var(--ds-surface-selected)] text-[color:var(--ds-fg)]"
-                        : "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)]",
+                        : "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
                       c.failure && "border-[color:var(--ds-danger)] text-[color:var(--ds-danger)]",
                     )}
                   >
@@ -432,7 +440,10 @@ export function EvidenceSection({ row }: { row: DemoRow }) {
               onClick={() => setOpen(captures.indexOf(c))}
               aria-label={`Open capture — ${c.label}${c.failure ? " (failure capture)" : ""}`}
               className={cn(
-                "flex min-w-0 flex-col items-start gap-[var(--ds-space-hair)] border bg-[var(--ds-surface-2)] text-left",
+                // The recessed plane. A capture tile is a thing that sits BACK
+                // from the section, and it was the last one drawing its own
+                // lighter fill inside a surface that had already stepped down.
+                "flex min-w-0 flex-col items-start gap-[var(--ds-space-hair)] border bg-[var(--ds-recess-bg)] text-left",
                 "px-[var(--ds-space-snug)] py-[var(--ds-space-snug)] rounded-[var(--ds-radius-md)]",
                 dsFocus,
                 dsMotion.fast,

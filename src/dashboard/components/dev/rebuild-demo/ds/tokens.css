@@ -71,9 +71,32 @@
      that genuinely needs an edge (a SCROLLING well, whose half-cut bottom row
      is the depth cue) can set one without every other consumer inheriting a
      line it does not want. Geometry is unchanged either way — the border box
-     is always there, so nothing shifts by a pixel when a surface opts in. */
+     is always there, so nothing shifts by a pixel when a surface opts in.
+
+     TWO INKS ON ONE PLANE, and the split is the thing that was drifting: three
+     chips were painting `--ds-fg-muted` by hand while the plane's own token
+     said `--ds-fg-secondary`, so "recessed" meant two different weights
+     depending on which call site you read. It is not one intent rendered
+     inconsistently — it is two:
+
+       `--ds-recess-fg`       a recessed surface carrying a VALUE you READ
+                              (`EID 10084412`, a filename, a count)
+       `--ds-recess-fg-quiet` a recessed surface carrying a MARKER you SCAN
+                              PAST (`test`, `dry run`, `v3.1`, a panel name)
+
+     Both are now named, so neither is a hand-picked colour at a call site.
+
+     WHAT IS DELIBERATELY *NOT* ON THIS PLANE: a form control. `controlShell`,
+     Checkbox, Radio, the off Switch and SearchInput all draw `--ds-surface-2`
+     with `--ds-control-border`, which reads like a recessed chip and is not
+     one. A control's OUTLINE at 3:1 is what identifies it as a control — it is
+     the whole basis of the `ValueField` / `LockedValue` pair, where "you may
+     change this" and "you may not" are told apart by SHAPE. Folding the
+     controls onto a border-less plane would delete that cue to win a
+     consistency that was never true. They stay as they are, on purpose. */
   --ds-recess-bg: var(--ds-surface-2);
   --ds-recess-fg: var(--ds-fg-secondary);
+  --ds-recess-fg-quiet: var(--ds-fg-muted);
   --ds-recess-border: transparent;
 
   /* ---------------------------------------------------------------------

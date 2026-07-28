@@ -3,7 +3,7 @@ import { ArrowRight, Layers, LayoutList, Link2, PanelRight, Workflow } from "luc
 import { cn } from "@/lib/utils";
 import { CONTAINMENT_KINDS, MEMBER_SHAPE, PANEL_KINDS, ROLLUP_STEPS, ROW_VARIANTS, type RowVariantSpec } from "./demo-catalog";
 import { DEMO_ROWS } from "./demo-data";
-import { Button, CardBase, dsBorder, dsIcon, dsRadius, dsSurface, dsText } from "./demo-ui";
+import { Button, CardBase, dsBorder, dsClip, dsIcon, dsRadius, dsSurface, dsText } from "./demo-ui";
 
 /**
  * DEV-ONLY — the catalog view of `?view=rebuild-demo`.
@@ -23,9 +23,13 @@ import { Button, CardBase, dsBorder, dsIcon, dsRadius, dsSurface, dsText } from 
  * chip already carries the type's name; weight is all the separation it needs.
  */
 const TYPE_TONE: Record<RowVariantSpec["rowType"], string> = {
-  "Run Row": "border-[color:var(--ds-border-loud)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg)]",
-  "Group Row": "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-secondary)]",
-  "Member Row": "border-[color:var(--ds-border-subtle)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)]",
+  // One plane, three INKS. The three row types were being told apart by border
+  // STRENGTH on a fill that was the same in all three — which is a distinction
+  // nobody can see, drawn with the one channel the recessed plane does not use.
+  // Ink weight is the channel that was already carrying it.
+  "Run Row": "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-fg)]",
+  "Group Row": "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg)]",
+  "Member Row": "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
 };
 
 /**
@@ -57,11 +61,14 @@ function FactRow({ label, children }: { label: string; children: ReactNode }) {
 
 /** the neutral fact chip this page uses everywhere a code or a step is named */
 const catalogChip = cn(
-  "inline-flex items-center border",
+  "inline-flex items-center border text-ellipsis",
+  dsClip.token,
   "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
   dsRadius.sm,
   dsText.micro,
-  "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-secondary)]",
+  // The recessed plane. It was the last outlined-with-its-own-fill chip on a
+  // page whose whole job is to show what the system's shapes ARE.
+  "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg)]",
 );
 
 /** the bullet a spec list hangs on — 6px down so it sits on the x-height */

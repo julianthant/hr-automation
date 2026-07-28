@@ -55,7 +55,7 @@ export { fmtElapsed } from "./demo-wire";
  * the colour was carrying nothing the label did not. One treatment, and the
  * live palette gets four hues back.
  */
-export const SYSTEM_CHIP = "bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-secondary)]";
+export const SYSTEM_CHIP = "bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg)]";
 
 export const SYSTEM_ACCENT: Record<SystemKey, string> = {
   kuali: SYSTEM_CHIP,

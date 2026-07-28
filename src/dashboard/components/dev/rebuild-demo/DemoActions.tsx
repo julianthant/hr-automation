@@ -504,7 +504,7 @@ export function CommandResultFeed({
   return (
     <div
       className={cn(
-        "flex shrink-0 flex-col border-b bg-[var(--ds-surface-2)]",
+        "flex shrink-0 flex-col border-b bg-[var(--ds-recess-bg)]",
         dsBorder.subtle,
         "gap-[var(--ds-space-snug)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
       )}

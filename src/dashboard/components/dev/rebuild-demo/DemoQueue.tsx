@@ -41,6 +41,7 @@ import {
   PopoverContent,
   PopoverTrigger,
   dsBorder,
+  dsClip,
   dsFocus,
   dsIcon,
   dsMotion,
@@ -165,7 +166,7 @@ function FactChipView({ label, value, arrowTo, warn }: NonNullable<DemoRow["fact
     <Chip label={label} tone={warn ? "warning" : "neutral"} title={full} className="w-full">
       {arrowTo ? (
         <span className="inline-flex min-w-0 items-center gap-[var(--ds-space-tight)]">
-          <span className="truncate">{value}</span>
+          <span className="min-w-0 truncate">{value}</span>
           <ArrowRight aria-hidden className="size-2.5 shrink-0 text-[color:var(--ds-fg-muted)]" />
           <span className="truncate text-[color:var(--ds-fg)]">{arrowTo}</span>
         </span>
@@ -336,7 +337,10 @@ type RowChipTone = "neutral" | "info" | "warning" | "violet";
 
 /** One recessed plane, four tones. A fill and no line — see `--ds-recess-*`. */
 const ROW_CHIP_TONE: Record<RowChipTone, string> = {
-  neutral: "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-fg-muted)]",
+  // `--ds-recess-fg-quiet`, not a hand-picked `--ds-fg-muted`: a row chip is a
+  // MARKER you scan past (`test`, `dry run`, `v3.1`), which is a different job
+  // from the recessed plane's other ink, the one that carries a value you read.
+  neutral: "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
   info: "border-transparent bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
   warning: "border-transparent bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
   violet: "border-transparent bg-[var(--ds-status-parked-bg)] text-[color:var(--ds-status-parked-fg)]",
@@ -347,7 +351,11 @@ const rowChip = (tone: RowChipTone, extra?: string): string =>
     // `max-w-full` + the truncating child below: a chip is a single-line token
     // at every width, and it truncates INSIDE its border rather than wrapping
     // outside it.
-    "inline-flex max-w-full shrink-0 items-center overflow-hidden border whitespace-nowrap",
+    // `text-ellipsis` is the half that was missing: `overflow-hidden` alone
+    // cuts a value with no signal that anything was cut, which on a version tag
+    // or an instance name is indistinguishable from a shorter value.
+    "inline-flex shrink-0 items-center border text-ellipsis",
+    dsClip.token,
     "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
     dsRadius.sm,
     dsText.micro,
@@ -640,7 +648,12 @@ function RowFooterLine({
             "h-[var(--ds-h-xs)]",
             dsRadius.sm,
             dsBorder.base,
-            "bg-[var(--ds-surface-1)]",
+            // The LAST outlined-and-lighter chip. It sat at `surface-1` on top
+            // of the footer's `recess-bg` band — i.e. brighter than its own
+            // parent, which is the one thing a recessed token can never be. It
+            // reads as an inset in the band now: no fill of its own, the band's
+            // ink, and its edge from the plane's border token.
+            "border-[color:var(--ds-recess-border)] bg-transparent",
           )}
         >
           #{row.run}
@@ -838,7 +851,7 @@ export function DemoRowCard({
                   className={linkChip("info")}
                 >
                   <Users aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
-                  <span className="truncate">{linked.label}</span>
+                  <span className="min-w-0 truncate">{linked.label}</span>
                   <ArrowUpRight aria-hidden className="size-3 shrink-0" />
                 </button>
               </div>
@@ -869,7 +882,7 @@ export function DemoRowCard({
                   className={linkChip("neutral")}
                 >
                   <ArrowLeft aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
-                  <span className="truncate">
+                  <span className="min-w-0 truncate">
                     {DEMO_ROWS[row.linkedParentId].wfLabel} · {DEMO_ROWS[row.linkedParentId].title}
                   </span>
                 </button>
@@ -988,7 +1001,8 @@ export function DemoRowCard({
  */
 const linkChip = (tone: "info" | "neutral"): string =>
   cn(
-    "inline-flex max-w-full cursor-pointer items-center border",
+    "inline-flex cursor-pointer items-center border",
+    dsClip.token,
     "h-[var(--ds-h-xs)] gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
     dsRadius.sm,
     dsText.meta,
@@ -1029,7 +1043,7 @@ function LinkedReviewChip({ row, handlers }: { row: DemoRow; handlers: DemoQueue
         className={linkChip("neutral")}
       >
         <ClipboardList aria-hidden className="size-3 shrink-0" />
-        <span className="truncate">OCR review · {statusText(effectiveStatus(target)).toLowerCase()}</span>
+        <span className="min-w-0 truncate">OCR review · {statusText(effectiveStatus(target)).toLowerCase()}</span>
         <ArrowUpRight aria-hidden className="size-3 shrink-0" />
       </button>
     </div>
@@ -1163,9 +1177,15 @@ function PersonWell({ children }: { children: ReactNode }) {
         // The recessed plane, plus the ONE case allowed to draw its edge: this
         // well SCROLLS, and the half-cut row at its bottom is only readable as
         // "there is more" if the container has a boundary to be cut by.
+        // The edge is set by RE-POINTING `--ds-recess-border` on this element,
+        // which is the mechanism the plane documents for exactly this case — a
+        // scrolling well, whose half-cut bottom row is only readable as "there
+        // is more" if there is a boundary to be cut by. Painting `dsBorder`
+        // straight on made this the one recessed surface whose edge did not
+        // come from the plane's own token.
         "divide-y overflow-hidden overflow-y-auto border bg-[var(--ds-recess-bg)]",
+        "[--ds-recess-border:var(--ds-border-subtle)] border-[color:var(--ds-recess-border)]",
         dsRadius.md,
-        dsBorder.subtle,
         "divide-[color:var(--ds-border-subtle)]",
         "max-h-[var(--ds-h-member-well)]",
       )}
@@ -1412,13 +1432,14 @@ const DRILL_GRID = "grid grid-cols-[1rem_minmax(0,1fr)_var(--ds-w-member-eid)_va
 /** the drill-in header's three summary chips — one shape, two loudness levels */
 const drillChip = (warn: boolean): string =>
   cn(
-    "inline-flex shrink-0 items-center border border-transparent whitespace-nowrap",
+    "inline-flex shrink-0 items-center border border-transparent text-ellipsis",
+    dsClip.token,
     "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-base)]",
     dsRadius.sm,
     dsText.meta,
     warn
       ? "bg-[var(--ds-status-waiting-bg)] font-medium text-[color:var(--ds-status-waiting-fg)]"
-      : "bg-[var(--ds-recess-bg)] text-[color:var(--ds-fg-muted)]",
+      : "bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
   );
 
 function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQueueState; handlers: DemoQueueHandlers }) {
@@ -1485,7 +1506,7 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
         className={cn(
           DRILL_GRID,
           dsText.caps,
-          "shrink-0 items-center border-b bg-[var(--ds-surface-2)]",
+          "shrink-0 items-center border-b bg-[var(--ds-recess-bg)]",
           dsBorder.subtle,
           "h-[var(--ds-h-xs)] gap-x-[var(--ds-space-base)] px-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]",
         )}
@@ -1558,7 +1579,7 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
           about the product: the order it is in. */}
       <div
         className={cn(
-          "flex shrink-0 items-center justify-end border-t bg-[var(--ds-surface-2)]",
+          "flex shrink-0 items-center justify-end border-t bg-[var(--ds-recess-bg)]",
           dsBorder.subtle,
           dsText.meta,
           "px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",

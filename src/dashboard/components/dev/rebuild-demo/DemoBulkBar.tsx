@@ -237,7 +237,7 @@ export function DemoQueueToolbar({
       {selectMode && (
         <div
           className={cn(
-            "flex items-center border-t bg-[var(--ds-surface-2)]",
+            "flex items-center border-t bg-[var(--ds-recess-bg)]",
             dsSize.hBar,
             dsBorder.subtle,
             "gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
@@ -277,7 +277,7 @@ export function DemoQueueToolbar({
       {outcome && buckets && (
         <div
           className={cn(
-            "border-t bg-[var(--ds-surface-2)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
+            "border-t bg-[var(--ds-recess-bg)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
             dsBorder.subtle,
           )}
           aria-live="polite"

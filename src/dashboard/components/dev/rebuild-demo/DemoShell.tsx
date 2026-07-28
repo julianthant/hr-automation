@@ -69,6 +69,7 @@ import {
   type DemoTheme,
   dsBorder,
   dsElev,
+  dsClip,
   dsFocus,
   dsIcon,
   dsLayer,
@@ -1431,7 +1432,7 @@ const PHASE_TONE: Record<SessionPhase, { dot: string; label: string; text: strin
  */
 const HEALTH_TONE: Record<BrowserHealth, { cls: string; icon: typeof Activity; label: string }> = {
   healthy: {
-    cls: "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)]",
+    cls: "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
     icon: CheckCircle2,
     label: "Ready",
   },
@@ -1556,16 +1557,23 @@ const atCap = (slot: { inUse: number; cap: number }): boolean => slot.inUse >= s
  * One capacity chip shape for lanes AND for every system budget. They were two
  * near-identical hand-rolled spans at 9.5px, which is below the type floor and
  * made the row wrap ragged whenever a card carried three systems.
+ *
+ * It also absorbed `barChip`, the collapsed Session bar's summary chip — the
+ * SAME nine lines declared a second time ~230 lines below this one, differing
+ * only in the name of its boolean. Two declarations of one shape is how the two
+ * drift; there is now one, and it sits at module scope where the second copy
+ * could not have been written without noticing the first.
  */
 const capacityChip = (full: boolean): string =>
   cn(
-    "inline-flex shrink-0 items-center border",
+    "inline-flex shrink-0 items-center border text-ellipsis",
+    dsClip.token,
     "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
     dsRadius.sm,
     dsText.micro,
     full
-      ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]"
-      : "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)]",
+      ? "border-transparent bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]"
+      : "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
   );
 
 function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
@@ -1784,18 +1792,6 @@ export function DemoSessionPanel({ tick }: { tick: number }) {
   const lanesCap = DEMO_SESSIONS.reduce((n, s) => n + (s.lanes?.cap ?? 0), 0);
   const blocked = DEMO_SESSIONS.filter((s) => s.waiting);
 
-  /** the summary chips on the collapsed bar — one shape, two loudness levels */
-  const barChip = (warn: boolean): string =>
-    cn(
-      "inline-flex shrink-0 items-center border",
-      "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
-      dsRadius.sm,
-      dsText.micro,
-      warn
-        ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]"
-        : "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)]",
-    );
-
   return (
     <section aria-label="Session Panel" className={cn("shrink-0 border-t", dsBorder.base, dsSurface.card)}>
       <div className={cn("flex items-center", dsSize.hBar, "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)]")}>
@@ -1843,7 +1839,7 @@ export function DemoSessionPanel({ tick }: { tick: number }) {
               </span>
             )}
           </span>
-          <span title={`${lanesInUse} of ${lanesCap} lanes in use across every worker`} className={barChip(false)}>
+          <span title={`${lanesInUse} of ${lanesCap} lanes in use across every worker`} className={capacityChip(false)}>
             <Gauge aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
             <span className={dsText.nums}>
               {lanesInUse}/{lanesCap}
@@ -1853,14 +1849,14 @@ export function DemoSessionPanel({ tick }: { tick: number }) {
           {blocked.length > 0 && (
             <span
               title={blocked.map((s) => `${s.workflow} is waiting on the ${s.waiting?.system} lease`).join(" · ")}
-              className={barChip(true)}
+              className={capacityChip(true)}
             >
               <Hourglass aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
               {blocked.length} waiting on a lease
             </span>
           )}
           {sickBrowsers > 0 && (
-            <span className={barChip(true)}>
+            <span className={capacityChip(true)}>
               <AlertTriangle aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
               {sickBrowsers} browsers need attention
             </span>
