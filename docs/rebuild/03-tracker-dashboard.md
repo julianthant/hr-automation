@@ -1214,7 +1214,7 @@ suggestion: §1.1 span identity → §4 completion union → §5.2 lift mapping 
 
 ---
 
-## 9. Ratified delegation and presentation decisions (D6–D21)
+## 9. Ratified delegation and presentation decisions (D6–D24)
 
 Status: **ratified by the operator 2026-07-25.** These continue the **row-model decision series**
 ratified 2026-07-24 (`reviews/second-look-2026-07-22.md` §6.6 — D1: three row types Run/Group/Member
@@ -1234,6 +1234,31 @@ vocabulary is that ledger's: **`containment`** = `member | linked | rejected` (�
 its semantics, and **D21** is added — the step timeline is equal-width. The as-built shell and
 layout those waves settled are recorded at the end of this section; they are not separately
 numbered, because none of them re-opens a question the D-series answered.
+
+**Amended again 2026-07-28 by the redesign's later waves** (commits `d1530a1f`..`fa6c251c`):
+row-model **D5** gains a close-on-settle arm, **D11** loses the rest of its ladder (one member
+presentation at every count), **D12** is touched but not overridden, the gate banner that expressed
+**D18**'s loudness principle at run-detail level is overridden (the decision moves inline into the
+stream), **D19**(d) is re-amended (the `Edit & re-run` dialog is removed — editing happens in
+place in the rail), **D20** is reinforced structurally, **D21** is extended (the wait renders on
+the step's own bar; a queued run draws its shape), and **D22–D24** are new. Several of these
+**reverse earlier operator-directed decisions**; each entry says so and records the reason, so a
+future agent does not restore the old behaviour on principle.
+
+### Row-model D5 — amended 2026-07-28: a settled group collapses shut
+
+D5 (ratified 2026-07-24: groups default collapsed, auto-expand on a member `Waiting on you` or
+`Failed`) gains the symmetric arm: **a group that settles collapses back shut**, and a settled row
+stops re-explaining its own composition — the prose count line, the checked counter and the
+member-name preview are all dropped on terminal rows. Attention rows and live rows keep
+everything.
+
+Rationale: the auto-expand exists because an open group is a demand; a group with nothing left to
+demand holding the space of an open one is the same defect inverted. And a terminal row restating
+its member count in prose beside the count strip that already shows it is the duplication D24
+names — the row's expansion state and its explanatory chrome are both projections of settlement,
+derived in one place (`visibleMemberIds` branches on settlement and nothing else), never authored
+per fixture.
 
 ### D6 — oath-upload's signers are `linked`, not `member`; shape S4 is deleted
 
@@ -1283,54 +1308,61 @@ panel, per row-model D4) — **never on the packet group**. From the packet, "wh
 blank" is answered on the **record card**, not by walking a delegation tree. Rationale: maximum real
 depth is 2; surfacing it twice buys nothing and doubles the count surface.
 
-### D11 — the presentation ladder is three rungs; the status matrix is deleted
+### D11 — one member presentation at every count; the density ladder is deleted
 
-**Amended 2026-07-27.** The ladder:
+**Amended 2026-07-27, amended again 2026-07-28.** There is no ladder. A group's expanded body is
+**one rung at every member count**: count strip → compact member lines in a capped scroll well →
+`Open all N people` drill-in. The same shape at 3 people and at 50 — scale changes the container's
+**overflow** and nothing else. Member count is continuous, presentation is never a row type, and
+the drill-in is part of the one shape, not a route to a different one.
 
-| Members | Expanded body |
-|---|---|
-| 1–3 | Full Member Rows inline |
-| 4–12 | Compact list, first 4 + `Show all N` |
-| **13+** | Compact list in a scroll well + `Open all N people` |
+**What this replaces, in two stages — both reversals of ratified, operator-directed designs.**
+The ratified-2026-07-25 D11 was a four-rung ladder (1–3 full inline Member Rows · 4–12 compact
+list · 13–40 scroll well · **41+ status matrix** with a matrix-only attention strip). The
+2026-07-27 amendment deleted the 41+ matrix: the operator saw the 50-member I-9 group render as a
+grid of status cells where the 18-person work-study group renders named lines, read the matrix as
+a *different kind of row*, and said *"we also don't need a new row type for i9 quarterly
+retention"* while pointing at that work-study group. The 2026-07-28 amendment deleted the rest:
+shown a 2-member group rendering full inline row cards beside a 6-member group rendering compact
+lines, the operator said *"why are some like this and some like that? keep the design like above.
+ditch the bottom design completely."* — so the 1–3 inline-card rung went the same way the matrix
+did, and compact/well merged into the one surviving shape. Note the earlier amendment recorded the
+operator confirming "4 is good" for the 1–3 / 4–12 boundary; **that ratification is spent** — the
+later, more general instruction supersedes it, and it must not be quoted to restore the rung.
 
-Member count is continuous — this is presentation, never a row type, and the drill-in is a rung of
-the ladder, not a route. Every group reads the same at every size: count strip → status counts →
-member well (name · detail · EID) → `Open all N people`.
+**The principle, which is why neither deletion may be undone piecemeal:** a second visual language
+for *the same thing but more of it* makes the product read as having more concepts than it has —
+the exact cost the three-row-type model exists to avoid. D14 already holds this from the other end
+(a group of one still renders as a Group Row); the matrix broke it at 41+, the inline cards broke
+it at 3. **`densityRung` / `DensityRung` / `DENSITY_RUNGS` were deleted, not reduced to a function
+that ignores its argument** — a per-count switch that currently maps every count to the same rung
+is a per-count switch waiting to grow rungs back. `PersonWell` + `PersonLine` make the one shape
+mechanical rather than a convention two call sites keep.
 
-**What this replaces.** The ratified-2026-07-25 D11 had a fourth rung at **41+** that swapped the
-member well for a **status matrix** plus a matrix-only attention strip and a `Start review`
-drill-in. That rung is **deleted**, and with it the attention strip, which existed only to caption
-the matrix. The old 13–40 and 41+ bands merge into one `13+` band.
-
-**Why.** The operator saw the 50-member I-9 packet render as a grid of status cells where the
-18-person work-study group renders named lines, read the matrix as a *different kind of row*, and
-said "we also don't need a new row type for i9 quarterly retention" while pointing at that
-work-study group. Asked to confirm the boundaries that survive, they said "4 is good" — so the
-1–3 / 4–12 rungs stand as ratified. D14 already holds that a group of one still renders as a Group
-Row *because a group that looks like a Run Row makes the next fan-out look like a new object*; the
-matrix broke exactly that rule from the other end of the count. **A second visual language for "the
-same thing but more of it" makes the product read as having more concepts than it has**, which is
-the cost the three-row-type model exists to avoid. Do not reintroduce a per-count layout switch.
-
-**The two numbers behind the surviving rung.** The well is capped at `--ds-h-member-well` =
-**136px ≈ 5.67 rows**. The half-cut sixth row IS the depth cue, which is why it is deliberately
-**not** 144px / 6 whole rows — a well that ends on a clean row edge reads as a complete list, and
-the operator then has no reason to scroll it. Members are ordered **attention-first**, so the top
-of the well IS the attention list the 41+ rung used to draw as a separate strip.
+**The two numbers behind the well.** `--ds-h-member-well` = **136px ≈ 5.67 rows**. The half-cut
+sixth row IS the depth cue, which is why it is deliberately **not** 144px / 6 whole rows — a well
+that ends on a clean row edge reads as a complete list, and the operator then has no reason to
+scroll it. Members are ordered **attention-first**, so the top of the well IS the attention list
+the 41+ rung used to draw as a separate strip.
 
 **Nothing was lost.** The per-status information the matrix carried survives as the count strip's
-status counts plus the separate waiting / rejected tallies (D9's `50 people · 3 rejected`), and
-**the drill-in survives** — `Open all N people` is still the route into the full member list at
-every size ≥ 13.
+status counts plus the separate waiting / rejected tallies (D9's `50 people · 3 rejected`); the
+detail an inline card carried survives on the member's own drill-in and the group's People tab;
+and `Open all N people` is still the route into the full member list at every size.
 
-**Supersedes** the original D11's 41+ rung and, with it, `reviews/delegation-layouts-2026-07-25.md`
-§4's four-rung ladder and its "at 41+ the attention strip renders **above** the matrix" rule. The
-original entry's "supersedes the rebuild demo's threshold of 20" clause is spent — the demo now
-implements this ladder as written.
+**Supersedes** the original D11 ladder in full, `reviews/delegation-layouts-2026-07-25.md` §4's
+four-rung ladder and its "at 41+ the attention strip renders **above** the matrix" rule, and the
+2026-07-27 three-rung amendment this entry previously recorded.
 
 ### D12 — the collapsed row shows the gate's age
 
 `Waiting on you · 10m`. Rationale: an aging gate is the most actionable fact in the queue.
+
+**Touched 2026-07-28, not overridden.** On the run detail the gate's age now renders in three
+places — the panel header's status pill (`Waiting on you · 33m 50s`), the inline decision in the
+log stream, and the corner notice that appears while the decision is scrolled out of view (see the
+D18 amendment). **The queue row's gate age is unchanged** — this entry's contract stands as
+ratified.
 
 ### D13 — a failed `linked` child makes the parent `Failed`, with `Re-upload`
 
@@ -1379,6 +1411,31 @@ One row: an **`All`** pill, then a composite **`Needs you`** pill (= `Waiting on
 everything doing?" second. Counts are the same server-side projection that feeds `wfCounts` and the
 queue rows (§2.2); the composite pill is a sum of projected buckets, never a second count path.
 
+**Amended 2026-07-28 — the gate banner this loudness principle produced is overridden.** The pill
+model above is untouched. What is overridden is the run-detail expression of "the decision is the
+loudest thing": the **tall gate banner above the tabs** (ratified as-built through D19 and pinned
+in this section's shell notes as "the gate banner … never moves into the rail") is **deleted**.
+The decision now lives **inline in the log stream at the point it was reached** (`InlineDecision` —
+title, age, note, candidates, staged writes, both park resolutions); the panel header keeps a
+**one-line state plus its action**; and a small **dismissable notice** in the panel's corner
+(`DecisionNotice`) appears only while a decision is outstanding **and not visible** (an
+IntersectionObserver on the decision's anchor; dismissal is per row+tab and re-arms on either
+change, so a dismissed reminder can never become an unreachable decision).
+
+**Why this is not a loss of loudness, stated so the banner is not restored on principle:** the
+decision was being rendered **twice** — the banner above the tabs and, at the moment it occurred,
+the same title, the same copy and the same buttons inline in the stream. Removing the banner
+removed a **duplicate**, not information. Verified on both the write-parked and identity-approval
+runs before the deletion. Two bands saying the same thing is how a dense panel teaches an operator
+to skim past both — the duplication was itself the defect.
+
+Recorded with it, because they close the same "can the record hide?" question: a **failed run now
+opens on Logs** rather than Review (`defaultTabFor` puts logs ahead of every other default), so
+the failure record cannot hide behind a tab; and the failure's **write-state sentence** ("what
+this run left behind" — the difference between a safe retry and a duplicate termination) renders
+**unconditionally in the stream, never behind a disclosure**. Only diagnosis (progress ledger,
+cause chain, fingerprint) may sit behind a disclosure.
+
 ### D19 — run-detail tabs derive from panel kind; Screenshots is not a tab; Data is not a tab either
 
 Ratifies the tab model **as built in the rebuild demo**:
@@ -1390,19 +1447,26 @@ Ratifies the tab model **as built in the rebuild demo**:
 - **(c) Data and Edit Data are ONE merged surface** — every value the run touched. Reads are editable
   in place; **writes are shown but not editable**; the footer offers `Load a prior run` and
   `Start a run from this data`.
-- **(d) Amended 2026-07-27 — Data is not a tab.** It is a section of the run's **context rail**,
-  with an `Edit & re-run` **Dialog** for the editing half. `DemoTab` and `tabsFor` drop `"data"`
-  entirely, so no dead tab id is reachable, and `detailSurfaces` re-derives from `tabsFor` at
-  projection.
+- **(d) Amended 2026-07-27, re-amended 2026-07-28 — Data is not a tab, and not a dialog either.**
+  It is a section of the run's **context rail**, edited **in place**. The separate `Edit & re-run`
+  Dialog that briefly carried the editing half was introduced and then **removed at operator
+  instruction** (*"we also need the edit data and data tab to be together so i can have a feel of
+  how its like to edit the data"*); the rail section **widens** while editing
+  (`--ds-w-context-rail-wide`, 520px) instead of opening a modal. `DemoTab` and `tabsFor` drop
+  `"data"` entirely, so no dead tab id is reachable, and `detailSurfaces` re-derives from `tabsFor`
+  at projection.
 
-**(c) is preserved byte-for-byte by (d).** Reads stay editable, writes stay shown and never
-editable, staged writes still render as staged, unconfirmed still says unconfirmed, nothing gains
-success styling it has not earned, and the `Load a prior run` / `Start a run from this data` footer
-survives intact. The unlock rules (`editPolicyFor` with the reason always shown), the CAS on the
-checkpoint generation, and the audited freshness override all carry over into the dialog unchanged.
-**Only the home changed** — the ledger is *read* in the rail and *edited* in a dialog, because
-editing is a task and reference is not. Gating is still `actions[]` descriptors at the `data`
-placement, so a run that may not be edited is simply not sent a Save.
+**(c) is preserved byte-for-byte by (d), through both amendments.** Reads stay editable, writes
+stay shown and never editable, staged writes still render as staged, unconfirmed still says
+unconfirmed, nothing gains success styling it has not earned, and the `Load a prior run` /
+`Start a run from this data` footer survives intact. The unlock rules (`editPolicyFor` with the
+reason always shown), the CAS on the checkpoint generation, and the audited freshness override all
+carry over into the rail section unchanged (the freshness *confirm* stays a dialog — it is a
+question with a typed answer and two mutually exclusive exits, which is what a dialog is for).
+**Only the home changed** — the ledger is read AND corrected in one place, because the operator's
+stated need was to *feel* the editing in the context of the data, not to be handed a task surface.
+Gating is still `actions[]` descriptors at the `data` placement, so a run that may not be edited
+is simply not sent a Save.
 
 **Why the move.** Logs and Data were mutually exclusive tabs, so the operator could not watch a
 run's log stream and see what that run read and wrote at the same time. That mutual exclusion was a
@@ -1428,8 +1492,8 @@ defaults stay state-driven (`Waiting on you` / `Write parked` → Review, termin
 Consequence for §2.2's wire: `QueueSurfaceWire.detailSurfaces` stays server-declared and
 capability-driven — the panel kind selects from what the server declares — but `"screenshots"` no
 longer projects a tab (it projects the evidence rail section), and `"edit-data"` / `"view-data"`
-collapse into one `data` surface — which, as of (d), projects a **rail section plus a dialog**, not
-a tab, with its write fields still rendering read-only.
+collapse into one `data` surface — which, as of (d), projects a **rail section edited in place**,
+not a tab and not a dialog, with its write fields still rendering read-only.
 
 ### D20 — `Write parked` means an unknown write outcome, and nothing else
 
@@ -1442,6 +1506,14 @@ Consequence: the rebuild demo's `sep-rosa` fixture, which labels a pre-submit ho
 with a "Resume & submit" action, is wrong and must be re-authored as a gate. Rationale: parked is the
 one status that means "we may have already filed something"; diluting it with holds we know the
 state of destroys the only signal that warrants a live probe.
+
+**Reinforced 2026-07-28 — a parked row is structurally sent no data-mutating command.** The prior
+action policy offered `rerun-with-existing-data` ("Start a run from this data") on a parked row —
+i.e. a fresh run seeded from a write whose outcome is unknown, which is exactly the
+duplicate-termination path this decision exists to prevent. `deriveActions` now sends a parked row
+**no** `data`-placement command at all; its only exits remain the two typed park resolutions.
+Because every control is derived from the served `actions[]`, the hazardous command is
+unreachable, not merely hidden.
 
 ### D21 — every step segment on the timeline is the same width; the duration is printed
 
@@ -1478,6 +1550,93 @@ timeline elements should have equal sizes doesnt matter the time."* **A future a
 restore proportional widths on no-fabrication grounds.** If proportionality is ever wanted again it
 needs a fresh operator decision, not a correctness argument — the correctness argument has been
 made and answered.
+
+**Extended 2026-07-28** — two further moves, superseding this entry's "gate/wait segment" and
+"dashed treatment" wording above:
+
+- **The waiting state renders on the current step's own bar** — hatched, with the true elapsed age
+  printed beneath it — rather than as a separate trailing gate segment. A wait is a **state of a
+  step**, not a step of its own: the old trailing segment meant `Your review` occupied two of six
+  slots and read as two separate things, one of them apparently finished, and deleting it gave the
+  track a sixth of its width back. "Working" and "waiting on you" are told apart by the bar's
+  fill, not by a slot count. Fail-safe kept deliberately: a gate whose run records no waiting step
+  still draws the old trailing segment — a true fact is never dropped because the shape did not
+  line up.
+- **A queued run draws every segment outlined and empty**, so the track states the run's *shape*
+  before it starts. The old dashed hairlines read as one dashed rule across the panel with labels
+  floating over it — the surface that exists to say what a run will do said nothing until it
+  started, which is an information defect, not a visual one. The outline is **continuous, not
+  dashed**: the dash is spoken for (`Write parked` is the one thing in this product that dashes,
+  and nothing else may borrow the cue).
+
+The track therefore has exactly **three legible states**: **outlined-empty** (not reached) ·
+**solid** (done, or being worked now) · **hatched** (the run is stopped here, on you).
+
+### D22 — the status vocabulary shortens: `Verified done` renders as `Done`
+
+**Ratified 2026-07-28.** The quietest status renders as a green **`Done`** with **no icon** on the
+pill. The qualifier was doing two jobs badly: it made the quietest status the longest label in the
+vocabulary, and beside `Done with warnings` it asked the operator to work out whether *that* one
+was verified too. `Done` / `Done with warnings` is the coherent pair — one word plus its
+qualifier — and the sibling deliberately did **not** shorten, because the qualifier IS the
+difference between them. The pill is green rather than muted (a muted `Done` beside a muted
+`Cancelled` is two greys) — safe, because **the word remains**: this is not colour-only encoding.
+
+**The guarantee is structural, not textual, and the shortening must not be read as a weakening:**
+the verdict is still reachable **only via read-back** (doc 12's completion contract), and the
+receipt still shows its read-back checks — only the *label* shortens. The wire/status key stays
+`verified-done`.
+
+**Reconciliation debt, recorded rather than silently fixed:**
+`docs/rebuild/12-operator-trust-and-authoring.md:284` and this doc's D9 (…"`Verified done`
+requires zero unacknowledged rejections") still use the long label. They describe the same verdict
+under its pre-D22 name and need reconciling when next touched — the semantics they state are
+unchanged.
+
+### D23 — the motion rule is narrowed on purpose
+
+**Ratified 2026-07-28.** From *never animate status changes* to **never animate ambient status
+churn; a run that starts needing you may announce itself** — once, on the edge.
+
+**The reasoning, so the narrower form is applied and not merely quoted:** a dashboard where
+everything that updates also moves is unreadable exactly when it is busiest, and this one updates
+constantly. So elapsed timers, incrementing counts, background settling and self-initiated
+re-sorts stay **still** — if all of that moved, movement would be unavailable for the one thing
+that needs it. But the two states allowed to shout (`Waiting on you`, `Failed`) mark the moment a
+run stops being background and becomes work, and that is precisely the moment the operator is
+looking somewhere else; a row that turns amber silently between glances is a row that gets found
+late.
+
+**Four constraints keep the exception from becoming a licence:** (1) **edge, never state** — it
+fires on the *transition into* an attention status; a row already waiting when scrolled to does
+nothing; (2) **never on mount** — first sight of a row is not a change; (3) **once, then still**
+(`ATTENTION_ANNOUNCE_MS`) — nothing pulses, repeats, or waits to be acknowledged; (4) **only the
+two loud statuses** — reaching for this on a third status is the drift, and the answer is no.
+Implemented once (`useAttentionAnnounce`); never re-derive it at a second call site. **The
+narrower form must not become a licence** — this entry is authority for exactly the attention edge
+and nothing more.
+
+### D24 — a professional dashboard does not explain itself
+
+**Ratified 2026-07-28.** Explanatory prose on a surface is a **defect** unless it lives inside an
+**ⓘ** (a click-to-open Popover — reachable by pointer, touch and keyboard, costing the surface
+nothing until asked for). Two exemptions, and only two, because neither is explanation: a
+**refusal**, which must state what was *not* done and why or the operator cannot act on it; and a
+genuine **hazard** about the run in front of you (a stale checkpoint, a staged write, an
+unresolved park) — those are outcomes, not teaching.
+
+**The test:** a sentence on a surface must be a fact about the RUN in front of you. A sentence
+that would be equally true of every run in the product is a rule of the product, and a rule of the
+product is not information — it is teaching, and it costs the same pixels every time it is drawn
+whether or not anyone needed it. Operator, verbatim: *"i feel like the dashboard right now is
+bloated with extra information like explanations and descriptions that we dont need."*
+
+This decision drove the removal of dozens of strings (control descriptions restating the
+control's label, captions repeating icons, the UI describing its own mechanics, the product
+asserting its own correctness) and the relocation of the rest into ⓘs. An **empty state** still
+owes three things and no more: what would be here, why it is not, and what to do — it does not owe
+a defence of the design. The full deletion criteria live in the demo's `DESIGN.md` ("The product
+does not explain itself"), which is binding on every surface built against this contract.
 
 ---
 
