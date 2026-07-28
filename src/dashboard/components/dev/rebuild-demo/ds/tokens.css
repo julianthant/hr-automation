@@ -393,6 +393,19 @@
      column and truncates there, which it did before at any width. */
   --ds-w-member-detail: 104px;
   --ds-w-member-eid: 64px;
+  /* The ARCHIVE's fixed columns. They are tokens rather than literals in a
+     `<colgroup>` because the bump SECTION HEADER lays its own facts on the same
+     `when` and `count` tracks — so a sweep's date sits over the dates of the
+     runs it swept, and the section heads line up down the page instead of each
+     one ending wherever its sentence stopped. */
+  --ds-w-archive-status: 124px;
+  --ds-w-archive-trace: 132px;
+  --ds-w-archive-workflow: 168px;
+  --ds-w-archive-when: 104px;
+  --ds-w-archive-duration: 76px;
+  /* the two tracks only a bump header has: the version pair and its kind */
+  --ds-w-bump-version: 168px;
+  --ds-w-bump-kind: 60px;
   /* A queue row's HANGING INDENT — the leading column its status tick sits in,
      and the left edge every line under the title aligns to. It is a real grid
      track, so the row's rhythm comes from ONE gap instead of a hand-picked
