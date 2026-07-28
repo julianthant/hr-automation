@@ -99,6 +99,15 @@ export {
    * happened to stop. Needs `<CardBody grow>` (or a flex-column card) above it.
    */
   CardBase,
+  /**
+   * Cards read ACROSS rather than down — two identity candidates, a pair of
+   * compared readings. `CardBase` pins the bottom edge only; this shares the
+   * ROW tracks, so name lines up with name and reason with reason however
+   * differently they wrap. Supports any number of cards; three wrap into a
+   * second band with its own tracks.
+   */
+  CompareGrid,
+  CompareCard,
   CardFooter,
   SectionLabel,
   PageHeader,
