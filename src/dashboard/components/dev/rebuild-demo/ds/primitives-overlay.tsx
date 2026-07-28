@@ -49,7 +49,21 @@ import { FloatingSurface } from "./primitives-layout";
  * dialog's primary button. See `ToastViewport` for what we do about it.
  * ====================================================================== */
 
+/**
+ * TWO COUNTS, because two different things are being asked for.
+ *
+ * `modal` — a Dialog or a Drawer. It has a footer whose right-hand gutter holds
+ * the primary action, and the toast viewport must not COVER that. This is the
+ * only thing that may move the viewport.
+ *
+ * `layer` — a Popover or a context menu. Non-modal, anchored, no action gutter.
+ * A toast must not swallow a click meant for one, but it has no business
+ * teleporting to the other side of the window every time an ⓘ is opened. That
+ * is the same "one surface moves because another exists" defect the operator
+ * rejected, and a popover is the most frequently opened surface in the product.
+ */
 let openModalCount = 0;
+let openLayerCount = 0;
 const modalListeners = new Set<() => void>();
 
 function subscribeModals(onChange: () => void): () => void {
@@ -59,16 +73,18 @@ function subscribeModals(onChange: () => void): () => void {
   };
 }
 
-/** Called by every modal surface; they only mount while open. */
-function useRegisterModal(): void {
+function bumpCount(kind: "modal" | "layer", delta: number): void {
+  if (kind === "modal") openModalCount += delta;
+  else openLayerCount += delta;
+  modalListeners.forEach((listener) => listener());
+}
+
+/** Called by every overlay surface; they only mount while open. */
+function useRegisterModal(kind: "modal" | "layer" = "modal"): void {
   useEffect(() => {
-    openModalCount += 1;
-    modalListeners.forEach((listener) => listener());
-    return () => {
-      openModalCount -= 1;
-      modalListeners.forEach((listener) => listener());
-    };
-  }, []);
+    bumpCount(kind, 1);
+    return () => bumpCount(kind, -1);
+  }, [kind]);
 }
 
 /**
@@ -163,6 +179,15 @@ function useModalOpen(): boolean {
   return useSyncExternalStore(
     subscribeModals,
     () => openModalCount > 0,
+    () => false,
+  );
+}
+
+/** Is any dismissable layer open — a modal, a popover or a context menu? */
+function useAnyOverlayOpen(): boolean {
+  return useSyncExternalStore(
+    subscribeModals,
+    () => openModalCount + openLayerCount > 0,
     () => false,
   );
 }
@@ -666,7 +691,7 @@ function PopoverSurface({
   children: ReactNode;
 }) {
   const entered = useEntered();
-  useRegisterModal();
+  useRegisterModal("layer");
   const showHeader = !hideTitle;
   return (
     <PopoverPrimitive.Content
@@ -805,7 +830,7 @@ function ContextMenuSurface({
   children: ReactNode;
 }) {
   const entered = useEntered();
-  useRegisterModal();
+  useRegisterModal("layer");
   return (
     <ContextMenuPrimitive.Content
       aria-label={label}
@@ -1013,10 +1038,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
  */
 function ToastViewport({ toasts, onDismiss }: { toasts: DsToast[]; onDismiss: (id: string) => void }) {
   const modalOpen = useModalOpen();
+  const anyOverlay = useAnyOverlayOpen();
   // THE ONLY reason this viewport ever leaves bottom-right, and it is the
-  // ratified one: a Dialog or Drawer is open, whose footer it would otherwise
-  // sit on. Nothing else moves it — in particular it does not know, and may
-  // never know, whether a decision notice exists.
+  // ratified one: a Dialog or Drawer is open, whose footer's action gutter it
+  // would otherwise cover. Nothing else moves it — not a popover, and in
+  // particular not the decision notice, whose existence it does not know and
+  // may never be told.
   const aside = modalOpen;
   if (toasts.length === 0) return null;
   return (
@@ -1045,7 +1072,10 @@ function ToastViewport({ toasts, onDismiss }: { toasts: DsToast[]; onDismiss: (i
       )}
     >
       {toasts.map((item) => (
-        <ToastCard key={item.id} toast={item} onDismiss={onDismiss} inert={modalOpen} />
+        // INERT for any open layer, MOVED for none but a modal: a popover
+        // anchored near the bottom of the queue must not have its clicks eaten,
+        // and that is what inert cards buy — without the viewport jumping.
+        <ToastCard key={item.id} toast={item} onDismiss={onDismiss} inert={anyOverlay} />
       ))}
     </div>
   );
