@@ -120,6 +120,13 @@ const intentPill = (intent: ActionIntent, size: "sm" | "md"): string =>
     size === "sm"
       ? "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-base)]"
       : "h-[var(--ds-h-sm)] gap-[var(--ds-space-snug)] px-[var(--ds-space-cozy)]",
+    // The INLINE pill drops its outline: it sits on a card among chips that are
+    // now a fill and no line, and an extra edge there made `Open failure` the
+    // heaviest thing on a row whose loudest fact should be its status. The
+    // BANNER pill keeps its outline — it sits on a band of its own hue, where
+    // a fill alone does not separate it. Weight, focus ring and press dip are
+    // what say "command"; the border was not carrying that.
+    size === "sm" && "border-transparent",
     dsRadius.md,
     size === "sm" ? dsText.meta : dsText.body,
     dsFocus,

@@ -79,6 +79,22 @@ export interface DsStatusSpec {
   labelDecoration?: string;
   /** the icon spins — `running` only */
   spin?: boolean;
+  /**
+   * This status's PILL carries no icon — `verifiedDone` only.
+   *
+   * The word `Done` in the success green is the whole chip: it is the
+   * commonest state in a healthy day, so every pixel it spends is spent on
+   * most of the queue. It is not colour-only encoding — the word survives, and
+   * it is the only status whose label is that word — and the status's
+   * GUARANTEE is untouched: `Done` is still reachable only by reading the
+   * write back out of the system, and the receipt still carries the read-back
+   * checks that earned it. Only the label got shorter.
+   *
+   * The row's LEADING glyph (`StatusIcon`) is a different channel on a
+   * different surface and keeps its check — the row grid has a column for it,
+   * and an empty column is not a saving.
+   */
+  pillHideIcon?: boolean;
   /** what this status means for the operator; used as the chip's tooltip */
   meaning: string;
 }
@@ -181,11 +197,20 @@ export const DS_STATUS: Record<DsStatus, DsStatusSpec> = {
     meaning: "You stopped it. Not an alert — a deliberate act.",
   },
   verifiedDone: {
-    label: "Verified done",
+    // `Verified done` → `Done`. The qualifier was doing two jobs badly: it
+    // made the quietest status the longest label in the vocabulary, and beside
+    // `Done with warnings` it asked the operator to work out whether THAT one
+    // was verified too. `Done` / `Done with warnings` is the coherent pair —
+    // one word plus its qualifier — and the sibling deliberately did NOT
+    // shorten, because the qualifier IS the difference between them.
+    label: "Done",
     tier: "ghost",
     icon: CheckCircle2,
     chip: "bg-transparent border-transparent",
-    text: "text-[color:var(--ds-fg-muted)]",
+    // Green, not muted grey: with the icon gone the word carries the whole
+    // chip, and a muted `Done` beside a muted `Cancelled` is two greys.
+    text: "text-[color:var(--ds-status-verified-done-fg)]",
+    pillHideIcon: true,
     iconTone: "text-[color:var(--ds-status-verified-done-fg)]",
     soloTone: "text-[color:var(--ds-status-verified-done-fg)]",
     dot: "bg-[var(--ds-status-verified-done-mark)]",
@@ -276,7 +301,7 @@ export function StatusPill({
         className,
       )}
     >
-      {!hideIcon && (
+      {!hideIcon && !spec.pillHideIcon && (
         <Icon
           aria-hidden
           className={cn(
