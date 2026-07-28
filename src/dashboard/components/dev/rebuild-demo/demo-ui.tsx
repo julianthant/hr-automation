@@ -185,12 +185,11 @@ export {
   useDsModalPresence,
   useDsModalOpen,
   /**
-   * Is a toast occupying the viewport's bottom-right right now? Read it from
-   * any surface that would otherwise be drawn there and anchor somewhere else
-   * while it is true — the corner belongs to the alert, and the reminder is the
-   * one that yields.
+   * The class a surface wears to sit ABOVE the toast stack in the same
+   * bottom-right corner. It lifts by exactly the stack's measured height, so
+   * both tenants keep one fixed x and neither can cover the other.
    */
-  useDsToastCornerBusy,
+  dsToastStackLift,
 } from "./ds/primitives-overlay";
 export type {
   DsDialogSize,

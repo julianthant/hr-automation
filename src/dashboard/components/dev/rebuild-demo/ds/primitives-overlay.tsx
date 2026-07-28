@@ -116,7 +116,7 @@ export function useDsModalOpen(): boolean {
 }
 
 /* -------------------------------------------------------------------------
- * BOTTOM-RIGHT OCCUPANCY — one corner, and the ALERT owns it.
+ * BOTTOM-RIGHT OCCUPANCY — one corner, two tenants, stacked VERTICALLY.
  *
  * The toast viewport is `fixed bottom-right` and a `danger` toast never
  * auto-dismisses. The decision notice wants the same corner — anchored to the
@@ -124,46 +124,58 @@ export function useDsModalOpen(): boolean {
  * position them so they miss" is not a fix: the two live in different
  * coordinate systems and the panel's width changes with the rail.
  *
- * So it is a CLAIM, not a calculation — and the claim runs the way the
- * hierarchy does. Bottom-right belongs to the toast, because a failed write is
- * the loudest thing this product is allowed to say and moving it is how an
- * operator comes to look for it in two places. The REMINDER yields: while any
- * toast is on screen the notice anchors bottom-LEFT of its own panel instead.
- * Neither can cover the other, at any width, by construction rather than by
- * arithmetic — and the one that gives way is the one whose absence costs least.
+ * TWO WRONG ANSWERS WERE TRIED FIRST, and they are worth naming so neither
+ * comes back:
  *
- * (An earlier revision had this backwards: the toast stepped aside for the
- * notice. That put a persistent failure alert somewhere it had never been,
- * which is worse than the overlap it was avoiding.)
+ *   1. The TOAST stepped aside for the notice. That put a persistent failure
+ *      alert somewhere it had never been — an alert that moves is one the
+ *      operator learns to look for in two places.
+ *   2. The NOTICE stepped aside for the toast, right to left. Operator:
+ *      *"moves from right to left when there is toast on the left. dont do
+ *      that. just stay on right."* Right: a surface whose position depends on
+ *      whether some OTHER element happens to exist is one you reach for and
+ *      find gone, for a reason that is invisible from where you are standing.
+ *
+ * THE ANSWER IS THE OTHER AXIS. Both stay at bottom-right, at the same x,
+ * forever. The toast stack owns the floor; the notice rides directly above it,
+ * lifted by exactly the stack's height. Order is fixed and never swaps —
+ * transient below, persistent above — so nothing trades places with anything.
+ *
+ * The lift is published as a CSS custom property rather than React state on
+ * purpose: it changes on every toast add, dismiss and collapse, and a state
+ * update there would re-render every surface that reads it several times a
+ * second. It is also why the notice moves by TRANSFORM and not by `bottom` —
+ * transform and opacity only, and it stays interruptible.
  * ---------------------------------------------------------------------- */
 
-let liveToastCount = 0;
-const toastCornerListeners = new Set<() => void>();
-
-function publishToastCorner(n: number): void {
-  if (n === liveToastCount) return;
-  liveToastCount = n;
-  toastCornerListeners.forEach((listener) => listener());
-}
-
-function subscribeToastCorner(listener: () => void): () => void {
-  toastCornerListeners.add(listener);
-  return () => toastCornerListeners.delete(listener);
-}
+/**
+ * The var the corner's upper tenant reads. Always defined (`0px` when the
+ * stack is empty), so a consumer never needs a fallback branch.
+ */
+const TOAST_STACK_VAR = "--ds-toast-stack-h";
 
 /**
- * Is the viewport's bottom-right corner occupied by a toast right now?
- *
- * Read it from any surface that would otherwise be drawn there, and anchor
- * somewhere else while it is true. It is a subscription rather than a prop
- * because the two surfaces have no common owner — the toast provider sits at
- * the app root and the notice is mounted deep inside a panel body.
+ * A ceiling on the lift. Six toasts plus a notice would otherwise climb the
+ * whole panel and put the reminder off the top of its own container — at which
+ * point the fix for one occlusion has created another. Past the cap the stack
+ * simply overlaps itself, which is the right failure: the newest alert is on
+ * top, and the corner has stopped being a place anything can be read anyway.
  */
-export function useDsToastCornerBusy(): boolean {
-  return useSyncExternalStore(
-    subscribeToastCorner,
-    () => liveToastCount > 0,
-    () => false,
+const TOAST_STACK_MAX = "40vh";
+
+/**
+ * Spread onto a surface that shares the bottom-right corner with the toast
+ * stack. It rides directly ABOVE the stack, lifted by the stack's own measured
+ * height — a TRANSFORM, never a `bottom`, so the reflow animates on the
+ * compositor and `prefers-reduced-motion` removes it by zeroing
+ * `--ds-dur-move` (there is no separate branch to keep in step).
+ */
+export const dsToastStackLift = "translate-y-[calc(-1*var(--ds-toast-stack-h,0px))]";
+
+function publishToastStackHeight(px: number): void {
+  document.documentElement.style.setProperty(
+    TOAST_STACK_VAR,
+    px <= 0 ? "0px" : `min(${Math.round(px)}px, ${TOAST_STACK_MAX})`,
   );
 }
 
@@ -1027,15 +1039,34 @@ function ToastViewport({ toasts, onDismiss }: { toasts: DsToast[]; onDismiss: (i
   // else moves it. A notice that wants this corner yields instead — see the
   // occupancy registry above.
   const aside = modalOpen;
-  // The corner is published for as long as a toast is on screen, so a surface
-  // that would be drawn here can step aside before it ever paints.
+  /*
+    THE STACK'S HEIGHT IS MEASURED, not counted. Toasts are of wildly unequal
+    height — a `danger` card with a description and an action is four times a
+    one-line success, and a collapsed danger chip is smaller than either — so
+    `count × assumed height` would put the notice through the middle of the top
+    card the first time anything was not the assumed size. A `ResizeObserver`
+    is exact and re-fires on the collapse as well as on the add.
+  */
+  const stackRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    publishToastCorner(toasts.length);
-    return () => publishToastCorner(0);
-  }, [toasts.length]);
+    const node = stackRef.current;
+    if (!node) {
+      publishToastStackHeight(0);
+      return;
+    }
+    const measure = () => publishToastStackHeight(node.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      publishToastStackHeight(0);
+    };
+  });
   if (toasts.length === 0) return null;
   return (
     <div
+      ref={stackRef}
       role="region"
       aria-label="Notifications"
       data-ds-toast-viewport={aside ? "aside" : "default"}
