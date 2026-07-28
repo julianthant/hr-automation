@@ -1640,20 +1640,26 @@ does not explain itself"), which is binding on every surface built against this 
 
 ---
 
-### Shell and layout as rebuilt, 2026-07-27
+### Shell and layout as rebuilt (2026-07-27, updated 2026-07-28)
 
 Not numbered — none of this re-opens a D-series question, and the D-series is for decisions that
-were *asked*. It is recorded here because the presentation decisions above (D11, D19, D21) were
+were *asked*. It is recorded here because the presentation decisions above (D11, D18–D21) were
 made inside this layout and read wrong outside it.
 
 **The detail region is three columns**: **queue · centre · context rail**. The rail is **348px**
 (`--ds-w-context-rail`), collapsible to a labelled spine that says what is inside it
 (`Context · 9 data · 6 captures`), with the collapsed preference applied only above the
-three-column threshold. The split is by reading pattern (§D19): **live state in the centre**
-(gate banner, failure record, outcome, logs/review/receipt), **reference in the rail** (Data,
-Evidence, identity strip, attempt selector, delegation links). **The gate banner and the failure
-record never move into the rail** — `Waiting on you` and `Failed` are the only two states allowed
-to shout, and a decision parked behind a collapse control is a decision that never gets made.
+three-column threshold. The split is by reading pattern (§D19): **live state in the centre** — the
+run header, the timeline, the tabs and the tab body, with the log stream carrying the inline
+decision and the failure record (D18 amendment) — and **reference in the rail**: Data, Evidence,
+provenance and delegation links. **A decision and a failure never sit behind a collapse control or
+a lone tab** — `Waiting on you` and `Failed` are the only two states allowed to shout. As of
+2026-07-28 that invariant is honoured by the inline decision + one-line header state + corner
+notice (not by a banner, which is deleted — see D18), by a failed run opening on Logs, and by the
+write-state sentence rendering unconditionally in the stream.
+
+**Measured effect of the split, at 1280×720:** chrome above the panels **190px → 117px**; each
+panel **469px → 542px** tall; the tab body **123–215px → 213–335px**.
 
 **Three breakpoints, and they are deliberately different numbers:**
 
@@ -1686,12 +1692,41 @@ window over the panel region, costing no column; Escape or an outside click dism
 200px, always visible). Which panel you are in stays readable in all three because the Queue Panel
 is titled by its workflow.
 
-**`All workflows` is retired.** The cross-panel rail entry, `ALL_WORKFLOWS`, is deleted;
-`rowsForWorkflow` always filters and the app opens on a real panel (`DEFAULT_WORKFLOW`, read from
-the registry so a rename cannot point it at nothing). An operator works one workflow at a time, and
-a queue mixing fourteen workflows forced every row title to carry a workflow label to stay legible
-— which is the same redundancy that made the per-row workflow chip worth deleting. §10.1's one
-counting path (`countRows`) is untouched by this.
+**`All workflows` is retired, and rail grouping is the descriptor's own `category`.** The
+cross-panel rail entry, `ALL_WORKFLOWS`, is deleted; `rowsForWorkflow` always filters and the app
+opens on a real panel (`DEFAULT_WORKFLOW`, read from the registry so a rename cannot point it at
+nothing). An operator works one workflow at a time, and a queue mixing fourteen workflows forced
+every row title to carry a workflow label to stay legible — which is the same redundancy that made
+the per-row workflow chip worth deleting. Grouping in the panel comes from **each descriptor's own
+`category`** (the eight real categories the registry serves), never a frontend list: the frontend
+hardcodes only the display order, membership is the descriptor's, an unlisted category appends,
+and an empty category drops. §10.1's one counting path (`countRows`) is untouched by all of this.
+
+**One composed action bar** replaces the two stacked bars above the queue. The status filters are
+one *group* inside it, not a band of their own; the two composites (`All` / `Needs you`) are a
+segmented control — a different shape for a different kind of thing — and a **zero-count status
+pill recedes**: it drops its border, its fill and its label down to an icon and a faint `0`,
+keeping its slot, its click target and its full accessible name (`Done with warnings` is 130px of
+bar at rest; at zero it is 34px). The **collapsed launcher shows the attention count only**, with
+its scope stated in its accessible name: a rule separates the current panel's code from the count,
+and the count carries the `Needs you` composite's own eye glyph — the same one the Status Bar pill
+wears — because the number is the day's whole `Needs you` across *every* panel, which is the point
+of a control that is on screen when no per-workflow badge is.
+
+**Row commands moved to a right-click context menu** (`ContextMenu`, opened by the platform's
+Menu / Shift+F10 key and by `m` through `openContextMenuFor()`); the per-row `⋯` overflow button is
+gone — a control whose only job is to admit there are more controls, costing a slot on every row.
+The menu's items come from the object's served `actions[]` at the `menu` placement, so a command
+the surface did not send is unreachable rather than hidden.
+
+**One scrolling region per panel.** A panel's scroll track runs the panel's full height; a header,
+an outcome line or a tab bar that must stay put is a *sticky* block inside the one region, never a
+band stacked outside it that leaves the track a mid-panel segment. Queue rows are fixed at
+`--ds-h-row` — no surface invents a row height.
+
+**The catalog derives its tab lists from the panel's own source.** The row-and-panel catalog's
+per-kind tab lists are computed from `tabsForPanelKind` — the same function the panel itself
+calls — so the catalog can never again describe a tab set the panel does not render.
 
 ---
 
