@@ -314,19 +314,39 @@ export interface DsChipProps {
   className?: string;
 }
 
+/**
+ * Tone is a FILL, never a fill plus an outline.
+ *
+ * Every chip sits on the one recessed plane (`--ds-recess-*`, see tokens.css):
+ * the row footer's treatment — a fill and no line — is the house answer to
+ * "this sits back from the card", and a chip is the same statement at chip
+ * size. The border box is still there (`border-transparent`), so a chip that
+ * genuinely needs an edge can draw one without anything shifting a pixel.
+ */
 const CHIP_TONE: Record<NonNullable<DsChipProps["tone"]>, string> = {
-  neutral:
-    "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-secondary)]",
-  info: "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
+  neutral: "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg)]",
+  info: "border-transparent bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
   warning:
-    "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
-  danger:
-    "border-[color:var(--ds-danger-border)] bg-[var(--ds-danger-quiet)] text-[color:var(--ds-danger)]",
+    "border-transparent bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
+  danger: "border-transparent bg-[var(--ds-danger-quiet)] text-[color:var(--ds-danger)]",
 };
 
 /**
  * A compact fact or filter token: `EID 10084412`, `pdf · oath-batch-7.pdf`.
  * Values render monospace so columns of them line up down a dense queue.
+ *
+ * **A chip is a SINGLE-LINE token, always.** It truncates inside its own
+ * border and never wraps, at any width, with any value. This is not a
+ * preference: laid on the `ChipRow` grid track a long value used to wrap to a
+ * second line and render OUTSIDE the border it belongs to — a chip drawn as
+ * debris. The mechanism that stops it is `min-w-0` on the value span (a flex
+ * child's `min-width` is `auto`, so without it the chip refuses to shrink
+ * below its own text and overflows its cell) plus `whitespace-nowrap`.
+ *
+ * The full value stays reachable: it goes on the element's `title` and, when a
+ * chip is a control, into its accessible name. **If a fact cannot survive
+ * truncation it is not a chip** — put it on the row's `MetaLine`, on its own
+ * line, where it can wrap.
  */
 export function Chip({
   children,
@@ -341,13 +361,20 @@ export function Chip({
   className,
 }: DsChipProps) {
   const interactive = Boolean(onSelect);
+  const text = typeof children === "string" ? children : undefined;
+  // The full value is never lost to the cut. For a screen reader nothing is
+  // lost in the first place — `text-overflow` clips the PAINT, not the DOM, so
+  // the accessible name is already whole and an `aria-label` here would only
+  // overwrite it. What the cut does cost is the SIGHTED read, so a chip with
+  // no explanatory title of its own falls back to printing itself on hover.
+  const hoverText = title ?? text;
   const body = (
     <>
       {icon}
       {label && (
-        <span className="text-[color:var(--ds-fg-muted)]">{label}</span>
+        <span className="shrink-0 text-[color:var(--ds-fg-muted)]">{label}</span>
       )}
-      <span className={cn(dsText.nums, "truncate")}>{children}</span>
+      <span className={cn(dsText.nums, "min-w-0 truncate whitespace-nowrap")}>{children}</span>
     </>
   );
   const shell = cn(
@@ -356,7 +383,7 @@ export function Chip({
     dsText.meta,
     "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
     CHIP_TONE[tone],
-    selected && "border-[color:var(--ds-border-loud)] bg-[var(--ds-surface-selected)]",
+    selected && "bg-[var(--ds-surface-selected)] text-[color:var(--ds-fg)]",
     className,
   );
 
@@ -366,7 +393,7 @@ export function Chip({
         type="button"
         aria-pressed={selected ?? false}
         onClick={onSelect}
-        title={title}
+        title={hoverText}
         className={cn(
           shell,
           "cursor-pointer",
@@ -384,7 +411,7 @@ export function Chip({
   }
 
   return (
-    <span className={shell} title={title}>
+    <span className={shell} title={hoverText}>
       {body}
       {onRemove && (
         <button

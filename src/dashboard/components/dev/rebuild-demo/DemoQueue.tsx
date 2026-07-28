@@ -33,6 +33,7 @@ import {
 import { panelKindSpec, rowExplanationOf, rowVariantSpec } from "./demo-catalog";
 import {
   Button,
+  Chip,
   ChipRow,
   IconButton,
   MetaLine,
@@ -144,28 +145,34 @@ export function computeVisibleIds(
 // Small row pieces
 // ---------------------------------------------------------------------------
 
+/**
+ * A row's fact, on the `Chip` primitive.
+ *
+ * It used to be a local COPY of that primitive with the truncation left out,
+ * which is exactly how `ticket · filed after signing` came to wrap to a second
+ * line and paint itself outside its own border on the `ChipRow` track. The
+ * primitive is a single-line token by construction — it truncates inside its
+ * border and keeps the whole value on hover — so this is now a call, not a
+ * fork, and every chip in the product inherits the same fix.
+ *
+ * The one thing a fact adds is DIRECTION: `old → new`. That is the row's own
+ * arrow, and it renders as part of the value so the cut, when it comes, takes
+ * the tail of the new value rather than the arrow that explains it.
+ */
 function FactChipView({ label, value, arrowTo, warn }: NonNullable<DemoRow["facts"]>[number]) {
+  const full = [label, value, arrowTo && `→ ${arrowTo}`].filter(Boolean).join(" ");
   return (
-    <span
-      className={cn(
-        "inline-flex items-center border",
-        "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
-        dsRadius.sm,
-        dsText.meta,
-        warn
-          ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]"
-          : "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-secondary)]",
-      )}
-    >
-      {label && <span className="text-[color:var(--ds-fg-muted)]">{label}</span>}
-      <span className={cn(dsText.nums, !warn && "text-[color:var(--ds-fg)]")}>{value}</span>
-      {arrowTo && (
-        <>
+    <Chip label={label} tone={warn ? "warning" : "neutral"} title={full} className="w-full">
+      {arrowTo ? (
+        <span className="inline-flex min-w-0 items-center gap-[var(--ds-space-tight)]">
+          <span className="truncate">{value}</span>
           <ArrowRight aria-hidden className="size-2.5 shrink-0 text-[color:var(--ds-fg-muted)]" />
-          <span className={cn(dsText.nums, "text-[color:var(--ds-fg)]")}>{arrowTo}</span>
-        </>
+          <span className="truncate text-[color:var(--ds-fg)]">{arrowTo}</span>
+        </span>
+      ) : (
+        value
       )}
-    </span>
+    </Chip>
   );
 }
 
@@ -327,18 +334,20 @@ const MEMBER_STATUS_ICON: Record<ProposedStatus, { icon: typeof CheckCircle2; cl
  */
 type RowChipTone = "neutral" | "info" | "warning" | "violet";
 
+/** One recessed plane, four tones. A fill and no line — see `--ds-recess-*`. */
 const ROW_CHIP_TONE: Record<RowChipTone, string> = {
-  neutral: "border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)]",
-  info: "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
-  warning:
-    "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
-  violet:
-    "border-[color:var(--ds-status-parked-border)] bg-[var(--ds-status-parked-bg)] text-[color:var(--ds-status-parked-fg)]",
+  neutral: "border-transparent bg-[var(--ds-recess-bg)] text-[color:var(--ds-fg-muted)]",
+  info: "border-transparent bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
+  warning: "border-transparent bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
+  violet: "border-transparent bg-[var(--ds-status-parked-bg)] text-[color:var(--ds-status-parked-fg)]",
 };
 
 const rowChip = (tone: RowChipTone, extra?: string): string =>
   cn(
-    "inline-flex shrink-0 items-center border",
+    // `max-w-full` + the truncating child below: a chip is a single-line token
+    // at every width, and it truncates INSIDE its border rather than wrapping
+    // outside it.
+    "inline-flex max-w-full shrink-0 items-center overflow-hidden border whitespace-nowrap",
     "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
     dsRadius.sm,
     dsText.micro,
@@ -609,9 +618,11 @@ function RowFooterLine({
   return (
     <div
       className={cn(
+        // THE recessed plane, and the treatment every other recessed surface in
+        // the product now copies: a fill, no line.
         "flex items-start gap-[var(--ds-space-base)] border-t px-[var(--ds-space-cozy)] py-[var(--ds-space-tight)]",
         dsBorder.subtle,
-        "bg-[var(--ds-surface-2)]",
+        "bg-[var(--ds-recess-bg)]",
       )}
     >
       <div
@@ -698,11 +709,19 @@ export function DemoRowCard({
             dsMotion.base,
             dsSurface.card,
             dsFocus,
-            selected ? dsBorder.loud : dsBorder.base,
+            selected ? dsBorder.strong : dsBorder.base,
             "hover:border-[color:var(--ds-border-strong)]",
             // Selection is a FILL plus a rail, never a glow: a shadow means
             // floating, and a selected row is not floating.
-            selected && "bg-[var(--ds-surface-selected)] shadow-[inset_2px_0_0_var(--ds-accent)]",
+            //
+            // The rail reads `--ds-ring`, not `--ds-accent`. On the dark theme
+            // the accent is near-white, so a 2px accent rail down the selected
+            // row was the brightest thing on the panel — louder than the amber
+            // `Waiting on you` fill beside it. Selection is the lowest-stakes
+            // state on screen; it belongs BELOW the two states allowed to
+            // shout, and it now shares its ink with the focus ring because
+            // "the system is pointing at this" is one statement, not two.
+            selected && "bg-[var(--ds-surface-selected)] shadow-[inset_2px_0_0_var(--ds-ring)]",
             status === "running" && !selected && "border-[color:var(--ds-status-running-border)]",
           )}
         >
@@ -773,8 +792,14 @@ export function DemoRowCard({
             </div>
 
             {/* A counted anchor ("5 separations") has no subject of its own, so
-                the names ARE its identity — without them the row is a number. */}
-            {row.memberPreview && row.groupNoun && (
+                the names ARE its identity — without them the row is a number.
+
+                It is SUPPRESSED the moment the member list is on screen: the
+                preview and the list are then the same names twice, on one
+                card, and the preview is the copy that truncates. Two
+                truncations on one card is one too many, and the second is a
+                duplicate rather than a fact. */}
+            {row.memberPreview && row.groupNoun && !membersVisible && (
               <div className={cn(dsText.meta, "col-start-2 truncate text-[color:var(--ds-fg-muted)]")} title={row.memberPreview}>
                 {row.memberPreview}
               </div>
@@ -860,16 +885,36 @@ export function DemoRowCard({
 
             {isGroup && counts && (memberCount > 0 ? (
               <div className="col-start-2 flex flex-col gap-[var(--ds-space-snug)]">
-                <div className={cn(dsText.meta, "flex items-center gap-[var(--ds-space-cozy)]")}>
-                  <DemoStatusCounts counts={counts} />
+                {/* THE COUNTS STRIP IS THE MEMBER LIST'S HEADER ROW, and it is
+                    laid on the member list's OWN column tracks.
+
+                    It used to be a free flex row with an `ml-auto` on the last
+                    item, so the tallies sat wherever they stopped and
+                    `0/12 checked` right-aligned to the CARD while the EIDs
+                    below right-aligned to the WELL — two right edges a few
+                    pixels apart, which reads as a mistake rather than as two
+                    things. On `MEMBER_GRID` with the well's own horizontal
+                    padding, the tallies sit over the names and the checked
+                    counter sits over the EIDs. One grid, top to bottom. */}
+                <div
+                  className={cn(
+                    MEMBER_GRID,
+                    dsText.meta,
+                    "items-center gap-x-[var(--ds-space-base)] px-[var(--ds-space-base)]",
+                  )}
+                >
+                  <span aria-hidden className="col-start-1" />
+                  <span className="col-start-2 flex min-w-0 items-center gap-[var(--ds-space-cozy)]">
+                    <DemoStatusCounts counts={counts} />
+                  </span>
                   {/* Rejected is its own tally. Folding it into done is how a
                       packet with an unreadable page comes to read as clean. */}
                   {counts.rejected > 0 && (
                     <span
-                      className="inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-fg-muted)]"
+                      className="col-start-3 inline-flex min-w-0 items-center gap-[var(--ds-space-tight)] truncate text-[color:var(--ds-fg-muted)]"
                       title={`${counts.rejected} rejected — never became work and excluded from the rollup`}
                     >
-                      <SearchX aria-hidden className={dsIcon.sm} />
+                      <SearchX aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
                       <span className={dsText.nums}>{counts.rejected}</span> rejected
                     </span>
                   )}
@@ -879,14 +924,13 @@ export function DemoRowCard({
                       that changes nothing — so it goes. */}
                   {!settled && (
                     <span
-                      className="ml-auto inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-success-fg)]"
+                      className="col-start-4 inline-flex items-center justify-end gap-[var(--ds-space-tight)] text-[color:var(--ds-success-fg)]"
                       aria-label="checked progress"
                     >
-                      <CheckCircle2 aria-hidden className={dsIcon.sm} />
+                      <CheckCircle2 aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
                       <span className={dsText.nums}>
                         {[...(row.memberIds ?? [])].filter((id) => state.checkedIds.has(id)).length}/{memberCount}
-                      </span>{" "}
-                      checked
+                      </span>
                     </span>
                   )}
                 </div>
@@ -944,9 +988,13 @@ const linkChip = (tone: "info" | "neutral"): string =>
     dsText.meta,
     dsFocus,
     dsMotion.fast,
+    // Same recessed plane as every other chip. The delegation chip used to be
+    // outlined AND lighter than its neighbours — a third answer to "this sits
+    // back from the card" on a surface that already had two.
+    "border-transparent",
     tone === "info"
-      ? "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)] hover:brightness-125"
-      : cn(dsBorder.base, "bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]"),
+      ? "bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)] hover:brightness-125"
+      : "bg-[var(--ds-recess-bg)] text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
   );
 
 /**
@@ -1356,12 +1404,13 @@ const DRILL_GRID = "grid grid-cols-[1rem_minmax(0,1fr)_var(--ds-w-member-eid)_va
 /** the drill-in header's three summary chips — one shape, two loudness levels */
 const drillChip = (warn: boolean): string =>
   cn(
-    "inline-flex shrink-0 items-center border",
+    "inline-flex shrink-0 items-center border border-transparent whitespace-nowrap",
     "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-base)]",
+    dsRadius.sm,
     dsText.meta,
     warn
-      ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] font-medium text-[color:var(--ds-status-waiting-fg)]"
-      : cn(dsBorder.base, "bg-[var(--ds-surface-2)] text-[color:var(--ds-fg-muted)]"),
+      ? "bg-[var(--ds-status-waiting-bg)] font-medium text-[color:var(--ds-status-waiting-fg)]"
+      : "bg-[var(--ds-recess-bg)] text-[color:var(--ds-fg-muted)]",
   );
 
 function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQueueState; handlers: DemoQueueHandlers }) {
@@ -1466,7 +1515,7 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
                 dsFocus,
                 dsMotion.fast,
                 "hover:bg-[var(--ds-surface-3)]",
-                isSel && "bg-[var(--ds-surface-selected)] shadow-[inset_2px_0_0_var(--ds-accent)]",
+                isSel && "bg-[var(--ds-surface-selected)] shadow-[inset_2px_0_0_var(--ds-ring)]",
               )}
             >
               <Icon aria-hidden className={cn(dsIcon.md, rejected ? "text-[color:var(--ds-fg-muted)]" : spec.cls)} />

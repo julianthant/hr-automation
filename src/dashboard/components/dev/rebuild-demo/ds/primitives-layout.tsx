@@ -818,12 +818,22 @@ export function TabPanel({
  * Well — an inset region inside a Card (raw output, a preview, a diff)
  * ====================================================================== */
 
+/**
+ * An inset region inside a Card. It reads the one recessed plane
+ * (`--ds-recess-*`), the same fill a row footer and a chip read — a fill and
+ * no line, so a card holding a well, a footer and four chips is a set of tones
+ * rather than four nested boxes.
+ *
+ * A well that SCROLLS is the one consumer allowed to draw the edge, by setting
+ * `--ds-recess-border` on itself: there the border is not decoration, it is
+ * what tells the eye the content is cut rather than finished.
+ */
 export function Well({ className, children }: { className?: string; children: ReactNode }) {
   return (
     <div
       className={cn(
-        "min-w-0 border bg-[var(--ds-surface-2)] p-[var(--ds-space-base)]",
-        "border-[color:var(--ds-border-subtle)]",
+        "min-w-0 border bg-[var(--ds-recess-bg)] p-[var(--ds-space-base)]",
+        "border-[color:var(--ds-recess-border)]",
         dsRadius.md,
         dsText.body,
         className,
