@@ -354,6 +354,12 @@
      holds an item, so the bars land on one baseline down the row and a worker
      with nothing in flight is not handed a bar it has not earned. */
   --ds-h-micro-pipeline: 8px;
+  /* The run timeline's track. 10px, not 8: a not-yet-reached segment is drawn
+     as an OUTLINE with a transparent fill, and at 8px a 1px outline top and
+     bottom leaves 6px of hole — the segment reads as a hairline rather than as
+     a shape. The whole point of the outlined state is that a queued run shows
+     you how many steps it has and how it is laid out before it starts. */
+  --ds-h-timeline-bar: 10px;
   /* The scroll well a Group Row shows its members in. This is the value that
      makes scale presentational: at ~5.5 lines a group of 50 occupies exactly
      the same space as a group of 13, so a queue full of groups keeps a

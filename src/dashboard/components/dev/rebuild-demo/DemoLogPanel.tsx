@@ -7,7 +7,6 @@ import {
   Camera,
   Check,
   CheckCircle2,
-  ChevronDown,
   Clock3,
   ChevronLeft,
   ChevronRight,
@@ -64,6 +63,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  Tooltip,
   ValueField,
   dsBorder,
   dsClip,
@@ -537,7 +537,7 @@ function Timeline({ row, tick }: { row: DemoRow; tick: number }) {
                     (s.state === "current" || isWait) && "animate-pulse motion-reduce:animate-none",
                   )}
                 />
-                <span className={cn("min-w-0 truncate text-[10.5px]", s.state === "pending" ? "text-muted-foreground" : tone.text)}>{s.label}</span>
+                <span className={cn(dsClip.text, dsText.micro, s.state === "pending" ? "text-muted-foreground" : tone.text)}>{s.label}</span>
               </div>
               {/* the track segment — one step, one slot, every time */}
               <button
@@ -553,28 +553,53 @@ function Timeline({ row, tick }: { row: DemoRow; tick: number }) {
                   // a disclosure trigger, not a command. Without the tint nobody
                   // discovers the detail card; with a dip it would promise a
                   // commit that never happens.
-                  "mt-1 block h-2 w-full rounded-[3px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  dsMotion.fast,
+                  "mt-[var(--ds-space-tight)] block w-full",
+                  "h-[var(--ds-h-timeline-bar)]",
+                  dsRadius.xs,
+                  dsFocus,
+                  dsMotion.base,
                   "hover:brightness-125",
-                  // HATCHED = the run is stopped ON this step, waiting for you.
-                  // SOLID = it is doing the work itself. Same slot either way.
+                  /*
+                    THREE STATES, AND THE THIRD IS A SHAPE RATHER THAN AN ABSENCE.
+
+                      OUTLINED + TRANSPARENT  not reached yet
+                      SOLID                   done, or being worked on now
+                      HATCHED                 the run is stopped here, on you
+
+                    A queued run used to draw six dashed hairlines two pixels
+                    apart, which read as ONE dashed rule across the panel with
+                    labels floating over it — so the surface that exists to say
+                    what a run will do said nothing at all until it started.
+                    That is an information defect, not a visual one: the shape
+                    of the work is knowable the moment the row exists.
+
+                    A CONTINUOUS outline, not a dashed one. Dashes at 10px tall
+                    and 60px wide are noise, and the dash was already spoken
+                    for — `Write parked` is the one thing in this product that
+                    dashes, and nothing else may borrow the cue.
+                  */
                   isWait
                     ? "bg-[repeating-linear-gradient(45deg,var(--color-warning)_0_4px,transparent_4px_8px)] opacity-70"
-                    : tone.bar,
+                    : s.state === "pending"
+                      ? "border border-[color:var(--ds-border-strong)] bg-transparent"
+                      : tone.bar,
                   !isWait && !timed && s.state !== "pending" && "opacity-70",
-                  s.state === "pending" && "border border-dashed border-border bg-transparent",
                 )}
               />
-              <div className="mt-0.5 flex min-w-0 items-baseline gap-1">
+              <div className="mt-[var(--ds-space-hair)] flex min-w-0 items-baseline gap-[var(--ds-space-tight)]">
                 <span
                   className={cn(
-                    "truncate font-mono text-[9.5px] tabular-nums",
+                    dsClip.text,
+                    dsText.micro,
+                    dsText.nums,
                     isWait ? "text-warning" : "text-muted-foreground",
                   )}
                 >
                   {isWait ? gateAge(row, tick) : timed ? fmtElapsed(s.durationSec ?? 0) : ""}
                 </span>
-                {s.attempts && s.attempts > 1 && <span className="shrink-0 font-mono text-[9px] font-bold text-warning">×{s.attempts}</span>}
+                {s.attempts && s.attempts > 1 && (
+                  <span className={cn(dsText.micro, dsText.nums, "shrink-0 font-bold text-warning")}>×{s.attempts}</span>
+                )}
               </div>
 
               {(s.keyLines || timed || isWait) && (
@@ -1065,10 +1090,20 @@ function LogsTab({
             {matchCount} match{matchCount === 1 ? "" : "es"}
           </span>
         )}
+        {/* `System ▾` WAS HERE AND IT DID NOTHING. It was a bordered `<span>`
+            with a chevron — not a button, no handler, no menu — so it read as a
+            filter the operator could not click. Operator: *"what does system
+            do? i cant even click on it."*
+
+            DELETED rather than implemented. The stream already prints the
+            system on every line it belongs to (the `SystemChip` at the head of
+            each entry), and the category dropdown beside the search box is the
+            lens this bar already offers. A second narrowing control that
+            duplicates a fact each line carries is not a missing feature; the
+            dead affordance was the whole defect, and the honest fix for a
+            control that promises something the surface does not do is to stop
+            drawing it. */}
         <span className="ml-auto inline-flex items-center gap-1.5">
-          <span className="inline-flex items-center gap-0.5 rounded-md border border-border px-1.5 py-0.5">
-            System <ChevronDown aria-hidden className="size-3" />
-          </span>
           {/* The run's PROVENANCE sits on the bar under its own stream: the
               workflow version qualifies every line above it, so it belongs on
               the same surface rather than in a rail section three columns away
@@ -2280,7 +2315,6 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
   const isMember = row.rowType === "member";
   const status = effectiveStatus(row);
   const tone = OUTCOME_TONE[row.outcome.tone];
-  const elapsed = row.elapsedSec !== undefined ? fmtElapsed(row.elapsedSec + tick) : undefined;
   const attentionMember = isMember && (status === "failed" || status === "waiting" || status === "doneWarnings");
 
   return (
@@ -2300,14 +2334,16 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
         >
           <span className={cn(dsText.title, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>{row.title}</span>
           <StatusBadge status={status} age={gateAge(row)} />
-          {/* A ticking duration may never wrap: at a narrow window "5m 48s"
-              was breaking across two lines and shoving the header off its
-              baseline every time the panel got tight. */}
-          {elapsed && (
-            <span className={cn(dsText.meta, dsText.nums, "shrink-0 whitespace-nowrap text-[color:var(--ds-fg-secondary)]")}>
-              {elapsed}
-            </span>
-          )}
+          {/* THE RUNNING TOTAL IS GONE FROM THIS HEADER. Operator: *"the clock
+              in the queue footer is enough. no need it in the log panel"*. The
+              queue row's own footer carries elapsed for every row on screen,
+              including this one — so the panel header was a second ticking copy
+              of a number the operator was already looking at, two columns away.
+
+              The STATUS PILL's age stays, and it is not the same number:
+              `Waiting on you · 3m 29s` is how long the run has needed YOU,
+              which is the triage signal. The total is how long it has existed,
+              which is provenance and belongs with the rest of it. */}
           {/* THE PANEL KIND MOVED INTO THE ⓘ. It was drawn twice on this one
               surface — a chip here beside the trace id, and again at the right
               of the tab bar below — and both were the demo naming its own panel
@@ -2377,13 +2413,27 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
           const Icon = meta.icon;
           const dot = (key === "review" && Boolean(row.records)) || (key === "people" && memberAttentionIds(row.id).length > 0);
           return (
+            /*
+              THE HINT IS A `Tooltip`, NOT A NATIVE `title`.
+
+              A native tooltip is drawn by the browser at the CURSOR, below and
+              right of it, and nothing on the page can move it — so hovering
+              `Receipt` painted `Receipt — press 2` directly over the timeline's
+              first step label one band below. The primitive is Radix: it opens
+              on the `top` side, carries `collisionPadding`, and flips itself
+              rather than landing on whatever happens to be underneath.
+
+              It is a HINT, not load-bearing content (the shortcut is also in
+              Settings → Help, from the one shared registry), so hover-only is
+              the right home for it — the rule it would otherwise break is about
+              information you cannot get any other way.
+            */
+            <Tooltip key={key} content={`${meta.label} — press ${i + 1}`} side="top">
             <button
-              key={key}
               type="button"
               role="tab"
               aria-selected={active}
               onClick={() => onTab(key)}
-              title={`${meta.label} — press ${i + 1}`}
               className={cn(
                 "relative -mb-px inline-flex cursor-pointer items-center border-b-2 border-transparent",
                 "h-[var(--ds-h-bar)] gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
@@ -2404,6 +2454,7 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
                 />
               )}
             </button>
+            </Tooltip>
           );
         })}
         {/* NOTHING SITS AT THE END OF THE TAB BAR. This slot held the panel's

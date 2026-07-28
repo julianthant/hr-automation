@@ -726,15 +726,15 @@ function WorkflowPanelControls({ mode, onMode }: PanelModeProps) {
  * (`countRowsByWorkflow`), so the two numbers are the same KIND of thing, and
  * this control renders the rail's own pair summed down its length.
  *
- * WHY IT IS A PAIR AND NOT A LABELLED NUMBER. The previous fix scoped this to
- * the panels the rail is not showing and spent a word — `elsewhere` — saying
- * so. The word was doing all the work of keeping it apart from the Status Bar's
- * `Needs you N`, and a word is a fragile place to keep a distinction. `3 | 5`
- * is a different SHAPE from `Needs you 1`; two quantities cannot be read as one
- * quantity rendered twice, however close they sit. So the scope goes back to
- * the whole day (which is what a control that outlives the rail should carry),
- * the eye and the word both go, and the amber falls on the one number that is
- * a demand — the other recedes, exactly as a zero does in the toolbar.
+ * ONE NUMBER, AND IT IS THE DEMAND. This carried a PAIR — `6 | 38` — on the
+ * argument that two quantities cannot be misread as one quantity rendered
+ * twice. Operator: *"no need 38, just 6 is enough."* And they are right: the
+ * denominator is the day's whole corpus, which is a number nobody acts on and
+ * which was there to disambiguate rather than to inform. A control earns its
+ * pixels by what it tells you to DO, and `38 rows exist` tells you nothing.
+ *
+ * The scope it was protecting survives where scope belongs — the tooltip and
+ * the accessible name, both of which say the count spans every workflow.
  *
  * It still carries the workflow's 2-char code — the prefix of every one of its
  * trace ids — so the control is never an anonymous glyph.
@@ -783,21 +783,25 @@ export function DemoWorkflowPanelToggle({
         <PanelLeftOpen aria-hidden className={dsIcon.sm} />
       )}
       <span className={dsText.nums}>{code}</span>
-      {/* The rule separates the panel you are IN from a pair that belongs to
+      {/* The rule separates the panel you are IN from a count that belongs to
           the whole day. It sits on the control's OWN surface, where
           `--ds-border` against a white card is not a line anybody sees. */}
       <span aria-hidden className={cn("mx-[var(--ds-space-hair)] h-4 w-px shrink-0", "bg-[var(--ds-border-loud)]")} />
-      {/* THE PAIR. Amber on the demand, and only there: at zero it steps down
-          to the same neutral its denominator wears, because a zero is not a
-          demand and a standing amber 0 is the definition of an alarm nobody
-          reads. The `/` is a hairline, not a glyph — a slash in `dsText.nums`
-          sits off the numerals' baseline and reads as punctuation inside a
-          number rather than a divider between two. */}
-      <span className={cn(dsText.nums, "shrink-0 tabular-nums", dsMotion.base, needsYou > 0 ? "font-semibold text-[color:var(--ds-status-waiting-fg)]" : "text-[color:var(--ds-fg-faint)]")}>
+      {/* THE DEMAND, and only the demand. Amber while it is one; at zero it
+          steps down to a neutral rather than vanishing, because a badge that
+          disappears reflows the whole action bar every time the count crosses
+          zero — and a standing amber 0 is the definition of an alarm nobody
+          reads. */}
+      <span
+        className={cn(
+          dsText.nums,
+          "shrink-0 tabular-nums",
+          dsMotion.base,
+          needsYou > 0 ? "font-semibold text-[color:var(--ds-status-waiting-fg)]" : "text-[color:var(--ds-fg-faint)]",
+        )}
+      >
         {needsYou}
       </span>
-      <span aria-hidden className="mx-[var(--ds-space-hair)] h-2.5 w-px shrink-0 bg-[var(--ds-border)]" />
-      <span className={cn(dsText.nums, "shrink-0 tabular-nums text-[color:var(--ds-fg-muted)]")}>{all}</span>
     </button>
   );
 }

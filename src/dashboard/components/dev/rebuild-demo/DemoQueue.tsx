@@ -1645,11 +1645,20 @@ export function DemoQueue({
             in a band of its own above the Status Bar; here it costs nothing and
             it is the answer to "which panel am I in" in every Workflow Panel
             state — including the one where the panel is reduced to an icon. */}
+        {/* THE WORKFLOW NAME, AND NOTHING ELSE.
+
+            It read `Oath Upload · queue · Sat, Jul 25 · 1 run`, and three
+            quarters of that was already on screen: the DATE is the Top Bar's
+            own navigator, the COUNT is the Status Bar's `All` pill and the
+            rail's badge on the same workflow, and `queue` names the panel the
+            operator is standing in — the scaffolding rule, applied to a header.
+            Operator: *"everything else beside oath upload is unnecessary. this
+            applies to all other workflows."*
+
+            What it answers is "which panel am I in", which is the one question
+            no other surface on screen answers when the Workflow Panel is
+            reduced to an icon. */}
         <h2 className={cn(dsText.title, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>{workflowLabel}</h2>
-        <span className="shrink-0">queue · {dayLabel(day)}</span>
-        <span className="ml-auto shrink-0">
-          <span className={dsText.nums}>{inView.length}</span> {inView.length === 1 ? "run" : "runs"}
-        </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto pb-3">
         {/* Empty is a STATE: what would be here, why it is not, and what to do
