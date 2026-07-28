@@ -300,17 +300,28 @@ export const termination = {
   /**
    * "Override Last Date Worked" checkbox. The live PeopleSoft DOM rendered
    * `HR_TBH_SCR_WRK_TBH_CHK2$3`; prefix matching preserves the row suffix.
-   * verified 2026-07-16
+   *
+   * `input[type="checkbox"]` is LOAD-BEARING, not cosmetic: on the EDITABLE
+   * transaction form PeopleSoft renders every checkbox as the visible input
+   * PLUS a hidden companion `<FIELD>$chk$<row>` carrying the posted Y/N value
+   * (`HR_TBH_SCR_WRK_TBH_CHK2$chk$3`). Both ids share the prefix, so a bare
+   * `id^=` matched 2 elements and EVERY read threw a strict-mode violation.
+   * (The 2026-07-16 mapping was taken from a read-only submitted record, which
+   * renders no `$chk$` companion — hence the miss.)
+   * verified 2026-07-28 (live editable UC_VOL_TERM form: 1 element)
    * @tags termination, override, last-date-worked, checkbox, ucpath
    */
   overrideLastDateWorkedCheckbox: (f: FrameLocator): Locator =>
-    f.locator('input[id^="HR_TBH_SCR_WRK_TBH_CHK2$"]'),
+    f.locator('input[type="checkbox"][id^="HR_TBH_SCR_WRK_TBH_CHK2$"]'),
 
   /**
    * Editable "Last Date Worked" input. The live read-only transaction rendered
    * the corresponding `HR_TBH_SCR_WRK_TBH_DATE$3` span; this selector is
    * deliberately input-specific so a read-only/reused transaction fails closed
-   * instead of masquerading as an editable form. verified 2026-07-16
+   * instead of masquerading as an editable form. The sibling `$prompt$3`
+   * calendar anchor + its `$prompt$img$3` icon share the prefix but are `<a>`
+   * / `<img>`, so `input` keeps this at exactly 1 element.
+   * verified 2026-07-28 (live editable UC_VOL_TERM form: 1 element)
    * @tags termination, last-date-worked, date, input, ucpath
    */
   lastDateWorkedInput: (f: FrameLocator): Locator =>
