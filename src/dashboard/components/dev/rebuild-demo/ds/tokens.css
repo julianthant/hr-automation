@@ -61,8 +61,17 @@
      is the lowest-stakes state on this screen: it says "the system is pointing
      here", which needs to be findable and needs to be nothing else. Mixing
      toward the FOREGROUND instead of toward the accent keeps it hueless and
-     keeps it one step, on either theme. */
-  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 5%, var(--ds-surface-1));
+     keeps it one step, on either theme.
+
+     ONE STEP MEANS ONE STEP. At 5% the selected card still read as a pale plate
+     laid over the panel — operator: *"the color the row changes when
+     highlighted is too light. we need a shade close to the original color."*
+     The fill is not what finds the row: the 2px rail down its left edge, the
+     stronger border and the weight change are, and every one of those is a
+     non-luminance cue that survives at any tint. So the fill drops to the
+     smallest delta that is still a delta, and the cues beside it carry the
+     rest. */
+  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 3%, var(--ds-surface-1));
   --ds-surface-disabled: color-mix(in srgb, var(--muted) 60%, transparent);
 
   /* THE RECESSED PLANE — the ONE treatment for "this sits back from the card".
@@ -115,6 +124,24 @@
   --ds-recess-fg: var(--ds-fg-secondary);
   --ds-recess-fg-quiet: var(--ds-fg-muted);
   --ds-recess-border: var(--ds-border);
+
+  /* THE PAPER PLANE — the ONE place in this product that is not a UI surface.
+     A scanned page rendered inside the capture viewer is a DOCUMENT: ink on
+     stock, ruled lines, a signature block. It is deliberately the same in both
+     themes, because paper does not have a dark mode and a form printed in
+     graphite would read as a UI panel wearing a form's layout.
+
+     It is used by exactly one component (`PageFacsimile`) and it is fenced:
+     what it renders is SYNTHETIC, drawn from the synthetic extraction record
+     beside it and marked as such on its own face. The rule it does not break is
+     the one the placeholder frame protects — nothing here draws an
+     approximation of a REAL system page, and no live scan is committed to this
+     bundle. Its contrast is checked as text on a light surface (ink 15% on
+     stock 97% clears 4.5:1 with room; the quiet ink is a label at 3:1+). */
+  --ds-paper-bg: oklch(0.97 0.006 85);
+  --ds-paper-fg: oklch(0.22 0.008 85);
+  --ds-paper-fg-quiet: oklch(0.46 0.008 85);
+  --ds-paper-rule: oklch(0.82 0.008 85);
 
   /* ---------------------------------------------------------------------
      BORDER — one hairline weight for structure; strength carries meaning.
@@ -353,8 +380,16 @@
      sort select and the select toggle. Operator: "all of these should have the
      same height." It is named rather than repeated as `--ds-h-sm` at eight call
      sites so a control added later cannot quietly drift by 6px, which is
-     exactly how the composites' bordered box came to be 30 in a row of 24. */
-  --ds-h-toolbar: var(--ds-h-sm);
+     exactly how the composites' bordered box came to be 30 in a row of 24.
+
+     It is the DEFAULT control height (28), not the dense one (24). At 24 the
+     bar's ten pills each had 6px of ink above and below an 11px label inside a
+     36px band, and the operator read the result as controls of different sizes
+     even where the token had already made them identical — the padding, not the
+     height, was doing the differing. 28 in a 36 band leaves 4px of air top and
+     bottom and lets every control take the SAME `--ds-space-base` inset, which
+     is what "the same height no matter what" actually asks for. */
+  --ds-h-toolbar: var(--ds-h-md);
   --ds-h-topbar: 44px; /* the app top bar */
   /* The Session Card's micro step pipeline. It is a RESERVED band, not a
      measured one: every card gives the bar the same slot whether or not it
@@ -376,18 +411,39 @@
   --ds-h-capture-box: 46vh;
   /* the thumbnail strip along the capture column's bottom */
   --ds-h-capture-thumb: 44px;
-  /* The scroll well a Group Row shows its members in. This is the value that
-     makes scale presentational: at ~5.5 lines a group of 50 occupies exactly
-     the same space as a group of 13, so a queue full of groups keeps a
-     predictable height and the row never has to change SHAPE to hold more. */
-  --ds-h-member-well: 136px;
-  /* The band the run-detail panel's DECISION NOTICE occupies at the bottom of
-     its own box. It exists as a token because one other surface has to clear
-     it: the toast viewport's `--ds-toast-inset-bottom` is a CONSTANT built from
-     this, so the two never overlap and — the load-bearing part — neither one's
-     position is ever a function of whether the other is on screen. Two lines
-     plus the notice's own padding, measured. */
-  --ds-h-decision-notice: 68px;
+  /* The source-page stage when Review stacks below its extracted fields. At
+     the side-by-side rung the grid gives it the full remaining panel height;
+     at the narrow rung it still needs enough paper to inspect rather than a
+     thumbnail stretched across a decision surface. */
+  --ds-h-review-page-min: 420px;
+  /* ONE MEMBER LINE, and the two wells built out of it.
+     ------------------------------------------------------------------
+     The well used to be a hand-picked 136px on 24px lines, and the half-cut
+     row that fell out of it was defended as a depth cue. The operator read it
+     as what it looks like — *"the list is hard-clipped mid-row"* — and they are
+     right: a partially painted row is indistinguishable from a rendering bug,
+     and a scrollbar already says "there is more" without lying about a person.
+
+     So the well is now a WHOLE NUMBER OF LINES, always. `line` is the rhythm
+     (26px — two more than the dense control height, because these rows are read
+     in columns rather than clicked in a bar); the two wells are N lines plus
+     the N-1 hairlines `divide-y` puts between them, which is exactly where the
+     container's edge lands.
+
+       collapsed  6 lines — the resting shape, the same at 6 members and at 50
+       open      20 lines — the operator's own number, scrolling to everyone
+
+     Scale is still presentational: the RESTING height does not vary with the
+     count. What changed is that expanding is now in the row instead of only
+     through `Open all N`. */
+  --ds-h-member-line: 26px;
+  --ds-h-member-well: calc(6 * var(--ds-h-member-line) + 5 * var(--ds-border-w));
+  --ds-h-member-well-open: calc(20 * var(--ds-h-member-line) + 19 * var(--ds-border-w));
+  /* NO TOKEN FOR THE DECISION NOTICE'S BAND. There was one — the toast
+     viewport's floor was built partly out of it — and deleting it is the point:
+     the notice hangs off its panel's bottom-LEFT and the toast stack off the
+     viewport's bottom-right, so the two can never converge and neither needs to
+     know the other's height. See `ds/primitives-overlay.tsx`. */
   /* The two FIXED columns of a member line, in the well and in the drill-in.
      They are fixed so the names down the left and the EIDs down the right land
      on the same edge in every group — a member list whose third column sizes
@@ -490,6 +546,15 @@
      different shapes, and that difference is the tile's only cheap way to say
      which of the two you are about to open. */
   --ds-h-evidence-thumb: 44px;
+  /* ONE EVIDENCE ROW, and the well built out of it — the same construction as
+     the member well, and for the same reason: a list that CLIPS must clip on a
+     whole row boundary, or the cut edge reads as a rendering fault rather than
+     as "there is more below". The rail's evidence list was a two-column grid of
+     tall tiles, so one capture occupied a third of the width and left the rest
+     empty; it is a full-width list now, and the well is what keeps a run with
+     nine captures from pushing Data off the rail. */
+  --ds-h-evidence-row: calc(var(--ds-h-evidence-thumb) + 2 * var(--ds-space-snug));
+  --ds-h-evidence-well: calc(4 * var(--ds-h-evidence-row) + 3 * var(--ds-border-w));
 
   /* ---------------------------------------------------------------------
      RADIUS — derived from the product's --radius (8px) so the demo can
@@ -675,7 +740,7 @@ body[data-demo-theme="dark"] {
   --ds-surface-3: var(--accent);
   --ds-surface-overlay: var(--popover);
   --ds-surface-scrim: rgba(0, 0, 0, 0.66);
-  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 5%, var(--ds-surface-1));
+  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 3%, var(--ds-surface-1));
   --ds-surface-disabled: color-mix(in srgb, var(--muted) 60%, transparent);
 
   /* --- border ----------------------------------------------------------- */
@@ -856,7 +921,9 @@ body[data-demo-theme="light"] {
   --ds-surface-3: var(--accent);
   --ds-surface-overlay: var(--popover);
   --ds-surface-scrim: rgba(16, 24, 40, 0.45);
-  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 6%, var(--ds-surface-1));
+  /* A hair more than the dark theme's 3%: paper starts at pure white, so the
+     same ratio lands a smaller absolute step. Measured, not matched. */
+  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 4%, var(--ds-surface-1));
   --ds-surface-disabled: color-mix(in srgb, var(--muted) 70%, transparent);
 
   /* --- border ----------------------------------------------------------- */

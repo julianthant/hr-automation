@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanelRight } from "lucide-react";
 import { DemoLogPanel, tabsFor, type DemoTab } from "./DemoLogPanel";
 import { computeVisibleIds, DemoQueue, type DemoFilter, type DemoQueueState, type DemoView } from "./DemoQueue";
@@ -44,7 +44,18 @@ import {
 } from "./DemoShell";
 // Row lookups go through the ALL-DAYS map: a row selected from a prior day must
 // open exactly like a row from today.
-import { ALL_DEMO_ROWS as DEMO_ROWS, DEMO_DAY } from "./demo-days";
+import { ALL_DEMO_ROWS as DEMO_ROWS, DEMO_DAY, dayOfRow } from "./demo-days";
+import {
+  canGoBack,
+  canGoForward,
+  currentPlace,
+  goBack,
+  goForward,
+  initNavHistory,
+  navDestinationLabel,
+  pushPlace,
+  type DemoNavHistory,
+} from "./demo-nav-history";
 import {
   EmptyState,
   Panel,
@@ -92,7 +103,7 @@ export function RebuildDemo() {
    * Help → Keyboard, so a control that shows the shortcut list can reach the
    * page that holds the same list.
    */
-  const [settingsSection, setSettingsSection] = useState<SettingsSectionKey>("general");
+  const [settingsSection] = useState<SettingsSectionKey>("general");
   const [activeWorkflow, setActiveWorkflow] = useState(DEFAULT_WORKFLOW);
   // Floating window · icon · docked sidebar, persisted. The 200px column is a
   // choice now rather than a tax, and the default costs the panels nothing.
@@ -113,6 +124,12 @@ export function RebuildDemo() {
   const [checkedIds, setCheckedIds] = useState<ReadonlySet<string>>(
     () => new Set(Object.values(DEMO_ROWS).filter((r) => r.checkedByDefault).map((r) => r.id)),
   );
+  /**
+   * Which member wells are grown to their tall shape. Empty at rest, because a
+   * queue that boots with three 20-line wells open is a queue with no rows on
+   * screen — expansion is a thing the operator asks for, per row.
+   */
+  const [openWells, setOpenWells] = useState<ReadonlySet<string>>(() => new Set());
   const [tick, setTick] = useState(0);
   /* Which storage snapshot the mock server is serving. Degraded is a real
      served state, not a UI mood — it drives the app-wide banner AND the
@@ -228,8 +245,20 @@ export function RebuildDemo() {
   const counts = useMemo(() => countRows(scopedRows), [scopedRows]);
 
   const state: DemoQueueState = useMemo(
-    () => ({ view, filter, selectedId, checkedIds, expandedGroups, sort, selectMode, bulkIds, tick, panelWorkflow: activeWorkflow }),
-    [view, filter, selectedId, checkedIds, expandedGroups, sort, selectMode, bulkIds, tick, activeWorkflow],
+    () => ({
+      view,
+      filter,
+      selectedId,
+      checkedIds,
+      expandedGroups,
+      openWells,
+      sort,
+      selectMode,
+      bulkIds,
+      tick,
+      panelWorkflow: activeWorkflow,
+    }),
+    [view, filter, selectedId, checkedIds, expandedGroups, openWells, sort, selectMode, bulkIds, tick, activeWorkflow],
   );
 
   /** the top-level rows on screen right now — all Select all may ever take */
@@ -304,6 +333,13 @@ export function RebuildDemo() {
           else next.add(groupId);
           return next;
         }),
+      onToggleWell: (groupId: string) =>
+        setOpenWells((prev) => {
+          const next = new Set(prev);
+          if (next.has(groupId)) next.delete(groupId);
+          else next.add(groupId);
+          return next;
+        }),
       onToggleBulk: (id: string) =>
         setBulkIds((prev) => {
           const next = new Set(prev);
@@ -328,6 +364,65 @@ export function RebuildDemo() {
     setActiveWorkflow(label);
     setView({ kind: "queue" });
   }, []);
+
+  // ---- where you have been ----------------------------------------------
+  /*
+    BACK AND FORWARD, over PLACES rather than over presses.
+
+    A place is `workflow + row + tab` (`demo-nav-history.ts`), and the history
+    is recorded by OBSERVING those three rather than by asking every navigation
+    call site to remember to log itself. That is the whole reason the operator's
+    request is cheap to satisfy: there are already six routes that move the
+    panel (a delegation chip, a back link, the rail, search, a notification, the
+    launcher) and a seventh will be added by somebody who has never read this
+    file. An observer cannot be forgotten by a new call site; a `pushPlace()`
+    sprinkled through the handlers can, and one that is forgotten produces a
+    Back button that skips a step — which is worse than no Back button.
+
+    The ref is what stops the observer from recording its OWN moves: applying a
+    history entry changes exactly the state the effect watches, so without it
+    every Back would immediately re-push the place it just left and the history
+    would be two entries long forever.
+  */
+  const [navHistory, setNavHistory] = useState<DemoNavHistory>(() =>
+    initNavHistory({ workflow: DEFAULT_WORKFLOW, rowId: "oath-summer", tab: null }),
+  );
+  const applyingNav = useRef(false);
+
+  useEffect(() => {
+    if (applyingNav.current) {
+      applyingNav.current = false;
+      return;
+    }
+    setNavHistory((prev) => pushPlace(prev, { workflow: activeWorkflow, rowId: selectedId, tab }));
+  }, [activeWorkflow, selectedId, tab]);
+
+  const travel = useCallback(
+    (direction: "back" | "forward") => {
+      setNavHistory((prev) => {
+        const next = direction === "back" ? goBack(prev) : goForward(prev);
+        const place = currentPlace(next);
+        if (next === prev || !place) return prev;
+        applyingNav.current = true;
+        // The row's own day has to move with it, exactly as a search hit does —
+        // a place restored into the wrong date partition lands on an empty
+        // queue and reads as a broken button.
+        const row = DEMO_ROWS[place.rowId];
+        if (row) setDay(dayOfRow(row));
+        setShellView("queue");
+        setView({ kind: "queue" });
+        setActiveWorkflow(place.workflow);
+        setSelectedId(place.rowId);
+        setTab(place.tab as DemoTab | null);
+        return next;
+      });
+    },
+    [],
+  );
+
+  /** what each control will actually do, named on its face rather than guessed at */
+  const navBackTo = navDestinationLabel(navHistory, "back", (id) => DEMO_ROWS[id]?.displayName ?? DEMO_ROWS[id]?.title);
+  const navForwardTo = navDestinationLabel(navHistory, "forward", (id) => DEMO_ROWS[id]?.displayName ?? DEMO_ROWS[id]?.title);
 
   // ---- keyboard flow -----------------------------------------------------
   useEffect(() => {
@@ -487,29 +582,26 @@ export function RebuildDemo() {
   return (
     <div
       data-demo-theme={theme}
-      // THE TOAST FLOOR, and it is a CONSTANT.
+      // THE TOAST FLOOR, and it clears the app's OWN chrome and nothing else.
       //
-      // The viewport is `fixed` at the bottom of the WINDOW; this shell is the
-      // only thing that knows what it has parked down there, and there are two
-      // things. The Session bar (`--ds-h-bar`). And the band the run-detail
-      // panel's decision notice occupies — the panel sits `--ds-space-cozy`
-      // above the bar, the notice sits `--ds-space-cozy` inside the panel, and
-      // it is `--ds-h-decision-notice` tall.
+      // The viewport is `fixed` at the bottom of the WINDOW, and this shell is
+      // the only thing that knows what it has parked down there: the Session
+      // bar. That is one term, it is app-level, and it is the same on every
+      // view.
       //
-      // With the context rail open those two are already disjoint (the rail
-      // separates the panel's right edge from the window's). This constant is
-      // for the collapsed-rail case, where they converge — and it is a
-      // constant, never a measurement of whether a notice happens to be
-      // showing, because *"these 2 should not be affecting each other"*: a gap
-      // that is always there is predictable, and one that appears when some
-      // other element does is the bug the operator reported.
+      // It used to carry a second term — the band the run-detail panel's
+      // decision notice occupies — so that the two could never collide with a
+      // collapsed context rail. That term is GONE, and its absence is the fix
+      // the operator asked for: *"why is the toast notification affected by the
+      // notification in the log panel?"* Every toast in the product was riding
+      // 100px high because a panel-local reminder might exist. The notice now
+      // hangs off its panel's bottom-LEFT and the stack off the viewport's
+      // bottom-right, so they cannot converge on any layout and neither owes
+      // the other a pixel.
       style={
-        {
-          "--ds-toast-inset-bottom":
-            "calc(var(--ds-h-bar) + var(--ds-space-cozy) * 2 + var(--ds-h-decision-notice) + var(--ds-space-base))",
-        } as CSSProperties
+        { "--ds-toast-inset-bottom": "calc(var(--ds-h-bar) + var(--ds-space-loose))" } as CSSProperties
       }
-      className="flex h-screen flex-col bg-background text-foreground"
+      className="flex h-screen min-w-0 flex-col overflow-hidden bg-background text-foreground"
     >
       <ToastProvider>
       {/* ONE `TooltipProvider` FOR THE WHOLE DEMO, and it is not optional: Radix
@@ -530,9 +622,13 @@ export function RebuildDemo() {
         onToggleTheme={toggleTheme}
         storage={storage}
         onStorage={setStorage}
-        onOpenHelp={() => {
-          setSettingsSection("keyboard");
-          setShellView("settings");
+        nav={{
+          canBack: canGoBack(navHistory),
+          canForward: canGoForward(navHistory),
+          backTo: navBackTo,
+          forwardTo: navForwardTo,
+          onBack: () => travel("back"),
+          onForward: () => travel("forward"),
         }}
       />
 
@@ -553,7 +649,7 @@ export function RebuildDemo() {
       ) : shellView === "explorer" ? (
         <DemoExplorerPage onBack={() => setShellView("queue")} onOpenSettings={() => setShellView("settings")} />
       ) : shellView === "report" ? (
-        <DemoActivityReportPage day={day} onBack={() => setShellView("queue")} onOpenSettings={() => setShellView("settings")} />
+        <DemoActivityReportPage day={day} />
       ) : shellView === "kit" ? (
         /* every primitive in every state — the thing a builder skims BEFORE
            choosing a component, so no surface hand-rolls one that exists */
@@ -576,7 +672,7 @@ export function RebuildDemo() {
             />
           )}
 
-          <main className="flex min-h-0 flex-1 flex-col">
+          <main className="flex min-h-0 min-w-0 flex-1 flex-col">
             {/* ONE bar above the panels now, not two. The Status Bar's ten
                 pills were a band of their own directly above a band of
                 unrelated controls; they are the middle GROUP of a single

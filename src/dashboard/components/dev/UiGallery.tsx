@@ -60,6 +60,7 @@ const STATIC_STATE: DemoQueueState = {
   selectedId: "",
   checkedIds: new Set(),
   expandedGroups: new Set(["oath-batch"]),
+  openWells: new Set(),
   sort: "attention",
   selectMode: false,
   bulkIds: new Set(),
@@ -78,6 +79,7 @@ const STATIC_HANDLERS: DemoQueueHandlers = {
   onDrillIn: NOOP,
   onBack: NOOP,
   onToggleGroup: NOOP,
+  onToggleWell: NOOP,
   onOpenPanel: NOOP,
   onToggleBulk: NOOP,
 };

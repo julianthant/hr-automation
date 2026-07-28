@@ -38,8 +38,60 @@ export const DEMO_NOW = `${DEMO_DAY}T14:26:00`;
 
 export const DEMO_NOW_MS = Date.parse(DEMO_NOW);
 
+/**
+ * THE APP'S OWN VERSION — `major.minor`, and it is a different axis from a
+ * workflow's `v7.2`.
+ *
+ * It used to be a DATE STAMP (`2026.07.3`), which reads like a version and
+ * carries none of a version's information: two date stamps tell you which
+ * shipped later and nothing about whether the later one moved anything under
+ * your runs. The operator drew the scheme: *"the app will be like this 1.1. the
+ * first 1 is for the major dashboard change. the second 1 is for a minor
+ * change. the minor change does not affect any workflows but the major change
+ * affect some/all workflows."*
+ *
+ *   MAJOR — a dashboard change that reaches SOME OR ALL WORKFLOWS. Old rows may
+ *           not be interpretable by the new projection, so it archives every
+ *           prior-version run and a non-terminal run blocks it.
+ *   MINOR — a dashboard change that reaches NO workflow. Nothing archives,
+ *           nothing in flight is disturbed, nothing can block it.
+ *
+ * The test for "affects a workflow" is deliberately mechanical rather than a
+ * judgement at release time, and it is the same test the descriptor version
+ * already uses: did a workflow's SHAPE move — its steps, its data contract, the
+ * projection that renders its rows? A change that only alters the app's own
+ * chrome (a colour, a page's layout, a shortcut) is minor however large it
+ * looks.
+ *
+ * TWO PARTS, NOT THREE, is the operator's call and it holds: this product ships
+ * from one tree to one operator, so there is no "patch" audience — a cosmetic
+ * fix and a small behavioural one both reach the same person on the same day,
+ * and the only question either has to answer is "did my runs move".
+ *
+ * THE TRACE ID DOES NOT CARRY THIS. A run's trace correlates it to the app
+ * version it ran under (both are on the archived row); it never encodes one.
+ * Versions live in exactly two places — this constant for the app, the
+ * descriptor for the workflow — and every surface reads them from there.
+ */
+export interface AppVersion {
+  major: number;
+  minor: number;
+}
+
 /** the app build serving every row — the `appVersion` half of the archive key */
-export const DEMO_APP_VERSION = "2026.07.3";
+export const DEMO_APP_VERSION_PARTS: AppVersion = { major: 3, minor: 1 };
+
+/** `3.1` — the app version as every surface prints it */
+export function fmtAppVersion(version: AppVersion): string {
+  return `${version.major}.${version.minor}`;
+}
+
+/** `app 3.1` — where the number needs to say WHICH version it is */
+export function appVersionTag(version: AppVersion): string {
+  return `app ${fmtAppVersion(version)}`;
+}
+
+export const DEMO_APP_VERSION = fmtAppVersion(DEMO_APP_VERSION_PARTS);
 
 /** the actor every command records today (M1 — single local operator) */
 export const DEMO_OPERATOR = "local-operator";
@@ -573,6 +625,92 @@ function lockedFormType(value: string, reason: string): StartChoiceWire {
   };
 }
 
+/**
+ * THE CAPABILITY VOCABULARY — the questions the capability page asks of every
+ * descriptor. It lives HERE, with the descriptors, and not with the derivation
+ * that reads it: a descriptor has to be able to name the capability it is
+ * declining, and a type that lived downstream of the descriptor would make that
+ * a circular dependency.
+ *
+ * Each key is answered by a FIELD above, never by an id:
+ *
+ *   startable / capture   `start.methods`
+ *   dryRun / duplicateCheck  `start.flags`
+ *   roster / workers / presets / subSelections  `start.choices`
+ *   multiFile / merge     the upload method's own two booleans
+ *   memberOutcomes        `memberOutcomes`
+ *   delegation            `linkedPanel` + the Explorer graph's `delegatesTo`
+ *   systemWrite           the Explorer graph's `write` nodes
+ */
+export type CapabilityKey =
+  | "startable"
+  | "dryRun"
+  | "roster"
+  | "workers"
+  | "presets"
+  | "capture"
+  | "duplicateCheck"
+  | "multiFile"
+  | "merge"
+  | "subSelections"
+  | "memberOutcomes"
+  | "delegation"
+  | "systemWrite";
+
+/**
+ * TWO KINDS OF NO, and the difference is the point of serving them.
+ *
+ *   `not-applicable`  the capability makes no sense here — a read-only workflow
+ *                     has no rehearsal to offer, because every run of it
+ *                     already is one. This is a DESIGN answer and it is final.
+ *   `not-built`       it would make sense and it is not wired yet. This is a
+ *                     ROADMAP answer and it can change.
+ *
+ * An operator plans differently depending on which they are looking at, and one
+ * grey dash for both is what makes "we decided against it" and "we have not got
+ * to it" indistinguishable.
+ */
+export interface CapabilityAbsenceWire {
+  state: "not-applicable" | "not-built";
+  reason: string;
+}
+
+export type CapabilityAbsences = Partial<Record<CapabilityKey, CapabilityAbsenceWire>>;
+
+/** the capability facts that are NOT about starting — shared by several descriptors */
+const NO_MEMBERS: CapabilityAbsenceWire = {
+  state: "not-applicable",
+  reason: "This workflow does not fan out — it has one row and no members, so there is no member outcome to answer with.",
+};
+const NO_UPLOAD_MULTI: CapabilityAbsenceWire = {
+  state: "not-applicable",
+  reason: "It is not started from a file, so there is no second file to pick.",
+};
+const NO_UPLOAD_MERGE: CapabilityAbsenceWire = {
+  state: "not-applicable",
+  reason: "It is not started from a file, so there is nothing to merge.",
+};
+const NO_CAPTURE_YET: CapabilityAbsenceWire = {
+  state: "not-built",
+  reason: "Phone capture is wired for OCR-backed uploads only. This start would accept photographed pages just as well; nobody has connected it.",
+};
+const NO_DUP_CHECK: CapabilityAbsenceWire = {
+  state: "not-built",
+  reason: "The duplicate check is wired for Oath Upload's ServiceNow filing only. The same shape would apply here and is not built.",
+};
+const NO_PRESET: CapabilityAbsenceWire = {
+  state: "not-applicable",
+  reason: "Every step of this workflow is load-bearing — there is no subset of them that is a coherent run, so there is nothing for a preset to skip.",
+};
+const NO_ROSTER_TYPED: CapabilityAbsenceWire = {
+  state: "not-applicable",
+  reason: "The start already carries the identifier, so there is no name that needs a roster to become an employee ID.",
+};
+const NO_DELEGATION: CapabilityAbsenceWire = {
+  state: "not-applicable",
+  reason: "It does the whole job itself — no part of this workflow is another workflow's work.",
+};
+
 export interface DemoWorkflowRef {
   id: DemoWorkflowId;
   /** the 2-char `defineWorkflow` code — the first component of every trace id */
@@ -614,6 +752,21 @@ export interface DemoWorkflowRef {
    * "delegated only, and here is why" teaches them the shape of the product.
    */
   notStartable?: string;
+  /**
+   * Why a capability this workflow does NOT have is absent — the descriptor
+   * explaining its own `no`.
+   *
+   * The capability page derives every YES from the fields above; what it cannot
+   * derive is the DIFFERENCE between "this makes no sense here" and "this is
+   * not wired yet", and that difference is the whole reason the page is worth
+   * having. Composing the explanation in the UI would mean the UI deciding, for
+   * example, that Person Lookup has no dry run *because it is read-only* — true
+   * today, and still on the screen unchanged on the day it stops being.
+   *
+   * Read by `demo-capability-wire.ts`; a test asserts every absent capability
+   * on every workflow has an entry here.
+   */
+  absences?: CapabilityAbsences;
 }
 
 /**
@@ -763,6 +916,17 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
       ],
       flags: [dryRunFlag()],
     },
+    absences: {
+      roster: NO_ROSTER_TYPED,
+      capture: NO_CAPTURE_YET,
+      duplicateCheck: NO_DUP_CHECK,
+      multiFile: NO_UPLOAD_MULTI,
+      merge: NO_UPLOAD_MERGE,
+      memberOutcomes: {
+        state: "not-built",
+        reason: "Several typed doc IDs do fan out into members, but no outcome vocabulary has been written for them — their detail column is still the free-text fact the run sends.",
+      },
+    },
   },
   onboarding: {
     id: "onboarding",
@@ -791,6 +955,22 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
       ],
       choices: [workerChoice()],
       flags: [dryRunFlag()],
+    },
+    absences: {
+      roster: {
+        state: "not-applicable",
+        reason: "The start is a campus email and the hire's identity comes from their CRM record, so there is no name a roster could turn into an employee ID.",
+      },
+      presets: NO_PRESET,
+      capture: NO_CAPTURE_YET,
+      duplicateCheck: {
+        state: "not-built",
+        reason: "A hire filed twice is a real hazard here and the check is not wired. What stands in for it today is the UCPath person search, which is a step of the run rather than a refusal at the start.",
+      },
+      multiFile: NO_UPLOAD_MULTI,
+      merge: NO_UPLOAD_MERGE,
+      memberOutcomes: NO_MEMBERS,
+      delegation: NO_DELEGATION,
     },
   },
   "person-lookup": {
@@ -821,6 +1001,26 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
       choices: [workerChoice()],
       flags: [],
     },
+    absences: {
+      dryRun: {
+        state: "not-applicable",
+        reason: "It writes nothing, anywhere — every run of it is already a rehearsal, so a dry-run switch would be a control with no off state.",
+      },
+      roster: NO_ROSTER_TYPED,
+      presets: NO_PRESET,
+      capture: NO_CAPTURE_YET,
+      duplicateCheck: {
+        state: "not-applicable",
+        reason: "Nothing is filed, so there is no second filing to refuse.",
+      },
+      multiFile: NO_UPLOAD_MULTI,
+      merge: NO_UPLOAD_MERGE,
+      delegation: NO_DELEGATION,
+      systemWrite: {
+        state: "not-applicable",
+        reason: "Read-only by design. It is the workflow other workflows delegate to precisely because it cannot change anything.",
+      },
+    },
   },
   "person-match": {
     id: "person-match",
@@ -831,6 +1031,14 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
     systems: ["ucpath"],
     notStartable:
       "Delegated only — and nothing has delegated to it since 2026-07-16. Inventing a start path for code nothing calls would be worse than leaving it absent.",
+    absences: {
+      memberOutcomes: NO_MEMBERS,
+      delegation: NO_DELEGATION,
+      systemWrite: {
+        state: "not-applicable",
+        reason: "Read-only. It compares two identities and answers; changing one is its caller's job.",
+      },
+    },
   },
   "i9-lookup": {
     id: "i9-lookup",
@@ -840,6 +1048,14 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
     version: 3,
     systems: ["i9"],
     notStartable: "Delegated only — an I-9 lookup is enrichment inside its parent's run, and on its own it would answer a question nobody asked.",
+    absences: {
+      memberOutcomes: NO_MEMBERS,
+      delegation: NO_DELEGATION,
+      systemWrite: {
+        state: "not-applicable",
+        reason: "Read-only. It reads the I-9 portal; creating a profile belongs to Onboarding, which is the workflow that knows a hire is real.",
+      },
+    },
   },
   "work-study": {
     id: "work-study",
@@ -876,6 +1092,19 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
       choices: [workerChoice(undefined, ["typed"])],
       flags: [dryRunFlag(["typed"])],
     },
+    absences: {
+      roster: NO_ROSTER_TYPED,
+      presets: NO_PRESET,
+      capture: NO_CAPTURE_YET,
+      duplicateCheck: NO_DUP_CHECK,
+      multiFile: NO_UPLOAD_MULTI,
+      merge: NO_UPLOAD_MERGE,
+      memberOutcomes: {
+        state: "not-built",
+        reason: "A spreadsheet import fans out into members and no outcome vocabulary has been written for them yet.",
+      },
+      delegation: NO_DELEGATION,
+    },
   },
   "kronos-pay-rule": {
     id: "kronos-pay-rule",
@@ -900,6 +1129,26 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
       ],
       choices: [workerChoice()],
       flags: [],
+    },
+    absences: {
+      dryRun: {
+        state: "not-built",
+        reason: "It changes a pay rule in Kronos and honours no rehearsal. A dry run belongs here and is not wired — this is the one write in the product you cannot practise.",
+      },
+      roster: NO_ROSTER_TYPED,
+      presets: NO_PRESET,
+      capture: NO_CAPTURE_YET,
+      duplicateCheck: {
+        state: "not-applicable",
+        reason: "Setting the same pay rule twice is the same pay rule — there is no duplicate to refuse.",
+      },
+      multiFile: NO_UPLOAD_MULTI,
+      merge: NO_UPLOAD_MERGE,
+      memberOutcomes: {
+        state: "not-built",
+        reason: "Several typed EIDs fan out into members and no outcome vocabulary has been written for them yet.",
+      },
+      delegation: NO_DELEGATION,
     },
   },
   ocr: {
@@ -936,6 +1185,33 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
         workerChoice(),
       ],
       flags: [],
+    },
+    absences: {
+      dryRun: {
+        state: "not-applicable",
+        reason: "A standalone review reads a document and stops. There is no approve step and no fan-out, so there is no write for a rehearsal to suppress.",
+      },
+      presets: NO_PRESET,
+      capture: {
+        state: "not-built",
+        reason: "Photographed pages arrive through a TARGET workflow's start today. A standalone review would take them just as well and is not wired for it.",
+      },
+      duplicateCheck: {
+        state: "not-applicable",
+        reason: "Reading the same document twice files nothing twice — there is no duplicate to refuse.",
+      },
+      merge: {
+        state: "not-applicable",
+        reason: "Each file becomes its own review. Merging is an OnBase concern: it imports one file, so its pages have to arrive as one document.",
+      },
+      memberOutcomes: {
+        state: "not-applicable",
+        reason: "Approval IS delegation, so a standalone review has no fan-out and no members. The people it read are records in the review, not rows.",
+      },
+      systemWrite: {
+        state: "not-applicable",
+        reason: "It reads a document and parks at a review. Every write in an OCR-backed flow belongs to the target workflow the review releases.",
+      },
     },
   },
   "oath-signature": {
@@ -983,6 +1259,21 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
       ],
       flags: [dryRunFlag(["upload", "capture"])],
     },
+    absences: {
+      presets: NO_PRESET,
+      duplicateCheck: {
+        state: "not-applicable",
+        reason: "Signing an oath twice is the same signed oath. The duplicate check guards a ServiceNow FILING, which is Oath Upload's job and not this one's.",
+      },
+      merge: {
+        state: "not-applicable",
+        reason: "Each packet is its own set of signers. Two packets merged into one would put two departments' people under a single coordinator row.",
+      },
+      memberOutcomes: {
+        state: "not-built",
+        reason: "Its signers are member rows and no outcome vocabulary has been written for them — a signer's detail column is still the free-text fact the run sends.",
+      },
+    },
   },
   "oath-upload": {
     id: "oath-upload",
@@ -1024,6 +1315,21 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
       ],
       flags: [dryRunFlag(), DUPLICATE_CHECK_FLAG],
     },
+    absences: {
+      capture: NO_CAPTURE_YET,
+      presets: {
+        state: "not-applicable",
+        reason: "Its `What to do with it` choice is a MODE, not a preset: `Upload only` does a different job (one ticket, nothing read, nothing signed) rather than the same job with steps left out.",
+      },
+      merge: {
+        state: "not-applicable",
+        reason: "One row walks one signed document. Two documents merged would file one ticket for two things.",
+      },
+      memberOutcomes: {
+        state: "not-applicable",
+        reason: "It has no members by design — its signers are LINKED runs in the Oath Signature panel, each with its own row, receipt and retry.",
+      },
+    },
   },
   "emergency-contact": {
     id: "emergency-contact",
@@ -1060,6 +1366,22 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
       ],
       flags: [dryRunFlag()],
     },
+    absences: {
+      presets: NO_PRESET,
+      duplicateCheck: NO_DUP_CHECK,
+      merge: {
+        state: "not-applicable",
+        reason: "Each file is its own packet of people. Merging two would put two packets' contacts under one coordinator row.",
+      },
+      memberOutcomes: {
+        state: "not-built",
+        reason: "Each person is a member row and no outcome vocabulary has been written for them yet.",
+      },
+      delegation: {
+        state: "not-applicable",
+        reason: "The OCR review it runs is DELEGATED TO it, not by it — the review is a child of this packet, so the arrow points the other way.",
+      },
+    },
   },
   onbase: {
     id: "onbase",
@@ -1095,6 +1417,22 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
       ],
       flags: [dryRunFlag()],
     },
+    absences: {
+      presets: NO_PRESET,
+      capture: NO_CAPTURE_YET,
+      duplicateCheck: {
+        state: "not-built",
+        reason: "Filing the same page under the same person twice is a real hazard in OnBase and the check is not wired here — it exists only on Oath Upload's ServiceNow filing.",
+      },
+      memberOutcomes: {
+        state: "not-built",
+        reason: "Each person is a member row and no outcome vocabulary has been written for them yet.",
+      },
+      delegation: {
+        state: "not-applicable",
+        reason: "The OCR review it runs is DELEGATED TO it, not by it — the review is a child of this document, so the arrow points the other way.",
+      },
+    },
   },
   "i9-check": {
     id: "i9-check",
@@ -1128,6 +1466,34 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
       ],
       flags: [],
     },
+    absences: {
+      dryRun: {
+        state: "not-applicable",
+        reason: "It reads UCPath and appends the retention tracker — a local file, not a system of record. There is no HR write for a rehearsal to suppress.",
+      },
+      roster: {
+        state: "not-applicable",
+        reason: "The scan IS the roster. Each person on it is searched in UCPath by name, which is the work rather than a shortcut around it.",
+      },
+      presets: NO_PRESET,
+      capture: NO_CAPTURE_YET,
+      duplicateCheck: {
+        state: "not-applicable",
+        reason: "Checking the same person twice appends the tracker twice and changes nothing about them — there is no filing to refuse.",
+      },
+      merge: {
+        state: "not-applicable",
+        reason: "Each scan is its own batch of people.",
+      },
+      delegation: {
+        state: "not-applicable",
+        reason: "The OCR review it runs is DELEGATED TO it, not by it — the review is a child of this scan, so the arrow points the other way.",
+      },
+      systemWrite: {
+        state: "not-applicable",
+        reason: "It reads UCPath and appends a local retention tracker. Nothing in UCPath, Kuali, Kronos, OnBase or the I-9 portal changes.",
+      },
+    },
   },
   "crm-doc-download": {
     id: "crm-doc-download",
@@ -1155,6 +1521,30 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
       choices: [workerChoice()],
       flags: [],
     },
+    absences: {
+      dryRun: {
+        state: "not-applicable",
+        reason: "Its whole product is a file on disk. A downloaded document is an output, not a write — nothing about it needs undoing, so there is nothing to rehearse.",
+      },
+      roster: NO_ROSTER_TYPED,
+      presets: NO_PRESET,
+      capture: NO_CAPTURE_YET,
+      duplicateCheck: {
+        state: "not-applicable",
+        reason: "Downloading the same document twice overwrites a file. Nothing is filed, so there is no duplicate to refuse.",
+      },
+      multiFile: NO_UPLOAD_MULTI,
+      merge: NO_UPLOAD_MERGE,
+      memberOutcomes: {
+        state: "not-built",
+        reason: "Several typed values fan out into members and no outcome vocabulary has been written for them yet.",
+      },
+      delegation: NO_DELEGATION,
+      systemWrite: {
+        state: "not-applicable",
+        reason: "It downloads files. No HR record anywhere changes.",
+      },
+    },
   },
   "sharepoint-download": {
     id: "sharepoint-download",
@@ -1178,6 +1568,41 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
       // was a decision to make.
       choices: [],
       flags: [],
+    },
+    absences: {
+      dryRun: {
+        state: "not-applicable",
+        reason: "Its whole product is a file on disk. A download is an output, not a write, so there is nothing for a rehearsal to stop short of.",
+      },
+      roster: {
+        state: "not-applicable",
+        reason: "It IS the roster download. Every roster-backed start reads whatever this leaves behind.",
+      },
+      workers: {
+        state: "not-applicable",
+        reason: "One run, one file. There is nothing to split across a second browser.",
+      },
+      presets: NO_PRESET,
+      capture: {
+        state: "not-applicable",
+        reason: "There is no document to photograph — the run takes no subject at all.",
+      },
+      duplicateCheck: {
+        state: "not-applicable",
+        reason: "A second download overwrites a file and files nothing.",
+      },
+      multiFile: NO_UPLOAD_MULTI,
+      merge: NO_UPLOAD_MERGE,
+      subSelections: {
+        state: "not-applicable",
+        reason: "There is nothing to decide: no roster to pick, no form spec, no document type and nothing to parallelize. The run IS the instruction.",
+      },
+      memberOutcomes: NO_MEMBERS,
+      delegation: NO_DELEGATION,
+      systemWrite: {
+        state: "not-applicable",
+        reason: "It leaves one file in the roster folder. No HR record anywhere changes.",
+      },
     },
   },
   "old-kronos-reports": {
@@ -1222,6 +1647,37 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
         },
       ],
       flags: [],
+    },
+    absences: {
+      dryRun: {
+        state: "not-applicable",
+        reason: "Its whole product is a file on disk. A report is an output, not a write — nothing about it needs undoing.",
+      },
+      roster: {
+        state: "not-applicable",
+        reason: "The report is built from Kronos' own timekeeping data; there are no names to resolve.",
+      },
+      workers: {
+        state: "not-applicable",
+        reason: "One run builds one report. Kronos assembles it server-side, so a second browser would sit and wait beside the first.",
+      },
+      presets: NO_PRESET,
+      capture: {
+        state: "not-applicable",
+        reason: "There is no document to photograph — the run takes no subject at all.",
+      },
+      duplicateCheck: {
+        state: "not-applicable",
+        reason: "Building the same report twice leaves two files and files nothing.",
+      },
+      multiFile: NO_UPLOAD_MULTI,
+      merge: NO_UPLOAD_MERGE,
+      memberOutcomes: NO_MEMBERS,
+      delegation: NO_DELEGATION,
+      systemWrite: {
+        state: "not-applicable",
+        reason: "It leaves report files in the reports folder. No HR record anywhere changes.",
+      },
     },
   },
 };
@@ -1841,15 +2297,30 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
       tone: "destructive",
     },
   };
+  // THE FOOTER ↺. On a row that failed at a DELEGATED child it is the only
+  // replay left — the outcome bar's `Retry the lookup` twin is gone (item 19)
+  // — so it inherits that twin's confirm: same command, same replayed child,
+  // and the operator still reads what the replay does and what it will not
+  // touch before it happens. An ordinary failure keeps the bare ↺; there is
+  // nothing non-obvious to promise about retrying your own run.
+  const replaysDelegatedChild = spec.mirroredFrom !== undefined && spec.subjectKind !== "file";
   const retry: ActionDescriptorWire = {
     key: "retry",
     kind: "command",
     command: "retry",
-    label: "Retry",
+    label: replaysDelegatedChild ? "Retry the lookup" : "Retry",
     intent: "primary",
     icon: "retry",
     placement: ["footer", "menu"],
     expectedVersion: v,
+    confirm: replaysDelegatedChild
+      ? {
+          title: "Replay the delegated lookup?",
+          body: `The CHILD run is replayed under its own task id, so this ${ctx.workflow.label} run resumes behind it instead of starting over. Nothing that already ran is repeated, and nothing has been written to ${ctx.workflow.systems.join(" / ")}.`,
+          confirmLabel: "Retry the lookup",
+          tone: "neutral",
+        }
+      : undefined,
   };
   const hide: ActionDescriptorWire = {
     key: "hide",
@@ -1886,9 +2357,32 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
       out.push(isGroup ? cancelTree : cancelRun);
       break;
     case "parked":
-      // No cancel, no retry, no resume. The only exits are the two typed
-      // resolutions already pushed from `gate.options` — a blind retry on an
-      // unknown write is how you terminate somebody twice.
+      // NO RETRY AND NO RESUME — a blind retry on a write whose outcome is
+      // unknown is how you terminate somebody twice (D20). The two typed
+      // resolutions already pushed from `gate.options` are the only ways to
+      // settle the write itself.
+      //
+      // CANCEL IS NOT ONE OF THOSE, and withholding it was the bug. Operator:
+      // *"even for write parked, it should still have the x at footer for
+      // cancellation."* Cancelling stops the RUN; it does not claim the
+      // submitted write did or did not land, and it never reverses anything —
+      // which is exactly what the confirm copy has always said. A parked row
+      // was the only row in the product with an empty footer, so the operator
+      // could not stop a run that was going nowhere without first resolving a
+      // write they may have had no way to resolve yet.
+      out.push(
+        isGroup
+          ? cancelTree
+          : {
+              ...cancelRun,
+              confirm: {
+                title: `Cancel ${ctx.title}?`,
+                body: `The run stops where it is. This does NOT settle the parked write — whether the submit landed in ${ctx.workflow.systems.join(" / ")} is still unknown, and cancelling neither confirms it nor reverses it. Record the outcome with one of the two resolutions when you know it.`,
+                confirmLabel: "Cancel run",
+                tone: "destructive",
+              },
+            },
+      );
       break;
     case "failed":
     case "cancelled":
@@ -1990,44 +2484,39 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
 
 function deriveOutcomeAction(spec: DemoRowSpec, ctx: ActionPolicyContext): ActionDescriptorWire | null {
   // A row that failed because its LINKED child failed is fixed at the child,
-  // never here — but WHICH fix depends on what the child was reading. A packet
-  // came from a file, so the answer is a better file; a person's mid-run lookup
-  // came from a name, so the answer is to replay that lookup (keeping its task
-  // id, so the dependency reopens and this run resumes behind it).
-  if (spec.mirroredFrom) {
-    return spec.subjectKind === "file"
-      ? {
-          key: "reupload",
-          kind: "command",
-          command: "rerun-with-different-input",
-          label: "Re-upload",
-          intent: "destructive",
-          icon: "retry",
-          placement: ["outcome", "menu"],
-          expectedVersion: ctx.projectedVersion,
-          confirm: {
-            title: "Start a new run from a different file?",
-            body: `This row stays failed and keeps its evidence. A NEW ${ctx.workflow.label} run is enqueued from the file you pick — the two are separate runs with separate receipts.`,
-            confirmLabel: "Choose a file…",
-            tone: "neutral",
-          },
-        }
-      : {
-          key: "retry-child",
-          kind: "command",
-          command: "retry",
-          label: "Retry the lookup",
-          intent: "destructive",
-          icon: "retry",
-          placement: ["outcome", "menu"],
-          expectedVersion: ctx.projectedVersion,
-          confirm: {
-            title: "Replay the delegated lookup?",
-            body: `The CHILD run is replayed under its own task id, so this ${ctx.workflow.label} run resumes behind it instead of starting over. Nothing that already ran is repeated, and nothing has been written to ${ctx.workflow.systems.join(" / ")}.`,
-            confirmLabel: "Retry the lookup",
-            tone: "neutral",
-          },
-        };
+  // never here — but WHICH fix depends on what the child was reading.
+  //
+  // A PACKET came from a file, so the answer is a better file, and that is an
+  // answer the footer does not have: `Re-upload` opens a file picker and starts
+  // a DIFFERENT run. It is the row's only route to that, so it stays on the
+  // outcome bar.
+  //
+  // A PERSON's mid-run lookup came from a name, so the answer is to replay that
+  // lookup — and THE FOOTER'S ↺ ALREADY DOES EXACTLY THAT, same `retry`
+  // command, same replayed child. So the outcome bar no longer offers it.
+  // Operator: *"retry the lookup is not needed here since i know i can just do
+  // it myself from the footer."* The child-replay confirm copy did not die with
+  // the button — `deriveActions` hands it to the footer ↺ on precisely these
+  // rows, so the promise the operator reads before replaying is unchanged; only
+  // the second door to it is gone. The row falls through to `Open failure`,
+  // which is what every other failed row shows.
+  if (spec.mirroredFrom && spec.subjectKind === "file") {
+    return {
+      key: "reupload",
+      kind: "command",
+      command: "rerun-with-different-input",
+      label: "Re-upload",
+      intent: "destructive",
+      icon: "retry",
+      placement: ["outcome", "menu"],
+      expectedVersion: ctx.projectedVersion,
+      confirm: {
+        title: "Start a new run from a different file?",
+        body: `This row stays failed and keeps its evidence. A NEW ${ctx.workflow.label} run is enqueued from the file you pick — the two are separate runs with separate receipts.`,
+        confirmLabel: "Choose a file…",
+        tone: "neutral",
+      },
+    };
   }
   switch (ctx.status) {
     case "waiting":

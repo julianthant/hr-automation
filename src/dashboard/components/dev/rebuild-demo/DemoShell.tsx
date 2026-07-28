@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, 
 import {
   Activity,
   AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
   Camera,
   CheckCircle2,
   ChevronDown,
@@ -31,8 +33,10 @@ import { cn } from "@/lib/utils";
 import { effectiveStatus, fmtElapsed, type DemoRow } from "./demo-data";
 import {
   agoSeconds,
+  appVersionTag,
   buildWorkflowCategoryGroups,
   DEMO_APP_VERSION,
+  DEMO_APP_VERSION_PARTS,
   DEMO_WORKFLOW_LIST,
   DEMO_WORKFLOWS,
   fmtClockSec,
@@ -54,6 +58,7 @@ import {
   DEMO_SESSIONS,
   MAX_WORKER_SPAWN,
   WORKER_SPAWN_WORKFLOWS,
+  leaseScopeOf,
   planWorkerSpawn,
   workerSpawnCapacity,
   type BrowserHealth,
@@ -66,7 +71,6 @@ import {
   DemoDateNav,
   DemoNotificationBell,
   DemoSearchControl,
-  DemoShortcutsPopover,
   type DemoNavigateTo,
 } from "./DemoTopBarSurfaces";
 import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
@@ -86,6 +90,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  SectionLabel,
   Select,
   type DemoTheme,
   dsBorder,
@@ -196,6 +201,28 @@ export function countRowsByWorkflow(rows: DemoRow[]): Map<string, Record<StatusB
     if (s === "waiting" || s === "parked") counts.needsYou += 1;
   }
   return out;
+}
+
+/**
+ * A rail entry's PAIR: what is moving, over everything.
+ *
+ * The rail used to carry three numbers per row — an amber eye badge for
+ * attention, then `queued │ all`. Operator: *"remove the eye icons and put the
+ * numbers in there instead of the 0s."* And the `0`s were the tell: `queued`
+ * alone is not "what is happening in this panel", because the moment a run
+ * starts it leaves `queued` and the column reads zero while the workflow is
+ * plainly working. So the left number is now ACTIVE — queued PLUS running — the
+ * union of "accepted, not finished". A panel with three runs in flight reads
+ * `3 │ 8` rather than `0 │ 8` with a badge beside it.
+ *
+ * Attention is NOT folded in. It is a different question ("does this need me")
+ * with a different answer surface (the Status Bar's `Needs you` pill, the
+ * launcher's amber count), and merging two quantities into one badge is the
+ * exact bug the eye badge was introduced to fix in the first place.
+ */
+export function railEntryCounts(counts: Record<StatusBucket, number> | undefined): { active: number; total: number } {
+  if (!counts) return { active: 0, total: 0 };
+  return { active: counts.queued + counts.running, total: counts.all };
 }
 
 /**
@@ -438,6 +465,57 @@ function DemoSurfacesPopover({
   );
 }
 
+/**
+ * The two history controls, as the Top Bar sees them. The shell owns the
+ * history value itself (`demo-nav-history.ts`); this is only what the pair of
+ * buttons needs to render and to call.
+ */
+export interface DemoNavControls {
+  canBack: boolean;
+  canForward: boolean;
+  /** the place each direction lands on, named — undefined when there is none */
+  backTo?: string;
+  forwardTo?: string;
+  onBack: () => void;
+  onForward: () => void;
+}
+
+/**
+ * BACK AND FORWARD, and they sit in the Top Bar rather than on the queue.
+ *
+ * The thing they undo is a jump BETWEEN panels — a delegation chip, a back
+ * link, a search hit — so they belong to the shell, beside the view switcher
+ * that is the other way of changing where you are, and not inside one of the
+ * panels the jump moves you out of.
+ *
+ * A disabled direction stays in place rather than disappearing: a pair that
+ * collapses to one button at the start of a session moves every control to its
+ * right by 28px the first time you navigate, which is a layout that shifts
+ * under the pointer.
+ */
+function DemoNavHistoryControls({ nav }: { nav: DemoNavControls }) {
+  return (
+    <span className="flex shrink-0 items-center gap-[var(--ds-space-hair)]">
+      <IconButton
+        size="sm"
+        label="Back"
+        title={nav.backTo ? `Back to ${nav.backTo}` : "Back — nowhere to go yet"}
+        disabled={!nav.canBack}
+        onClick={nav.onBack}
+        icon={<ArrowLeft aria-hidden className={dsIcon.md} />}
+      />
+      <IconButton
+        size="sm"
+        label="Forward"
+        title={nav.forwardTo ? `Forward to ${nav.forwardTo}` : "Forward — nowhere to go yet"}
+        disabled={!nav.canForward}
+        onClick={nav.onForward}
+        icon={<ArrowRight aria-hidden className={dsIcon.md} />}
+      />
+    </span>
+  );
+}
+
 export function DemoTopBar({
   view,
   onView,
@@ -449,7 +527,7 @@ export function DemoTopBar({
   onToggleTheme,
   storage,
   onStorage,
-  onOpenHelp,
+  nav,
 }: {
   view: DemoShellView;
   onView: (v: DemoShellView) => void;
@@ -465,8 +543,8 @@ export function DemoTopBar({
   /** the demo's own fixture switch, behind the demo badge — never a product control */
   storage: StorageMode;
   onStorage: (mode: StorageMode) => void;
-  /** the other route to the same shortcut registry — Settings → Help → Keyboard */
-  onOpenHelp: () => void;
+  /** where the operator has been — see `demo-nav-history.ts` */
+  nav: DemoNavControls;
 }) {
   return (
     <header
@@ -497,6 +575,8 @@ export function DemoTopBar({
           also the door to the demo's own scaffolding, so nothing that only
           exists because this is a demo sits inside a product surface. */}
       <DemoSurfacesPopover view={view} onView={onView} storage={storage} onStorage={onStorage} />
+
+      <DemoNavHistoryControls nav={nav} />
 
       <div
         className={cn(
@@ -540,10 +620,12 @@ export function DemoTopBar({
             page of preferences. Its glyph carries the worst verdict. */}
         <DemoDoctorPopover tick={tick} />
         <DemoNotificationBell onNavigate={onNavigate} tick={tick} />
-        {/* The keyboard legend lives HERE now, behind the control that used to
-            do nothing — it was a permanent 36px strip across the top of the
-            queue, which is a row the panels wanted more than the legend did. */}
-        <DemoShortcutsPopover onOpenHelp={onOpenHelp} />
+        {/* THE KEYBOARD GLYPH IS GONE. Operator: *"the keyboard icon will be
+            removed from there since we already have help in settings."* The
+            registry it opened is unchanged and still has one home —
+            Settings → Help → Keyboard — which is where every other reference
+            surface in this product already lives. A second door to a reference
+            page is not discoverability, it is a second thing to maintain. */}
         {/* The theme pair. One control, and its LABEL names the destination
             ("Switch to Paper Ink"), because a lone sun/moon glyph never says
             which of the two states it is reporting. */}
@@ -842,7 +924,7 @@ function WorkflowEntryList({
   const counts = useMemo(() => countRowsByWorkflow(rows), [rows]);
 
   /** Every rail entry is the same object; the label IS what it filters by. */
-  const entry = (label: string, total: number, queued: number, needsYou: number, on: boolean, note?: string) => (
+  const entry = (label: string, active: number, total: number, on: boolean, note?: string) => (
     <button
       type="button"
       aria-current={on ? "page" : undefined}
@@ -882,60 +964,34 @@ function WorkflowEntryList({
           {label}
         </span>
       </span>
-      <span className="flex shrink-0 items-center gap-[var(--ds-space-tight)]">
-        {/* THE ATTENTION BADGE. It used to be a QUEUED count here — an
-            unlabelled number in an outline chip, which the operator reasonably
-            read as "this workflow needs you N times" and summed against the
-            launcher's global 6. Two different quantities in two anonymous
-            numeric badges is the whole bug; there is one quantity now, it wears
-            the `Needs you` composite's own eye, and the launcher aggregates
-            exactly this number over the panels the rail is not showing. Queued
-            is still one press away, on the Status Bar pill that filters to it. */}
-        {needsYou > 0 && (
-          <span
-            title={`${needsYou} waiting on you or write parked in ${label}`}
-            className={cn(
-              "inline-flex items-center gap-[var(--ds-space-hair)] border px-[var(--ds-space-tight)]",
-              "h-[var(--ds-h-xs)]",
-              dsRadius.sm,
-              dsText.micro,
-              "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
-            )}
-          >
-            <Eye aria-hidden className="size-2.5 shrink-0" />
-            <span className={dsText.nums}>{needsYou}</span>
-          </span>
-        )}
-        {/* `queued │ total`, PER WORKFLOW. Operator: *"the queued | total should
-            be in beside each workflow."* It is the pair the collapsed launcher
-            used to carry as one global figure, which is where it was ambiguous —
-            here each number is scoped to the panel it sits on, and the two are
-            told apart by a rule rather than by the operator remembering an
-            order. Both come off `countRowsByWorkflow`, the same pass the
-            attention badge and the Status Bar read.
+      {/* `active │ all`, PER WORKFLOW, and it is the ONLY badge on the row.
+          The amber eye that used to sit to its left is gone: it was a THIRD
+          number in a row that already carried two, and every panel wearing one
+          read `0` in the column beside it — because `queued` empties the moment
+          a run starts. `active` is queued + running, so the column says what
+          the panel is doing rather than what it has not begun.
 
-            A count that hits zero DIMS, it does not disappear — the eye must
-            not have to re-scan the rail to find out a panel is idle. */}
+          A count that hits zero DIMS, it does not disappear — the eye must not
+          have to re-scan the rail to find out a panel is idle. */}
+      <span
+        title={`${label}: ${active} active (queued or running) of ${total} row${total === 1 ? "" : "s"} today`}
+        aria-label={`${active} active of ${total} in ${label}`}
+        className={cn(dsText.meta, dsText.nums, "flex shrink-0 items-center justify-end gap-[var(--ds-space-hair)]")}
+      >
+        <span className={active === 0 ? "text-[color:var(--ds-fg-faint)]" : "text-[color:var(--ds-fg-secondary)]"}>
+          {active}
+        </span>
+        <span aria-hidden className="text-[color:var(--ds-fg-faint)]">│</span>
         <span
-          title={`${label}: ${queued} queued of ${total} row${total === 1 ? "" : "s"} today`}
-          aria-label={`${queued} queued of ${total} in ${label}`}
-          className={cn(dsText.meta, dsText.nums, "flex items-center justify-end gap-[var(--ds-space-hair)]")}
+          className={
+            total === 0
+              ? "text-[color:var(--ds-fg-faint)]"
+              : on
+                ? "font-semibold text-[color:var(--ds-fg)]"
+                : "text-[color:var(--ds-fg-secondary)]"
+          }
         >
-          <span className={queued === 0 ? "text-[color:var(--ds-fg-faint)]" : "text-[color:var(--ds-fg-secondary)]"}>
-            {queued}
-          </span>
-          <span aria-hidden className="text-[color:var(--ds-fg-faint)]">│</span>
-          <span
-            className={
-              total === 0
-                ? "text-[color:var(--ds-fg-faint)]"
-                : on
-                  ? "font-semibold text-[color:var(--ds-fg)]"
-                  : "text-[color:var(--ds-fg-secondary)]"
-            }
-          >
-            {total}
-          </span>
+          {total}
         </span>
       </span>
     </button>
@@ -953,7 +1009,7 @@ function WorkflowEntryList({
           "flex items-center justify-end gap-[var(--ds-space-hair)] px-[var(--ds-space-cozy)] pb-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]",
         )}
       >
-        <span>queued</span>
+        <span>active</span>
         <span aria-hidden className="text-[color:var(--ds-fg-faint)]">│</span>
         <span>all</span>
       </div>
@@ -966,13 +1022,11 @@ function WorkflowEntryList({
           </div>
           <ul className="flex flex-col gap-px px-[var(--ds-space-snug)]">
             {g.entries.map((e) => {
-              const c = counts.get(e.label);
+              const pair = railEntryCounts(counts.get(e.label));
               // Rows are deliberately icon-free — the workflow icons live on
               // Session Cards and the add-worker picker, not here.
               return (
-                <li key={e.label}>
-                  {entry(e.label, c?.all ?? 0, c?.queued ?? 0, c?.needsYou ?? 0, active === e.label, e.note)}
-                </li>
+                <li key={e.label}>{entry(e.label, pair.active, pair.total, active === e.label, e.note)}</li>
               );
             })}
           </ul>
@@ -1253,8 +1307,15 @@ export function DemoStatusFilters({
         onClick={() => onSelect(on ? "all" : s)}
         className={cn(
           "inline-flex shrink-0 cursor-pointer items-center border",
-          "h-[var(--ds-h-toolbar)] gap-[var(--ds-space-snug)]",
-          empty ? "border-transparent px-[var(--ds-space-tight)]" : "px-[var(--ds-space-base)]",
+          // ONE BOX, WHATEVER IS IN IT. Height AND inset are the bar's
+          // constants for every pill — operator: *"all these should be the same
+          // height no matter what. the buttons and all."* An empty bucket still
+          // gives up its FILL, its EDGE and its word (that cue is real, and a
+          // full bucket must not look like an empty one), but it no longer also
+          // gives up 8px of padding, which was making a row of identically
+          // sized controls read as controls of three different sizes.
+          "h-[var(--ds-h-toolbar)] gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
+          empty && "border-transparent",
           dsRadius.md,
           dsText.meta,
           dsFocus,
@@ -1805,38 +1866,51 @@ function AddWorkersDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
                   more {workflow.label} {capacity.canStart === 1 ? "worker" : "workers"} can start now
                 </span>
               </span>
-              {/* Per-system leases, because that is what refuses a worker. */}
-              <ChipRow>
-                {workflow.systems.map((s) => {
-                  const lease = DEMO_LANE_BUDGET.systems.find((l) => l.system === s);
-                  const full = lease !== undefined && lease.inUse >= lease.cap;
-                  return (
-                    <span
-                      key={s}
-                      title={
-                        lease
-                          ? `${s}: ${lease.inUse} of ${lease.cap} concurrent sessions in use${lease.heldBy.length > 0 ? ` · held by ${lease.heldBy.join(", ")}` : ""}`
-                          : `${s}: no lease recorded — nothing is holding it`
-                      }
-                      className={cn(
-                        "inline-flex min-w-0 items-center border",
-                        dsClip.token,
-                        "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
-                        dsRadius.sm,
-                        dsText.micro,
-                        full
-                          ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]"
-                          : "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
-                      )}
-                    >
-                      <span className={dsClip.text}>{s}</span>
-                      <span className={dsText.nums}>
-                        {lease ? `${lease.inUse}/${lease.cap}` : "0/—"}
-                      </span>
-                    </span>
-                  );
-                })}
-              </ChipRow>
+              {/* Per-system leases, because that is what refuses a worker —
+                  and now SPLIT BY WHOSE BUDGET THEY ARE.
+
+                  Operator: *"uc path 1/1 does not make any sense. uc path 1/1
+                  should mean that for each session there can only be 1 ucpath
+                  window. not for each workflow."* Read inside a dialog scoped
+                  to one workflow, an undifferentiated `ucpath 1/1` says
+                  "Onboarding has spent its UCPath allowance" — when what is
+                  true is that the app gets ONE UCPath window and Separations is
+                  in it. Two bands, each labelled with whose count it is, and
+                  the label does the work the chip cannot: a chip never wraps,
+                  so the scope could not have gone inside one. */}
+              {(["session", "workflow"] as const).map((scope) => {
+                const systems = workflow.systems.filter((s) => leaseScopeOf(s) === scope);
+                if (systems.length === 0) return null;
+                return (
+                  <div key={scope} className="flex flex-col gap-[var(--ds-space-tight)]">
+                    <SectionLabel>
+                      {scope === "session" ? "This session — shared by every workflow" : `${workflow.label} — its own pool`}
+                    </SectionLabel>
+                    <ChipRow>
+                      {systems.map((s) => {
+                        const lease = DEMO_LANE_BUDGET.systems.find((l) => l.system === s);
+                        const full = lease !== undefined && lease.inUse >= lease.cap;
+                        return (
+                          <span
+                            key={s}
+                            title={
+                              lease
+                                ? scope === "session"
+                                  ? `${s}: this session gets ${lease.cap} window${lease.cap === 1 ? "" : "s"} in total, shared by every workflow — ${lease.inUse} in use${lease.heldBy.length > 0 ? ` by ${lease.heldBy.join(", ")}` : ""}. Authenticating another one would invalidate the open session.`
+                                  : `${s}: ${lease.inUse} of ${lease.cap} concurrent sessions in use${lease.heldBy.length > 0 ? ` · held by ${lease.heldBy.join(", ")}` : ""}`
+                                : `${s}: no lease recorded — nothing is holding it`
+                            }
+                            className={capacityChip(full)}
+                          >
+                            <span className={dsClip.text}>{s}</span>
+                            <span className={dsText.nums}>{lease ? `${lease.inUse}/${lease.cap}` : "0/—"}</span>
+                          </span>
+                        );
+                      })}
+                    </ChipRow>
+                  </div>
+                );
+              })}
             </div>
 
             {/* THE VECTOR. Every worker answers for itself; nothing is folded. */}
@@ -1893,15 +1967,14 @@ function AddWorkersDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
             )}
           </div>
         </DialogBody>
-        <DialogFooter
-          meta={
-            result
-              ? `${result.started} started · ${result.refused} refused`
-              : capacity.canStart < count
-                ? `${count - capacity.canStart} of these will be refused`
-                : undefined
-          }
-        >
+        {/* NO PRE-PRESS REFUSAL COUNT. Operator: *"we dont need the bottom
+            part."* `2 of these will be refused` was the well's own numbers
+            arithmetic'd into a warning — the well one band up already says how
+            many can start and which lease is the reason, so the footer added a
+            prediction and no information, in the loudest slot on the dialog.
+            After the press the meta carries the REPORT, which is a fact rather
+            than a forecast, and that stays. */}
+        <DialogFooter meta={result ? `${result.started} started · ${result.refused} refused` : undefined}>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>
             Close
           </Button>
@@ -2018,10 +2091,10 @@ export function DemoSessionPanel({ tick }: { tick: number }) {
               historical runs keep their OWN `appVersion` where it genuinely
               differs, which is exactly why it must not be repeated here. */}
           <span
-            title={`The app build serving this dashboard. A run that RAN under a different build carries its own — that is a fact about the run and stays on the run.`}
+            title={`App ${DEMO_APP_VERSION} — MAJOR moves when a dashboard change reaches some or all workflows (prior-version runs archive); MINOR when it reaches none. A run that RAN under a different version carries its own, which is a fact about the run and stays on the run.`}
             className={cn(dsText.meta, dsText.nums, "shrink-0 text-[color:var(--ds-fg-muted)]")}
           >
-            {DEMO_APP_VERSION}
+            {appVersionTag(DEMO_APP_VERSION_PARTS)}
           </span>
           <span aria-hidden className="h-[var(--ds-h-xs)] w-px shrink-0 bg-[var(--ds-border)]" />
           <span className={cn(dsText.meta, "inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-success-fg)]")}>

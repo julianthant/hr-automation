@@ -37,9 +37,14 @@ import { MemberOutcomePending, MemberOutcomeWord, StatusBadge, type ProposedStat
 import { panelKindOf, panelKindSpec, rowVariantSpec } from "./demo-catalog";
 import { BannerActions, OutcomeActionButton, ParkResolutions, type DemoActionHandler } from "./DemoActions";
 import { ContextRail, ContextRailSpine, useContextRail } from "./DemoContextRail";
-import { CaptureLightbox, SystemChip } from "./DemoEvidence";
+import { CaptureLightbox, PageFacsimile, SystemChip } from "./DemoEvidence";
 import { RunProvenanceBar } from "./DemoRunIdentity";
-import { candidateCaptureFor, type DemoCapture, type DemoFailureRecord } from "./demo-evidence-wire";
+import {
+  candidateCaptureFor,
+  reviewPageFacsimile,
+  type DemoCapture,
+  type DemoFailureRecord,
+} from "./demo-evidence-wire";
 import {
   actionsAt,
   agoSeconds,
@@ -112,6 +117,15 @@ import {
  */
 
 const NOOP = () => {};
+
+/**
+ * The outcome action this panel does not draw, because it already draws what
+ * that action travels to. `open-park` scrolls to the decision card — and the
+ * decision card, in this same scroller, is where the two typed resolutions
+ * live. The queue card keeps its `Resolve`: from out there the pill really does
+ * leave for the surface that can settle the write.
+ */
+const PANEL_OMITS_OUTCOME_ACTIONS = ["open-park"] as const;
 
 export type { DemoTab } from "./demo-wire";
 
@@ -823,14 +837,23 @@ function PanelKindInfo({
  * because it does not know how many toasts exist and may never be given a way
  * to find out.
  *
- * Three earlier revisions all broke that rule in the same way and the operator
- * rejected each: the toast stepped aside for the notice, then the notice
- * stepped aside for the toast, then the notice was lifted by the toast stack's
- * measured height. *"these 2 should not be affecting each other."* They do not:
- * the toast stack lives in the VIEWPORT's coordinate space and this lives in
- * the PANEL's, and the one case where those converge (a collapsed context rail)
- * is cleared by a constant inset on the toast viewport. See the note at the top
- * of `ds/primitives-overlay.tsx`.
+ * BOTTOM-**LEFT**, AND THAT IS THE WHOLE INDEPENDENCE FIX. Four earlier
+ * revisions all broke the rule in the same way: the toast stepped aside for the
+ * notice, then the notice stepped aside for the toast, then the notice was
+ * lifted by the toast stack's measured height, and then — the version the
+ * operator was still looking at when they said *"why is the toast notification
+ * affected by the notification in the log panel? that should not be the
+ * case."* — the toast viewport's FLOOR carried a constant term for the band
+ * this notice occupies. A constant is better than a measurement, but it is
+ * still one surface's geometry written into another's: every toast in the
+ * product floated 100px off the bottom of the window because a panel-local
+ * reminder MIGHT be showing.
+ *
+ * Two surfaces that share no coordinate cannot collide, so they no longer share
+ * one. The toast stack owns the viewport's bottom-RIGHT; this owns its panel's
+ * bottom-LEFT. Neither reserves a pixel for the other, on any layout, at any
+ * rail width, and `--ds-toast-inset-bottom` is back to clearing only the app's
+ * own Session bar. See the note at the top of `ds/primitives-overlay.tsx`.
  */
 function DecisionNotice({
   row,
@@ -861,8 +884,9 @@ function DecisionNotice({
     <FloatingSurface
       role="status"
       className={cn(
-        // Two constants of THIS panel's box. Nothing else feeds them.
-        "absolute bottom-[var(--ds-space-cozy)] right-[var(--ds-space-cozy)] overflow-hidden",
+        // Two constants of THIS panel's box, and the x is the far edge from the
+        // toast stack on purpose — see the note above.
+        "absolute bottom-[var(--ds-space-cozy)] left-[var(--ds-space-cozy)] overflow-hidden",
         // `md`, not `sm`. At 240px the ask truncated mid-word — `approve the
         // pe…` — which is the one line on this surface that has to survive: the
         // status is already on the header pill, so what is left here is WHAT IS
@@ -1282,8 +1306,13 @@ function ReviewTab({
     setIdx((c) => (c + n + records.length) % records.length);
   };
 
+  const pageFacsimile = reviewPageFacsimile(rec);
+
   return (
-    <div className="flex flex-col">
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      style={{ minHeight: "calc(100% - var(--ds-panel-head-h, 0px))" }}
+    >
       {/* approve bar — the gate on the whole set, and the review row's own
           decision anchor: this is what the floating notice jumps to on a panel
           whose decision surface is Review rather than the log stream. */}
@@ -1395,17 +1424,24 @@ function ReviewTab({
           Stacking is the last resort, not the 1280px default it became: an
           extraction the operator has to scroll to reach is the exact complaint
           this surface exists to answer. */}
-      <div className="grid grid-cols-1 gap-0 @min-[29rem]:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)] @min-[42.5rem]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="flex flex-col gap-1.5 border-b border-border/60 p-3 @min-[29rem]:border-b-0 @min-[29rem]:border-r">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 @min-[29rem]:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)] @min-[42.5rem]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="flex min-h-[var(--ds-h-review-page-min)] flex-col gap-1.5 border-b border-border/60 p-3 @min-[29rem]:min-h-0 @min-[29rem]:border-b-0 @min-[29rem]:border-r">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{rec.pageNote}</span>
-          {/* THE SHAPE OF THE REAL DOCUMENT. US Letter, 612 × 792 pt, held as a
-              ratio so it is correct at every width — the placeholder used to be
-              a hand-picked min-height that produced a ~0.48 letterbox, i.e. a
-              picture of a page shape that does not exist. `max-h-full` keeps a
-              tall page inside the pane when the pane is the constraint. */}
-          <div className="flex w-full flex-col items-center justify-center gap-1.5 self-center rounded-md border border-border bg-secondary/30 aspect-[var(--ds-aspect-page)]">
-            <FileText aria-hidden className="size-6 text-muted-foreground/60" />
-            <span className="text-[11px] text-muted-foreground">Page {rec.page} — source image</span>
+          {/* THE PAGE CLAIMS THE REVIEW'S LEFT COLUMN. The old glyph box sized
+              itself from width alone, stopped after a few hundred pixels and
+              left the lower third of the decision surface black. The stage is
+              now the flexing part of the review; the paper fits inside it at
+              the real Letter ratio and the extracted-data column remains in
+              the panel's one shared scroller. */}
+          <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-md border border-border bg-secondary/30 p-[var(--ds-space-base)]">
+            <div
+              role="img"
+              aria-label={`Page ${rec.page} — synthetic ${rec.pageNote.split("·").slice(1).join("·").trim()} facsimile for ${rec.name}`}
+              style={{ aspectRatio: "var(--ds-aspect-page)" }}
+              className="h-full max-h-full max-w-full overflow-hidden rounded-[var(--ds-radius-sm)] border border-border"
+            >
+              <PageFacsimile page={pageFacsimile} />
+            </div>
           </div>
         </div>
 
@@ -2459,17 +2495,23 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
           )}
         >
           <span className={cn(dsText.title, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>{row.title}</span>
-          <StatusBadge status={status} age={gateAge(row)} />
-          {/* THE RUNNING TOTAL IS GONE FROM THIS HEADER. Operator: *"the clock
-              in the queue footer is enough. no need it in the log panel"*. The
-              queue row's own footer carries elapsed for every row on screen,
-              including this one — so the panel header was a second ticking copy
-              of a number the operator was already looking at, two columns away.
+          {/* THE STATUS CHIP IS GONE FROM THIS HEADER, and so is the running
+              total that went before it.
 
-              The STATUS PILL's age stays, and it is not the same number:
-              `Waiting on you · 3m 29s` is how long the run has needed YOU,
-              which is the triage signal. The total is how long it has existed,
-              which is provenance and belongs with the rest of it. */}
+              Operator, on the `Waiting on you · 3m 29s` chip: *"remove this
+              waiting for you"*; and on the `Write parked · 33m 50s` twin one
+              screenshot later: *"the ride parked should not be there either.
+              avoid redundancy."* They are the same complaint, and the rule
+              behind it is worth stating once: THE HEADER DOES NOT REPEAT A
+              STATE THE BAND DIRECTLY BELOW IT ALREADY STATES. The outcome bar
+              is a hairline away, it names the state in a sentence, it carries
+              the action, and it now carries the gate's age too — so the chip
+              was a third copy of a fact already on the queue card the operator
+              clicked to get here.
+
+              What the header keeps is IDENTITY: the title, the ⓘ, the trace id.
+              What is actionable about the state lives one line down, where the
+              button that acts on it is. */}
           {/* THE PANEL KIND MOVED INTO THE ⓘ. It was drawn twice on this one
               surface — a chip here beside the trace id, and again at the right
               of the tab bar below — and both were the demo naming its own panel
@@ -2497,7 +2539,24 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
       >
         <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
         <span className={cn(dsText.body, "min-w-0 truncate")}>{row.outcome.text}</span>
-        <OutcomeActionButton row={row} onAction={handleAction} className="ml-auto" />
+        {/* HOW LONG IT HAS NEEDED YOU, and this is the only place on the
+            surface that says it now that the header chip is gone. It is not the
+            run's total elapsed (that is the queue footer's, and it is not a
+            triage signal) — it is the age of the GATE, which is the number that
+            decides which of two waiting runs you open first. It rides the
+            outcome bar rather than the header because this is the band that
+            already carries the state and its action. */}
+        {gateAge(row, tick) && (
+          <span className={cn(dsText.meta, dsText.nums, "ml-auto shrink-0 tabular-nums opacity-80")}>
+            {gateAge(row, tick)}
+          </span>
+        )}
+        <OutcomeActionButton
+          row={row}
+          onAction={handleAction}
+          omitKeys={PANEL_OMITS_OUTCOME_ACTIONS}
+          className={cn(!gateAge(row, tick) && "ml-auto")}
+        />
       </div>
 
       {/* Requeue-while-settling: an absence observation was accepted, the row

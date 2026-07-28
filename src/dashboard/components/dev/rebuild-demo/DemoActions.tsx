@@ -290,13 +290,26 @@ export function OutcomeActionButton({
   row,
   onAction = NOOP_ACTION,
   className,
+  omitKeys,
 }: {
   row: DemoRow;
   onAction?: DemoActionHandler;
   className?: string;
+  /**
+   * Keys this SURFACE refuses to draw, because it already renders the thing the
+   * action travels to. Exactly one caller uses it, and the case is Write
+   * parked: on the queue card `Resolve` is honest — it leaves for a surface
+   * that can settle the write — but inside the detail panel the two typed
+   * resolutions are already on screen in the decision card, so a pill promising
+   * to "resolve" that only scrolls is a second copy of an action it cannot
+   * perform. Operator, on that pill: *"the resolve button should not be there
+   * either. avoid redundancy."* `Review` is NOT omitted the same way — it
+   * promises to take you to a review, and it does.
+   */
+  omitKeys?: readonly string[];
 }) {
   const action = outcomeAction(row);
-  if (!action) return null;
+  if (!action || omitKeys?.includes(action.key)) return null;
   return (
     <button
       type="button"

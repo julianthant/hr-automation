@@ -166,12 +166,13 @@ export function useDsModalOpen(): boolean {
  *   - The **toast stack** is app-level (it reports command outcomes, not the
  *     selected run), so it stays at the VIEWPORT's bottom-right.
  *
- * At the three-column layout the context rail already separates the centre
- * column's right edge from the viewport's, so the two are disjoint by
- * construction. The ONE case where the anchors converge is a collapsed rail,
- * and it is handled by a CONSTANT: `--ds-toast-inset-bottom` clears the band
- * the notice occupies. A constant gap is predictable; a conditional one is
- * exactly what the operator objected to.
+ * They are disjoint by their ANCHOR, not by an inset: the notice hangs off its
+ * panel's bottom-LEFT and this stack off the viewport's bottom-right, so there
+ * is no layout — collapsed rail included — on which they converge, and neither
+ * one's geometry contains a term for the other. `--ds-toast-inset-bottom`
+ * therefore clears only what the APP has parked at the bottom of the window
+ * (the Session bar). A floor built partly out of a panel-local reminder was the
+ * coupling the operator was pointing at, even as a constant.
  * ---------------------------------------------------------------------- */
 
 /** Is any Dialog or Drawer open right now? */
@@ -1053,13 +1054,10 @@ function ToastViewport({ toasts, onDismiss }: { toasts: DsToast[]; onDismiss: (i
       data-ds-toast-viewport={aside ? "aside" : "default"}
       className={cn(
         // `--ds-toast-inset-bottom` rather than a bare space token, and it is a
-        // CONSTANT the shell sets once. It clears two things that are parked at
-        // the bottom of this app: the Session bar, and the band the run-detail
-        // panel's decision notice occupies when a collapsed context rail brings
-        // the centre column out to the viewport edge. It is never computed from
-        // whether a notice is currently on screen — see the note at the top of
-        // this file. A surface with nothing parked at the bottom does not set
-        // it and gets the plain gutter.
+        // CONSTANT the shell sets once. It clears exactly one thing — the app's
+        // own Session bar — and nothing that belongs to a panel. A surface with
+        // nothing parked at the bottom does not set it and gets the plain
+        // gutter.
         "pointer-events-none fixed bottom-[var(--ds-toast-inset-bottom,var(--ds-space-loose))]",
         aside ? "left-[var(--ds-space-loose)] items-start" : "right-[var(--ds-space-loose)] items-end",
         "flex w-[360px] max-w-[calc(100vw-var(--ds-space-section))] flex-col gap-[var(--ds-space-base)]",

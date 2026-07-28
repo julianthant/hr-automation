@@ -95,6 +95,14 @@ export interface DemoQueueState {
   checkedIds: ReadonlySet<string>;
   /** which Group Rows are expanded — groups default collapsed (D5) */
   expandedGroups: ReadonlySet<string>;
+  /**
+   * Which member WELLS are open to their tall shape. Separate from
+   * `expandedGroups`, and deliberately: that one answers "are the members drawn
+   * at all", this one answers "how many of them fit before it scrolls". A
+   * settled group can be shut with its well remembered open, and a running one
+   * has no shut state to conflate the two with.
+   */
+  openWells: ReadonlySet<string>;
   /** row order within the attention bands — never across them */
   sort: DemoSortKey;
   /** bulk-selection mode: checkboxes on top-level rows */
@@ -122,6 +130,8 @@ export interface DemoQueueHandlers {
   onDrillIn: (groupId: string) => void;
   onBack: () => void;
   onToggleGroup: (groupId: string) => void;
+  /** grow this row's member well from 6 lines to 20, or back */
+  onToggleWell: (groupId: string) => void;
   /** jump to another Workflow Panel entry and select a row inside it */
   onOpenPanel: (workflow: string, id: string) => void;
   /** add/remove a row from the bulk target set */
@@ -1139,13 +1149,18 @@ const linkChip = (tone: "info" | "neutral"): string =>
     dsText.meta,
     dsFocus,
     dsMotion.fast,
-    // Same recessed plane as every other chip. The delegation chip used to be
-    // outlined AND lighter than its neighbours — a third answer to "this sits
-    // back from the card" on a surface that already had two.
-    "border-transparent",
+    // MATTE FILL *AND* A HAIRLINE — the object rule from `tokens.css`, which
+    // this chip was the last hold-out from. It used to draw the fill alone, on
+    // the reasoning that "recessed" is a plane and a plane needs no edge; the
+    // operator looked at the `← Oath Upload` chip and said *"all these like
+    // buttons/labels needs a border and a matte black background."* They are
+    // right, and the token comment already said why: a plane is a REGION, but
+    // this is an OBJECT you point at and click, and an object without an edge
+    // dissolves into the card it sits on. Same border tokens `Chip` reads, so
+    // there is one answer to "where does a chip's edge come from".
     tone === "info"
-      ? "bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)] hover:brightness-125"
-      : "bg-[var(--ds-recess-bg)] text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
+      ? "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)] hover:brightness-125"
+      : "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
   );
 
 /**
@@ -1302,14 +1317,36 @@ function filterWord(filter: DemoFilter): string {
 }
 
 /**
+ * The two well shapes, as LINE COUNTS.
+ *
+ * `--ds-h-member-well` / `--ds-h-member-well-open` are these same two numbers
+ * expressed as pixels, and the disclosure has to say them in words ("Expand to
+ * 20"). Exported so the pure test can pin the two against each other rather
+ * than against a hand-typed literal in a string.
+ */
+export const MEMBER_WELL_LINES = 6;
+export const MEMBER_WELL_OPEN_LINES = 20;
+
+/**
  * THE WELL. One container for every list of people a row can hold, so a group's
  * members and an OCR run's extracted records are the same object on screen —
- * which they are: a person the row is accounting for. Its cap is what makes
- * scale presentational (three lines do not fill it, fifty scroll inside it),
- * and the half-cut row at the bottom of a long list IS the depth cue, which is
- * why the cap is 136px and not a whole number of rows.
+ * which they are: a person the row is accounting for.
+ *
+ * IT IS AN OUTLINE, NOT A HOLE. It used to be the recessed plane's fill — on
+ * Graphite Warm that is the near-black recessed token sunk into the card token
+ * — with a subtle hairline that could not survive against it. The
+ * operator: *"i dont like the black background. i feel like it needs outline,
+ * better spacing, better alignment."* So the well sits ON the card plane and is
+ * separated by its EDGE: same fill as the card, a real border, whole-line
+ * clipping. The rows inside it are the content; the container is a frame around
+ * them, not a second surface underneath them.
+ *
+ * IT CLIPS ON A LINE, NEVER THROUGH ONE. Both heights are `N × line + (N−1)
+ * hairlines`, so the bottom edge always lands on a divider — the half-painted
+ * row that used to sit there read as a rendering defect, and the scrollbar
+ * already says "there is more" without inventing half a person to say it with.
  */
-function PersonWell({ children }: { children: ReactNode }) {
+function PersonWell({ children, open }: { children: ReactNode; open?: boolean }) {
   return (
     <div
       className={cn(
@@ -1317,21 +1354,11 @@ function PersonWell({ children }: { children: ReactNode }) {
         // four competing left edges; with the padding gone its lines inherit
         // the card's grid tracks exactly, so a member name starts where the
         // title starts and the EID column ends where the header badges end.
-        //
-        // The recessed plane, plus the ONE case allowed to draw its edge: this
-        // well SCROLLS, and the half-cut row at its bottom is only readable as
-        // "there is more" if the container has a boundary to be cut by.
-        // The edge is set by RE-POINTING `--ds-recess-border` on this element,
-        // which is the mechanism the plane documents for exactly this case — a
-        // scrolling well, whose half-cut bottom row is only readable as "there
-        // is more" if there is a boundary to be cut by. Painting `dsBorder`
-        // straight on made this the one recessed surface whose edge did not
-        // come from the plane's own token.
-        "divide-y overflow-hidden overflow-y-auto border bg-[var(--ds-recess-bg)]",
-        "[--ds-recess-border:var(--ds-border-subtle)] border-[color:var(--ds-recess-border)]",
+        "divide-y overflow-hidden overflow-y-auto border bg-[var(--ds-surface-1)]",
+        dsBorder.strong,
         dsRadius.md,
         "divide-[color:var(--ds-border-subtle)]",
-        "max-h-[var(--ds-h-member-well)]",
+        open ? "max-h-[var(--ds-h-member-well-open)]" : "max-h-[var(--ds-h-member-well)]",
       )}
     >
       {children}
@@ -1387,7 +1414,11 @@ function PersonLine({
   const shape = cn(
     MEMBER_GRID,
     "w-full items-center text-left",
-    "h-[var(--ds-h-sm)] gap-x-[var(--ds-space-base)]",
+    // The line's own rhythm token, and the well's height is a multiple of it —
+    // that is the whole mechanism that stops the container clipping through a
+    // row. It is also two pixels taller than the dense control height, because
+    // these lines are READ down four columns rather than pressed in a bar.
+    "h-[var(--ds-h-member-line)] gap-x-[var(--ds-space-base)]",
     dsText.body,
     // It comes from BELOW, because that is where the next person is coming
     // from: the list grows downward, so a line that slid down from above would
@@ -1540,15 +1571,20 @@ function GroupMemberList({ row, state, handlers }: { row: DemoRow; state: DemoQu
   const shut = settled && !expanded;
   const visible = shut ? [] : ids;
   const noun = row.wfLabel === "Oath Signature" ? "signers" : "people";
+  // The well only has a second shape when there is something below the fold to
+  // grow into — a 4-person group offering "Show 20" is offering nothing.
+  const wellOpen = state.openWells.has(row.id);
+  const canOpenWell = visible.length > MEMBER_WELL_LINES;
   return (
     <div>
-      {/* The well, at EVERY count. Its cap is what makes scale presentational:
-          three lines sit inside it without scrolling, fifty scroll, and the row
-          occupies the same space either way. The half-cut row at the bottom of
-          a long list IS the depth cue, which is why the cap is 136px and not a
-          whole number of rows. */}
+      {/* The well, at EVERY count. Its RESTING cap is what makes scale
+          presentational: three lines sit inside it without scrolling, fifty
+          scroll, and the row occupies the same space either way. What it no
+          longer does is clip through a person — both caps are a whole number of
+          lines, and reaching everyone is a press rather than a different
+          surface. */}
       {visible.length > 0 && (
-        <PersonWell>
+        <PersonWell open={wellOpen && canOpenWell}>
           {visible.map((id) => {
             const m = DEMO_ROWS[id];
             const spec = MEMBER_STATUS_ICON[m.status];
@@ -1597,6 +1633,26 @@ function GroupMemberList({ row, state, handlers }: { row: DemoRow; state: DemoQu
             {expanded ? "Collapse" : `Show all ${ids.length} ${noun}`}
           </button>
         )}
+        {/* GROW THE WELL, in place. It is offered before `Open all N` because
+            it is the cheaper of the two answers to the same question, and the
+            operator asked for it in exactly those terms: *"this should also
+            allow expanding to like 20 people and scrolling everyone from
+            there."* `Open all N` stays as the escape hatch to the surface where
+            a set that size is actually WORKED. */}
+        {!shut && canOpenWell && (
+          <button
+            type="button"
+            aria-expanded={wellOpen}
+            onClick={(e) => {
+              e.stopPropagation();
+              handlers.onToggleWell(row.id);
+            }}
+            className={disclosureLink}
+          >
+            {wellOpen ? <ChevronUp aria-hidden className={dsIcon.sm} /> : <ChevronDown aria-hidden className={dsIcon.sm} />}
+            {wellOpen ? `Show ${MEMBER_WELL_LINES}` : `Expand to ${Math.min(ids.length, MEMBER_WELL_OPEN_LINES)}`}
+          </button>
+        )}
         {!shut && (
           <button
             type="button"
@@ -1628,17 +1684,20 @@ function GroupMemberList({ row, state, handlers }: { row: DemoRow; state: DemoQu
 // right edge, which is how a table ends up saying `41` where it means `41s`.
 const DRILL_GRID = "grid grid-cols-[1rem_minmax(0,1fr)_var(--ds-w-member-eid)_var(--ds-w-member-detail)_2.5rem]";
 
-/** the drill-in header's three summary chips — one shape, two loudness levels */
+/**
+ * The drill-in header's three summary chips — one shape, two loudness levels,
+ * and (item 3) the same matte-fill-plus-hairline every other chip carries.
+ */
 const drillChip = (warn: boolean): string =>
   cn(
-    "inline-flex shrink-0 items-center border border-transparent text-ellipsis",
+    "inline-flex shrink-0 items-center border text-ellipsis",
     dsClip.token,
     "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-base)]",
     dsRadius.sm,
     dsText.meta,
     warn
-      ? "bg-[var(--ds-status-waiting-bg)] font-medium text-[color:var(--ds-status-waiting-fg)]"
-      : "bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
+      ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] font-medium text-[color:var(--ds-status-waiting-fg)]"
+      : "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
   );
 
 function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQueueState; handlers: DemoQueueHandlers }) {

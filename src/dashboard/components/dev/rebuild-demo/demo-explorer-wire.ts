@@ -440,9 +440,9 @@ export const ONBOARDING_GRAPH: ExplorerGraph = {
   label: "Onboarding",
   version: 11,
   minorVersion: 1,
-  dryRunBoundaryNodeId: "SmartHR transaction",
+  dryRunBoundaryNodeId: "I-9 creation",
   summary:
-    "Walks one new hire from their CRM record through the UCPath hire and the I-9. A dry run stops at the SmartHR submit and NOT before the I-9 — the I-9 profile is created on a rehearsal too, which is why that node carries its own write marking.",
+    "Walks one new hire from their CRM record through the I-9 profile and the UCPath hire. A dry run stops at the I-9 creation: everything above the line reads, and neither the I-9 portal nor UCPath is written to. A rehearsal of this workflow changes no system of record.",
   nodes: [
     {
       id: "CRM extraction",
@@ -503,8 +503,8 @@ export const ONBOARDING_GRAPH: ExplorerGraph = {
       kind: "write",
       system: "i9",
       purpose:
-        "Create the hire's I-9 profile, unless the portal already holds one. Searches first, then creates once — and a dry run does NOT skip it.",
-      skippedInDryRun: false,
+        "Create the hire's I-9 profile, unless the portal already holds one. Searches first, then creates once. This is where a rehearsal stops — an I-9 profile is a record in a federal-compliance system, and creating one for a hire that was never filed leaves a real orphan behind.",
+      skippedInDryRun: true,
       contract: [
         { dir: "read", field: "Existing I-9 profile", system: "i9" },
         { dir: "write", field: "I-9 profile", system: "i9", proof: "profile id read back off the portal" },

@@ -3,8 +3,8 @@ import {
   ArrowDownToLine,
   Camera,
   CircleAlert,
+  FileText,
   Hourglass,
-  ImageOff,
   Info,
   Play,
   Smartphone,
@@ -138,7 +138,7 @@ function PageTile({
           flagged ? "border-[color:var(--ds-status-waiting-mark)]" : "border-[color:var(--ds-border-subtle)]",
         )}
       >
-        <ImageOff
+        <FileText
           className={cn(
             dsIcon.md,
             flagged ? "text-[color:var(--ds-status-waiting-fg)]" : "text-[color:var(--ds-fg-faint)]",
@@ -270,7 +270,7 @@ export function DemoCapturePanel({
             <BulletList
               items={[
                 "The desktop is served the session and what has landed on it. It never reaches the phone, so nothing here can make a page arrive.",
-                "Image bytes are not in this corpus. Drawing a stand-in of a real form on a surface an operator approves from is the one thing these views must never do — each frame is the page's served shape and nothing more.",
+                "Before OCR, this fixture serves each received page's geometry and file metadata. Extracted evidence uses a synthetic facsimile; this intake stage does not pretend the page has been read.",
                 "Pages are numbered in the order the phone pushed them. Nothing has read them yet, so a page is a page and never a person.",
                 "This demo runs no capture server, so the pairing code is a fixture rather than a QR code that scans to nothing.",
               ]}

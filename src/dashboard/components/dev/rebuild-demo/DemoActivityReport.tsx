@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { ArrowLeft, ChartNoAxesColumn, Download, Info, Settings } from "lucide-react";
+import { ChartNoAxesColumn, Download, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Badge,
@@ -16,7 +16,6 @@ import {
   PanelBody,
   PanelFooter,
   PanelHeader,
-  PanelToolbar,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -62,13 +61,9 @@ import { fmtClock, plural, DEMO_NOW, DEMO_APP_VERSION, DEMO_OPERATOR } from "./d
 
 export function DemoActivityReportPage({
   day,
-  onBack,
-  onOpenSettings,
 }: {
   /** the day the nav is on. The report is a VIEW of it, never its own date. */
   day: string;
-  onBack: () => void;
-  onOpenSettings: () => void;
 }) {
   const [spanKey, setSpanKey] = useState<string>(REPORT_DAY_SPAN);
   // The spans are rebuilt from the selected day, so the single-day span is
@@ -82,18 +77,32 @@ export function DemoActivityReportPage({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {/* NO `back`, AND NO `Settings`.
+          Operator: *"no need to have this back to dashboard in activity"* and
+          *"the settings will be removed since we already have a settings at the
+          top most navbar."* Both were duplicate doors: the app's own nav bar is
+          above this header on every view, it holds the rail entry that got you
+          here and the gear, and the ← / → history pair added this wave returns
+          you to the exact place you left. The report is not stranded — it is
+          the only takeover with a rail entry of its own.
+
+          Archive, Explorer and Settings KEEP their back button, deliberately.
+          The operator scoped this to "in activity", and the rule is not
+          arbitrary: those three are opened FROM somewhere, this one is a
+          destination in the nav.
+
+          The span selector is the actions slot now — see the note below. */}
       <PageHeader
         title="Activity report"
         icon={<ChartNoAxesColumn aria-hidden className={dsIcon.lg} />}
-        back={
-          <Button variant="ghost" size="sm" icon={<ArrowLeft aria-hidden className={dsIcon.md} />} onClick={onBack}>
-            Back to the dashboard
-          </Button>
-        }
         actions={
-          <Button variant="ghost" size="sm" icon={<Settings aria-hidden className={dsIcon.md} />} onClick={onOpenSettings}>
-            Settings
-          </Button>
+          <span role="group" aria-label="Report span" className="flex items-center gap-[var(--ds-space-tight)]">
+            {spans.map((entry) => (
+              <Chip key={entry.key} selected={entry.key === span.key} onSelect={() => setSpanKey(entry.key)}>
+                {entry.label}
+              </Chip>
+            ))}
+          </span>
         }
       />
 
@@ -121,13 +130,16 @@ export function DemoActivityReportPage({
               </span>
             }
           />
-          <PanelToolbar label="Report span">
-            {spans.map((entry) => (
-              <Chip key={entry.key} selected={entry.key === span.key} onSelect={() => setSpanKey(entry.key)}>
-                {entry.label}
-              </Chip>
-            ))}
-          </PanelToolbar>
+          {/* THE SPAN TOOLBAR MOVED UP INTO THE PAGE HEADER.
+              Operator, of the day/range strip: *"this part can be added [to the
+              top bar]."* It was a band of its own between the panel head and
+              the numbers, which put the control that CHOOSES the span below the
+              sentence that reports it — so the header said `Sat, Jul 25` and
+              the thing that sets `Sat, Jul 25` was underneath. It is a
+              page-level scope, like the day the rest of the dashboard is on, so
+              it belongs on the page's own bar; and the panel head keeps the
+              span's LABEL, which is now a readout of the chip you pressed one
+              row above rather than a duplicate control. */}
           <PanelBody className="flex flex-col gap-[var(--ds-space-cozy)] p-[var(--ds-space-cozy)]">
             {/* ---- headline tiles. Counterweights first: OUTSTANDING sits in
                      the row, not under it, so finished work is never read
