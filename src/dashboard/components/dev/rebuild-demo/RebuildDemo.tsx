@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { PanelRight } from "lucide-react";
 import { DemoLogPanel, tabsFor, type DemoTab } from "./DemoLogPanel";
 import { computeVisibleIds, DemoQueue, type DemoFilter, type DemoQueueState, type DemoView } from "./DemoQueue";
 import { DemoCatalogView } from "./DemoCatalogView";
@@ -44,7 +45,17 @@ import {
 // Row lookups go through the ALL-DAYS map: a row selected from a prior day must
 // open exactly like a row from today.
 import { ALL_DEMO_ROWS as DEMO_ROWS, DEMO_DAY } from "./demo-days";
-import { ToastProvider, TooltipProvider, openContextMenuFor, useDemoTheme, useDsModalOpen } from "./demo-ui";
+import {
+  EmptyState,
+  Panel,
+  PanelBody,
+  ToastProvider,
+  TooltipProvider,
+  dsIcon,
+  openContextMenuFor,
+  useDemoTheme,
+  useDsModalOpen,
+} from "./demo-ui";
 import {
   ATTENTION_STATUSES,
   type DemoRow,
@@ -412,13 +423,41 @@ export function RebuildDemo() {
     return () => window.removeEventListener("keydown", onKey);
   }, [view, filter, expandedGroups, sort, selectedId, select, toggleChecked, scopedRows, panelMode, setPanelMode, cyclePanelMode, modalOpen]);
 
+  /**
+   * THE DETAIL PANEL MAY ONLY SHOW A RUN FROM THE PANEL YOU ARE LOOKING AT.
+   *
+   * Switching from CRM Doc Download to Oath Signature used to leave a CRM run
+   * open in the centre column while the queue beside it held Oath Signature
+   * rows — a panel describing a run the queue does not hold, with nothing on it
+   * saying so. This product's whole discipline is that a surface never implies
+   * something untrue, and "the thing you are looking at is in the list beside
+   * it" is exactly that kind of implication.
+   *
+   * It is written as a RECONCILIATION against the truth, not as a clear on the
+   * rail's click handler, and that distinction is what keeps cross-panel
+   * navigation working: `openPanel` sets the workflow and the row together, so
+   * by the time this runs the selection IS in the new panel and it survives.
+   * A switch that leaves it behind clears it, whichever route caused the
+   * switch. The same shape as `changeDay`'s re-anchor and the bulk set's own
+   * clear, which exist for the same reason.
+   *
+   * Clearing lands on the panel's own empty state rather than on another run:
+   * auto-selecting the first row of a workflow the operator has just arrived at
+   * would open a run they never asked to see.
+   */
+  useEffect(() => {
+    const selected = DEMO_ROWS[selectedId];
+    if (selected && selected.wfLabel !== activeWorkflow) setSelectedId("");
+  }, [activeWorkflow, selectedId]);
+
   // keep the selected row visible when keyboard-navigating
   useEffect(() => {
     const el = document.querySelector(`[data-demo-row-id="${selectedId}"]`);
     el?.scrollIntoView({ block: "nearest" });
   }, [selectedId]);
 
-  const row = withIdentity(DEMO_ROWS[selectedId] ?? DEMO_ROWS["sep-maria"]);
+  const selectedRow = DEMO_ROWS[selectedId];
+  const row = withIdentity(selectedRow ?? DEMO_ROWS["sep-maria"]);
 
   const openExample = useCallback(
     (id: string) => {
@@ -617,18 +656,34 @@ export function RebuildDemo() {
                 day={day}
               />
 
-              <DemoLogPanel
-                row={row}
-                tab={tab}
-                onTab={setTab}
-                onSelect={select}
-                onOpenPanel={openPanel}
-                checkedIds={checkedIds}
-                onToggleChecked={toggleChecked}
-                onAction={runAction}
-                tick={tick}
-                liveCount={liveCount}
-              />
+              {/* Nothing selected is a STATE, and it says the three things an
+                  empty state owes: what would be here, why it is not, and what
+                  to do. It is reached by switching workflows, so the reason is
+                  the switch — not a shrug. */}
+              {selectedRow ? (
+                <DemoLogPanel
+                  row={row}
+                  tab={tab}
+                  onTab={setTab}
+                  onSelect={select}
+                  onOpenPanel={openPanel}
+                  checkedIds={checkedIds}
+                  onToggleChecked={toggleChecked}
+                  onAction={runAction}
+                  tick={tick}
+                  liveCount={liveCount}
+                />
+              ) : (
+                <Panel className="min-h-0">
+                  <PanelBody className="grid place-items-center p-[var(--ds-space-page)]">
+                    <EmptyState
+                      icon={<PanelRight aria-hidden className={dsIcon.lg} />}
+                      title="No run open"
+                      description={`Pick a run from the ${activeWorkflow} queue and its logs, decisions, data and receipt open here. The run you had open belongs to a different workflow, so it closed when you switched.`}
+                    />
+                  </PanelBody>
+                </Panel>
+              )}
             </div>
 
               {panelMode === "floating" && (
