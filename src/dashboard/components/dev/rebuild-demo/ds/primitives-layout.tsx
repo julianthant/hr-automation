@@ -259,6 +259,106 @@ export function CardBase({ className, children }: { className?: string; children
   return <div className={cn("mt-auto flex min-w-0 flex-col", className)}>{children}</div>;
 }
 
+/* =========================================================================
+ * CompareGrid / CompareCard — cards that are read ACROSS, not down
+ * ====================================================================== */
+
+/**
+ * A row of cards the operator compares STRAIGHT ACROSS, sharing one set of row
+ * tracks so the nth line of every card sits on the nth baseline.
+ *
+ * WHY `CardBase` IS NOT ENOUGH, and this is the distinction worth keeping.
+ * `CardBase` pins the BOTTOM edge: a card with more to say is taller inside and
+ * its trailing control still lands level with its neighbour's. That is right
+ * for a grid of cards each describing its own thing. It is NOT enough for cards
+ * that are two readings of the SAME thing — two identity candidates, say —
+ * because there the operator reads horizontally: name against name, EID against
+ * EID, reason against reason. Pin only the bottom and the left card's two-line
+ * reason pushes its name, its EID and its reason all one line up from the right
+ * card's, so nothing lines up except the button.
+ *
+ * The mechanism is `grid-template-rows: subgrid`. The PARENT owns the tracks;
+ * each card spans `rows` of them and adopts them, so a track is as tall as the
+ * tallest cell in it ACROSS every card in the band. A card with nothing to put
+ * in a track leaves it empty — which is the point: the empty cell holds the
+ * space its neighbour needs, so the rows after it stay level.
+ *
+ * ```tsx
+ * <CompareGrid rows={5} min="16rem">
+ *   {people.map((p) => (
+ *     <CompareCard key={p.id} rows={5}>
+ *       …exactly five children, one per track, in the same order every time…
+ *     </CompareCard>
+ *   ))}
+ * </CompareGrid>
+ * ```
+ *
+ * **N is not two.** The columns are `auto-fit` over a minimum, so three
+ * candidates wrap into a second BAND and that band gets its own five tracks —
+ * which is correct, because you compare across a row, not down a page.
+ *
+ * **Every card must render the same number of children in the same order**, one
+ * per track; use an empty `<span />` for a fact this card does not have. That
+ * is the contract subgrid alignment rests on.
+ */
+export function CompareGrid({
+  rows,
+  min = "15rem",
+  className,
+  children,
+}: {
+  /** how many tracks each card spans — the number of aligned lines */
+  rows: number;
+  /** the narrowest a card may be before the row wraps into a second band */
+  min?: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn("grid gap-[var(--ds-space-snug)]", className)}
+      style={{
+        gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${min}), 1fr))`,
+        gridAutoRows: "auto",
+        // The tracks the cards subgrid onto. `auto` everywhere: a track is as
+        // tall as the tallest cell across the band, which is the whole point.
+        gridTemplateRows: `repeat(${rows}, auto)`,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** One card in a `CompareGrid`. `rows` must match the grid's. */
+export function CompareCard({
+  rows,
+  className,
+  children,
+}: {
+  rows: number;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "grid min-w-0 border p-[var(--ds-space-base)]",
+        "gap-y-[var(--ds-space-hair)]",
+        dsRadius.md,
+        "border-[color:var(--ds-border)] bg-[var(--ds-surface-1)]",
+        className,
+      )}
+      // `subgrid` on the ROW axis only — the card keeps its own single column.
+      // Every card carries identical padding, so the inset each one takes out of
+      // its first and last track is identical and the alignment survives it.
+      style={{ gridRow: `span ${rows}`, gridTemplateRows: "subgrid" }}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function CardFooter({ className, children }: { className?: string; children: ReactNode }) {
   return (
     <div

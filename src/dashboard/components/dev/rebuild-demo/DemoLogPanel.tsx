@@ -54,7 +54,8 @@ import {
 import {
   Badge,
   Button,
-  CardBase,
+  CompareCard,
+  CompareGrid,
   FloatingSurface,
   IconButton,
   Kbd,
@@ -241,8 +242,28 @@ function Pill({ dir, label, value }: { dir: "read" | "write"; label: string; val
 }
 
 /**
+ * The four lines every identity candidate answers with, in order. It is a
+ * constant because `CompareGrid`'s alignment rests on every card rendering the
+ * same number of cells in the same order — a card with nothing for a track
+ * renders it empty rather than skipping it.
+ *
+ * heading · name · identifier · reason · the proof.
+ */
+const CANDIDATE_ROWS = 5;
+
+/**
  * ONE candidate on an identity gate, with the capture that proves it is a
  * person rather than a string.
+ *
+ * IT SHARES ITS ROWS WITH ITS SIBLINGS, which is the whole point of the
+ * surface. Wave 9 pinned the buttons to a common baseline with `CardBase`, and
+ * that fixed the bottom edge and nothing above it: the left card's reason wraps
+ * to two lines and the right card's does not, so name, identifier and reason
+ * all sat at different heights on the one screen where the operator is
+ * comparing two people straight across. `CompareGrid`/`CompareCard` put every
+ * card on ONE set of row tracks — name against name, EID against EID, reason
+ * against reason, action pinned — and a card with no reason leaves that track
+ * empty so the rows after it stay level.
  *
  * The capture is fetched by id (`candidateCaptureFor`), so a candidate whose id
  * resolves to nothing renders as a candidate with no capture and SAYS SO — it
@@ -259,13 +280,7 @@ function CandidateCard({
 }) {
   const capture = candidateCaptureFor(candidate.captureId);
   return (
-    <div
-      className={cn(
-        "flex min-w-0 flex-col gap-[var(--ds-space-hair)] border p-[var(--ds-space-base)]",
-        dsRadius.md,
-        "border-[color:var(--ds-border)] bg-[var(--ds-surface-1)]",
-      )}
-    >
+    <CompareCard rows={CANDIDATE_ROWS}>
       <span className={cn(dsText.caps, "text-[color:var(--ds-fg-muted)]")}>{candidate.heading}</span>
       <span className={cn(dsText.ui, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")} title={candidate.name}>
         {candidate.name}
@@ -273,16 +288,14 @@ function CandidateCard({
       <span className={cn(dsText.meta, dsText.nums, "min-w-0 truncate text-[color:var(--ds-fg-secondary)]")} title={candidate.sub}>
         {candidate.sub}
       </span>
-      {candidate.matchedOn && (
-        <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>matched on {candidate.matchedOn}</span>
-      )}
-      {/* The way to the proof sits on the ROW's bottom edge, not on this card's.
-          One candidate's description wraps to two lines and its neighbour's does
-          not, so a fixed `mt-*` put one button a line below the other — on the
-          one surface where the operator is comparing two people side by side.
-          BOTH branches are pinned: a candidate with no capture is a shorter card
-          still, and leaving that branch unpinned just moves the ragged edge. */}
-      <CardBase className="pt-[var(--ds-space-tight)]">
+      {/* THE REASON TRACK IS ALWAYS RENDERED, empty or not. A candidate with no
+          `matchedOn` holds the space its neighbour's two-line reason needs, so
+          the action below stays level across the row. */}
+      <span className={cn(dsText.meta, "min-w-0 text-[color:var(--ds-fg-muted)]")}>
+        {candidate.matchedOn ? `matched on ${candidate.matchedOn}` : ""}
+      </span>
+      {/* The way to the proof, on the row's last track. */}
+      <span className="flex flex-col justify-end pt-[var(--ds-space-tight)]">
         {capture ? (
           <Button
             size="sm"
@@ -304,8 +317,8 @@ function CandidateCard({
             No capture — this was never on a page
           </span>
         )}
-      </CardBase>
-    </div>
+      </span>
+    </CompareCard>
   );
 }
 
@@ -377,13 +390,16 @@ function InlineDecision({
         {gate.candidates && gate.candidates.length > 0 && (
           <>
             {/* A LIST, sized by how many there are — two is the common case,
-                never the contract. At a narrow centre column they stack, which
-                keeps a name and its EID on one line each. */}
-            <div className="mt-[var(--ds-space-base)] grid gap-[var(--ds-space-snug)] @min-[30rem]:grid-cols-2 @min-[52rem]:grid-cols-3">
+                never the contract. `CompareGrid` fits as many per band as the
+                column allows and gives each band its own row tracks, so three
+                candidates align across the band they are in. At a narrow centre
+                column they stack, which keeps a name and its EID on one line
+                each. */}
+            <CompareGrid rows={CANDIDATE_ROWS} min="14rem" className="mt-[var(--ds-space-base)]">
               {gate.candidates.map((c) => (
                 <CandidateCard key={c.heading} candidate={c} onOpenCapture={setCapture} />
               ))}
-            </div>
+            </CompareGrid>
             {/* Says the quiet part: this run is STOPPED, and it is stopped
                 before the write rather than after it. */}
             <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>

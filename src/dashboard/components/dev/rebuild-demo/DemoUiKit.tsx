@@ -21,6 +21,8 @@ import {
   Button,
   Card,
   CardBase,
+  CompareCard,
+  CompareGrid,
   CardBody,
   CardFooter,
   CardHeader,
@@ -630,6 +632,38 @@ function ContainersSection() {
             </Card>
           ))}
         </div>
+      </div>
+
+      {/* CompareGrid + CompareCard — the OTHER half of sibling alignment.
+          Same three candidates as the specimen above, and the difference is
+          visible at a glance: there, only the buttons agree; here every line
+          does, because the cards share the row's tracks rather than just its
+          bottom edge. The third card has no reason at all and still holds the
+          space its neighbours' reasons need. */}
+      <div className="flex flex-col gap-[var(--ds-space-snug)]">
+        <SectionLabel>CompareGrid — cards read ACROSS: name with name, reason with reason</SectionLabel>
+        <CompareGrid rows={4} min="14rem">
+          {[
+            { name: "Marisol Alvarez", sub: "On the input record", detail: "Read off the separation document." },
+            {
+              name: "Marisol Alvarez-Ruiz",
+              sub: "Name match (proposed)",
+              detail: "Resolved in UCPath on last name plus department, which is a different person than the document names.",
+            },
+            { name: "Typed by you", sub: "Manual entry", detail: "" },
+          ].map((c) => (
+            <CompareCard key={c.sub} rows={4}>
+              <SectionLabel>{c.sub}</SectionLabel>
+              <span className={cn(dsText.ui, "font-semibold text-[color:var(--ds-fg)]")}>{c.name}</span>
+              <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>{c.detail}</span>
+              <span className="flex flex-col justify-end pt-[var(--ds-space-tight)]">
+                <Button size="sm" variant="outline" className="w-full" icon={<Camera aria-hidden className={dsIcon.sm} />}>
+                  See this candidate
+                </Button>
+              </span>
+            </CompareCard>
+          ))}
+        </CompareGrid>
       </div>
 
       <div className="grid grid-cols-2 gap-[var(--ds-space-cozy)]">
