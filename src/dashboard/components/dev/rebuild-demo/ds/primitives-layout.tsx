@@ -3,8 +3,10 @@ import {
   forwardRef,
   useCallback,
   useContext,
+  useEffect,
   useId,
   useRef,
+  useState,
   type HTMLAttributes,
   type KeyboardEvent,
   type ReactNode,
@@ -842,6 +844,53 @@ export function Well({ className, children }: { className?: string; children: Re
       {children}
     </div>
   );
+}
+
+/* =========================================================================
+ * ARRIVING — the enter transition for surfaces Radix does not own
+ * ====================================================================== */
+
+/**
+ * Spread onto an element that has just MOUNTED to make it arrive rather than
+ * appear. Returns `data-demo-enter="from"` for the first committed frame and
+ * `"to"` from the next, so the element's own `data-[demo-enter=from]:` classes
+ * describe where it comes from and the transition carries it in.
+ *
+ * WHY A HOOK AND NOT A KEY-FRAME. A key-frame restarts from zero when it is
+ * interrupted; a transition re-targets from wherever it currently is. Every
+ * moving thing in this product is a transition for that reason (see the
+ * `dsMotion` note), and a mount is the one case a transition cannot express on
+ * its own — there is no previous value to move away from. This manufactures
+ * one, and everything after the first frame behaves like every other
+ * transition in the system, including being interruptible.
+ *
+ * Reduced motion needs NO branch here: the `from` state is written in
+ * `--ds-travel-*` and the clock in `--ds-dur-enter`, and the media query at the
+ * foot of `tokens.css` zeroes both — so the element simply is where it belongs
+ * on the first frame.
+ *
+ * Radix surfaces (Dialog, Drawer, Popover, ContextMenu) do NOT use this: they
+ * publish `data-state="open|closed"` themselves, which is the same mechanism
+ * with an exit the platform can hold the unmount open for.
+ */
+export function useDsEnterTransition(): { "data-demo-enter": "from" | "to" } {
+  const [entered, setEntered] = useState(false);
+  useEffect(() => {
+    // TWO frames. One `requestAnimationFrame` can be dispatched in the same
+    // frame the element first paints in, and a property that changes inside
+    // its own first paint has no previous value to transition from — the
+    // element lands with no motion at all. The second frame guarantees the
+    // `from` styles were committed and can be moved away from.
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => setEntered(true));
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      cancelAnimationFrame(inner);
+    };
+  }, []);
+  return { "data-demo-enter": entered ? "to" : "from" };
 }
 
 /**

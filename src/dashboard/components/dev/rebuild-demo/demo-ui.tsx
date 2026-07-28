@@ -112,6 +112,13 @@ export {
   TabPanel,
   Well,
   FloatingSurface,
+  /**
+   * Make a surface that has just MOUNTED arrive instead of appear. Spread it
+   * onto the element and describe where it comes from with
+   * `data-[demo-enter=from]:` classes — the house mechanism for anything Radix
+   * does not already give a `data-state` to.
+   */
+  useDsEnterTransition,
 } from "./ds/primitives-layout";
 export type { DsBannerTone } from "./ds/primitives-layout";
 
@@ -170,6 +177,13 @@ export {
   useToasts,
   useDsModalPresence,
   useDsModalOpen,
+  /**
+   * Claim the viewport's bottom-right corner while a floating surface is
+   * mounted there. The toast viewport steps to bottom-left for as long as the
+   * claim is held — so a persistent `danger` toast and a panel-anchored notice
+   * can never occupy the same pixels, at any width, by construction.
+   */
+  useDsBottomRightClaim,
 } from "./ds/primitives-overlay";
 export type {
   DsDialogSize,

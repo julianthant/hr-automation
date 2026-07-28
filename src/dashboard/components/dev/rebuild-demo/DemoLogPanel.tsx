@@ -73,6 +73,8 @@ import {
   dsRadius,
   dsSize,
   dsText,
+  useDsBottomRightClaim,
+  useDsEnterTransition,
 } from "./demo-ui";
 import { ReceiptView, runReceiptFor } from "./DemoReceipt";
 import { InlineFailureRecord, failureRecordFor } from "./DemoFailure";
@@ -758,6 +760,19 @@ function PanelKindInfo({
  *
  * It deliberately sits at `dsLayer.sticky`, BELOW the toast layer: a `danger`
  * toast never auto-dismisses, and a reminder must never cover a failure.
+ *
+ * WHERE IT SITS, and why that took a registry. It used to be pinned TOP-right
+ * of the tab body, where it covered the People tab's own filter controls and
+ * clipped the detail column underneath it — it was floating over the work the
+ * operator had just switched tabs to do. Bottom-right is the corner a floating
+ * reminder belongs in, and it is also the corner the TOAST viewport owns; a
+ * `danger` toast never auto-dismisses, so "we will position them so they miss"
+ * is not a fix when the two live in different coordinate systems and the
+ * panel's width changes with the context rail. `useDsBottomRightClaim` makes
+ * the miss STRUCTURAL: while this is mounted the toast viewport steps to
+ * bottom-left — the same move it already makes for a modal — and stays fully
+ * live, because a reminder does not outrank a failure. It only gets not to be
+ * covered by one.
  */
 function DecisionNotice({
   row,
@@ -770,6 +785,12 @@ function DecisionNotice({
   onGo: () => void;
   onDismiss: () => void;
 }) {
+  // Held for as long as this is mounted — keyed to mount, exactly like
+  // `useDsModalPresence`, so there is no open/closed flag to get out of step.
+  // Both hooks run BEFORE the early return: a hook behind a conditional return
+  // is a hook whose count changes between renders.
+  useDsBottomRightClaim();
+  const entering = useDsEnterTransition();
   const gate = row.gate;
   if (!gate) return null;
   const parked = gate.kind === "parked";
@@ -785,11 +806,23 @@ function DecisionNotice({
     <FloatingSurface
       role="status"
       className={cn(
-        "absolute right-[var(--ds-space-cozy)] top-[var(--ds-space-cozy)] overflow-hidden",
-        "w-[var(--ds-w-popover-sm)] max-w-[calc(100%-2*var(--ds-space-cozy))]",
+        "absolute bottom-[var(--ds-space-cozy)] right-[var(--ds-space-cozy)] overflow-hidden",
+        // `md`, not `sm`. At 240px the ask truncated mid-word — `approve the
+        // pe…` — which is the one line on this surface that has to survive: the
+        // status is already on the header pill, so what is left here is WHAT IS
+        // WANTED, and a reminder that cannot say what it is reminding you of is
+        // a coloured rectangle.
+        "w-[var(--ds-w-popover-md)] max-w-[calc(100%-2*var(--ds-space-cozy))]",
         dsLayer.sticky,
+        // It ARRIVES — a reminder that blinks into the corner reads as a render
+        // fault. Origin-aware: it rises out of the edge it is anchored to. No
+        // reduced-motion branch, on purpose: the travel is `--ds-travel-md` and
+        // the clock is `--ds-dur-enter`, and the preference zeroes both.
+        dsMotion.enter,
+        "data-[demo-enter=from]:translate-y-[var(--ds-travel-md)] data-[demo-enter=from]:opacity-0",
         parked ? "border-[color:var(--ds-status-parked-border)]" : "border-[color:var(--ds-status-waiting-border)]",
       )}
+      {...entering}
     >
       <div
         className={cn(
@@ -797,11 +830,22 @@ function DecisionNotice({
           parked ? "bg-[var(--ds-status-parked-bg)]" : "bg-[var(--ds-status-waiting-bg)]",
         )}
       >
+        {/*
+          TWO LINES, not three, and the second one has two edges.
+
+          It used to run title / `open 33m 50s — the run is held here` / `Go to
+          the decision`: three lines of wildly unequal length stacked flush
+          left, which is a ragged block rather than a card. The ask takes line
+          one; line two carries the verb on the left and the age on the right,
+          so the notice is a rectangle with a left edge and a right edge instead
+          of a paragraph. `— the run is held here` went with it: it is a rule of
+          the product, true of every gate, and the age already says it.
+        */}
         <button
           type="button"
           onClick={onGo}
           className={cn(
-            "flex min-w-0 flex-1 cursor-pointer flex-col gap-[var(--ds-space-hair)] p-[var(--ds-space-tight)] text-left",
+            "flex min-w-0 flex-1 cursor-pointer flex-col gap-[var(--ds-space-tight)] p-[var(--ds-space-tight)] text-left",
             dsRadius.sm,
             dsFocus,
             dsMotion.fast,
@@ -812,12 +856,14 @@ function DecisionNotice({
             <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
             <span className="min-w-0 truncate">{gate.title}</span>
           </span>
-          <span className={cn(dsText.micro, dsText.nums, "text-[color:var(--ds-fg-muted)]")}>
-            {`open ${gateAge(row, tick)} — the run is held here`}
-          </span>
-          <span className={cn(dsText.micro, "inline-flex items-center gap-[var(--ds-space-hair)] font-semibold", fg)}>
-            <CornerDownRight aria-hidden className={dsIcon.sm} />
-            Go to the decision
+          <span className={cn(dsText.micro, "flex min-w-0 items-center gap-[var(--ds-space-base)]")}>
+            <span className={cn("inline-flex min-w-0 items-center gap-[var(--ds-space-hair)] truncate font-semibold", fg)}>
+              <CornerDownRight aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
+              Go to the decision
+            </span>
+            <span className={cn(dsText.nums, "ml-auto shrink-0 text-[color:var(--ds-fg-muted)]")}>
+              {`open ${gateAge(row, tick)}`}
+            </span>
           </span>
         </button>
         <IconButton
