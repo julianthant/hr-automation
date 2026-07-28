@@ -388,7 +388,7 @@ test("a capture start plans off the page count the phone already pushed", () => 
     method: requireStartMethod(capabilityOf("emergency-contact"), "capture"),
     capture: session,
   });
-  assert.equal(plan.headline, `1 Group Row · ${session?.photoCount} pages`);
+  assert.equal(plan.headline, `1 Group Row · ${session.photos.length} pages`);
 });
 
 test("one typed value mints a Run Row; more than one mints a Group Row", () => {
