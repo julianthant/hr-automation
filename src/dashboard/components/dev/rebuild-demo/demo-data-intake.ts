@@ -25,7 +25,7 @@
  *    confirmation before Run unlocks.
  */
 
-import { at, DEMO_WORKFLOWS, type DemoWorkflowId } from "./demo-wire";
+import { at, DEMO_WORKFLOWS, plural, type DemoWorkflowId } from "./demo-wire";
 
 // ---------------------------------------------------------------------------
 // Small deterministic hashes — stand-ins for the sha256 the backend serves
@@ -746,7 +746,7 @@ export function validateIntake(input: ValidateInput): ValidationResult {
       column: column.header,
       failed,
       total: totalSourceRows - excludedRows.size,
-      message: `column “${column.header}” is bound to ${field.id} — all ${failed} rows failed ${field.kind} coercion. Wrong column?`,
+      message: `column “${column.header}” is bound to ${field.id} — all ${plural(failed, "row")} failed ${field.kind} coercion. Wrong column?`,
     });
   }
 

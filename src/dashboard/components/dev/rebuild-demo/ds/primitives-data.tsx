@@ -304,7 +304,7 @@ export function TimelineSteps({
     return (
       <div
         role="img"
-        aria-label={`${label}: ${done} of ${steps.length} steps done${current ? `, now ${current.label}` : ""}`}
+        aria-label={`${label}: ${done} of ${steps.length} ${steps.length === 1 ? "step" : "steps"} done${current ? `, now ${current.label}` : ""}`}
         title={steps.map((step) => step.label).join(" · ")}
         className={cn("flex min-w-0 items-center", className)}
       >

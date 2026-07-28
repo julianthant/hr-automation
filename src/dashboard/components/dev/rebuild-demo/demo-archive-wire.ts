@@ -46,6 +46,7 @@ import {
   descriptorVersion,
   fmtVersion,
   fmtVersionTag,
+  plural,
   type DemoWorkflowId,
   type SystemKey,
 } from "./demo-wire";
@@ -266,7 +267,7 @@ export function bumpTargetLabel(record: ChangeRecordWire): { text: string; appUp
   const names = record.workflowIds.map((id) => DEMO_WORKFLOWS[id].label);
   if (names.length === 1) return { text: names[0], appUpdate: false, full: `${names[0]} only — no other workflow's version moved.` };
   return {
-    text: `${names.length} workflows`,
+    text: plural(names.length, "workflow"),
     appUpdate: false,
     full: `${names.join(", ")} — bumped together under one change record.`,
   };
@@ -1877,7 +1878,7 @@ export function deriveRelaunchPlan(run: ArchivedRunWire): RelaunchPlanWire {
   }
   if (run.members.length > 0) {
     cautions.push(
-      `The archived run covered ${run.members.length} people. The relaunch replays the same input, so it will cover them all again — including the ${run.members.filter((m) => m.tone === "quiet").length} that already succeeded.`,
+      `The archived run covered ${plural(run.members.length, "person", "people")}. The relaunch replays the same input, so it will cover them all again — including the ${run.members.filter((m) => m.tone === "quiet").length} that already succeeded.`,
     );
   }
 

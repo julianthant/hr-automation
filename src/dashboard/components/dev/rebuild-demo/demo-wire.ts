@@ -110,6 +110,24 @@ export function fmtElapsed(sec: number): string {
   return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
 }
 
+/**
+ * `n` with its noun, pluralised.
+ *
+ * The Explorer rendered `1 nodes` on two graphs, and a sweep found the same
+ * shape all over the folder — a template literal is the easiest place in a
+ * codebase to write a number beside a word that does not agree with it, and it
+ * only shows up on the one fixture where the count happens to be one.
+ *
+ * The rule this encodes is the rest of the product's rule, at the grammar
+ * level: a surface may not say something that is not true, and `1 nodes` is a
+ * small lie in the same family as a green verdict nothing checked. Irregular
+ * plurals pass their own (`plural(n, "person", "people")`); the default appends
+ * an `s`, which covers everything else this product counts.
+ */
+export function plural(n: number, singular: string, pluralForm?: string): string {
+  return `${n} ${n === 1 ? singular : (pluralForm ?? `${singular}s`)}`;
+}
+
 const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 

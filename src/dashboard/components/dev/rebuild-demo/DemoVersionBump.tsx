@@ -39,6 +39,7 @@ import {
   type BumpResult,
   type BumpScope,
 } from "./demo-archive-wire";
+import { plural } from "./demo-wire";
 import type { DemoWorkflowId } from "./demo-wire";
 
 /**
@@ -100,7 +101,7 @@ function BumpDialogBody({
   const [why, setWhy] = useState("");
   const [result, setResult] = useState<BumpResult | null>(null);
 
-  const title = plan.targets.length === 1 ? `Bump ${plan.targets[0].label}` : `Dashboard update — ${plan.targets.length} workflows`;
+  const title = plan.targets.length === 1 ? `Bump ${plan.targets[0].label}` : `Dashboard update — ${plural(plan.targets.length, "workflow")}`;
   const parked = plan.blockers.filter((blocker) => blocker.status === "parked");
   const isMajor = kind === "major";
 

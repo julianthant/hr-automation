@@ -73,6 +73,7 @@ import {
   DEMO_WORKFLOW_LIST,
   fmtClock,
   fmtVersionTag,
+  plural,
   type DemoWorkflowRef,
 } from "./demo-wire";
 
@@ -295,7 +296,7 @@ function WorkflowListPanel({
                       onClick={() => onSelect(workflow.id)}
                       title={
                         graph
-                          ? `${workflow.label} ${fmtVersionTag({ major: graph.version, minor: graph.minorVersion })} — ${graph.nodes.length} nodes`
+                          ? `${workflow.label} ${fmtVersionTag({ major: graph.version, minor: graph.minorVersion })} — ${plural(graph.nodes.length, "node")}`
                           : `${workflow.label} serves no descriptor graph yet, so there is nothing to draw.`
                       }
                       className={cn(
@@ -384,10 +385,10 @@ function GraphPanel({
       <PanelHeader
         title={`${graph.label} ${fmtVersionTag({ major: graph.version, minor: graph.minorVersion })}`}
         meta={[
-          `${graph.nodes.length} nodes`,
-          `${totals.reads} read`,
-          totals.writes > 0 ? `${totals.writes} write` : undefined,
-          totals.files > 0 ? `${totals.files} file` : undefined,
+          plural(graph.nodes.length, "node"),
+          plural(totals.reads, "read"),
+          totals.writes > 0 ? plural(totals.writes, "write") : undefined,
+          totals.files > 0 ? plural(totals.files, "file") : undefined,
         ]
           .filter(Boolean)
           .join(" · ")}
@@ -630,12 +631,12 @@ function GraphNodeRow({
           )}
           {overlay?.attempts !== undefined && overlay.attempts > 1 && (
             <span className={cn(dsText.micro, dsText.nums, "text-[color:var(--ds-status-waiting-fg)]")}>
-              {overlay.attempts} attempts
+              {plural(overlay.attempts, "attempt")}
             </span>
           )}
           {overlay && overlay.recorded.length > 0 && (
             <span className={cn(dsText.micro, dsText.nums, "text-[color:var(--ds-fg-muted)]")}>
-              {overlay.recorded.length === 1 ? "1 value" : `${overlay.recorded.length} values`}
+              {plural(overlay.recorded.length, "value")}
             </span>
           )}
           {overlay?.hasEvidence && (
@@ -964,8 +965,8 @@ function GraphInfo({ graph, posture }: { graph: ExplorerGraph; posture: ReturnTy
             tone="faint"
             items={[
               fmtVersionTag({ major: graph.version, minor: graph.minorVersion }),
-              `${graph.nodes.length} nodes`,
-              `${graph.edges.length} edges`,
+              plural(graph.nodes.length, "node"),
+              plural(graph.edges.length, "edge"),
               systemsOf(graph).join(", ") || "no system",
             ]}
           />

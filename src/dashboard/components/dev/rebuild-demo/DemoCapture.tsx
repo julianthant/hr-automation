@@ -30,7 +30,7 @@ import {
   dsText,
   useDsEnterTransition,
 } from "./demo-ui";
-import { fmtClock, fmtClockSec } from "./demo-wire";
+import { fmtClock, fmtClockSec, plural } from "./demo-wire";
 import {
   summarizeCaptureSession,
   type CapturePhotoFixture,
@@ -318,7 +318,7 @@ export function DemoCapturePanel({
               title={
                 flagged.length === 1
                   ? `Page ${flagged[0].page} could not be read`
-                  : `${flagged.length} pages could not be read`
+                  : `${plural(flagged.length, "page")} could not be read`
               }
             >
               {flagged.length === 1 ? (
