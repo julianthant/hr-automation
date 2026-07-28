@@ -514,7 +514,7 @@ export function RebuildDemo() {
       ) : shellView === "explorer" ? (
         <DemoExplorerPage onBack={() => setShellView("queue")} onOpenSettings={() => setShellView("settings")} />
       ) : shellView === "report" ? (
-        <DemoActivityReportPage onBack={() => setShellView("queue")} onOpenSettings={() => setShellView("settings")} />
+        <DemoActivityReportPage day={day} onBack={() => setShellView("queue")} onOpenSettings={() => setShellView("settings")} />
       ) : shellView === "kit" ? (
         /* every primitive in every state — the thing a builder skims BEFORE
            choosing a component, so no surface hand-rolls one that exists */

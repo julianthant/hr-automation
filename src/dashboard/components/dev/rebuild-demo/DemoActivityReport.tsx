@@ -35,7 +35,8 @@ import {
 import {
   buildActivityReport,
   outstandingBuckets,
-  REPORT_SPANS,
+  REPORT_DAY_SPAN,
+  reportSpansForDay,
   MANUAL_MINUTES,
   MANUAL_MINUTES_PROVENANCE,
   type CategoryBlock,
@@ -59,9 +60,23 @@ import { fmtClock, DEMO_NOW, DEMO_APP_VERSION, DEMO_OPERATOR } from "./demo-wire
  * the queue renders, so the report and the dashboard cannot disagree.
  */
 
-export function DemoActivityReportPage({ onBack, onOpenSettings }: { onBack: () => void; onOpenSettings: () => void }) {
-  const [spanKey, setSpanKey] = useState(REPORT_SPANS[REPORT_SPANS.length - 1].key);
-  const span = REPORT_SPANS.find((entry) => entry.key === spanKey) ?? REPORT_SPANS[0];
+export function DemoActivityReportPage({
+  day,
+  onBack,
+  onOpenSettings,
+}: {
+  /** the day the nav is on. The report is a VIEW of it, never its own date. */
+  day: string;
+  onBack: () => void;
+  onOpenSettings: () => void;
+}) {
+  const [spanKey, setSpanKey] = useState<string>(REPORT_DAY_SPAN);
+  // The spans are rebuilt from the selected day, so the single-day span is
+  // whatever the nav is pointing at — move the date and every number here moves
+  // with it. `spanKey` survives the change, so an operator who chose the
+  // all-days span keeps it.
+  const spans = useMemo(() => reportSpansForDay(day), [day]);
+  const span = spans.find((entry) => entry.key === spanKey) ?? spans[0];
   const report = useMemo(() => buildActivityReport(span, fmtClock(DEMO_NOW)), [span]);
   const outstanding = useMemo(() => outstandingBuckets(span), [span]);
 
@@ -85,7 +100,7 @@ export function DemoActivityReportPage({ onBack, onOpenSettings }: { onBack: () 
       <div className="min-h-0 flex-1 overflow-y-auto p-[var(--ds-space-cozy)]">
         <Panel>
           <PanelHeader
-            title={`Automation activity — ${span.label}`}
+            title="Automation activity"
             subtitle={span.label}
             meta={`${report.totals.runs} runs · ${report.totals.people} people`}
             actions={
@@ -107,7 +122,7 @@ export function DemoActivityReportPage({ onBack, onOpenSettings }: { onBack: () 
             }
           />
           <PanelToolbar label="Report span">
-            {REPORT_SPANS.map((entry) => (
+            {spans.map((entry) => (
               <Chip key={entry.key} selected={entry.key === span.key} onSelect={() => setSpanKey(entry.key)}>
                 {entry.label}
               </Chip>
