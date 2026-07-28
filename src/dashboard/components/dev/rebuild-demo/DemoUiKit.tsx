@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import {
+  ArrowUpDown,
   ArrowUpRight,
   Camera,
   ChevronsUp,
@@ -764,6 +765,27 @@ function FormsSection() {
           <Field label="Disabled" description="Locked while a run is in flight" disabled>
             <Input defaultValue="se-140211-9f3a" />
           </Field>
+          {/* The toolbar variant, shown on a bar with two `--ds-h-toolbar`
+              siblings — because the defect it exists to prevent is only visible
+              beside them: a bare `<select>` sits on a baseline, so it lands
+              1.25px below controls it shares a height token with. */}
+          <div className="flex flex-col gap-[var(--ds-space-tight)]">
+            <span className={cn(dsText.meta, "font-medium text-[color:var(--ds-fg-secondary)]")}>
+              Toolbar variant
+            </span>
+            <div className="flex h-[var(--ds-h-bar)] items-center gap-[var(--ds-space-snug)] border border-[color:var(--ds-border)] bg-[var(--ds-surface-1)] px-[var(--ds-space-base)] rounded-[var(--ds-radius-md)]">
+              <Button size="sm" variant="ghost">
+                Filter
+              </Button>
+              <Select variant="toolbar" aria-label="Sort" defaultValue="attention" icon={<ArrowUpDown className={dsIcon.sm} />}>
+                <option value="attention">Attention first</option>
+                <option value="newest">Newest first</option>
+              </Select>
+              <Button size="sm" variant="ghost">
+                Select
+              </Button>
+            </div>
+          </div>
         </div>
 
         <div className="flex flex-col gap-[var(--ds-space-cozy)]">

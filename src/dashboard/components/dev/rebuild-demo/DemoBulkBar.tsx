@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { submitDemoCommand, type DemoCommandResult } from "./demo-commands";
 import { actionsAt, type DemoCommandKey } from "./demo-wire";
 import { DEMO_SORTS, type DemoRow, type DemoSortKey } from "./demo-data";
-import { Button, IconButton, dsBorder, dsFocus, dsIcon, dsMotion, dsRadius, dsSize, dsText } from "./demo-ui";
+import { Button, IconButton, Select, dsBorder, dsFocus, dsIcon, dsMotion, dsRadius, dsSize, dsText } from "./demo-ui";
 
 /**
  * DEV-ONLY — the queue's ACTION BAR: what goes into the queue, and what you do
@@ -180,38 +180,28 @@ export function DemoQueueToolbar({
 
         {/* Sort is ONE control. The `⇅` used to be a separate glyph sitting a
             gap away from the select it belonged to, so it read as a sixth
-            control rather than as this one's icon. */}
-        <span className="relative shrink-0">
-          <ArrowUpDown
-            aria-hidden
-            className={cn(
-              dsIcon.sm,
-              "pointer-events-none absolute left-[var(--ds-space-snug)] top-1/2 -translate-y-1/2 text-[color:var(--ds-fg-muted)]",
-            )}
-          />
-          <select
-            aria-label="Sort the queue"
-            value={sort}
-            onChange={(e) => onSort(e.target.value as DemoSortKey)}
-            title={DEMO_SORTS.find((s) => s.key === sort)?.note}
-            className={cn(
-              "cursor-pointer appearance-none border pl-[var(--ds-space-section)] pr-[var(--ds-space-base)]",
-              "h-[var(--ds-h-toolbar)]",
-              dsRadius.md,
-              dsText.meta,
-              dsFocus,
-              dsMotion.fast,
-              dsBorder.base,
-              "bg-[var(--ds-surface-1)] text-[color:var(--ds-fg-secondary)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]",
-            )}
-          >
-            {DEMO_SORTS.map((s) => (
-              <option key={s.key} value={s.key}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </span>
+            control rather than as this one's icon.
+
+            It is the `Select` PRIMITIVE at `size="toolbar"`, not a local copy.
+            The local copy shared the height token with its neighbours and still
+            sat 1.25px low, because a bare `<select>` is `inline-block` on the
+            baseline of a line box and the height token cannot reach that. The
+            primitive's wrapper is a flex box, so every consumer inherits the
+            fix instead of each one rediscovering it. */}
+        <Select
+          variant="toolbar"
+          aria-label="Sort the queue"
+          value={sort}
+          onChange={(e) => onSort(e.target.value as DemoSortKey)}
+          title={DEMO_SORTS.find((s) => s.key === sort)?.note}
+          icon={<ArrowUpDown className={dsIcon.sm} />}
+        >
+          {DEMO_SORTS.map((s) => (
+            <option key={s.key} value={s.key}>
+              {s.label}
+            </option>
+          ))}
+        </Select>
 
         <button
           type="button"
