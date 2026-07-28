@@ -100,13 +100,40 @@ export const dsElev = {
 export const dsFocus = "outline-none ds-focus";
 export const dsFocusWithin = "ds-focus-within";
 
+/**
+ * THE MOTION LANGUAGE — five classes, and every moving thing in the product
+ * uses one of them. There is no sixth, and no surface invents its own timing.
+ *
+ * All five are TRANSITIONS, never key-frames, which is what makes the language
+ * interruptible: a transition re-targets from wherever it currently is the
+ * moment its end value changes, so grabbing something mid-flight answers at
+ * once instead of finishing the move it was making.
+ *
+ * `enter` and `exit` are the house pair and they are deliberately ASYMMETRIC
+ * (150ms / 90ms): arriving has to be read, leaving only has to be acknowledged.
+ */
 export const dsMotion = {
-  /** default: color / background / border / opacity, 140ms */
+  /** colour / fill / edge, in place — hover tints, a status settling. 140ms */
   base: "ds-motion",
-  /** press + hover feedback, 90ms */
+  /** press + hover on a COMMAND. 90ms — a press must feel like a press */
   fast: "ds-motion-fast",
-  /** an element arriving on screen, 200ms */
+  /** something ARRIVING: an overlay, a toast, a record just read. 150ms */
   enter: "ds-motion-enter",
+  /** something LEAVING. 90ms on the `in` curve — it goes, it does not drift */
+  exit: "ds-motion-exit",
+  /** a SPATIAL change: a panel reshaping, a rail collapsing. 220ms */
+  move: "ds-motion-move",
+} as const;
+
+/**
+ * The one travel distance language. Motion here NAMES A DIRECTION; it is never
+ * a journey. Use these as translate values, never a hand-picked px.
+ */
+export const dsTravel = {
+  /** 4px — a popover leaving its trigger */
+  sm: "var(--ds-travel-sm)",
+  /** 8px — a dialog, a toast, a record arriving */
+  md: "var(--ds-travel-md)",
 } as const;
 
 /* -------------------------------------------------------------------------

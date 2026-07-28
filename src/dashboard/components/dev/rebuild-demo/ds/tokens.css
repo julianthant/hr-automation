@@ -57,6 +57,25 @@
   --ds-surface-selected: color-mix(in srgb, var(--primary) 10%, transparent);
   --ds-surface-disabled: color-mix(in srgb, var(--muted) 60%, transparent);
 
+  /* THE RECESSED PLANE — the ONE treatment for "this sits back from the card".
+     Three of them existed: the row footer was a solid darker band with no
+     border, a chip was an outlined pill with its OWN fill, and the delegation
+     chip was outlined AND lighter. Three answers to one question is how a
+     dense surface stops reading as one system.
+
+     The footer's is the one that survives, on the operator's own preference
+     and on the merits: a fill and no line means a row carrying six facts is a
+     band of tones rather than a grid of little boxes.
+
+     `--ds-recess-border` is `transparent` rather than absent so a consumer
+     that genuinely needs an edge (a SCROLLING well, whose half-cut bottom row
+     is the depth cue) can set one without every other consumer inheriting a
+     line it does not want. Geometry is unchanged either way — the border box
+     is always there, so nothing shifts by a pixel when a surface opts in. */
+  --ds-recess-bg: var(--ds-surface-2);
+  --ds-recess-fg: var(--ds-fg-secondary);
+  --ds-recess-border: transparent;
+
   /* ---------------------------------------------------------------------
      BORDER — one hairline weight for structure; strength carries meaning.
      --------------------------------------------------------------------- */
@@ -397,23 +416,61 @@
      FOCUS — one ring, everywhere, always visible. A 2px outline (not a
      box-shadow ring) so it survives forced-colors and follows the radius.
      --------------------------------------------------------------------- */
-  /* Near-white, not the theme's mid-grey --ring: this is a keyboard-first
-     tool (j/k walks the queue), so the ring must be findable at a glance in a
-     list of eighty rows, and must clear WCAG 2.2's 3:1 focus-appearance floor
-     against every surface in the ladder. */
-  --ds-focus-ring: color-mix(in srgb, var(--foreground) 85%, transparent);
+  /* THE RING — one ink for "the system is pointing at this".
+     Focus and selection are the same statement at two volumes, so they read
+     the SAME ink rather than inventing one each.
+
+     It is deliberately no longer near-white. At 85% foreground the ring was
+     the brightest thing on the panel — louder than the amber `Waiting on you`
+     fill beside it — which inverts the attention ladder rule 1 mandates:
+     selection is the LOWEST-stakes state on screen (which row am I looking
+     at), and it must sit BELOW the two states allowed to shout. This value is
+     the quietest that still clears WCAG 2.2's 3:1 focus-appearance floor
+     against every surface in the ladder (≈4.6:1 on the card plane, ≈3.9:1 on
+     the raised one), so nothing is lost but the shouting. */
+  --ds-ring: color-mix(in srgb, var(--foreground) 46%, transparent);
+  --ds-focus-ring: var(--ds-ring);
   --ds-focus-ring-w: 2px;
   --ds-focus-ring-offset: 1px;
 
   /* ---------------------------------------------------------------------
-     MOTION — four durations, three easings. Motion here is functional only:
-     it explains where something came from or acknowledges a press. Nothing
-     in this product may move for delight.
+     MOTION — one language, expressed as tokens so no surface invents its own.
+
+     Motion here is functional only: it answers *where did this come from*,
+     *did my press register*, or *what just arrived*. Nothing moves for
+     delight, and nothing that merely UPDATES moves at all.
      --------------------------------------------------------------------- */
+
+  /* The raw ladder. Kept because a handful of colour/opacity transitions want
+     a duration that is not one of the two semantic ones. */
   --ds-dur-1: 90ms; /* press feedback, hover tint */
   --ds-dur-2: 140ms; /* the default — color/opacity changes */
-  --ds-dur-3: 200ms; /* popovers, tooltips, toasts entering */
-  --ds-dur-4: 260ms; /* drawers and dialogs entering */
+  --ds-dur-3: 200ms; /* a slower settle */
+  --ds-dur-4: 260ms; /* the scrim behind a drawer */
+
+  /* THE HOUSE PAIR — the two durations every arrival and every dismissal in
+     the product reads, and the reason the whole thing feels like one system.
+     ENTER is slower than EXIT on purpose: arriving has to be READ, leaving has
+     only to be acknowledged, and a slow exit is the commonest way an interface
+     comes to feel laggy. Asymmetry is the rule, not a per-surface choice. */
+  --ds-dur-enter: 150ms;
+  --ds-dur-exit: 90ms;
+
+  /* A SPATIAL change — a panel taking a different shape, the context rail
+     collapsing, the queue narrowing on a drill-in. Longer than an overlay
+     because the distance the eye follows is real rather than nominal. */
+  --ds-dur-move: 220ms;
+
+  /* HOW FAR anything travels, ever. In a dense console motion is a nudge that
+     names a direction, not a journey: past ~8px the eye starts chasing the
+     element instead of reading it, which is the opposite of the point. */
+  --ds-travel-sm: 4px; /* a popover leaving its trigger */
+  --ds-travel-md: 8px; /* a dialog, a toast, a record arriving */
+
+  /* The ONE scale value. A surface arrives from 97%, never from 90% — a large
+     zoom on a 1100px dialog reads as a bounce, and nothing here bounces. */
+  --ds-scale-enter: 0.97;
+
   --ds-ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* things arriving */
   --ds-ease-in: cubic-bezier(0.4, 0, 1, 1); /* things leaving */
   --ds-ease-standard: cubic-bezier(0.45, 0, 0.55, 1); /* things moving in place */
@@ -439,6 +496,9 @@
   --ds-dur-2: 0ms;
   --ds-dur-3: 0ms;
   --ds-dur-4: 0ms;
+  --ds-dur-enter: 0ms;
+  --ds-dur-exit: 0ms;
+  --ds-dur-move: 0ms;
 }
 
 /* ==========================================================================
@@ -619,7 +679,11 @@ body[data-demo-theme="dark"] {
   --ds-write-border: color-mix(in srgb, #a78bfa 40%, transparent);
 
   /* --- focus + elevation ------------------------------------------------ */
-  --ds-focus-ring: color-mix(in srgb, #fafafa 85%, transparent);
+  /* 4.6:1 on the card plane (#18181b), 3.9:1 on the raised one (#27272a) —
+     both clear WCAG 2.2's 3:1 focus-appearance floor with headroom, at a
+     fraction of the volume the old 85% white was shouting at. */
+  --ds-ring: rgba(255, 255, 255, 0.46);
+  --ds-focus-ring: var(--ds-ring);
   --ds-elev-1: 0 1px 2px hsl(0 0% 0% / 0.35);
   --ds-elev-2:
     0 4px 12px -2px hsl(0 0% 0% / 0.45), 0 1px 3px hsl(0 0% 0% / 0.32);
@@ -802,7 +866,10 @@ body[data-demo-theme="light"] {
   --ds-write-border: color-mix(in srgb, #6b21a8 34%, transparent);
 
   /* --- focus + elevation ------------------------------------------------ */
-  --ds-focus-ring: color-mix(in srgb, #0b0f19 85%, transparent);
+  /* 4.2:1 on white, 3.9:1 on the tinted page — the same statement as the dark
+     theme's ring at the same volume, re-picked rather than inverted. */
+  --ds-ring: #737d8f;
+  --ds-focus-ring: var(--ds-ring);
   /* White on white cannot be separated by a hairline alone, so this is the one
      theme where a resting card is allowed a shadow. */
   --ds-elev-1: 0 1px 3px rgba(16, 24, 40, 0.1);
@@ -887,23 +954,67 @@ body[data-demo-theme="light"] {
   outline-offset: var(--ds-focus-ring-offset);
 }
 
-/* Transitions. Token-driven so prefers-reduced-motion collapses them all. */
+/* ==========================================================================
+   MOTION — the five classes that are the whole language
+   ==========================================================================
+   Every one of them is a TRANSITION, never a key-frame animation, and that is
+   what makes the language interruptible by construction: a transition
+   re-targets from wherever it currently is the instant its end value changes,
+   so grabbing something mid-flight responds immediately instead of finishing
+   the move it was making. A key-frame animation cannot do that, which is the
+   reason none of them exist here (and the reason the architecture guard bans
+   writing one).
+
+   Only `opacity` and `transform` are ever animated. Nothing in this system
+   transitions width, height, top or left — a spatial change is expressed as a
+   translate over a laid-out grid, so the browser never re-lays-out a frame.
+
+   Durations are tokens, which is what lets `prefers-reduced-motion` remove
+   every transition in the product with one declaration at the foot of this
+   file rather than a reduced-motion branch per component.
+   ========================================================================== */
+
+/* Colour, fill and edge, in place. The workhorse — hover tints, status
+   changes, a chip going selected. */
 .ds-motion {
   transition-property: color, background-color, border-color, outline-color,
     box-shadow, opacity;
   transition-duration: var(--ds-dur-2);
   transition-timing-function: var(--ds-ease-out);
 }
+
+/* Press feedback and hover on a COMMAND. Fast because a press has to feel
+   like a press: anything over ~100ms reads as the button thinking. */
 .ds-motion-fast {
   transition-property: color, background-color, border-color, box-shadow,
     opacity, transform;
   transition-duration: var(--ds-dur-1);
   transition-timing-function: var(--ds-ease-out);
 }
+
+/* SOMETHING ARRIVING — an overlay, a toast, a record the run just read. */
 .ds-motion-enter {
   transition-property: opacity, transform;
-  transition-duration: var(--ds-dur-3);
+  transition-duration: var(--ds-dur-enter);
   transition-timing-function: var(--ds-ease-out);
+}
+
+/* SOMETHING LEAVING. Faster, and on the `in` curve so it goes rather than
+   drifts. Applied by swapping the class, so the exit re-targets from wherever
+   the entrance had got to. */
+.ds-motion-exit {
+  transition-property: opacity, transform;
+  transition-duration: var(--ds-dur-exit);
+  transition-timing-function: var(--ds-ease-in);
+}
+
+/* A SPATIAL change — a panel changing shape, a rail collapsing, a column
+   narrowing. Longer, and on the standard curve: the thing is not arriving
+   from anywhere, it is moving in place. */
+.ds-motion-move {
+  transition-property: transform, opacity;
+  transition-duration: var(--ds-dur-move);
+  transition-timing-function: var(--ds-ease-standard);
 }
 
 /* A dashed hairline — the shape cue that belongs to "Write parked" alone. */
@@ -931,5 +1042,14 @@ body[data-demo-theme="light"] {
     --ds-dur-2: 0ms;
     --ds-dur-3: 0ms;
     --ds-dur-4: 0ms;
+    --ds-dur-enter: 0ms;
+    --ds-dur-exit: 0ms;
+    --ds-dur-move: 0ms;
+    /* Distance is motion too. Zeroing only the clock would still slide a
+       drawer 8px in one frame — a jump, which is what a reduced-motion
+       preference is asking not to see. */
+    --ds-travel-sm: 0px;
+    --ds-travel-md: 0px;
+    --ds-scale-enter: 1;
   }
 }
