@@ -216,8 +216,32 @@ test("contract totals and systems are derived, never authored twice", () => {
   const totals = contractTotals(SEPARATIONS_GRAPH);
   const reads = SEPARATIONS_GRAPH.nodes.flatMap((n) => n.contract).filter((r) => r.dir === "read").length;
   const writes = SEPARATIONS_GRAPH.nodes.flatMap((n) => n.contract).filter((r) => r.dir === "write").length;
-  assert.deepEqual(totals, { reads, writes });
+  assert.deepEqual(totals, { reads, writes, files: 0 });
   assert.deepEqual(systemsOf(SEPARATIONS_GRAPH), ["kuali", "ucpath", "kronos"]);
+});
+
+test("a file write is counted apart from a system write, so the header cannot contradict the chip", () => {
+  // I-9 Check says "changes no system of record" AND appends a retention row.
+  // Both are true; a single `writes` count would have made one of them read as
+  // a lie in the panel header.
+  const i9 = graphFor("i9-check") as ExplorerGraph;
+  assert.equal(dryRunPosture(i9), "no-system-write");
+  const totals = contractTotals(i9);
+  assert.equal(totals.writes, 0);
+  assert.equal(totals.files, 1);
+
+  // Onboarding has both: two real system writes and the iDocs download.
+  const onboarding = graphFor("onboarding") as ExplorerGraph;
+  const onTotals = contractTotals(onboarding);
+  assert.ok(onTotals.writes > 0);
+  assert.equal(onTotals.files, 1);
+});
+
+test("no graph counts a system write while claiming it changes no system of record", () => {
+  for (const graph of EXPLORER_GRAPHS) {
+    if (dryRunPosture(graph) !== "no-system-write") continue;
+    assert.equal(contractTotals(graph).writes, 0, `${graph.workflowId} contradicts its own posture`);
+  }
 });
 
 /* =========================================================================
@@ -281,6 +305,21 @@ test("a waiting run stops on its gate, and the overlay names where it stopped", 
   const gate = overlay.nodes.find((n) => n.nodeId === "Identity approval");
   assert.equal(gate?.state, "waiting");
   assert.equal(overlay.stoppedAtNodeId, "Identity approval");
+});
+
+test("a gate the run RECORDED a step for reads that step, not the absent gate object", () => {
+  // `oath-batch` walked its approval and closed it, so the row carries no gate
+  // any more — inferring from that reported a step the run demonstrably ran as
+  // "not on this run's path".
+  const graph = graphFor("oath-signature") as ExplorerGraph;
+  const overlay = overlayForRun(graph, rowById("oath-batch"));
+  const gate = overlay.nodes.find((n) => n.nodeId === "Your review");
+  assert.equal(gate?.state, "done");
+  assert.equal(gate?.skippedBecause, undefined);
+
+  // And a gate still parked shows waiting off its recorded step.
+  const parked = overlayForRun(graphFor("ocr") as ExplorerGraph, rowById("ocr-summer"));
+  assert.equal(parked.nodes.find((n) => n.nodeId === "Your review")?.state, "waiting");
 });
 
 test("a run with no gate skips the gate node rather than parking on it", () => {
