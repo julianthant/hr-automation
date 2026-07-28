@@ -268,6 +268,7 @@ the component; do not re-draw the pattern.
 | **A provenance line** — where this came from | `MetaLine` | ids, codes, clocks, actors, hashes — `dsText.meta` + `dsText.nums`, segments joined with ` · `, empty segments dropped. **Never `font-mono`**: that loses the tabular figures that stop a clock from jittering. |
 | **A group heading** | `SectionLabel` | Never hand-roll `cn(dsText.caps, dsFg.muted)`. |
 | **A card's bottom edge** — what must land on ONE line across a row of cards | `CardBody grow` + `CardBase` | Sibling cards in a grid stretch to the tallest, so a card whose description wraps one line further pushes its trailing control a line below its neighbour's. `CardBody grow` makes the body claim the row's slack; `CardBase` (`mt-auto`) is what actually sits on the bottom edge. Never fix this with a fixed `mt-*` on the trailing element — that is the bug, not the fix. The slack lands ABOVE the base and is left empty on purpose: a card with less to say has less to say. |
+| **Cards read ACROSS, not down** — two readings of the SAME thing | `CompareGrid` + `CompareCard` | `CardBase` pins the bottom edge and nothing above it, which is right for cards each describing their own thing. It is not enough for two identity candidates or a pair of compared readings, because the operator reads HORIZONTALLY — name against name, EID against EID, reason against reason. These share the ROW tracks (`grid-template-rows: subgrid`), so a track is as tall as the tallest cell across the band. **Every card renders the same number of children in the same order**, one per track; a card with nothing for a track renders it EMPTY, because that empty cell holds the space its neighbour needs. Columns are `auto-fit`, so N is never two — three candidates wrap into a second band with its own tracks. |
 | **A sub-selection** — a choice that shapes a run before it starts | `StartChoiceControl` | Rendered from what the workflow's descriptor DECLARES (`DemoWorkflowRef.start`), never from what a component knows about that workflow. A choice the target fixes is a `LockedValue` with its reason, not a one-option select. An option that exists in the target system but is not wired is offered **disabled with its reason** — hiding it teaches the operator the product has never heard of it. A workflow that declares none shows none: no empty scaffolding. |
 | **A wrapping row of peer facts** | `ChipRow` | Chips are of wildly unequal width, so a `flex-wrap` row ends each line wherever its last chip stopped and orphans one on line two — four facts then read as three-plus-one. `ChipRow` lays them on a `--ds-w-chip-cell` track, so every line ends on the SAME edge and the wrap reads as a second row of a table. A row mixing a chip with a sentence or a button is not this. |
 | **An object's own commands** | `ContextMenu` | Right-click the object; never a `⋯`, which is a control whose only job is to admit there are more controls and which costs a slot on every row. The items come from the object's served `actions[]` at the `menu` placement, so a command the surface did not send is unreachable rather than hidden. **Keyboard parity is not optional**: the platform's Menu / Shift+F10 key opens it (the browser dispatches `contextmenu` on the focused element), and a shell binds one shortcut through `openContextMenuFor()` — in this demo that is `m`, registered in `DEMO_SHORTCUTS`. |
@@ -335,6 +336,21 @@ Two things this rule does **not** license:
 - A screen is **Panels**. A Panel has one `PanelHeader`, an optional
   `PanelToolbar`, exactly one scrolling `PanelBody`, and an optional
   `PanelFooter`. Only the body scrolls.
+- **A panel has ONE scrolling region and its track runs the panel's full
+  height.** Operator: *"the scroll wheel on the side of the log panel should be
+  one piece and not separated by dividers."* A header, an outcome line and a tab
+  bar stacked OUTSIDE the scroller, with each tab body owning a scroller of its
+  own, produce a track that starts a third of the way down and stops short of
+  the floor — a segment, not a rail. Everything that must stay put goes INSIDE
+  the one region as a **sticky** block (`top-0` for the head, `bottom-0` for a
+  search bar or an action bar), not above or below it. Two consequences that
+  bite: a sticky child of that region needs the head's height to sit below it
+  (`--ds-panel-head-h`, published by the panel that owns the head), and a
+  sticky element must NOT carry the head's `z` — the head is earlier in the DOM,
+  so an equal z makes every step heading paint straight over the tab bar.
+- **Anything anchored to a panel's box, not to its content, lives OUTSIDE the
+  scroller.** An `absolute` child of a scrolling element is positioned against
+  the scrolled content and slides away with it.
 - Tables get `THead` (sticky) and a `label` — a header must survive scrolling a
   long queue, and an unnamed table is a mystery to a screen reader.
 - **One primary and at most one danger action per surface.** Actions go
@@ -364,6 +380,12 @@ Two things this rule does **not** license:
   select) earns its own band while it is on rather than six more controls in the
   bar. A filter at zero keeps its slot and its click target and gives up its
   border, its fill and its label — an empty bucket must not look like a full one.
+- **Every control in a toolbar is `--ds-h-toolbar` tall.** It is a named token
+  rather than `--ds-h-sm` retyped per control, because a repeated literal is
+  exactly how one of thirteen came to be 30px in a row of 24. A control that
+  WRAPS others (a segmented composite) takes the height itself and its segments
+  fill it with `h-full` — a segment carrying its own height makes the box grow
+  by its padding and its border.
 - Truncate with `truncate` + `min-w-0` on the flex child; never wrap a person's
   name onto two lines in a dense list.
 - Empty is a **state**: say what would be here, why it is not, and what to do —
@@ -524,7 +546,38 @@ This demo is asserted through the accessibility tree, so a missing label is a
   **A dialog built on any OTHER primitive must call `useDsModalPresence()`** from
   a component that mounts only while it is open — the registry is what makes the
   step-aside happen, and a dialog that skips it is one a persistent `danger`
-  toast can still click-block.
+  toast can still click-block. A **Popover** or **ContextMenu** registers as a
+  `layer` instead: it makes the cards inert and moves NOTHING (see the rule
+  below).
+
+### The decision notice and the toast stack are in DIFFERENT coordinate spaces
+
+> **Neither element's position may be a function of the other's presence.** Not
+> horizontally, not vertically, not conditionally.
+
+Operator, on a frame where one had been pushed to the far edge while the other
+sat in the corner: *"these 2 should not be affecting each other."*
+
+Three answers were tried and all three were the same mistake — one surface
+reading the other's state to decide where to go. The toast stepped aside for the
+notice; the notice stepped aside for the toast; the notice was LIFTED by the
+toast stack's measured height. The third was quieter than the first two and was
+still the bug, because the notice's y was a function of how many toasts existed.
+
+**What replaces it is geometry, not arbitration.** The **decision notice** is
+about the run you are looking at, so it is `absolute` inside the run-detail
+panel, clipped by it, never portalled — its x and y are constants of that
+panel's box. The **toast stack** is app-level, so it stays at the VIEWPORT's
+bottom-right. With the context rail open, the rail already separates the two
+right edges. The one case where the anchors converge (a collapsed rail) is
+cleared by a CONSTANT, `--ds-toast-inset-bottom`, built from the bars and bands
+the shell has parked at the bottom. A gap that is always there is predictable;
+one that appears when some other element does is the defect.
+
+**The toast viewport moves for exactly one thing: an open Dialog or Drawer**,
+whose footer's right-hand gutter holds the primary action. A Popover moves
+nothing — it is the most frequently opened surface in the product, and a stack
+that teleports on every ⓘ is the same defect wearing a different trigger.
 - Contrast is WCAG AA minimum, including text on a solid status fill (which is
   why the loud statuses use dark ink on a bright fill).
 - Colour is never the only differentiator, anywhere.
@@ -572,7 +625,7 @@ This demo is asserted through the accessibility tree, so a missing label is a
 | `ds/theme.ts` | `useDemoTheme()` — the dark/light pair and where it is stamped |
 | `ds/primitives-core.tsx` | Button, IconButton, Badge, CountBadge, Chip, Kbd, Spinner, Skeleton, Separator |
 | `ds/primitives-status.tsx` | the eight statuses + StatusPill / StatusDot / StatusIcon |
-| `ds/primitives-layout.tsx` | Panel, Card, **CardBody `grow`**, **CardBase**, Banner, **Refusal**, **MetaLine**, **BulletList**, **ChipRow**, EmptyState, Tabs, Well, FloatingSurface |
+| `ds/primitives-layout.tsx` | Panel, Card, **CardBody `grow`**, **CardBase**, **CompareGrid / CompareCard**, Banner, **Refusal**, **MetaLine**, **BulletList**, **ChipRow**, EmptyState, Tabs, Well, FloatingSurface |
 | `ds/primitives-form.tsx` | Field, Input, Textarea, Select, Checkbox, RadioGroup, Switch, SearchInput, **ValueField**, **LockedValue** |
 | `ds/primitives-overlay.tsx` | Dialog, Drawer, **Popover**, **ContextMenu** (+ `openContextMenuFor`), Tooltip, Toast |
 | `ds/primitives-data.tsx` | Table, ProgressBar, TimelineSteps, KeyValueList |
