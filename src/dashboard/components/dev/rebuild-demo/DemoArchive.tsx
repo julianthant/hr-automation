@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  AppWindow,
   ArrowDownToLine,
   ArrowLeft,
   ArrowUpFromLine,
@@ -11,13 +12,13 @@ import {
   Download,
   ChevronDown,
   ChevronRight,
-  FileClock,
   FlaskConical,
   ImageOff,
   Info,
   Lock,
   RotateCw,
   TriangleAlert,
+  Workflow,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -82,6 +83,7 @@ import {
   archivedRunTouchedTest,
   archivedVersionTag,
   changeRecordFor,
+  bumpTargetLabel,
   deriveRelaunchPlan,
   deriveVersionRegistry,
   exportArchivedRunJson,
@@ -514,12 +516,12 @@ function ArchiveTable({
             clock, a duration — so they are fixed and the name takes the slack.
             That is what puts every name on the same x. */}
         <colgroup>
-          <col className="w-[124px]" />
+          <col className="w-[var(--ds-w-archive-status)]" />
           <col />
-          <col className="w-[132px]" />
-          <col className="w-[168px]" />
-          <col className="w-[104px]" />
-          <col className="w-[76px]" />
+          <col className="w-[var(--ds-w-archive-trace)]" />
+          <col className="w-[var(--ds-w-archive-workflow)]" />
+          <col className="w-[var(--ds-w-archive-when)]" />
+          <col className="w-[var(--ds-w-archive-duration)]" />
         </colgroup>
         <THead>
           <TR>
@@ -632,12 +634,35 @@ function ArchiveRow({ run, selected, onSelect }: { run: ArchivedRunWire; selecte
 }
 
 /**
+ * The bump header's own column tracks.
+ *
+ * Operator: *"this bar is too crowded. you need to find somewhere else to put
+ * those… label which workflow changed or if the app changed properly in an
+ * aligned and organized manner between rows."*
+ *
+ * It WAS a flex row of six things of six different lengths, so every section
+ * head ended wherever its sentence stopped and no two of them lined up down the
+ * page. These are fixed tracks, and the last two are the table's OWN `when` and
+ * `duration` columns — so a sweep's date sits directly over the dates of the
+ * runs it swept.
+ */
+const BUMP_GRID =
+  "grid grid-cols-[var(--ds-w-row-indent)_var(--ds-w-bump-version)_var(--ds-w-bump-kind)_minmax(0,1fr)_var(--ds-w-archive-when)_var(--ds-w-archive-duration)]";
+
+/**
  * A BUMP, as a collapsible section head spanning the row.
  *
  * It used to be a banner interleaved into a flat scroll — which is fine at two
  * sweeps and is a wall at twenty. Collapsing is where the operator's own
  * question gets answered: an archive is organised by the sweeps that made it,
  * and "not this one" is the fastest way through it.
+ *
+ * THE DESCRIPTION IS IN THE ⓘ. It was the one variable-length thing in the row
+ * and it was doing two jobs badly: crowding the facts out of the bar, and
+ * repeating the version pair printed two tracks to its left. Both halves fixed
+ * — the pair is gone from the sentence at the FIXTURE (see `demo-archive-wire`)
+ * and the sentence itself, with the reasoning, the author, the commit and the
+ * archived count, is one press away.
  *
  * When no change record matches the `bumpId` the gap is NAMED. This is the one
  * case where the archive loses the reason it exists, and it used to degrade to
@@ -658,53 +683,118 @@ function BumpSectionRow({
 }) {
   const record = changeRecordFor(bumpId);
   if (hidden) return null;
+  const target = record ? bumpTargetLabel(record) : undefined;
   return (
     <tr>
       <td colSpan={6} className="border-b border-[color:var(--ds-border)] bg-[var(--ds-surface-2)] p-0">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={!collapsed}
-          className={cn(
-            "flex w-full min-w-0 cursor-pointer flex-col gap-[var(--ds-space-hair)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)] text-left",
-            dsFocus,
-            dsMotion.fast,
-            "hover:bg-[var(--ds-surface-3)]",
-          )}
-        >
-          <span className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
+        {/* The toggle takes the row and the ⓘ sits beside it: a Popover trigger
+            cannot be nested inside a button, and the disclosure must not
+            collapse the section on its way open. */}
+        <div className="flex min-w-0 items-center pr-[var(--ds-space-snug)]">
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={!collapsed}
+            className={cn(
+              BUMP_GRID,
+              "min-w-0 flex-1 cursor-pointer items-center gap-x-[var(--ds-space-base)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)] text-left",
+              dsFocus,
+              dsMotion.fast,
+              "hover:bg-[var(--ds-surface-3)]",
+            )}
+          >
             {collapsed ? (
               <ChevronRight aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
             ) : (
               <ChevronDown aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
             )}
-            <FileClock aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
-            {record ? (
+            {record && target ? (
               <>
-                <span className={cn(dsText.meta, dsText.nums, "shrink-0 text-[color:var(--ds-fg)]")}>
+                {/* 1 — the version transition, and the only place it is drawn */}
+                <span className={cn(dsText.meta, dsText.nums, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>
                   {record.fromVersion} → {record.toVersion}
                 </span>
-                <Badge tone={record.kind === "major" ? "warning" : "neutral"} title={BUMP_KIND_LABEL[record.kind]}>
-                  {record.kind}
-                </Badge>
-                <Badge tone={record.scope === "dashboard" ? "warning" : "info"}>{BUMP_SCOPE_LABEL[record.scope]}</Badge>
-                <span className={cn(dsText.micro, "min-w-0 flex-1 truncate text-[color:var(--ds-fg-muted)]")} title={record.why}>
-                  {record.what}
+                {/* 2 — which KIND of bump, which is what decides whether
+                    anything archived at all */}
+                <span className="min-w-0">
+                  <Badge tone={record.kind === "major" ? "warning" : "neutral"} title={BUMP_KIND_LABEL[record.kind]}>
+                    {record.kind}
+                  </Badge>
                 </span>
-                <span className={cn(dsText.micro, "shrink-0 text-[color:var(--ds-fg-muted)]")}>{record.at}</span>
+                {/* 3 — WHAT changed: the workflow by name, or the app */}
+                <span
+                  className={cn(dsText.meta, "flex min-w-0 items-center gap-[var(--ds-space-tight)]")}
+                  title={`${BUMP_SCOPE_LABEL[record.scope]} — ${target.full}`}
+                >
+                  {target.appUpdate ? (
+                    <AppWindow aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+                  ) : (
+                    <Workflow aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+                  )}
+                  <span className="min-w-0 truncate text-[color:var(--ds-fg-secondary)]">{target.text}</span>
+                </span>
+                {/* 4 — when, on the table's own `when` track */}
+                <span className={cn(dsText.meta, dsText.nums, "min-w-0 truncate text-[color:var(--ds-fg-muted)]")}>
+                  {record.at}
+                </span>
+                {/* 5 — how many runs it swept, on the `duration` track */}
+                <span className="flex justify-end">
+                  <CountBadge value={count} />
+                </span>
               </>
             ) : (
               <>
-                <span className={cn(dsText.meta, "shrink-0 text-[color:var(--ds-danger)]")}>Change record missing</span>
-                <span className={cn(dsText.micro, "min-w-0 flex-1 truncate text-[color:var(--ds-fg-muted)]")}>
-                  Swept by <span className={dsText.nums}>{bumpId}</span>, which the change-record store does not hold. The runs
-                  are intact; what is missing is why they were archived.
+                <span className={cn(dsText.meta, "min-w-0 truncate text-[color:var(--ds-danger)]")}>Record missing</span>
+                <span aria-hidden />
+                <span className={cn(dsText.meta, "min-w-0 truncate text-[color:var(--ds-fg-muted)]")}>
+                  Swept by <span className={dsText.nums}>{bumpId}</span>
+                </span>
+                <span aria-hidden />
+                <span className="flex justify-end">
+                  <CountBadge value={count} />
                 </span>
               </>
             )}
-            <CountBadge value={count} className="shrink-0" />
-          </span>
-        </button>
+          </button>
+          {/* THE DESCRIPTION, and everything else about the sweep. */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <IconButton
+                size="xs"
+                label={record ? `About this bump — ${record.fromVersion} → ${record.toVersion}` : `About ${bumpId}`}
+                icon={<Info aria-hidden className={dsIcon.sm} />}
+                className="shrink-0 data-[state=open]:bg-[var(--ds-surface-3)] data-[state=open]:text-[color:var(--ds-fg)]"
+              />
+            </PopoverTrigger>
+            <PopoverContent
+              title={record ? `${record.fromVersion} → ${record.toVersion}` : "Change record missing"}
+              description={record ? BUMP_KIND_LABEL[record.kind] : undefined}
+              width="lg"
+              align="end"
+            >
+              {record && target ? (
+                <div className="flex flex-col gap-[var(--ds-space-base)]">
+                  <p className={cn(dsText.body, "text-[color:var(--ds-fg)]")}>{record.what}</p>
+                  <p className={cn(dsText.body, "text-[color:var(--ds-fg-muted)]")}>{record.why}</p>
+                  <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>{target.full}</p>
+                  <MetaLine
+                    items={[
+                      record.by,
+                      record.commit,
+                      record.at,
+                      `${record.archivedRuns} run${record.archivedRuns === 1 ? "" : "s"} archived`,
+                    ]}
+                  />
+                </div>
+              ) : (
+                <p className={cn(dsText.body, "text-[color:var(--ds-fg-muted)]")}>
+                  Swept by <span className={dsText.nums}>{bumpId}</span>, which the change-record store does not hold. The runs
+                  are intact; what is missing is why they were archived.
+                </p>
+              )}
+            </PopoverContent>
+          </Popover>
+        </div>
       </td>
     </tr>
   );

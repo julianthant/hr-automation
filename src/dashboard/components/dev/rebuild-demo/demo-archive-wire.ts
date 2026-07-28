@@ -211,7 +211,11 @@ export const DEMO_CHANGE_RECORDS: ChangeRecordWire[] = [
     workflowIds: [],
     at: "Jul 20, 9:02 AM",
     by: DEMO_OPERATOR,
-    what: "Dashboard update 2026.07.2 → 2026.07.3 — the queue projection gained containment and the merged Data surface.",
+    // NO VERSION PAIR IN THE SENTENCE. It used to open "Dashboard update
+    // 2026.07.2 → 2026.07.3 —", which is exactly what the version column beside
+    // it already prints. A description that restates the chip next to it is the
+    // same fact twice, and it is the copy that gets truncated.
+    what: "The queue projection gained containment and the merged Data surface.",
     why: "Old rows carry no containment, so they cannot be placed in the new queue model. Bumping every workflow is what keeps exactly one rendering path in the dashboard.",
     commit: "e15677b",
     fromVersion: "app 2026.07.2",
@@ -236,6 +240,36 @@ export const DEMO_CHANGE_RECORDS: ChangeRecordWire[] = [
 
 export function changeRecordFor(bumpId: string): ChangeRecordWire | undefined {
   return DEMO_CHANGE_RECORDS.find((record) => record.id === bumpId);
+}
+
+/**
+ * WHAT CHANGED, in the words the operator asked for: *"label which workflow
+ * changed or if the app changed properly."*
+ *
+ * The scope enum answers the question in the abstract (`Single workflow`) and
+ * leaves the reader to find WHICH one somewhere else on the page. This names
+ * it — and for an app update it says the thing that actually matters about a
+ * dashboard bump, which is that it reached every workflow rather than one.
+ *
+ * `appUpdate` is separate from the text so the column can mark it without
+ * spending a hue on a category: an app update is the one sweep that is not
+ * about a workflow at all.
+ */
+export function bumpTargetLabel(record: ChangeRecordWire): { text: string; appUpdate: boolean; full: string } {
+  if (record.scope === "dashboard") {
+    return {
+      text: "Every workflow — app update",
+      appUpdate: true,
+      full: "An app update bumps the effective version of every workflow, so every prior-version run archives.",
+    };
+  }
+  const names = record.workflowIds.map((id) => DEMO_WORKFLOWS[id].label);
+  if (names.length === 1) return { text: names[0], appUpdate: false, full: `${names[0]} only — no other workflow's version moved.` };
+  return {
+    text: `${names.length} workflows`,
+    appUpdate: false,
+    full: `${names.join(", ")} — bumped together under one change record.`,
+  };
 }
 
 // ---------------------------------------------------------------------------

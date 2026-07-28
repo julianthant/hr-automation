@@ -13,7 +13,9 @@ import {
   allTopLevelRows,
   archivedCapture,
   archivedRunTouchedTest,
+  bumpTargetLabel,
   changeRecordFor,
+  DEMO_CHANGE_RECORDS,
   deriveBumpPlan,
   deriveRelaunchPlan,
   deriveVersionRegistry,
@@ -363,4 +365,41 @@ test("the registry keys on the MAJOR digit — a minor difference is not a prior
   assert.ok(separations);
   assert.equal(separations.currentVersion, "7.2");
   assert.equal(separations.currentMajor, 7);
+});
+
+// ---------------------------------------------------------------------------
+// The bump SECTION HEADER's columns
+//
+// Operator: "label which workflow changed or if the app changed properly in an
+// aligned and organized manner between rows." Two things had to become true:
+// the header must say WHICH workflow (the scope enum only said "Single
+// workflow"), and its description must stop repeating the version pair already
+// printed two tracks to its left.
+// ---------------------------------------------------------------------------
+
+test("a single-workflow bump names the workflow, not the category", () => {
+  const record = changeRecordFor("chg-ec-4");
+  assert.ok(record);
+  const target = bumpTargetLabel(record);
+  assert.equal(target.text, "Emergency Contact");
+  assert.equal(target.appUpdate, false);
+});
+
+test("an app update says it reached every workflow, and is marked as an app update", () => {
+  const record = changeRecordFor("chg-app-2026073");
+  assert.ok(record);
+  const target = bumpTargetLabel(record);
+  assert.equal(target.appUpdate, true);
+  assert.match(target.text, /every workflow/i);
+});
+
+test("no change record's description repeats the version pair beside it", () => {
+  for (const record of DEMO_CHANGE_RECORDS) {
+    for (const version of [record.fromVersion, record.toVersion]) {
+      assert.ok(
+        !record.what.includes(version),
+        `${record.id}: "what" repeats ${version}, which the header already prints in its own column`,
+      );
+    }
+  }
 });
