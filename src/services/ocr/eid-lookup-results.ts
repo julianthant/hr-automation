@@ -30,11 +30,10 @@ export function patchOcrRecordFromEidLookupOutcome(
   const eid = (outcome.data?.emplId ?? "").trim();
   const looksLikeEid = /^\d{5,}$/.test(eid);
   const existingEid = getRecordEmployeeId(rec);
-  const existingVerification = rec.verification as { state?: string } | undefined;
-  const alreadyResolved =
-    rec.matchState === "resolved" &&
-    existingEid &&
-    existingVerification?.state !== "inactive";
+  // An inactive verification does NOT reopen resolution (operator decision
+  // 2026-07-27: inactive employees are submittable) — a resolved record with
+  // an EID stays resolved regardless of verification state.
+  const alreadyResolved = rec.matchState === "resolved" && existingEid;
 
   if (kind === "name") {
     if (outcome.status === "done" && looksLikeEid) {
@@ -89,15 +88,18 @@ export function patchOcrRecordFromEidLookupOutcome(
   }
 
   if (kind === "name") {
-    if (verification.state === "inactive") {
-      rec.selected = false;
-    }
+    // Inactive employees stay selected (operator decision 2026-07-27) — the
+    // name branch above already set `selected` on resolve.
     return;
   }
 
-  if (verification.state === "inactive" || verification.state === "lookup-failed") {
+  if (verification.state === "lookup-failed") {
     rec.selected = false;
-  } else if (verification.state === "verified" || verification.state === "non-hdh") {
+  } else if (
+    verification.state === "verified" ||
+    verification.state === "non-hdh" ||
+    verification.state === "inactive"
+  ) {
     rec.selected = true;
   }
 }
@@ -127,9 +129,13 @@ export function patchOcrRecordFromActiveCheckOutcome(
     terminationDate: outcome.data?.terminationDate,
   });
   rec.verification = verification;
-  if (verification.state === "inactive" || verification.state === "lookup-failed") {
+  if (verification.state === "lookup-failed") {
     rec.selected = false;
-  } else if (verification.state === "verified" || verification.state === "non-hdh") {
+  } else if (
+    verification.state === "verified" ||
+    verification.state === "non-hdh" ||
+    verification.state === "inactive"
+  ) {
     rec.selected = true;
   }
 }

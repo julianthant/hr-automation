@@ -440,7 +440,7 @@ describe("emergencyContactOcrFormSpec.approveTo.canFanOut", () => {
     );
   });
 
-  it("returns false for an inactive employee even with a valid EID + selected", () => {
+  it("returns true for an inactive employee with a valid EID + selected (submittable — operator decision 2026-07-27)", () => {
     assert.equal(
       canFanOut({
         formKind: "emergency-contact",
@@ -460,8 +460,8 @@ describe("emergencyContactOcrFormSpec.approveTo.canFanOut", () => {
           checkedAt: "2026-07-17T00:00:00.000Z",
         },
       }),
-      false,
-      "inactive employees are hard-blocked from EC fan-out",
+      true,
+      "inactive employees fan out — verification is a signal, not a gate",
     );
   });
 });

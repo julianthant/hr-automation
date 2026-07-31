@@ -11,6 +11,8 @@ export interface PrepReviewPersonSectionProps {
   fileId?: string;
   formCard: ReactNode;
   onPreviewStatusChange?: (page: number, status: "loading" | "ok" | "error") => void;
+  /** Force the page images to fetch now instead of on scroll. */
+  eagerLoadPreview?: boolean;
 }
 
 /**
@@ -26,6 +28,7 @@ export function PrepReviewPersonSection({
   fileId,
   formCard,
   onPreviewStatusChange,
+  eagerLoadPreview,
 }: PrepReviewPersonSectionProps) {
   return (
     <div className="p-4">
@@ -42,6 +45,7 @@ export function PrepReviewPersonSection({
                 page={page}
                 fileId={fileId}
                 onStatusChange={onPreviewStatusChange}
+                eagerLoad={eagerLoadPreview}
               />
             </figure>
           ))}

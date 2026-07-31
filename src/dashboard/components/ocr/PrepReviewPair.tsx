@@ -13,6 +13,8 @@ export interface PrepReviewPairProps {
   /** Full-width block (lookup screenshots) between the title and the columns. */
   screenshotStrip?: ReactNode;
   onPreviewStatusChange?: (page: number, status: "loading" | "ok" | "error") => void;
+  /** Force the page image to fetch now instead of on scroll. */
+  eagerLoadPreview?: boolean;
 }
 
 /**
@@ -28,6 +30,7 @@ export function PrepReviewPair({
   titleBar,
   screenshotStrip,
   onPreviewStatusChange,
+  eagerLoadPreview,
 }: PrepReviewPairProps) {
   return (
     <PrepReviewPageLayout
@@ -40,6 +43,7 @@ export function PrepReviewPair({
           page={page}
           fileId={fileId}
           onStatusChange={onPreviewStatusChange}
+          eagerLoad={eagerLoadPreview}
         />
       }
       formCards={formCard}

@@ -11,6 +11,13 @@ export interface PdfPagePreviewProps {
   fileId?: string;
   className?: string;
   onStatusChange?: (page: number, status: "loading" | "ok" | "error") => void;
+  /**
+   * Bypass the near-viewport deferral and fetch immediately. Set by the
+   * operator's explicit "Load all pages" action in the OCR review — the
+   * approval gate requires every source page to have rendered, and scrolling
+   * a 30+ page pile by hand to satisfy it is busywork.
+   */
+  eagerLoad?: boolean;
 }
 
 // Pre-render N pages above + below the viewport so scrolling feels instant.
@@ -59,6 +66,7 @@ export function PdfPagePreview({
   fileId,
   className,
   onStatusChange,
+  eagerLoad = false,
 }: PdfPagePreviewProps) {
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
   const imgRef = useRef<HTMLImageElement>(null);
@@ -70,6 +78,11 @@ export function PdfPagePreview({
   const [shouldLoad, setShouldLoad] = useState(false);
   useEffect(() => {
     if (shouldLoad) return; // already loading/loaded
+    // Operator asked for every page up front — skip the viewport deferral.
+    if (eagerLoad) {
+      setShouldLoad(true);
+      return;
+    }
     const el = containerRef.current;
     if (!el) return;
     let obs: IntersectionObserver | null = null;
@@ -118,7 +131,7 @@ export function PdfPagePreview({
       window.clearTimeout(firstLayoutCheck);
       window.clearTimeout(secondLayoutCheck);
     };
-  }, [shouldLoad]);
+  }, [shouldLoad, eagerLoad]);
 
   const srcPath = fileId
     ? `/api/files/${encodeURIComponent(fileId)}/pages/${page}`

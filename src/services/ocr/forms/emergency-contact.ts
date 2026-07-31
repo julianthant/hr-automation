@@ -618,11 +618,8 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
       // prior "every selected EC record fans out" behavior).
       const kind = record.formKind as string | undefined;
       if (kind === "oath" || kind === "unknown") return false;
-      // Inactive employees are hard-blocked in the review pane (Approve N and
-      // Select all skip them; backend lookup also deselects them). Mirror that
-      // here so a stale localStorage `selected:true` cannot enqueue a fill for
-      // a terminated person.
-      if (record.verification?.state === "inactive") return false;
+      // Inactive employees ARE submittable (operator decision 2026-07-27) —
+      // verification state is a review-pane signal, not a fan-out gate.
       // EID-completeness gate (F12, mirrors oath's `hasOathSignerInput`): an EC
       // child is enqueued by EID — the daemon navigates UCPath to that person.
       // A blank/invalid EID would fan out a child guaranteed to fail at

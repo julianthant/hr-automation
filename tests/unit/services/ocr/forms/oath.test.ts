@@ -185,7 +185,7 @@ describe("oathOcrFormSpec.approveTo.canFanOut", () => {
     assert.equal(canFanOut(rec), false);
   });
 
-  it("returns false for an inactive employee even with a valid EID + selected", () => {
+  it("returns true for an inactive employee with a valid EID + selected (submittable — operator decision 2026-07-27)", () => {
     const rec = makeApprovedOathRecord({
       verification: {
         state: "inactive",
@@ -194,6 +194,6 @@ describe("oathOcrFormSpec.approveTo.canFanOut", () => {
         checkedAt: "2026-07-17T00:00:00.000Z",
       },
     });
-    assert.equal(canFanOut(rec), false, "inactive employees are hard-blocked from oath fan-out");
+    assert.equal(canFanOut(rec), true, "inactive employees fan out — verification is a signal, not a gate");
   });
 });

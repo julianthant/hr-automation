@@ -419,7 +419,7 @@ test("applyOcrActiveCheckContinuation emits verified OCR tracker row", async () 
   }
 });
 
-test("applyOcrActiveCheckContinuation flags inactive records for manual edit", async () => {
+test("applyOcrActiveCheckContinuation marks inactive records without deselecting them", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ocr-active-continuation-inactive-"));
   try {
     const store = openTaskStoreForTests(join(dir, "tracker.sqlite"));
@@ -483,7 +483,9 @@ test("applyOcrActiveCheckContinuation flags inactive records for manual edit", a
     assert.deepEqual(result, { ok: true });
     const records = JSON.parse(emitted[0].data?.records ?? "[]") as Array<{ verification?: { state?: string }; selected?: boolean }>;
     assert.equal(records[0].verification?.state, "inactive");
-    assert.equal(records[0].selected, false);
+    // Inactive employees stay SELECTED (operator decision 2026-07-27) — the
+    // inactive badge is a review-pane signal, not an approval gate.
+    assert.equal(records[0].selected, true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
