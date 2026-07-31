@@ -521,6 +521,41 @@ describe("separations handler — live Separation Date write-back to Kuali", () 
     await runHandler(ctx, { docId: "4131", dryRun: true });
     assert.equal(mocks.updateSeparationDate.mock.calls.length, 0, "dry-run writes nothing");
   });
+
+  it("keeps Kuali's Separation Date VERBATIM when the New Kronos timecard read REJECTED", async () => {
+    // Regression (2026-07-31, live): the employee was FOUND in New Kronos but
+    // Go To → Timecard failed, so `runNewKronosTimecard` threw and the settled
+    // `newK` branch REJECTED. `kronosSkipped` is false on that path (the step
+    // RAN), so the handler used to fall through to the derive branch with an
+    // EMPTY timecard — producing sep = Kuali LDW 01/15 != Kuali sep 01/16 →
+    // a write-back stamped "Updated Separation Date … per Kronos timesheet"
+    // for a timesheet that was never opened. Three real Kuali docs (4445,
+    // 4461, 4471) were modified this way.
+    //
+    // A rejected read is the ABSENCE of an answer, not "no punches": keep
+    // Kuali's date and write nothing.
+    mocks.runKronosSearch.mockResolvedValueOnce({
+      newK: {
+        status: "rejected" as const,
+        reason: new Error(
+          "[New Kronos] EID 10772489 was found but the Go To → Timecard navigation failed",
+        ),
+      },
+      kualiTimekeeper: { status: "fulfilled" as const, value: undefined },
+    });
+    const { ctx, probe } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    assert.equal(
+      mocks.updateSeparationDate.mock.calls.length,
+      0,
+      "no Separation Date write-back when the timecard read failed",
+    );
+    assert.equal(
+      probe.data.separationDate,
+      "01/16/2026",
+      "Kuali's Separation Date is kept verbatim, not re-derived from the LDW",
+    );
+  });
 });
 
 describe("separations handler — empty transaction number fails the run", () => {
