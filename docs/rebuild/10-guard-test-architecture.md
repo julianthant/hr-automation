@@ -402,7 +402,8 @@ Four ratified decisions are worthless as prose. Each gets a guard, and each guar
   possible-submit being buried; (3) archiving never touches the write ledger.
 
 - **`runtime-isolation.test.ts` + `legacy-change-accounting.test.ts` (D88/D90 — charter/doc 03).**
-  TypeScript-AST scans consume the closed `forbiddenBridgeClasses` registry and ban static/dynamic
+  TypeScript-AST scans consume the closed `forbiddenBridgeClasses` registry, carry lexical
+  constant/import-alias environments through nested executable scopes, and ban static/dynamic
   imports, `require`, process invocation, filesystem/state/profile access, runtime HTTP calls,
   proxy/forward/remount, and continuous lift calls across `src`↔`temp_src`. Active configuration
   fixtures require exact commands and an executable `defineRuntimeIsolation` binding for the

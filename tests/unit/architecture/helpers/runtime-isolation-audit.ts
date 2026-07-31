@@ -77,18 +77,209 @@ function callName(expression: ts.LeftHandSideExpression): string | undefined {
   return undefined;
 }
 
-function collectConstStrings(source: ts.SourceFile): Map<string, readonly string[]> {
-  const bindings = new Map<string, readonly string[]>();
-  for (const statement of source.statements) {
-    if (!ts.isVariableStatement(statement)
-      || (statement.declarationList.flags & ts.NodeFlags.Const) === 0) continue;
-    for (const declaration of statement.declarationList.declarations) {
-      if (!ts.isIdentifier(declaration.name) || !declaration.initializer) continue;
-      const values = staticStrings(declaration.initializer, bindings);
-      if (values.length > 0) bindings.set(declaration.name.text, values);
+interface ScanEnvironment {
+  readonly strings: Map<string, readonly string[]>;
+  readonly callAliases: Map<string, string>;
+  readonly moduleNamespaces: Map<string, string>;
+  readonly shadowedCalls: Set<string>;
+}
+
+const CLASSIFIED_CALLS = new Set([
+  ...PROCESS_CALLS,
+  ...FILESYSTEM_CALLS,
+  ...ROUTE_BRIDGE_CALLS,
+  "connect", "open", "send",
+]);
+
+function cloneEnvironment(environment: ScanEnvironment): ScanEnvironment {
+  return {
+    strings: new Map(environment.strings),
+    callAliases: new Map(environment.callAliases),
+    moduleNamespaces: new Map(environment.moduleNamespaces),
+    shadowedCalls: new Set(environment.shadowedCalls),
+  };
+}
+
+function canonicalCallName(
+  expression: ts.LeftHandSideExpression,
+  environment: ScanEnvironment,
+): string | undefined {
+  if (ts.isIdentifier(expression)) {
+    return environment.callAliases.get(expression.text)
+      ?? (environment.shadowedCalls.has(expression.text) ? undefined : expression.text);
+  }
+  if (ts.isPropertyAccessExpression(expression)) return expression.name.text;
+  if (ts.isElementAccessExpression(expression) && expression.argumentExpression
+    && ts.isStringLiteralLike(expression.argumentExpression)) return expression.argumentExpression.text;
+  return undefined;
+}
+
+function moduleSpecifierFrom(
+  node: ts.Expression,
+  environment: ScanEnvironment,
+): string | undefined {
+  const expression = ts.isAwaitExpression(node) ? node.expression : node;
+  if (ts.isIdentifier(expression)) return environment.moduleNamespaces.get(expression.text);
+  if (!ts.isCallExpression(expression)) return undefined;
+  const name = callName(expression.expression);
+  if (name !== "require" && expression.expression.kind !== ts.SyntaxKind.ImportKeyword) return undefined;
+  const values = expression.arguments.flatMap((argument) => staticStrings(argument, environment.strings));
+  return values.length === 1 ? values[0] : undefined;
+}
+
+function registerBindingName(
+  name: ts.BindingName,
+  initializer: ts.Expression | undefined,
+  environment: ScanEnvironment,
+): void {
+  if (!initializer) return;
+  if (ts.isIdentifier(name)) {
+    const values = staticStrings(initializer, environment.strings);
+    if (values.length > 0) environment.strings.set(name.text, values);
+
+    const moduleSpecifier = moduleSpecifierFrom(initializer, environment);
+    if (moduleSpecifier) environment.moduleNamespaces.set(name.text, moduleSpecifier);
+
+    let canonical: string | undefined;
+    if (ts.isIdentifier(initializer)) {
+      canonical = environment.callAliases.get(initializer.text);
+    } else if (ts.isPropertyAccessExpression(initializer)) {
+      canonical = initializer.name.text;
+    } else if (ts.isElementAccessExpression(initializer) && initializer.argumentExpression
+      && ts.isStringLiteralLike(initializer.argumentExpression)) {
+      canonical = initializer.argumentExpression.text;
+    }
+    if (canonical && CLASSIFIED_CALLS.has(canonical)) {
+      environment.callAliases.set(name.text, canonical);
+      environment.shadowedCalls.delete(name.text);
+    }
+    return;
+  }
+
+  if (!ts.isObjectBindingPattern(name)) return;
+  const moduleSpecifier = moduleSpecifierFrom(initializer, environment);
+  const namespaceKnown = ts.isIdentifier(initializer)
+    && environment.moduleNamespaces.has(initializer.text);
+  if (!moduleSpecifier && !namespaceKnown) return;
+  for (const element of name.elements) {
+    if (!ts.isIdentifier(element.name)) continue;
+    const imported = element.propertyName && ts.isIdentifier(element.propertyName)
+      ? element.propertyName.text
+      : element.name.text;
+    if (CLASSIFIED_CALLS.has(imported)) {
+      environment.callAliases.set(element.name.text, imported);
+      environment.shadowedCalls.delete(element.name.text);
     }
   }
-  return bindings;
+}
+
+function clearBindingName(name: ts.BindingName, environment: ScanEnvironment): void {
+  if (ts.isIdentifier(name)) {
+    environment.strings.delete(name.text);
+    environment.callAliases.delete(name.text);
+    environment.moduleNamespaces.delete(name.text);
+    environment.shadowedCalls.add(name.text);
+    return;
+  }
+  for (const element of name.elements) {
+    if (!ts.isOmittedExpression(element)) clearBindingName(element.name, environment);
+  }
+}
+
+function registerImports(
+  statements: readonly ts.Statement[],
+  environment: ScanEnvironment,
+): void {
+  for (const statement of statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (bindings && ts.isNamespaceImport(bindings)) {
+      clearBindingName(bindings.name, environment);
+      environment.moduleNamespaces.set(bindings.name.text, statement.moduleSpecifier.text);
+    } else if (bindings && ts.isNamedImports(bindings)) {
+      for (const element of bindings.elements) {
+        clearBindingName(element.name, environment);
+        const imported = element.propertyName?.text ?? element.name.text;
+        if (CLASSIFIED_CALLS.has(imported)) {
+          environment.callAliases.set(element.name.text, imported);
+          environment.shadowedCalls.delete(element.name.text);
+        }
+      }
+    }
+    if (statement.importClause?.name) clearBindingName(statement.importClause.name, environment);
+  }
+}
+
+function registerDirectDeclarations(
+  statements: readonly ts.Statement[],
+  environment: ScanEnvironment,
+): void {
+  for (const statement of statements) {
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        clearBindingName(declaration.name, environment);
+      }
+    } else if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name) {
+      clearBindingName(statement.name, environment);
+    }
+  }
+
+  // Fixed point lets a function declared before a same-scope const still see
+  // that lexical binding, while nested blocks keep their own shadowing map.
+  for (let pass = 0; pass <= statements.length; pass++) {
+    const before = environment.strings.size + environment.callAliases.size + environment.moduleNamespaces.size;
+    for (const statement of statements) {
+      if (!ts.isVariableStatement(statement)
+        || (statement.declarationList.flags & ts.NodeFlags.Const) === 0) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        registerBindingName(declaration.name, declaration.initializer, environment);
+      }
+    }
+    const after = environment.strings.size + environment.callAliases.size + environment.moduleNamespaces.size;
+    if (after === before) break;
+  }
+}
+
+function visitWithEnvironment(
+  node: ts.Node,
+  environment: ScanEnvironment,
+  callback: (node: ts.Node, environment: ScanEnvironment) => void,
+): void {
+  callback(node, environment);
+
+  if (ts.isSourceFile(node) || ts.isBlock(node) || ts.isModuleBlock(node)) {
+    const scope = cloneEnvironment(environment);
+    registerImports(node.statements, scope);
+    registerDirectDeclarations(node.statements, scope);
+    for (const statement of node.statements) visitWithEnvironment(statement, scope, callback);
+    return;
+  }
+
+  if (ts.isFunctionDeclaration(node)
+    || ts.isFunctionExpression(node)
+    || ts.isArrowFunction(node)
+    || ts.isMethodDeclaration(node)
+    || ts.isConstructorDeclaration(node)
+    || ts.isGetAccessorDeclaration(node)
+    || ts.isSetAccessorDeclaration(node)) {
+    const scope = cloneEnvironment(environment);
+    for (const parameter of node.parameters) {
+      clearBindingName(parameter.name, scope);
+      if (parameter.initializer) visitWithEnvironment(parameter.initializer, scope, callback);
+      registerBindingName(parameter.name, parameter.initializer, scope);
+    }
+    if (node.body) visitWithEnvironment(node.body, scope, callback);
+    return;
+  }
+
+  if (ts.isCatchClause(node)) {
+    const scope = cloneEnvironment(environment);
+    if (node.variableDeclaration) clearBindingName(node.variableDeclaration.name, scope);
+    visitWithEnvironment(node.block, scope, callback);
+    return;
+  }
+
+  ts.forEachChild(node, (child) => visitWithEnvironment(child, environment, callback));
 }
 
 function staticStrings(
@@ -230,16 +421,21 @@ function scanTree(
 
   for (const file of walkFiles(root)) {
     const source = parse(file);
-    const bindings = collectConstStrings(source);
-    visit(source, (node) => {
+    const environment: ScanEnvironment = {
+      strings: new Map(),
+      callAliases: new Map(),
+      moduleNamespaces: new Map(),
+      shadowedCalls: new Set(),
+    };
+    visitWithEnvironment(source, environment, (node, scope) => {
       if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
         && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)
         && moduleCrosses(file, node.moduleSpecifier.text, root, otherRoot)) {
         addViolation(output, "cross-tree-module-edge", repoRoot, file, `static module edge to ${node.moduleSpecifier.text}`);
       }
       if (!ts.isCallExpression(node)) return;
-      const name = callName(node.expression);
-      const values = valuesInCall(node, bindings);
+      const name = canonicalCallName(node.expression, scope);
+      const values = valuesInCall(node, scope.strings);
       const otherRuntimeHint = callHasOtherRuntimeHint(node, other);
       const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
       if ((isDynamicImport || name === "require")
