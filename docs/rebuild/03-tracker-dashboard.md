@@ -959,7 +959,11 @@ The legacy and rebuilt event worlds coexist only as **two fully isolated runtime
   bridge capabilities may only be direct audited callees — aliasing, binding, wrapping, returning,
   passing, computed selection, and re-export are forbidden. This intentionally rejects generic
   wrappers at the runtime boundary; a reviewed side-local facade is the escape hatch, not a looser
-  scanner.
+  scanner. A manifest-pinned module-family catalog classifies every non-type named/default/namespace
+  import and member from filesystem, HTTP/network, process/worker/module-loader, and browser/profile
+  packages; the rule is not limited to familiar method names. Calls and constructors share the same
+  operand audit, and computed selection from `globalThis`/`window`/other runtime-global roots fails
+  closed in the runtime-bridge class.
 - Live-verified selectors, parsers, and behavioral knowledge may be copied/ported into `temp_src`
   only with source/provenance evidence and rebuild tests. This is knowledge transfer, not a runtime
   dependency.

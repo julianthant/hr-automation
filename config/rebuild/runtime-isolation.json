@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "phase": "pre-tree",
   "legacy": {
     "sourceRoot": "src",
@@ -56,6 +56,33 @@
       }
     ]
   },
+  "moduleFamilies": [
+    {
+      "family": "filesystem",
+      "specifiers": ["fs", "fs/promises", "node:fs", "node:fs/promises"],
+      "bridgeClasses": ["cross-tree-filesystem-access"]
+    },
+    {
+      "family": "network-route",
+      "specifiers": ["dgram", "http", "http2", "https", "net", "node:dgram", "node:http", "node:http2", "node:https", "node:net", "node:tls", "tls", "undici", "ws"],
+      "bridgeClasses": ["cross-tree-runtime-bridge", "route-proxy-forward-remount"]
+    },
+    {
+      "family": "process-execution",
+      "specifiers": ["child_process", "cluster", "node:child_process", "node:cluster", "node:vm", "node:worker_threads", "vm", "worker_threads"],
+      "bridgeClasses": ["cross-tree-process-invocation"]
+    },
+    {
+      "family": "module-loader",
+      "specifiers": ["module", "node:module"],
+      "bridgeClasses": ["cross-tree-module-edge"]
+    },
+    {
+      "family": "browser-profile",
+      "specifiers": ["@playwright/test", "playwright", "playwright-core", "puppeteer", "puppeteer-core"],
+      "bridgeClasses": ["shared-browser-session"]
+    }
+  ],
   "forbiddenBridgeClasses": [
     "continuous-runtime-lift",
     "cross-tree-filesystem-access",

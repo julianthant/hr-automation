@@ -16,6 +16,22 @@ export const SUPPORTED_FORBIDDEN_BRIDGE_CLASSES = [
 
 export type ForbiddenBridgeClass = typeof SUPPORTED_FORBIDDEN_BRIDGE_CLASSES[number];
 
+export const SUPPORTED_MODULE_FAMILIES = [
+  "browser-profile",
+  "filesystem",
+  "module-loader",
+  "network-route",
+  "process-execution",
+] as const;
+
+export type RuntimeModuleFamily = typeof SUPPORTED_MODULE_FAMILIES[number];
+
+export interface RuntimeModuleFamilyContract {
+  readonly family: RuntimeModuleFamily;
+  readonly specifiers: readonly string[];
+  readonly bridgeClasses: readonly ForbiddenBridgeClass[];
+}
+
 export interface RuntimeSideContract {
   readonly sourceRoot: string;
   readonly entrypoint: string;
@@ -44,9 +60,11 @@ export interface RuntimeSideContract {
 }
 
 export interface RuntimeIsolationContract {
+  readonly schemaVersion: 2;
   readonly phase: "pre-tree" | "active";
   readonly legacy: RuntimeSideContract;
   readonly rebuild: RuntimeSideContract;
+  readonly moduleFamilies: readonly RuntimeModuleFamilyContract[];
   readonly forbiddenBridgeClasses: readonly ForbiddenBridgeClass[];
 }
 
@@ -78,13 +96,17 @@ interface StaticResolution {
 interface DangerousCapability {
   readonly name: string;
   readonly bridgeClasses: readonly ForbiddenBridgeClass[];
+  readonly moduleSpecifier?: string;
 }
+
+type AuditedInvocation = ts.CallExpression | ts.NewExpression;
 
 interface ScanEnvironment {
   readonly strings: Map<string, StaticResolution>;
   readonly capabilities: Map<string, DangerousCapability>;
   readonly moduleNamespaces: Map<string, string>;
   readonly runtimeBindings: Map<string, Readonly<Record<string, string>>>;
+  readonly moduleCatalog: ReadonlyMap<string, readonly ForbiddenBridgeClass[]>;
   readonly shadowedCalls: Set<string>;
 }
 
@@ -118,23 +140,24 @@ function cloneEnvironment(environment: ScanEnvironment): ScanEnvironment {
     capabilities: new Map(environment.capabilities),
     moduleNamespaces: new Map(environment.moduleNamespaces),
     runtimeBindings: new Map(environment.runtimeBindings),
+    moduleCatalog: environment.moduleCatalog,
     shadowedCalls: new Set(environment.shadowedCalls),
   };
 }
 
-function moduleBridgeClasses(specifier: string): readonly ForbiddenBridgeClass[] {
-  const bare = specifier.replace(/^node:/, "");
-  if (bare === "fs" || bare === "fs/promises") return ["cross-tree-filesystem-access"];
-  if (bare === "child_process") return ["cross-tree-process-invocation"];
-  if (bare === "module") return ["cross-tree-module-edge"];
-  if (["http", "https", "net", "tls", "undici"].includes(bare)) return ["cross-tree-runtime-bridge"];
-  if (/^(?:@playwright\/test|playwright|playwright-core|puppeteer)/.test(bare)) return ["shared-browser-session"];
-  if (/(?:proxy|forward)/i.test(bare)) return ["route-proxy-forward-remount"];
-  return [];
+function moduleBridgeClasses(
+  specifier: string,
+  environment: ScanEnvironment,
+): readonly ForbiddenBridgeClass[] {
+  return environment.moduleCatalog.get(specifier) ?? [];
 }
 
-function capabilityForName(name: string, moduleSpecifier?: string): DangerousCapability | undefined {
-  const moduleClasses = moduleSpecifier ? moduleBridgeClasses(moduleSpecifier) : [];
+function capabilityForName(
+  name: string,
+  environment: ScanEnvironment,
+  moduleSpecifier?: string,
+): DangerousCapability | undefined {
+  const moduleClasses = moduleSpecifier ? moduleBridgeClasses(moduleSpecifier, environment) : [];
   const classes = new Set<ForbiddenBridgeClass>();
   const accepts = (bridgeClass: ForbiddenBridgeClass): boolean =>
     moduleClasses.length === 0 || moduleClasses.includes(bridgeClass);
@@ -157,7 +180,10 @@ function capabilityForName(name: string, moduleSpecifier?: string): DangerousCap
   if (MODULE_LOADER_CALLS.has(name) && accepts("cross-tree-module-edge")) {
     classes.add("cross-tree-module-edge");
   }
-  return classes.size > 0 ? { name, bridgeClasses: [...classes] } : undefined;
+  if (moduleSpecifier) {
+    for (const bridgeClass of moduleClasses) classes.add(bridgeClass);
+  }
+  return classes.size > 0 ? { name, bridgeClasses: [...classes], moduleSpecifier } : undefined;
 }
 
 function capabilityFromExpression(
@@ -169,25 +195,31 @@ function capabilityFromExpression(
     const bound = environment.capabilities.get(expression.text);
     if (bound) return bound;
     const namespaceModule = environment.moduleNamespaces.get(expression.text);
-    const namespaceClasses = namespaceModule && moduleBridgeClasses(namespaceModule);
+    const namespaceClasses = namespaceModule && moduleBridgeClasses(namespaceModule, environment);
     if (namespaceClasses && namespaceClasses.length > 0) {
-      return { name: `${expression.text} namespace`, bridgeClasses: namespaceClasses };
+      return {
+        name: `${expression.text} namespace`,
+        bridgeClasses: namespaceClasses,
+        moduleSpecifier: namespaceModule,
+      };
     }
     if (environment.shadowedCalls.has(expression.text)) return undefined;
-    return capabilityForName(expression.text);
+    return capabilityForName(expression.text, environment);
   }
   if (ts.isPropertyAccessExpression(expression)) {
     const moduleSpecifier = ts.isIdentifier(expression.expression)
       ? environment.moduleNamespaces.get(expression.expression.text)
       : undefined;
-    return moduleSpecifier ? capabilityForName(expression.name.text, moduleSpecifier) : undefined;
+    return moduleSpecifier ? capabilityForName(expression.name.text, environment, moduleSpecifier) : undefined;
   }
   if (ts.isElementAccessExpression(expression) && expression.argumentExpression
     && ts.isStringLiteralLike(expression.argumentExpression)) {
     const moduleSpecifier = ts.isIdentifier(expression.expression)
       ? environment.moduleNamespaces.get(expression.expression.text)
       : undefined;
-    return moduleSpecifier ? capabilityForName(expression.argumentExpression.text, moduleSpecifier) : undefined;
+    return moduleSpecifier
+      ? capabilityForName(expression.argumentExpression.text, environment, moduleSpecifier)
+      : undefined;
   }
   return undefined;
 }
@@ -200,7 +232,7 @@ function directCallCapability(
   if (bound) return bound;
   const name = callName(expression);
   if (!name || ts.isIdentifier(expression) && environment.shadowedCalls.has(name)) return undefined;
-  return capabilityForName(name);
+  return capabilityForName(name, environment);
 }
 
 function staticResolution(node: ts.Node, environment: ScanEnvironment): StaticResolution {
@@ -330,7 +362,7 @@ function registerBindingName(
     const imported = element.propertyName && ts.isIdentifier(element.propertyName)
       ? element.propertyName.text
       : element.name.text;
-    const capability = capabilityForName(imported, moduleSpecifier);
+    const capability = capabilityForName(imported, environment, moduleSpecifier);
     if (capability) {
       environment.capabilities.set(element.name.text, capability);
       environment.shadowedCalls.delete(element.name.text);
@@ -370,12 +402,13 @@ function registerImports(
         clearBindingName(element.name, environment);
         if (element.isTypeOnly) continue;
         const imported = element.propertyName?.text ?? element.name.text;
-        const capability = capabilityForName(imported, specifier);
+        const capability = capabilityForName(imported, environment, specifier);
         if (capability) {
           environment.capabilities.set(element.name.text, capability);
           environment.shadowedCalls.delete(element.name.text);
         }
-        if (imported === "promises" && moduleBridgeClasses(specifier).includes("cross-tree-filesystem-access")) {
+        if (imported === "promises"
+          && moduleBridgeClasses(specifier, environment).includes("cross-tree-filesystem-access")) {
           environment.moduleNamespaces.set(element.name.text, specifier);
         }
         const config = context.own.runtimeConfig;
@@ -579,7 +612,8 @@ function isDirectAuditedCalleeReference(node: ts.Expression, environment: ScanEn
     current = current.parent;
   }
   while (ts.isParenthesizedExpression(current.parent)) current = current.parent;
-  return ts.isCallExpression(current.parent) && current.parent.expression === current
+  return (ts.isCallExpression(current.parent) || ts.isNewExpression(current.parent))
+    && current.parent.expression === current
     && directCallCapability(current, environment) !== undefined;
 }
 
@@ -599,39 +633,70 @@ function escapedCapability(
   return capability;
 }
 
+const RUNTIME_GLOBAL_ROOTS = new Set(["global", "globalThis", "process", "self", "window"]);
+
+function hasRuntimeGlobalRoot(expression: ts.Expression): boolean {
+  if (ts.isParenthesizedExpression(expression)) return hasRuntimeGlobalRoot(expression.expression);
+  if (ts.isIdentifier(expression)) return RUNTIME_GLOBAL_ROOTS.has(expression.text);
+  if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
+    return hasRuntimeGlobalRoot(expression.expression);
+  }
+  return false;
+}
+
+function isComputedRuntimeGlobalSelection(node: ts.Node): node is ts.ElementAccessExpression {
+  return ts.isElementAccessExpression(node)
+    && !!node.argumentExpression
+    && !ts.isStringLiteralLike(node.argumentExpression)
+    && hasRuntimeGlobalRoot(node.expression)
+    && !isTypeOnlyReference(node);
+}
+
 function boundModuleCapability(
   node: ts.Node,
   environment: ScanEnvironment,
 ): DangerousCapability | undefined {
   if (!ts.isVariableDeclaration(node) || !node.initializer) return undefined;
   const moduleSpecifier = moduleSpecifierFrom(node.initializer, environment);
-  const bridgeClasses = moduleSpecifier && moduleBridgeClasses(moduleSpecifier);
+  const bridgeClasses = moduleSpecifier && moduleBridgeClasses(moduleSpecifier, environment);
   return bridgeClasses && bridgeClasses.length > 0
-    ? { name: `${moduleSpecifier} module namespace`, bridgeClasses }
+    ? { name: `${moduleSpecifier} module namespace`, bridgeClasses, moduleSpecifier }
     : undefined;
 }
 
-function loadBearingArguments(name: string, node: ts.CallExpression): readonly ts.Expression[] {
-  if (PROCESS_CALLS.has(name)) return node.arguments.slice(0, 2);
+function loadBearingArguments(
+  capability: DangerousCapability,
+  node: AuditedInvocation,
+): readonly ts.Expression[] {
+  const { name, bridgeClasses, moduleSpecifier } = capability;
+  const arguments_ = [...(node.arguments ?? [])];
+  if (PROCESS_CALLS.has(name)) return arguments_.slice(0, 2);
   if (FILESYSTEM_CALLS.has(name)) {
     return ["cp", "cpSync", "rename", "renameSync"].includes(name)
-      ? node.arguments.slice(0, 2)
-      : node.arguments.slice(0, 1);
+      ? arguments_.slice(0, 2)
+      : arguments_.slice(0, 1);
   }
-  if (ROUTE_BRIDGE_CALLS.has(name)) return [...node.arguments];
-  if (RUNTIME_CALLS.has(name) || PROFILE_CALLS.has(name)) return node.arguments.slice(0, 1);
+  if (ROUTE_BRIDGE_CALLS.has(name) && !moduleSpecifier) return arguments_;
+  if (bridgeClasses.some((bridgeClass) => [
+    "cross-tree-filesystem-access",
+    "cross-tree-module-edge",
+    "cross-tree-process-invocation",
+    "cross-tree-runtime-bridge",
+    "route-proxy-forward-remount",
+    "shared-browser-session",
+  ].includes(bridgeClass))) return arguments_.slice(0, 1);
   return [];
 }
 
 function resourceResolution(
-  name: string,
-  node: ts.CallExpression,
+  capability: DangerousCapability,
+  node: AuditedInvocation,
   environment: ScanEnvironment,
 ): StaticResolution {
-  const argumentsToResolve = loadBearingArguments(name, node);
+  const argumentsToResolve = loadBearingArguments(capability, node);
   if (argumentsToResolve.length === 0) return { values: [], resolved: false, exactValue: false };
   const parts = argumentsToResolve.map((argument) => staticResolution(argument, environment));
-  const exactOperands = PROCESS_CALLS.has(name)
+  const exactOperands = PROCESS_CALLS.has(capability.name)
     ? (parts[0]?.exactValue ?? false) && parts.slice(1).every(({ resolved }) => resolved)
     : parts.every(({ exactValue }) => exactValue);
   return {
@@ -655,19 +720,20 @@ function reportCapabilityEscape(
 function reportModuleReExport(
   output: RuntimeIsolationViolation[],
   node: ts.ExportDeclaration,
+  environment: ScanEnvironment,
   repoRoot: string,
   file: string,
 ): void {
   if (node.isTypeOnly || !node.moduleSpecifier || !ts.isStringLiteral(node.moduleSpecifier)) return;
   const specifier = node.moduleSpecifier.text;
   if (!node.exportClause) {
-    for (const bridgeClass of moduleBridgeClasses(specifier)) {
+    for (const bridgeClass of moduleBridgeClasses(specifier, environment)) {
       addViolation(output, bridgeClass, repoRoot, file, `dangerous module namespace capability ${specifier} is re-exported`);
     }
     return;
   }
   if (!ts.isNamedExports(node.exportClause)) {
-    for (const bridgeClass of moduleBridgeClasses(specifier)) {
+    for (const bridgeClass of moduleBridgeClasses(specifier, environment)) {
       addViolation(output, bridgeClass, repoRoot, file, `dangerous module namespace capability ${specifier} is re-exported`);
     }
     return;
@@ -675,14 +741,14 @@ function reportModuleReExport(
   for (const element of node.exportClause.elements) {
     if (element.isTypeOnly) continue;
     const imported = element.propertyName?.text ?? element.name.text;
-    const capability = capabilityForName(imported, specifier);
+    const capability = capabilityForName(imported, environment, specifier);
     if (capability) reportCapabilityEscape(output, capability, repoRoot, file);
   }
 }
 
-function auditDirectCall(
+function auditDirectInvocation(
   output: RuntimeIsolationViolation[],
-  node: ts.CallExpression,
+  node: AuditedInvocation,
   environment: ScanEnvironment,
   repoRoot: string,
   file: string,
@@ -690,12 +756,13 @@ function auditDirectCall(
   otherRoot: string,
   other: RuntimeSideContract,
 ): void {
-  const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
+  const isDynamicImport = ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword;
   const capability = isDynamicImport ? undefined : directCallCapability(node.expression, environment);
   const name = isDynamicImport ? "import" : capability?.name;
 
   if (isDynamicImport || name === "require") {
-    const target = node.arguments[0] && staticResolution(node.arguments[0], environment);
+    const argument = node.arguments?.[0];
+    const target = argument && staticResolution(argument, environment);
     if (!target?.resolved || !target.exactValue || target.values.length !== 1) {
       addViolation(output, "cross-tree-module-edge", repoRoot, file, `${name} target is not one exact statically resolved value`);
     } else if (moduleCrosses(file, target.values[0], ownRoot, otherRoot)) {
@@ -708,9 +775,9 @@ function auditDirectCall(
     addViolation(output, "cross-tree-module-edge", repoRoot, file, `${capability.name} creates an unauditable module-loader capability`);
     return;
   }
-  if (capability.bridgeClasses.length === 1 && capability.bridgeClasses[0] === "cross-tree-module-edge") return;
+  if (capability.name === "require") return;
 
-  const target = resourceResolution(capability.name, node, environment);
+  const target = resourceResolution(capability, node, environment);
   if (!target.resolved) {
     for (const bridgeClass of capability.bridgeClasses) {
       addViolation(output, bridgeClass, repoRoot, file, `${capability.name} load-bearing target is unresolved`);
@@ -720,6 +787,10 @@ function auditDirectCall(
   if (capability.bridgeClasses.includes("cross-tree-process-invocation")
     && target.values.some((value) => runtimeReferences(value, other))) {
     addViolation(output, "cross-tree-process-invocation", repoRoot, file, `${capability.name} invokes the other runtime`);
+  }
+  if (capability.bridgeClasses.includes("cross-tree-module-edge")
+    && target.values.some((value) => moduleCrosses(file, value, ownRoot, otherRoot))) {
+    addViolation(output, "cross-tree-module-edge", repoRoot, file, `${capability.name} loads from the other runtime tree`);
   }
   if (capability.bridgeClasses.includes("cross-tree-filesystem-access")) {
     if (target.values.some((value) => pathReference(value, other.sourceRoot))) {
@@ -750,6 +821,7 @@ function scanTree(
   repoRoot: string,
   own: RuntimeSideContract,
   other: RuntimeSideContract,
+  moduleCatalog: ReadonlyMap<string, readonly ForbiddenBridgeClass[]>,
 ): RuntimeIsolationViolation[] {
   const root = resolve(repoRoot, own.sourceRoot);
   if (!existsSync(root)) return [];
@@ -764,6 +836,7 @@ function scanTree(
       capabilities: new Map(),
       moduleNamespaces: new Map(),
       runtimeBindings: new Map(),
+      moduleCatalog,
       shadowedCalls: new Set(),
     };
     const context = { repoRoot, file, own };
@@ -775,15 +848,28 @@ function scanTree(
         && moduleCrosses(file, node.moduleSpecifier.text, root, otherRoot)) {
         addViolation(output, "cross-tree-module-edge", repoRoot, file, `static module edge to ${node.moduleSpecifier.text}`);
       }
-      if (coexistenceActive && ts.isExportDeclaration(node)) reportModuleReExport(output, node, repoRoot, file);
+      if (coexistenceActive && ts.isExportDeclaration(node)) {
+        reportModuleReExport(output, node, scope, repoRoot, file);
+      }
+      if (coexistenceActive && isComputedRuntimeGlobalSelection(node)) {
+        addViolation(
+          output,
+          "cross-tree-runtime-bridge",
+          repoRoot,
+          file,
+          "computed runtime-global capability selection is not auditable",
+        );
+      }
 
       const escaped = coexistenceActive
         ? escapedCapability(node, scope) ?? boundModuleCapability(node, scope)
         : undefined;
       if (escaped) reportCapabilityEscape(output, escaped, repoRoot, file);
-      if (!ts.isCallExpression(node)) return;
+      if (!ts.isCallExpression(node) && !ts.isNewExpression(node)) return;
       const name = callName(node.expression);
-      if (coexistenceActive) auditDirectCall(output, node, scope, repoRoot, file, root, otherRoot, other);
+      if (coexistenceActive) {
+        auditDirectInvocation(output, node, scope, repoRoot, file, root, otherRoot, other);
+      }
       if (name && /(?:legacy.*(?:lift|sync|mirror|replay|adapter|bridge)|(?:lift|sync|mirror|replay|adapter|bridge).*legacy|rebuild.*(?:lift|sync|mirror|replay|adapter|bridge)|(?:lift|sync|mirror|replay|adapter|bridge).*rebuild)/i.test(name)) {
         addViolation(output, "continuous-runtime-lift", repoRoot, file, `${name} is a live compatibility bridge`);
       }
@@ -1001,6 +1087,44 @@ function validateCommands(
   return output;
 }
 
+function buildModuleCatalog(
+  families: readonly RuntimeModuleFamilyContract[],
+): ReadonlyMap<string, readonly ForbiddenBridgeClass[]> {
+  const catalog = new Map<string, readonly ForbiddenBridgeClass[]>();
+  for (const family of families) {
+    for (const specifier of family.specifiers) catalog.set(specifier, family.bridgeClasses);
+  }
+  return catalog;
+}
+
+function validateModuleFamilies(
+  repoRoot: string,
+  contract: RuntimeIsolationContract,
+): RuntimeIsolationViolation[] {
+  const output: RuntimeIsolationViolation[] = [];
+  const families = contract.moduleFamilies.map(({ family }) => family).sort();
+  const supportedFamilies = [...SUPPORTED_MODULE_FAMILIES].sort();
+  const specifiers = contract.moduleFamilies.flatMap(({ specifiers: values }) => values);
+  const classesAreClosed = contract.moduleFamilies.every(({ bridgeClasses }) =>
+    bridgeClasses.length > 0
+    && bridgeClasses.every((bridgeClass) => SUPPORTED_FORBIDDEN_BRIDGE_CLASSES.includes(bridgeClass)));
+  const entriesAreNonempty = contract.moduleFamilies.every(({ specifiers: values }) => values.length > 0);
+  if (new Set(families).size !== families.length
+    || JSON.stringify(families) !== JSON.stringify(supportedFamilies)
+    || new Set(specifiers).size !== specifiers.length
+    || !classesAreClosed
+    || !entriesAreNonempty) {
+    addViolation(
+      output,
+      "runtime-binding",
+      repoRoot,
+      resolve(repoRoot, "config/rebuild/runtime-isolation.json"),
+      "moduleFamilies must register every supported family once with unique specifiers and closed bridge classes",
+    );
+  }
+  return output;
+}
+
 export function auditRuntimeIsolation(
   repoRoot: string,
   contract: RuntimeIsolationContract,
@@ -1012,6 +1136,8 @@ export function auditRuntimeIsolation(
   if (new Set(configured).size !== configured.length || JSON.stringify(configured) !== JSON.stringify(supported)) {
     addViolation(output, "runtime-binding", repoRoot, resolve(repoRoot, "config/rebuild/runtime-isolation.json"), "forbiddenBridgeClasses must register every executable detector exactly once");
   }
+  output.push(...validateModuleFamilies(repoRoot, contract));
+  const moduleCatalog = buildModuleCatalog(contract.moduleFamilies);
 
   const declaredRebuildCommands = Object.keys(contract.rebuild.commands).sort();
   const actualRebuildCommands = Object.keys(scripts).filter((name) => name.startsWith("rebuild:")).sort();
@@ -1048,7 +1174,7 @@ export function auditRuntimeIsolation(
     output.push(...executableRuntimeBinding(repoRoot, contract.rebuild));
   }
 
-  output.push(...scanTree(repoRoot, contract.legacy, contract.rebuild));
-  output.push(...scanTree(repoRoot, contract.rebuild, contract.legacy));
+  output.push(...scanTree(repoRoot, contract.legacy, contract.rebuild, moduleCatalog));
+  output.push(...scanTree(repoRoot, contract.rebuild, contract.legacy, moduleCatalog));
   return output;
 }

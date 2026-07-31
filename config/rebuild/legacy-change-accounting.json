@@ -76,7 +76,7 @@
       "path": "tests/unit/architecture/helpers/runtime-isolation-audit.ts",
       "changeKind": "added",
       "beforeSha256": null,
-      "afterSha256": "56e7e519041bbef99555f6a3fe06641e9120b05bd0061a059a7f522a661a3ff8",
+      "afterSha256": "04abf765dfa093756da40239b3abec7ebd2761cb2b563b6c95f44faa6aff3dad",
       "capabilityIds": [
         "legacy-dev-tool-architecture-guards"
       ],
@@ -202,7 +202,7 @@
       "path": "tests/unit/architecture/runtime-isolation.test.ts",
       "changeKind": "added",
       "beforeSha256": null,
-      "afterSha256": "3e26371afb1702336edd0b4f4f927e821242d4122c1f2ded09ca37af41331e8e",
+      "afterSha256": "79a8fb13365aeb59260796a94138f80a8fd64bfad3a24267d719e5a030e336ab",
       "capabilityIds": [
         "legacy-dev-tool-architecture-guards"
       ],

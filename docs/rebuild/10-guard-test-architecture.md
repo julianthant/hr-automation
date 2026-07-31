@@ -408,10 +408,18 @@ Four ratified decisions are worthless as prose. Each gets a guard, and each guar
   binding. Every direct dynamic import/`require`, process, filesystem/state/profile, runtime HTTP,
   or proxy/forward/remount sink must resolve its load-bearing target: an unresolved/computed target
   fails in that sink's existing owning bridge class instead of becoming a non-match. Dangerous
-  named or namespace capabilities may occur only as direct audited callees; assignment/reassignment,
+  named/default/namespace capabilities may occur only as direct audited callees or constructors;
+  assignment/reassignment,
   `.bind`/`.call`/`.apply`, object/array/class wrapping, return/callback argument, computed member
-  selection, loader factory/alias, and re-export are capability escapes. Comments, declarations,
-  and type-only imports/exports do not count as runtime use. Active configuration fixtures require
+  selection, loader factory/alias, and re-export are capability escapes. A closed manifest catalog
+  maps filesystem (`fs`/promises), HTTP/network (`http`/`https`/`http2`/`net`/`tls`/`dgram` plus
+  `undici`/`ws`), process/code execution (`child_process`/workers/cluster/`vm`), module loaders, and
+  Playwright/Puppeteer packages to their owning classes. **Every** non-type binding/member from a
+  catalogued family inherits that classification regardless of export name; `CallExpression` and
+  `NewExpression` use the same operand proof. Computed selection from a runtime-global root fails
+  closed in `cross-tree-runtime-bridge`. Missing/duplicate families or specifiers fail the binding
+  audit, while comments, declarations, and type-only imports/exports do not count as runtime use.
+  Active configuration fixtures require
   exact commands and an exported direct-`const` `defineRuntimeIsolation` call for the state/artifact
   roots, ports, process lock, and browser profile/session. The manifest pins the config factory and
   every composition factory by module + export and declares the exact binding argument path (for
