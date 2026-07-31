@@ -19,6 +19,7 @@
   },
   "include": [
     "src/**/*",
+    "scripts/rebuild/**/*",
     "tests/**/*",
     "vitest.config.ts",
     "data/documents/make-e2e-roster.mjs"
