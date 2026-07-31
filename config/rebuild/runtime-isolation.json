@@ -4,7 +4,11 @@
   "legacy": {
     "sourceRoot": "src",
     "entrypoint": "src/cli.ts",
-    "commands": ["dashboard", "dashboard:prod", "dashboard:watch"],
+    "commands": {
+      "dashboard": "tsx --env-file=.env src/cli.ts dashboard --capture-ngrok",
+      "dashboard:prod": "tsx --env-file=.env src/cli.ts dashboard --prod",
+      "dashboard:watch": "tsx watch --env-file=.env src/cli.ts dashboard --capture-ngrok"
+    },
     "stateRoot": ".tracker",
     "artifactRoot": ".tracker",
     "backendPort": 3838,
@@ -16,22 +20,42 @@
   "rebuild": {
     "sourceRoot": "temp_src",
     "entrypoint": "temp_src/cli.ts",
-    "commands": ["rebuild:dashboard", "rebuild:dashboard:prod", "rebuild:cli"],
+    "commands": {
+      "rebuild:dashboard": "tsx --env-file=.env temp_src/cli.ts dashboard",
+      "rebuild:dashboard:prod": "tsx --env-file=.env temp_src/cli.ts dashboard --prod",
+      "rebuild:cli": "tsx --env-file=.env temp_src/cli.ts"
+    },
     "stateRoot": ".tracker-rebuild",
     "artifactRoot": ".tracker-rebuild/artifacts",
     "backendPort": 3938,
     "frontendPort": 5174,
     "processLockRoot": ".tracker-rebuild/locks",
     "browserProfileRoot": ".auth-rebuild",
-    "browserSessionNamespace": "hrauto-rebuild"
+    "browserSessionNamespace": "hrauto-rebuild",
+    "runtimeConfig": {
+      "module": "temp_src/config/runtime-isolation.ts",
+      "factory": "defineRuntimeIsolation",
+      "exportName": "rebuildRuntimeIsolation"
+    },
+    "compositionRoots": [
+      {
+        "path": "temp_src/cli.ts",
+        "factory": "startRebuildRuntime"
+      },
+      {
+        "path": "temp_src/core/workflow-registry.ts",
+        "factory": "composeRebuildRuntime"
+      }
+    ]
   },
-  "forbiddenRuntimeBridges": [
-    "cross-tree-import",
-    "cross-tree-invocation",
-    "legacy-state-read",
-    "rebuild-state-read",
-    "route-proxy",
-    "continuous-lift",
+  "forbiddenBridgeClasses": [
+    "continuous-runtime-lift",
+    "cross-tree-filesystem-access",
+    "cross-tree-module-edge",
+    "cross-tree-process-invocation",
+    "cross-tree-runtime-bridge",
+    "cross-tree-state-access",
+    "route-proxy-forward-remount",
     "shared-browser-session"
   ]
 }

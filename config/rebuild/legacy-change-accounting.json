@@ -34,7 +34,7 @@
       "path": "tests/unit/architecture/guard-manifest.test.ts",
       "changeKind": "added",
       "beforeSha256": null,
-      "afterSha256": "8290095401aef8f08b857e2bccbfc9c76119c1c0449ff6551b518bf2848a0c92",
+      "afterSha256": "a5aec3bd225a9619a9a873c1afb818efb0a8d6be3ab0492569f6bf7089fe61e4",
       "capabilityIds": [
         "legacy-dev-tool-architecture-guards"
       ],
@@ -49,6 +49,34 @@
       "changeKind": "added",
       "beforeSha256": null,
       "afterSha256": "53420adeee3da1a3c5e213b7b82b0c15f4a93b143b4dd56f2f87bf3284e57929",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/helpers/rebuild-ratchet-arms.ts",
+      "changeKind": "added",
+      "beforeSha256": null,
+      "afterSha256": "7a9c3011f66c24b4d517600f840de8d4185ab807f655c6247e7b37bc1b8bbd79",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/helpers/runtime-isolation-audit.ts",
+      "changeKind": "added",
+      "beforeSha256": null,
+      "afterSha256": "91eb5023b4a237b3775e151724b355c1d28aa8b767dc32ab4518ccdfae01b04d",
       "capabilityIds": [
         "legacy-dev-tool-architecture-guards"
       ],
@@ -118,7 +146,7 @@
       "path": "tests/unit/architecture/legacy-test-disposition.test.ts",
       "changeKind": "added",
       "beforeSha256": null,
-      "afterSha256": "bc18546507ca518fce82ba06b49561e4e92049c755e7d0b47c7a3cfb284a3a5b",
+      "afterSha256": "675b2523dc28ca2b925023718d2358bd1b6547f820b04e4bbfb7fbd5e133fcd2",
       "capabilityIds": [
         "legacy-dev-tool-architecture-guards"
       ],
@@ -160,7 +188,7 @@
       "path": "tests/unit/architecture/rebuild-gates.test.ts",
       "changeKind": "added",
       "beforeSha256": null,
-      "afterSha256": "517b251b2ebccc407813920fbcc1c81d7ec35bc8031de8226084b6ebeea94591",
+      "afterSha256": "35086eb59af822973c019ad9f373f7fb712f92e8cc41738616ce1b532f60b860",
       "capabilityIds": [
         "legacy-dev-tool-architecture-guards"
       ],
@@ -174,7 +202,7 @@
       "path": "tests/unit/architecture/runtime-isolation.test.ts",
       "changeKind": "added",
       "beforeSha256": null,
-      "afterSha256": "e69f5131f5e9d3b58cf04ed8f723682717c109c3e3a744ecf66b07279cb14749",
+      "afterSha256": "b976283625ac20665e3e49efb2d1e5d6f69d9f6b3525cd3a01ffaec087081524",
       "capabilityIds": [
         "legacy-dev-tool-architecture-guards"
       ],

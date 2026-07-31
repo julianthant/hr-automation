@@ -5,17 +5,35 @@ import inventory from "../../../config/rebuild/legacy-test-disposition.json" wit
 import { REPO_ROOT } from "./helpers/guard-files.js";
 
 function baselineDirectories(): string[] {
-  const files = execFileSync(
+  return requiredLegacyDirectories(execFileSync(
     "git",
     ["ls-tree", "-r", "--name-only", inventory.baselineCommit, "--", "tests"],
     { cwd: REPO_ROOT, encoding: "utf8" },
+  ).trim().split("\n").filter(Boolean), currentTestFiles());
+}
+
+function currentTestFiles(): string[] {
+  return execFileSync(
+    "git",
+    ["ls-files", "--cached", "--others", "--exclude-standard", "--", "tests"],
+    { cwd: REPO_ROOT, encoding: "utf8" },
   ).trim().split("\n").filter(Boolean);
+}
+
+export function requiredLegacyDirectories(
+  baselineFiles: readonly string[],
+  currentFiles: readonly string[],
+): string[] {
   const directories = new Set(["tests"]);
-  for (const file of files) {
+  for (const file of [...baselineFiles, ...currentFiles]) {
+    if (file === "tests/rebuild" || file.startsWith("tests/rebuild/")) continue;
     const parts = file.split("/");
     parts.pop();
     while (parts.length > 1) {
-      directories.add(parts.join("/"));
+      const directory = parts.join("/");
+      if (directory !== "tests/rebuild" && !directory.startsWith("tests/rebuild/")) {
+        directories.add(directory);
+      }
       parts.pop();
     }
   }
@@ -23,10 +41,25 @@ function baselineDirectories(): string[] {
 }
 
 describe("legacy test disposition inventory", () => {
-  it("classifies every baseline test directory exactly once", () => {
+  it("classifies the union of baseline and current legacy test directories exactly once", () => {
     const paths = inventory.entries.map(({ path }) => path);
     assert.equal(new Set(paths).size, paths.length);
     assert.deepEqual(paths, baselineDirectories());
+  });
+
+  it("excludes only tests/rebuild while retaining newly added legacy helper directories", () => {
+    assert.deepEqual(
+      requiredLegacyDirectories(
+        ["tests/unit/original.test.ts"],
+        [
+          "tests/unit/architecture/helpers/guard-files.ts",
+          "tests/rebuild/unit/new.test.ts",
+          "tests/rebuild/scenario/helper.ts",
+        ],
+      ),
+      ["tests", "tests/unit", "tests/unit/architecture", "tests/unit/architecture/helpers"],
+    );
+    assert.ok(inventory.entries.some(({ path }) => path === "tests/unit/architecture/helpers"));
   });
 
   it("requires port evidence before any later-retirement candidacy", () => {
