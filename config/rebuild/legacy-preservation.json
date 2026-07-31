@@ -1882,7 +1882,7 @@
       "src/systems/kuali/navigate.ts": "134485590fbd4e30d84be93ba704d72e5d674a0157b74c57be34370703eb874c",
       "src/systems/kuali/selectors.ts": "cc97d9b4ac9136886e8c58dc90e5a77c223e70875f609d0856d89fdf0b6a37aa",
       "src/systems/new-kronos/index.ts": "243cdd79cc070a9d8a3f714a98dca25eff71007c878e34a7448010a4f8bdcba1",
-      "src/systems/new-kronos/navigate.ts": "49b2fa7c165bcc6a3c59620e192b0055ad46e758c412c5a1c8c655ebbe9508c6",
+      "src/systems/new-kronos/navigate.ts": "4f6710e71c06f07c620e0c422288729770073ba2ec6b67c10a5c60947164f494",
       "src/systems/new-kronos/selectors.ts": "6330dc5609668e2d6aacd422374ca953f6f8f50592b6fc37d239063609e67218",
       "src/systems/old-kronos/index.ts": "9c402c3e3f45469541896b60e60ca307fd4e1b7dda0767eb2df7c110ff395b25",
       "src/systems/old-kronos/navigate.ts": "3f23cf1bd665e1b82b248e658c0b5e6754d3929f9c62fe6849f6971f9fa87b17",
