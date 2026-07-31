@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, relative, resolve } from "node:path";
 import ts from "typescript";
@@ -68,6 +69,15 @@ export interface RuntimeIsolationContract {
   readonly forbiddenBridgeClasses: readonly ForbiddenBridgeClass[];
 }
 
+export interface RuntimeIsolationPreservationContract {
+  readonly schemaVersion: 1;
+  readonly baselineCommit: string;
+  readonly runtimeIsolation: {
+    readonly sourceRoot: string;
+    readonly files: Readonly<Record<string, string>>;
+  };
+}
+
 export interface RuntimeIsolationViolation {
   readonly bridgeClass: ForbiddenBridgeClass | "runtime-binding";
   readonly file: string;
@@ -116,8 +126,19 @@ interface ScanContext {
   readonly own: RuntimeSideContract;
 }
 
+type ScanEnforcement =
+  | { readonly mode: "strict" }
+  | {
+    readonly mode: "hash-bound-preservation";
+    readonly hashes: ReadonlyMap<string, string>;
+  };
+
 function normalize(path: string): string {
   return path.replaceAll("\\", "/");
+}
+
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 function parse(file: string): ts.SourceFile {
@@ -755,6 +776,7 @@ function auditDirectInvocation(
   ownRoot: string,
   otherRoot: string,
   other: RuntimeSideContract,
+  failClosed: boolean,
 ): void {
   const isDynamicImport = ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword;
   const capability = isDynamicImport ? undefined : directCallCapability(node.expression, environment);
@@ -763,22 +785,23 @@ function auditDirectInvocation(
   if (isDynamicImport || name === "require") {
     const argument = node.arguments?.[0];
     const target = argument && staticResolution(argument, environment);
-    if (!target?.resolved || !target.exactValue || target.values.length !== 1) {
+    if (failClosed && (!target?.resolved || !target.exactValue || target.values.length !== 1)) {
       addViolation(output, "cross-tree-module-edge", repoRoot, file, `${name} target is not one exact statically resolved value`);
-    } else if (moduleCrosses(file, target.values[0], ownRoot, otherRoot)) {
+    } else if (target?.resolved && target.exactValue && target.values.length === 1
+      && moduleCrosses(file, target.values[0], ownRoot, otherRoot)) {
       addViolation(output, "cross-tree-module-edge", repoRoot, file, `${name} crosses runtime tree`);
     }
   }
 
   if (!capability) return;
-  if (MODULE_FACTORY_CALLS.has(capability.name)) {
+  if (failClosed && MODULE_FACTORY_CALLS.has(capability.name)) {
     addViolation(output, "cross-tree-module-edge", repoRoot, file, `${capability.name} creates an unauditable module-loader capability`);
     return;
   }
   if (capability.name === "require") return;
 
   const target = resourceResolution(capability, node, environment);
-  if (!target.resolved) {
+  if (failClosed && !target.resolved) {
     for (const bridgeClass of capability.bridgeClasses) {
       addViolation(output, bridgeClass, repoRoot, file, `${capability.name} load-bearing target is unresolved`);
     }
@@ -822,6 +845,7 @@ function scanTree(
   own: RuntimeSideContract,
   other: RuntimeSideContract,
   moduleCatalog: ReadonlyMap<string, readonly ForbiddenBridgeClass[]>,
+  enforcement: ScanEnforcement,
 ): RuntimeIsolationViolation[] {
   const root = resolve(repoRoot, own.sourceRoot);
   if (!existsSync(root)) return [];
@@ -830,6 +854,9 @@ function scanTree(
   const output: RuntimeIsolationViolation[] = [];
 
   for (const file of walkFiles(root)) {
+    const relativeFile = normalize(relative(repoRoot, file));
+    const failClosed = enforcement.mode === "strict"
+      || enforcement.hashes.get(relativeFile) !== sha256(readFileSync(file));
     const source = parse(file);
     const environment: ScanEnvironment = {
       strings: new Map(),
@@ -848,10 +875,10 @@ function scanTree(
         && moduleCrosses(file, node.moduleSpecifier.text, root, otherRoot)) {
         addViolation(output, "cross-tree-module-edge", repoRoot, file, `static module edge to ${node.moduleSpecifier.text}`);
       }
-      if (coexistenceActive && ts.isExportDeclaration(node)) {
+      if (coexistenceActive && failClosed && ts.isExportDeclaration(node)) {
         reportModuleReExport(output, node, scope, repoRoot, file);
       }
-      if (coexistenceActive && isComputedRuntimeGlobalSelection(node)) {
+      if (coexistenceActive && failClosed && isComputedRuntimeGlobalSelection(node)) {
         addViolation(
           output,
           "cross-tree-runtime-bridge",
@@ -861,19 +888,62 @@ function scanTree(
         );
       }
 
-      const escaped = coexistenceActive
+      const escaped = coexistenceActive && failClosed
         ? escapedCapability(node, scope) ?? boundModuleCapability(node, scope)
         : undefined;
       if (escaped) reportCapabilityEscape(output, escaped, repoRoot, file);
       if (!ts.isCallExpression(node) && !ts.isNewExpression(node)) return;
       const name = callName(node.expression);
       if (coexistenceActive) {
-        auditDirectInvocation(output, node, scope, repoRoot, file, root, otherRoot, other);
+        auditDirectInvocation(output, node, scope, repoRoot, file, root, otherRoot, other, failClosed);
       }
-      if (name && /(?:legacy.*(?:lift|sync|mirror|replay|adapter|bridge)|(?:lift|sync|mirror|replay|adapter|bridge).*legacy|rebuild.*(?:lift|sync|mirror|replay|adapter|bridge)|(?:lift|sync|mirror|replay|adapter|bridge).*rebuild)/i.test(name)) {
+      if (failClosed && name && /(?:legacy.*(?:lift|sync|mirror|replay|adapter|bridge)|(?:lift|sync|mirror|replay|adapter|bridge).*legacy|rebuild.*(?:lift|sync|mirror|replay|adapter|bridge)|(?:lift|sync|mirror|replay|adapter|bridge).*rebuild)/i.test(name)) {
         addViolation(output, "continuous-runtime-lift", repoRoot, file, `${name} is a live compatibility bridge`);
       }
     });
+  }
+  return output;
+}
+
+function validateLegacyPreservation(
+  repoRoot: string,
+  side: RuntimeSideContract,
+  preservation: RuntimeIsolationPreservationContract,
+): RuntimeIsolationViolation[] {
+  const output: RuntimeIsolationViolation[] = [];
+  const manifestFile = resolve(repoRoot, "config/rebuild/legacy-preservation.json");
+  const entries = Object.entries(preservation.runtimeIsolation.files);
+  const actualFiles = walkFiles(resolve(repoRoot, side.sourceRoot))
+    .map((file) => normalize(relative(repoRoot, file)))
+    .sort();
+  const declaredFiles = entries.map(([file]) => normalize(file)).sort();
+  const hashesAreValid = entries.every(([file, hash]) =>
+    normalize(file).startsWith(`${normalize(side.sourceRoot)}/`)
+    && /^[a-f0-9]{64}$/.test(hash));
+
+  if (preservation.runtimeIsolation.sourceRoot !== side.sourceRoot
+    || JSON.stringify(declaredFiles) !== JSON.stringify(actualFiles)
+    || !hashesAreValid) {
+    addViolation(
+      output,
+      "runtime-binding",
+      repoRoot,
+      manifestFile,
+      "legacy runtime-isolation preservation paths must exactly cover the current TypeScript source tree with valid SHA-256 hashes",
+    );
+  }
+
+  for (const [file, expected] of entries) {
+    const absolute = resolve(repoRoot, file);
+    if (!existsSync(absolute) || sha256(readFileSync(absolute)) !== expected) {
+      addViolation(
+        output,
+        "runtime-binding",
+        repoRoot,
+        absolute,
+        "legacy runtime-isolation preservation hash is missing or stale",
+      );
+    }
   }
   return output;
 }
@@ -1129,6 +1199,7 @@ export function auditRuntimeIsolation(
   repoRoot: string,
   contract: RuntimeIsolationContract,
   scripts: Readonly<Record<string, string>>,
+  preservation?: RuntimeIsolationPreservationContract,
 ): RuntimeIsolationViolation[] {
   const output: RuntimeIsolationViolation[] = [];
   const configured = [...contract.forbiddenBridgeClasses].sort();
@@ -1138,6 +1209,8 @@ export function auditRuntimeIsolation(
   }
   output.push(...validateModuleFamilies(repoRoot, contract));
   const moduleCatalog = buildModuleCatalog(contract.moduleFamilies);
+  const preservationHashes = new Map(Object.entries(preservation?.runtimeIsolation.files ?? {}));
+  if (preservation) output.push(...validateLegacyPreservation(repoRoot, contract.legacy, preservation));
 
   const declaredRebuildCommands = Object.keys(contract.rebuild.commands).sort();
   const actualRebuildCommands = Object.keys(scripts).filter((name) => name.startsWith("rebuild:")).sort();
@@ -1174,7 +1247,10 @@ export function auditRuntimeIsolation(
     output.push(...executableRuntimeBinding(repoRoot, contract.rebuild));
   }
 
-  output.push(...scanTree(repoRoot, contract.legacy, contract.rebuild, moduleCatalog));
-  output.push(...scanTree(repoRoot, contract.rebuild, contract.legacy, moduleCatalog));
+  output.push(...scanTree(repoRoot, contract.legacy, contract.rebuild, moduleCatalog, {
+    mode: "hash-bound-preservation",
+    hashes: preservationHashes,
+  }));
+  output.push(...scanTree(repoRoot, contract.rebuild, contract.legacy, moduleCatalog, { mode: "strict" }));
   return output;
 }

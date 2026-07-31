@@ -405,8 +405,9 @@ Four ratified decisions are worthless as prose. Each gets a guard, and each guar
   A finite TypeScript-AST normal form consumes the closed `forbiddenBridgeClasses` registry; it is
   intentionally not described as whole-language runtime soundness. Lexical environments prove
   only supported literal/`const` expressions and exact properties of the current side's runtime
-  binding. Every direct dynamic import/`require`, process, filesystem/state/profile, runtime HTTP,
-  or proxy/forward/remount sink must resolve its load-bearing target: an unresolved/computed target
+  binding. Every `temp_src` file plus every new/modified/hash-mismatched `src` file is strict: each
+  direct dynamic import/`require`, process, filesystem/state/profile, runtime HTTP, or
+  proxy/forward/remount sink must resolve its load-bearing target, and an unresolved/computed target
   fails in that sink's existing owning bridge class instead of becoming a non-match. Dangerous
   named/default/namespace capabilities may occur only as direct audited callees or constructors;
   assignment/reassignment,
@@ -417,8 +418,16 @@ Four ratified decisions are worthless as prose. Each gets a guard, and each guar
   Playwright/Puppeteer packages to their owning classes. **Every** non-type binding/member from a
   catalogued family inherits that classification regardless of export name; `CallExpression` and
   `NewExpression` use the same operand proof. Computed selection from a runtime-global root fails
-  closed in `cross-tree-runtime-bridge`. Missing/duplicate families or specifiers fail the binding
-  audit, while comments, declarations, and type-only imports/exports do not count as runtime use.
+  closed in `cross-tree-runtime-bridge`. An exhaustive path→whole-file-SHA map in
+  `legacy-preservation.json` is the sole preservation-mode authority: an exact matching legacy file
+  suppresses only unresolved side-local/escape-shaped debt already frozen in that content, while
+  statically resolved legacy→rebuild imports, resources, ports, and profiles still fail. A missing,
+  stale, added, or modified file cannot claim preservation and is scanned strictly. The activation
+  replay copies the actual `src`, adds a minimal valid runtime-bound `temp_src`, and requires zero;
+  mutation fixtures then prove preserved known crossings still fail and unresolved sinks in new or
+  hash-mismatched legacy files fail closed. Missing/duplicate module families or specifiers and
+  missing/stale preservation paths/hashes fail the binding audit, while comments, declarations, and
+  type-only imports/exports do not count as runtime use.
   Active configuration fixtures require
   exact commands and an exported direct-`const` `defineRuntimeIsolation` call for the state/artifact
   roots, ports, process lock, and browser profile/session. The manifest pins the config factory and

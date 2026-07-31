@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -33,5 +34,17 @@ describe("legacy source and test preservation", () => {
     }
     assert.equal(manifest.retirementRequiresOperatorAuthorization, true);
     assert.equal(manifest.preservationMode, "through-initial-cutover");
+  });
+
+  it("hash-binds every current TypeScript legacy source file for D88 preservation mode", () => {
+    assert.equal(manifest.runtimeIsolation.sourceRoot, "src");
+    const sourceRoot = manifest.roots.find(({ root }) => root === manifest.runtimeIsolation.sourceRoot);
+    assert.ok(sourceRoot, "src preservation root must exist");
+    const expected = sourceRoot.files.filter((path) => path.endsWith(".ts") || path.endsWith(".tsx")).sort();
+    assert.deepEqual(Object.keys(manifest.runtimeIsolation.files).sort(), expected);
+    for (const [path, expectedHash] of Object.entries(manifest.runtimeIsolation.files)) {
+      const actualHash = createHash("sha256").update(readFileSync(join(REPO_ROOT, path))).digest("hex");
+      assert.equal(actualHash, expectedHash, `${path}: runtime-isolation preservation hash`);
+    }
   });
 });

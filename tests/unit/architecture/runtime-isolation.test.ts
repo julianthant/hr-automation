@@ -1,9 +1,11 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import isolationJson from "../../../config/rebuild/runtime-isolation.json" with { type: "json" };
+import preservationJson from "../../../config/rebuild/legacy-preservation.json" with { type: "json" };
 import { REPO_ROOT } from "./helpers/guard-files.js";
 import {
   auditRuntimeIsolation,
@@ -11,9 +13,11 @@ import {
   SUPPORTED_MODULE_FAMILIES,
   type ForbiddenBridgeClass,
   type RuntimeIsolationContract,
+  type RuntimeIsolationPreservationContract,
 } from "./helpers/runtime-isolation-audit.js";
 
 const isolation = isolationJson as RuntimeIsolationContract;
+const preservation = preservationJson as RuntimeIsolationPreservationContract;
 const packageJson = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {
   scripts: Record<string, string>;
 };
@@ -22,6 +26,24 @@ function write(root: string, path: string, content: string): void {
   const target = join(root, path);
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, content);
+}
+
+function sha256(path: string): string {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function preserveFiles(
+  root: string,
+  paths: readonly string[],
+): RuntimeIsolationPreservationContract {
+  return {
+    schemaVersion: 1,
+    baselineCommit: preservation.baselineCommit,
+    runtimeIsolation: {
+      sourceRoot: "src",
+      files: Object.fromEntries(paths.map((path) => [path, sha256(join(root, path))])),
+    },
+  };
 }
 
 function activeContract(): RuntimeIsolationContract {
@@ -203,7 +225,102 @@ describe("D88 runtime isolation", () => {
   });
 
   it("audits the real pre-tree checkout and exact legacy commands", () => {
-    assert.deepEqual(auditRuntimeIsolation(REPO_ROOT, isolation, packageJson.scripts), []);
+    assert.deepEqual(auditRuntimeIsolation(REPO_ROOT, isolation, packageJson.scripts, preservation), []);
+  });
+
+  it("activates beside the actual preserved legacy tree without imposing rebuild normal form", () => {
+    withActiveFixture((root, contract, scripts) => {
+      rmSync(join(root, contract.legacy.sourceRoot), { recursive: true, force: true });
+      cpSync(join(REPO_ROOT, contract.legacy.sourceRoot), join(root, contract.legacy.sourceRoot), {
+        recursive: true,
+      });
+
+      assert.deepEqual(auditRuntimeIsolation(root, contract, scripts, preservation), []);
+
+      write(
+        root,
+        "src/rebuild-crossing-activation.ts",
+        `import "../temp_src/cli.js";
+import { readFileSync } from "node:fs";
+import { get } from "node:http";
+import { launch } from "puppeteer";
+readFileSync(".tracker-rebuild/state.json");
+get("http://127.0.0.1:3938/api/entries");
+launch({ userDataDir: ".auth-rebuild" });
+`,
+      );
+      const preservedCrossing = {
+        ...preservation,
+        runtimeIsolation: {
+          ...preservation.runtimeIsolation,
+          files: {
+            ...preservation.runtimeIsolation.files,
+            "src/rebuild-crossing-activation.ts": sha256(join(root, "src/rebuild-crossing-activation.ts")),
+          },
+        },
+      } satisfies RuntimeIsolationPreservationContract;
+      const violations = auditRuntimeIsolation(root, contract, scripts, preservedCrossing);
+      for (const expected of [
+        "cross-tree-module-edge",
+        "cross-tree-state-access",
+        "cross-tree-runtime-bridge",
+        "route-proxy-forward-remount",
+        "shared-browser-session",
+      ] satisfies readonly ForbiddenBridgeClass[]) {
+        assert.ok(violations.some(({ bridgeClass, file }) =>
+          bridgeClass === expected && file === "src/rebuild-crossing-activation.ts"), expected);
+      }
+    });
+  });
+
+  it("uses preservation mode only for exact path-and-hash matches", () => {
+    withActiveFixture((root, contract, scripts) => {
+      const exact = preserveFiles(root, ["src/cli.ts"]);
+      assert.deepEqual(auditRuntimeIsolation(root, contract, scripts, exact), []);
+
+      const original = readFileSync(join(root, "src/cli.ts"), "utf8");
+      write(
+        root,
+        "src/cli.ts",
+        `${original}import { truncateSync as activationTruncate } from "node:fs";
+declare const activationTarget: string;
+activationTruncate(activationTarget);
+`,
+      );
+      const modified = auditRuntimeIsolation(root, contract, scripts, exact);
+      assert.ok(modified.some(({ bridgeClass, detail }) =>
+        bridgeClass === "runtime-binding" && detail.includes("hash is missing or stale")));
+      assert.ok(modified.some(({ bridgeClass, file, detail }) =>
+        bridgeClass === "cross-tree-filesystem-access"
+        && file === "src/cli.ts"
+        && detail.includes("truncateSync load-bearing target is unresolved")));
+
+      seedValidActiveRuntime(root, contract);
+      write(
+        root,
+        "src/dynamic-rebuild-escape.ts",
+        `import { unlinkSync } from "node:fs";
+declare const target: string;
+declare const method: string;
+unlinkSync(target);
+require(process.env.REBUILD_MODULE);
+globalThis[method](process.env.REBUILD_URL);
+`,
+      );
+      const added = auditRuntimeIsolation(root, contract, scripts, exact);
+      assert.ok(added.some(({ bridgeClass, file, detail }) =>
+        bridgeClass === "cross-tree-filesystem-access"
+        && file === "src/dynamic-rebuild-escape.ts"
+        && detail.includes("unresolved")));
+      assert.ok(added.some(({ bridgeClass, file, detail }) =>
+        bridgeClass === "cross-tree-module-edge"
+        && file === "src/dynamic-rebuild-escape.ts"
+        && detail.includes("not one exact statically resolved value")));
+      assert.ok(added.some(({ bridgeClass, file, detail }) =>
+        bridgeClass === "cross-tree-runtime-bridge"
+        && file === "src/dynamic-rebuild-escape.ts"
+        && detail.includes("computed runtime-global")));
+    });
   });
 
   it("rejects missing, duplicate, or open module-family catalog entries", () => {
