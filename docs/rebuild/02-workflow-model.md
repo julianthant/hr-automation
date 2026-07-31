@@ -441,8 +441,9 @@ SSE hello carries its fingerprint; a server/client mismatch fails loud. This rem
    detail paths exist in exact node outputs, verdict keys are unique, and the workflow plus every
    used task meets doc 12's scenario obligations.
 10. The derived UI dependency projection lists every `ElementId`/`PageStateId`/`ObservationId` used
-    by its browser tasks. Each resolves in the same-system driver registry; duplicate aliases and
-    raw task-level Page/Locator access fail the build.
+    by its browser tasks. Each resolves in the same-system driver registry; invalid `supersedes`
+    references and raw task-level Page/Locator access fail the build. Search terms never create a
+    second identity.
 
 The old “object with ≥3 workflow ids” heuristic is retained only as a cheap smell detector. It is
 not the exhaustiveness proof: the authoritative proof compares every named current projection and
@@ -1041,13 +1042,13 @@ Fix: re-run "ucpath-job-summary" (start there, or mark it always-rerun for this 
    retain their original source and `observedAt`. An edit NEVER refreshes live-source facts.
 
    **Live Edit Data over checkpoints (operator directive, charter §12).** This is not only a
-   start-anywhere affordance: for ANY stopped or parked run, the Edit Data tab shows the run's
-   current checkpoint state **live** — every accumulated task output, keyed by step, as it exists
-   in SQLite right now. Only descriptor-allowlisted node+field paths are editable; stable identity,
-   original input, idempotency, proof/receipt, and provenance remain read-only (doc 06). An edit is
-   the `injected` mechanism above (parsed against the producing contract's schema—a bad edit is
-   rejected loudly at save time; a good edit becomes a typed patch with field-level operator
-   provenance). Editing checkpoint data in this tab is the supported way
+   start-anywhere affordance: for ANY stopped or parked run, the Context rail's merged Data section
+   shows the run's current checkpoint state **live** — every accumulated task output, keyed by step,
+   as it exists in SQLite right now. Only descriptor-allowlisted node+field paths are editable;
+   stable identity, original input, idempotency, proof/receipt, and provenance remain read-only
+   (doc 06). An edit is the `injected` mechanism above (parsed against the producing contract's
+   schema—a bad edit is rejected loudly at save time; a good edit becomes a typed patch with
+   field-level operator provenance). Editing checkpoint data in this Context section is the supported way
    to correct a run's data mid-way; hand-editing SQLite or JSONL is not.
 4. **Rerun with different input.** A new logical item ⇒ new `(workflow, item_id)` ⇒ **zero
    checkpoints by construction**. `injected` is rejected on a new-input run — the two affordances
@@ -1153,7 +1154,7 @@ storage, SSE. This section keeps only the engine-side semantics that doc 02 owns
 
 ---
 
-## 8. Worked example — person-lookup (the Phase-2 vertical slice)
+## 8. Worked example — person-lookup (the Phase-1 exit vertical slice)
 
 The first step **imports doc 01 §9.1's `ucpath/search-person-org` contract verbatim** (D16 — one
 definition, this doc consumes it): input is the `by-name`/`by-eid` discriminated union, output is

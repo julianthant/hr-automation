@@ -115,8 +115,9 @@ only readable current truth. (Added 2026-07-26 after the 07-23/24 ratifications 
    schema-validated with visible row-level rejection—not guessed into validity. Design doc: `06-data-intake-and-edit-data.md`.
 12. **Edit Data over checkpoints (operator directive 2026-07-17).** Whenever a run is stopped or
    parked for later resume, the data the workflow currently holds (its checkpoint state) is ALWAYS
-   live-visible in the Edit Data tab. Descriptor-allowlisted correction fields are editable and
-   schema-validated on save; identity, input, idempotency, proof, and provenance are read-only.
+   live-visible in the Context rail's merged Data section. Descriptor-allowlisted correction fields
+   are editable in place and schema-validated on save; identity, input, idempotency, proof, and
+   provenance are read-only. There is no separate Data/Edit Data tab or dialog.
 13. **Write-safety — fenced, fail-closed real mutations (gap audit `08` + operator answers 2026-07-18;
    full design: doc `09`).** Every mutation gets completion-verification and double-submit
    protection appropriate to its system, and completion is checked **FAIL-CLOSED**: an unknown or
@@ -186,7 +187,8 @@ only readable current truth. (Added 2026-07-26 after the 07-23/24 ratifications 
     input/output, stable child identity, join/failure/partial/cascade/retry policy, and is persisted
     atomically with the child manifest. Full design: docs 02/03.
 18. **Semantic UI vocabulary + trustworthy evidence.** Important controls, screens, page states,
-    and observations have stable canonical names with aliases and verification evidence. Browser
+    and observations have stable canonical names, non-identity search terms, explicit `supersedes`
+    links, and verification evidence. Browser
     tasks use typed system drivers; raw Playwright pages/locators stay inside driver/session
     infrastructure. Every run projects a receipt of inputs, observations, decisions, actions,
     verification, output, reused checkpoints/proofs, warnings, and uncertainty. Failures produce a
@@ -206,8 +208,8 @@ only readable current truth. (Added 2026-07-26 after the 07-23/24 ratifications 
     **The DSL graph-authoring mode is TRIMMED (2026-07-24, Q5a)** — no second graph-authoring
     pipeline, no codegen, no exclusive source-vs-DSL mode. Workflows are source-authored; the
     editor does presentation + safe closed policy fields, and anything else generates a
-    code-change brief. Reinstate only if a migration questionnaire names a concrete DSL-authored
-    workflow. Full design: doc 12.
+    code-change brief. Reinstatement requires a new explicit operator architecture decision; a
+    migration questionnaire cannot enable it. Full design: doc 12.
 21. **Irreplaceable local state has an operational recovery contract.** SQLite claims,
     checkpoints, dependencies, commands, intents, manifests, and outboxes are not reconstructible
     from JSONL. Startup integrity/migration/disk/WAL checks, rotating online backups, mandatory

@@ -71,7 +71,7 @@ run ─────┬─ task                           (one descriptor step �
 ```ts
 // temp_src/events/types.ts — the wire/at-rest contract. ZERO imports (leaf module).
 
-export type SpanKind = "worker" | "run" | "task";
+export type SpanKind = "worker" | "browser" | "run" | "task";
 
 export type RunOutcome =
   | "done" | "failed" | "cancelled" | "discarded" | "skipped" | "interrupted" | "superseded";
@@ -80,30 +80,41 @@ export type RunOutcome =
 // An optional versioned one-time historical import may decode it (§5); runtime never does.
 
 /**
- * Span identity = (runId, attempt, spanPath)  — D10.
+ * Run/task identity = (runId, attempt, spanPath); process-lifetime worker/browser identity =
+ * (workerId, spanPath). Workers persist across runs, so they never receive a synthetic run id.
  * spanPath uses doc 02's readable path grammar (imported, not redefined):
  *   run span:   pl-104233-9f3e
  *   task span:  pl-104233-9f3e/searching#2        (#N = in-run kernel retry attempt)
  *   worker span: worker/oath-signature/W-88112
- * "Opened and closed exactly once" holds PER (runId, attempt, spanPath): a reassigned or
+ * "Opened and closed exactly once" holds per `(runId, attempt, spanPath)` for run/task spans and
+ * per `(workerId, spanPath)` for worker/browser spans. A reassigned or
  * re-pended execution of the same runId is a NEW attempt, so today's same-runId re-pend
  * (`returnTaskToQueued` → row-lifecycle "reassign", VL-004) is representable without violating
  * the invariant. In-run kernel retries are attempt-suffixed task spans; cross-run retries are a
  * NEW run with `retryOf`; the legacy `-N` display suffix stays display-only formatting.
  */
-export interface SpanRef {
-  runId: string;           // full UUID — SQLite/store join key
-  attempt: number;         // 1-based execution attempt of this run
+interface SpanPathRef {
   spanPath: string;
   parentSpanPath?: string; // task→run, browser→worker
+}
+export interface RunSpanRef extends SpanPathRef {
+  runId: string;           // full UUID — SQLite/store join key
+  attempt: number;         // 1-based execution attempt of this run
   traceId: string;         // frozen `<code>-<HHMMSS>-<runId4>`; root-prefix propagation unchanged
 }
+export interface WorkerSpanRef extends SpanPathRef {
+  workerId: string;
+  runId?: never;
+  attempt?: never;
+  traceId?: never;
+}
+export type SpanRef = RunSpanRef | WorkerSpanRef;
 
 export type SpanEvent =
   | RunQueued | RunClaimed | RunRequeued | SpanStarted | SpanPatched
   | SubjectObserved | GateOpened | GateResolved | SpanEnded;
 
-interface Base extends SpanRef {
+interface Base {
   t: string;            // event type discriminant
   ts: string;           // ISO-8601
   workflow: string;     // descriptor id — partition key
@@ -112,7 +123,7 @@ interface Base extends SpanRef {
 
 /** Run is born at ENQUEUE, not at claim. Carries the validated workflow-constant input or a
  * sensitive-input authority reference—exactly one, proven by `RunQueuedSchema`. */
-interface RunQueuedBase extends Base {
+interface RunQueuedBase extends Base, RunSpanRef {
   t: "run.queued";
   kind: "run";
   itemId: string;                  // stable business key (the completion program's deriveItemId, §4)
@@ -136,34 +147,35 @@ export type RunQueued = RunQueuedBase & (
   | { input?: never; sensitiveInputRef: SensitiveInputRef }
 );
 
-export interface RunClaimed extends Base { t: "run.claimed"; workerId: string; }
-export interface RunRequeued extends Base {
+export interface RunClaimed extends Base, RunSpanRef { t: "run.claimed"; workerId: string; }
+export interface RunRequeued extends Base, RunSpanRef {
   t: "run.requeued";
   cause: "reassign" | "bump" | "recovery";
   nextAttempt: number;             // the attempt the next claim will run as
 }
 
-/** Opens a worker/task span. Tasks reference the descriptor step key — labels live there. */
-export interface SpanStarted extends Base {
-  t: "span.started";
-  kind: SpanKind;                  // "worker" | "task"
-  name: string;                    // task: descriptor step key; worker: instance label
-  system?: string;                 // SystemId (doc 01's closed union) for browser/worker spans
-}
+/** Opens a worker/browser/task span. A run span is born at `run.queued`. */
+export type SpanStarted =
+  | (Base & WorkerSpanRef & {
+      t: "span.started"; kind: "worker" | "browser"; name: string; system?: string;
+    })
+  | (Base & RunSpanRef & {
+      t: "span.started"; kind: "task"; name: string; system?: string;
+    });
 
 /**
  * Durable KV updates on the owning RUN (detail fields, resolved names, record snapshots).
  * Patch keys MUST be declared in the descriptor's `details` list (§3.3) — an undeclared key
  * throws at emit. Identity attrs can never ride a patch (§6 guard 4).
  */
-export interface SpanPatched extends Base {
+export interface SpanPatched extends Base, RunSpanRef {
   t: "span.patched";
   updates: readonly [DetailUpdateWire, ...DetailUpdateWire[]];
 }
 
 /** Fresh subject observation. The raw identifier is retained only in the encrypted/local
  * authority record when required; this stream carries a redacted value + comparison outcome. */
-export interface SubjectObserved extends Base {
+export interface SubjectObserved extends Base, RunSpanRef {
   t: "subject.observed";
   taskId: TaskId;
   expected: SubjectEvidenceWire;
@@ -174,8 +186,8 @@ export interface SubjectObserved extends Base {
 
 /** A run parked on an operator/system decision (D5: gates are run-state, owned by doc 02;
  *  these events are their wire form). Replaces `running/awaiting-approval` + sentinel steps. */
-export interface GateOpened extends Base { t: "gate.opened"; gate: string; }   // gate ids declared in descriptor
-export interface GateResolved extends Base {
+export interface GateOpened extends Base, RunSpanRef { t: "gate.opened"; gate: string; }   // gate ids declared in descriptor
+export interface GateResolved extends Base, RunSpanRef {
   t: "gate.resolved"; gate: string;
   /** Descriptor-validated display/audit key, never the gate's decision payload. */
   resolutionKey: GateResolutionKey;
@@ -184,14 +196,14 @@ export interface GateResolved extends Base {
   resultHash: Sha256;
 }
 
-export interface SpanEnded extends Base {
+export type SpanEnded = Base & SpanRef & {
   t: "span.ended";
   outcome: RunOutcome;             // task spans use "done" | "failed" | "cancelled" | "skipped"
   failureId?: FailureId;           // full structured failure lives in doc 12's failure store
   errorSummary?: string;           // display-safe, legible summary; never the only failure evidence
   verdict?: VerdictKey;            // validated against the descriptor's closed tuple (§3.2)
   evidenceReceiptId?: EvidenceReceiptId;
-}
+};
 ```
 
 The TypeScript declarations above are readable views, **not validation**. `SpanEventSchema`,
@@ -204,10 +216,10 @@ visible quarantine contract; it is not a runtime boundary.
 
 **Notes** (high-volume annotations — log lines, screenshots, per-action records, data points) are a
 parallel stream, not span events. Same `SpanRef` addressing, so a note attributes to its exact task
-attempt:
+attempt or worker/browser lifetime:
 
 ```ts
-export interface Note extends SpanRef {
+export type Note = SpanRef & {
   ts: string; workflow: string; pid: number;
   level: "step" | "success" | "error" | "waiting" | "warn" | "debug";
   message: string;
@@ -215,7 +227,7 @@ export interface Note extends SpanRef {
   /** Per-action attribution: task + semantic UI id + page-state transition, never a raw selector. */
   action?: UiActionEvidenceWire;
   attachment?: ScreenshotAttachmentWire | DataPointAttachmentWire | DiagnosticAttachmentWire;
-}
+};
 ```
 
 Notes are evidence, not control state. A new structured field requires a union/schema extension.
@@ -283,7 +295,7 @@ flowchart LR
   subgraph AUTH["SQLite — AUTHORITY (D14/D51)<br/><i>not rebuildable from JSONL</i>"]
     CL["claims · checkpoints"]
     DEP["dependencies · manifests"]
-    CMD["commands (CAS, actor-stamped)"]
+    CMD["commands (idempotent, version/actor-stamped; scoped CAS)"]
     WI["write_intents (the fence)"]
     OB["ledger + span OUTBOXES"]
   end
@@ -429,7 +441,7 @@ interface QueueSurfaceWire {
                                                      // closed status/count tuples for the mini-badge
   //  members are ordinary flat surfaces in the same queue payload (joined client-side by
   //  parentRunId); each is change-gated individually via queuePatch
-  detailSurfaces: ("logs"|"screenshots"|"review"|"edit-data"|"view-data")[];  // capability-driven tabs
+  detailSurfaces: ("logs"|"review"|"receipt"|"people"|"data")[]; // panel-kind tabs + Context Data section
   links?: { review?: { workflow: string; runId: string } };  // "Open OCR review" jump
   evidence: { receiptId?: EvidenceReceiptId; failureId?: FailureId;
               confidence: "verified" | "partial" | "unknown" };
@@ -530,7 +542,7 @@ export type GateCommandRequest = CommandEnvelope & {
   payload: { result: CanonicalJsonValue };
 };
 export type NotificationCommandRequest = CommandEnvelope & (
-  | { type: "notification-read" | "notification-acknowledge" | "notification-resolve";
+  | { type: "notification-read" | "notification-unread";
       target: { notificationId: NotificationId; expectedVersion: PositiveInt }; payload?: never }
   | { type: "notification-snooze";
       target: { notificationId: NotificationId; expectedVersion: PositiveInt };
@@ -538,7 +550,8 @@ export type NotificationCommandRequest = CommandEnvelope & (
 );
 export type CommandRequest =
   | RunCommandRequest | GateCommandRequest | NotificationCommandRequest | CaptureCommandRequest;
-// CaptureCommandRequest is owned by doc 06 and uses this envelope's idempotency/CAS semantics.
+// CaptureCommandRequest is owned by doc 06 and uses this envelope's idempotency, version-stamp,
+// and transactional current-state validation; it is not a blanket CAS arm.
 
 /** Multi-select never means "loop and hope". Targets and versions are frozen at confirmation. */
 export interface BulkCommandRequest {
@@ -582,23 +595,26 @@ Command semantics are binding:
 | Enqueue | Validate raw input once, derive stable item id, then apply descriptor policy in one transaction. `reject-active` returns the existing active run; `supersede-active` terminalizes the exact active generation and creates the new run atomically; `allow-parallel` still requires a distinct stable item/variant key. An authority read error aborts—never “continue and enqueue anyway.” |
 | Retry | Creates a new run linked by `retryOf`, reuses immutable parsed input/config, validates checkpoints/freshness, and preserves the logical item. A parked unknown write uses resolution actions, never generic retry. |
 | Cancel | Resolves the full dependency tree from authoritative SQLite, applies every edge's doc 02 cancel policy, and commits state transitions together. If the tree is unavailable/inconsistent, no target is cancelled. Visible queue roots are never an authority fallback. |
-| Bump | Changes priority/claim order with CAS; it does not fabricate a requeue or mutate business input. Running work returns a typed rejection unless the scheduler explicitly supports cooperative yield. |
+| Bump | Changes priority/claim order through an idempotent transactional command; it does not fabricate a requeue or mutate business input. Running work returns a typed rejection unless the scheduler explicitly supports cooperative yield. Version drift alone does not conflict. |
 | Hide / Unhide | A reversible presentation tombstone only. It changes no run outcome, task, dependency, checkpoint, intent, or evidence. The UI label is **Hide**, never Delete. |
 | Purge | Not a row action. `cli purge-run <exact-run-id> --backup <path>` is an offline maintenance command requiring a fresh verified backup and refusing any active/dependency/write-authority reference. It writes a purge receipt. |
 | Edit checkpoint | Uses doc 06's field-level patch/provenance model, creates a new run/attempt as specified there, and never mutates original input or a completed proof. |
 
-Every command is inserted durably before application and handled transactionally with the target's
-monotonic `version`. Re-delivery returns `already-applied`; stale projections return `conflict` and
-force refresh. The command audit records requester (`local-operator` for now), source surface,
-reason, before/after versions, affected dependency ids, and outcome. API routes are thin schema
-parsers over this service—there are no workflow-specific mutation endpoints except domain gates
-whose handlers themselves issue commands.
+Every command is inserted durably before application and records the target's monotonic `version`.
+Re-delivery returns `already-applied`. CAS is enforced only for real race families: cancel-tree,
+edit-vs-resume, gate resolution, and write recovery; a stale projection conflicts and forces refresh
+only for those arms. Other arms retain the version seam for audit/future concurrency but validate
+current authority without rejecting solely because the observed version changed. The command audit
+records requester (`local-operator` for now), source surface, reason, before/after versions, affected
+dependency ids, and outcome. API routes are thin schema parsers over this service—there are no
+workflow-specific mutation endpoints except domain gates whose handlers themselves issue commands.
 
 Bulk commands first resolve the union of all authoritative dependency targets. `all-or-none` locks,
-validates every expected version/policy, and applies one transaction or none. `best-effort` writes a
-child command/result per requested target and returns the complete applied/conflict/rejected vector;
-the UI may never collapse a partial result into “Done.” Bulk cancel defaults to `all-or-none`; bulk
-hide defaults to `best-effort`. There is no client loop whose last response overwrites earlier errors.
+validates every policy plus expected versions for CAS-enforced arms, and applies one transaction or
+none. `best-effort` writes a child command/result per requested target and returns the complete
+applied/conflict/rejected vector; the UI may never collapse a partial result into “Done.” Bulk cancel
+defaults to `all-or-none`; bulk hide defaults to `best-effort`. There is no client loop whose last
+response overwrites earlier errors.
 
 ### 2.5 Non-rebuildable SQLite recovery contract
 
@@ -649,16 +665,15 @@ are excluded from ordinary tracker cleanup and covered by disk-space warnings.
 
 Desktop notifications are delivery conveniences, not the record. A `notifications` authority
 table stores a strict event with `notificationId`, dedupe key, severity, run/workflow/failure refs,
-created time, message template+arguments, state (`unread|read|acknowledged|snoozed|resolved`), and
-delivery attempts. Triggers are closed and base-owned: run failure, subject mismatch, open operator
-gate, unknown write outcome, quarantined legacy row, storage degradation, stalled lease/outbox, and
-failed backup. Repeated identical triggers update count/lastSeen instead of spamming.
+created time, message template+arguments, read state (`unread|read`), and optional snooze expiry.
+Triggers are closed and base-owned: run failure, subject mismatch, open operator gate, unknown write
+outcome, storage degradation, stalled lease/outbox, and failed backup. Repeated identical triggers
+update count/lastSeen instead of spamming.
 
 The dashboard inbox and per-run timeline always render durable state. OS notification delivery is
-best-effort with retry/backoff and a recorded failure; a failed toast never loses the inbox item.
-Acknowledging is distinct from resolving; snooze has an expiry; a resolved underlying condition
-auto-resolves only notification types whose schema says so. Notification text uses redacted
-arguments and links to the evidence/failure/run—not raw secrets or captured form contents.
+best-effort; a failed toast never loses the unread inbox item. Snooze suppresses delivery until its
+expiry without changing read state. Notification text uses redacted arguments and links to the
+evidence/failure/run—not raw secrets or captured form contents.
 
 ```ts
 export interface NotificationWire {
@@ -666,7 +681,7 @@ export interface NotificationWire {
   dedupeKey: NotificationDedupeKey;
   trigger: NotificationTrigger;
   severity: "info" | "warning" | "error" | "critical";
-  state: "unread" | "read" | "acknowledged" | "snoozed" | "resolved";
+  state: "unread" | "read";
   title: string;
   message: string;
   count: PositiveInt;
@@ -1114,9 +1129,9 @@ its own milestones with no parity deadline coupling.
 | 14 | The `ledger/` dir gets pruned, or `write_intents` treated as a rebuildable projection (D21/D79/D86) | `.tracker-rebuild/ledger/` is exempt from cleanup; `write_intents` remains system-of-record; ordered actor-attributed ledger projection reconciles from atomic outboxes. Notes/spans are both 30d. Hash-chain/tail-anchor is explicitly deferred until multi-user |
 | 15 | Cancel/deletion targets fall back to whatever roots the caller can currently see | command integration tests make SQLite authority unavailable/inconsistent and assert zero transitions; source scan bans caller-supplied root fallback in target resolution |
 | 16 | Two active runs appear because active-run lookup failed and enqueue continued | transactional enqueue-policy tests inject lookup/constraint failures; every result is reject/no-op/one new generation, never two active generations |
-| 17 | A dashboard retry races a newer state and mutates the wrong attempt | every action carries `expectedVersion`; concurrency tests prove one applies and the loser gets a typed conflict |
+| 17 | A dashboard retry races a newer state and mutates the wrong attempt | every action carries the observed version for audit; the idempotent command resolves the stable run from current authority and transactionally rejects an inapplicable state rather than mutating a caller-selected attempt. Version drift alone is not a Retry conflict |
 | 18 | `state.db` corrupts and the app silently starts an empty authority store | boot corruption fixture must enter read-only degraded mode; restore-drill test proves a checksummed backup restores commands, dependencies, checkpoints, and write intents before claims resume |
-| 19 | OS notification fails, so a critical unknown write is invisible | notification trigger and durable inbox commit in the authority transaction; delivery failure is recorded/retried and the unread inbox assertion remains true |
+| 19 | OS notification fails, so a critical unknown write is invisible | notification trigger and durable inbox commit in the authority transaction; delivery failure never clears or removes the unread inbox item, and no per-attempt delivery state is required |
 
 ---
 
@@ -1469,8 +1484,8 @@ Ratifies the tab model **as built in the rebuild demo**:
   instruction** (*"we also need the edit data and data tab to be together so i can have a feel of
   how its like to edit the data"*); the rail section **widens** while editing
   (`--ds-w-context-rail-wide`, 520px) instead of opening a modal. `DemoTab` and `tabsFor` drop
-  `"data"` entirely, so no dead tab id is reachable, and `detailSurfaces` re-derives from `tabsFor`
-  at projection.
+  `"data"` entirely, so no dead tab id is reachable. The panel tab list derives from `tabsFor`,
+  while `detailSurfaces` separately carries the `data` capability for the Context rail section.
 
 **(c) is preserved byte-for-byte by (d), through both amendments.** Reads stay editable, writes
 stay shown and never editable, staged writes still render as staged, unconfirmed still says

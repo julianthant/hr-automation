@@ -838,7 +838,7 @@ bind stable commit input + key="10694136|termination|08/01/2026"
                            proof:{transactionNumber:"T002173999"}, operator, instance:"prod",
                            dryRun:false, proofSource:"normal-output", bindingProofDigest,
                            fencedAt, confirmedAt:clock.now() }
-           // ledger projector assigns seq/prevHash only after claiming this outbox
+           // ledger projector assigns ordered sequence + actor metadata only after claiming this outbox
          + span write.committed + span.ended(done)
 ```
 

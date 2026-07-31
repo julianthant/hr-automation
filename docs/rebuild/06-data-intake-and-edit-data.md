@@ -21,7 +21,7 @@ evidence make partial/excluded rows impossible to mistake for silently completed
 | **Canonical field definitions** — the field vocabulary + zod schemas live in `temp_src/domain/` (defined THERE). This doc owns the *mapping/intake semantics onto* those fields, not the vocabulary itself |
 | Task contract/impl split (`defineTaskContract`/`defineTask`), service stores (D4), `freshness` field, error taxonomy → **doc 01** |
 | The **injected-data mechanism** (`RunEnvelope.injected`, §5.6 #3), checkpoint store + resume scope (D9), freshness walk (D8), the "Live Edit Data over checkpoints" subsection → **doc 02** |
-| SSE wire shapes (`detailSurfaces` incl. `edit-data`), `span.patched`, notes stream, SQLite projection role (D14) → **doc 03** |
+| SSE wire shapes (`detailSurfaces` incl. the Context-rail `data` section), `span.patched`, notes stream, SQLite projection role (D14) → **doc 03** |
 | Standard CAS command path for Edit Data → **doc 03** |
 | Scenario manifests, evidence receipts, run explanation, knowledge/fix records → **doc 12** |
 
@@ -89,10 +89,11 @@ export interface CanonicalField<S extends z.ZodType = z.ZodType> {
 }
 ```
 
-`eid` reuses `src/domain/identity/eid.ts`: `coerce` runs `normalizeEid` (strip non-digits) then the
-schema is `z.string().regex(/^10\d{6}$/)` (doc 01 §9.1 `SearchPersonOrg` + `isUcpathEmployeeId`).
-`firstName`/`lastName`/`fullName` reuse `ocr-person-name.ts` shapes (title-cased "Last, First").
-`effectiveDate`/date fields coerce `MM/DD/YYYY` via the ported `dates.ts` helpers.
+`eid` ports the canonical EID schema and normalization behavior into `temp_src` without importing
+legacy code: `coerce` runs the native `normalizeEid` (strip non-digits), then the schema is
+`z.string().regex(/^10\d{6}$/)` (doc 01 §9.1 `SearchPersonOrg` + `isUcpathEmployeeId`).
+`firstName`/`lastName`/`fullName` port the canonical `ocr-person-name.ts` shapes (title-cased
+"Last, First"). `effectiveDate`/date fields coerce `MM/DD/YYYY` via the ported `dates.ts` helpers.
 
 **The load-bearing invariant—each mapped field uses the target field's exact schema.** A
 spreadsheet-capable workflow declares an `intake` projection naming which input fields are mappable;
@@ -601,12 +602,14 @@ export type CaptureCommandRequest = CommandEnvelope & (
 );
 ```
 
-- **Every mutation is versioned and idempotent.** Upload/replace/reorder/delete/finalize/discard
-  takes a command id plus expected session version. Duplicate phone retries return the prior result;
-  stale ordering/finalize requests conflict and reload. These are doc 03 D67
-  `CaptureCommandRequest` arms, not route-local mutations. Only `finalized|discarded|expired` are
-  terminal and never reopen; `failed` is a durable recoverable state whose Retry Finalize command
-  creates a new finalization generation/outbox under CAS without changing photo identity/order.
+- **Every mutation is version-stamped and idempotent.** Upload/replace/reorder/delete/finalize/
+  discard takes a command id plus the observed session version for audit. Duplicate phone retries
+  return the prior result; a serialized transaction validates the requested refs and state against
+  current authority, rejecting an inapplicable command without treating version drift alone as a
+  CAS conflict. These are doc 03 D67 `CaptureCommandRequest` arms, not route-local mutations. Only
+  `finalized|discarded|expired` are terminal and never reopen; `failed` is a durable recoverable
+  state whose Retry Finalize command idempotently creates the next stable finalization generation/
+  outbox without changing photo identity/order.
 - **Photos are immutable refs.** HEIC conversion happens before acceptance; the server validates
   decoded image type/dimensions/size, writes through the content-addressed artifact writer, and
   records only refs/order. Replace changes the ref; it never overwrites bytes. Empty, corrupt,
@@ -630,11 +633,12 @@ export type CaptureCommandRequest = CommandEnvelope & (
   token-scoped manifest/upload/replace/reorder/delete/finalize/status routes. Start/list/discard,
   queue, files, settings, evidence, and commands remain loopback-only (doc 12 §7).
 
-Mandatory scenarios cover restart between every state, duplicate/reordered phone requests, expired
-token, HEIC conversion, corrupt/empty image, bundle failure/retry, crash before/after artifact
-publish and before/after enqueue commit, wrong form/workflow binding, and attempts to reach a
-non-capture route through the phone origin. The dashboard shows session state, photo count/order,
-bundle digest/page count, handoff run, expiry, and structured failure.
+Mandatory scenarios cover restart with an open session and restart mid-finalize, plus duplicate/
+reordered phone requests, expired token, HEIC conversion, corrupt/empty image, bundle failure/retry,
+wrong form/workflow binding, and attempts to reach a non-capture route through the phone origin.
+The durable finalize-outbox fixture covers the publish/enqueue boundary without a restart-at-every-
+state matrix. The dashboard shows session state, photo count/order, bundle digest/page count,
+handoff run, expiry, and structured failure.
 
 ---
 
@@ -668,7 +672,7 @@ field-level provenance `{ source, observedAt?, correctedAt?, supersedes? }`.
 | **Stopped / failed** (terminal but resumable — `single`, real `operation-member`, D9) | Same explicit field policy; an accepted edit becomes `injected` on retry/resume. |
 | **Running** (actively claimed, a live task owns a page) | **READ-ONLY** — the run's checkpoints are being written by the live task; editing not-yet-written state is meaningless and racy. Show live checkpoint state read-only. |
 | **Terminal `done`** | **Read-only.** Correcting-and-rerunning a done item is the *separate* new-input path (§6.5), not Edit Data. |
-| **Display-only rows** (operation coordinators, i9 display-only members) & **OCR per-page internals** | **No Edit-Data tab** — D9 excludes them (nothing to resume). |
+| **Display-only rows** (operation coordinators, i9 display-only members) & **OCR per-page internals** | **No checkpoint Data section in Context** — D9 excludes them (nothing to resume). |
 
 ### 6.3 Editing = typed field patches; editing is not freshness
 
@@ -716,12 +720,14 @@ edit onto a run that has moved on. (Editing a *running* task's checkpoints is fo
 
 ### 6.5 Edit Data before first start — the intake grid is a SEPARATE surface (shared core)
 
-**Decision: the pre-first-start intake correction grid (§5) and the checkpoint Edit-Data tab are
-SEPARATE surfaces that share ONE pure per-cell coercion/validation core.** Justification:
+**Decision: the pre-first-start intake correction grid (§5) and checkpoint correction in the
+Context rail's Data section are SEPARATE surfaces that share ONE pure per-cell coercion/validation
+core.** Justification:
 
 - They **parse against different schemas**: the intake grid parses each row against the *workflow
-  input* schema (pre-run); Edit Data parses each field against the *producing contract's output*
-  schema (mid-run). Same UX ("loud per-cell error naming row/column/value"), different contract.
+  input* schema (pre-run); Context Data correction parses each field against the *producing
+  contract's output* schema (mid-run). Same UX ("loud per-cell error naming row/column/value"),
+  different contract.
 - They have **different lifecycles + endpoints**: doc 02 §5.6 #4 already mandates that new-input and
   injected are *separate endpoints* — "`injected` is rejected on a new-input run" so changed input
   can never silently ride stale context. Merging the two grids into one would blur exactly that
@@ -729,9 +735,9 @@ SEPARATE surfaces that share ONE pure per-cell coercion/validation core.** Justi
 - Sharing the pure coercion/validation module (the successor of `validateEditField` +
   `mmddyyyyToYmd`) keeps the two surfaces consistent without coupling their contracts.
 
-So: **intake grid** = correct cells before N inputs fan out (§5); **Edit-Data tab** = correct a
-parked/stopped run's checkpoints before resume (§6.1–6.4). One validation core, two surfaces, two
-endpoints.
+So: **intake grid** = correct cells before N inputs fan out (§5); **Context Data correction** =
+correct a parked/stopped run's checkpoints before resume (§6.1–6.4). One validation core, two
+surfaces, two endpoints. There is no separate Data/Edit Data tab or dialog.
 
 ---
 

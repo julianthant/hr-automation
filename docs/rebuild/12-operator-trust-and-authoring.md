@@ -161,8 +161,8 @@ No rebuilt module imports legacy selector code, and old source remains preserved
 
 ### 1.4 Tasks do not receive raw `Page`
 
-Raw Playwright access is confined to `stores/<system>/driver/**`, session-pool infrastructure, and
-the registry interpreter. Browser task contexts receive a typed driver:
+Raw Playwright access is confined to `stores/<system>/driver/**`, worker-owned session
+infrastructure, and the registry interpreter. Browser task contexts receive a typed driver:
 
 ```ts
 export interface SystemDriver<S extends BrowserSystemId> {
@@ -286,8 +286,8 @@ export interface RunEvidenceReceipt {
 }
 ```
 
-“Done” in the UI is displayed as **Verified done** only when the descriptor's declared completion
-criteria all have evidence and `confidence === "verified"`. `done-with-warnings` is legal only for
+The `verified-done` result key is displayed as **Done** only when the descriptor's declared
+completion criteria all have evidence and `confidence === "verified"`. `done-with-warnings` is legal only for
 declared, non-load-bearing optional observations whose absence cannot change a transaction or core
 result. Unknown/ambiguous mandatory facts force `partial`/`failed`/parked state and can never be
 hidden by a green status. A transaction's expected/observed subject and proof source are visible
@@ -601,7 +601,7 @@ They survive dashboard reloads and dedupe by stable fingerprint.
 
 Notify only when the operator would need to know or act after missing a toast:
 
-- run failed/verified done/done with warnings/cancelled/partial;
+- run failed/Done (`verified-done` key)/Done with warnings/cancelled/partial;
 - operator gate opened or resolution failed;
 - write recovery needs proof/absence confirmation;
 - subject mismatch;
@@ -611,7 +611,7 @@ Notify only when the operator would need to know or act after missing a toast:
 
 Transient acknowledgements (“copied”, “saved draft”, “retry requested”) remain ephemeral UI
 messages. Every durable notification links to a run/failure/gate/command/storage incident and offers
-only actions currently authorized by the server projection. Acknowledging/snoozing affects the
+only actions currently authorized by the server projection. Reading/snoozing affects the
 notification, never the underlying run or failure.
 
 ---
@@ -694,7 +694,7 @@ what the **base** implements before workflow-specific leaf behavior is migrated:
     tail-anchor tamper evidence is deferred until multi-user.
 19. Content-addressed immutable artifacts and idempotent outbox-based mutable projections.
 20. Append-only span/note streams and server-side queue/timeline/session projections.
-21. Durable typed notifications with acknowledgement/snooze/resolution lifecycle.
+21. Durable actor-keyed typed notifications with read/unread state and optional snooze.
 22. Structured failure records and automatic redacted diagnostic bundles.
 23. Per-run evidence receipts showing inputs, observations, decisions, actions, verification,
     output, reuse, and uncertainty.
