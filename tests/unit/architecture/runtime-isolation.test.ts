@@ -174,6 +174,7 @@ describe("D88 runtime isolation", () => {
         ["temp_src/core/static.ts", "import \"../../src/cli.js\";\n"],
         ["temp_src/core/bare.ts", "import \"src/cli.js\";\n"],
         ["temp_src/core/dynamic.ts", "const target = \"../../src/cli.js\"; export const load = () => import(target);\n"],
+        ["temp_src/core/nested-template.ts", "export function load() { const root = \"../../src\"; const target = `${root}/cli.js`; return import(target); }\n"],
         ["temp_src/core/required.ts", "const target = \"../../src/cli.js\"; export const load = () => require(target);\n"],
         ["src/rebuild-edge.ts", "export const load = () => import(\"../temp_src/cli.js\");\n"],
       ] as const) {
@@ -184,12 +185,36 @@ describe("D88 runtime isolation", () => {
     });
   });
 
+  it("rejects nested lexical dynamic imports and renamed filesystem bindings", () => {
+    withActiveFixture((root, contract, scripts) => {
+      write(
+        root,
+        "temp_src/core/nested-dynamic.ts",
+        "function load() { const target = \"../../src/cli.js\"; return import(target); }\nexport { load };\n",
+      );
+      write(
+        root,
+        "temp_src/core/renamed-fs.ts",
+        "import { readFileSync as load } from \"node:fs\";\nload(\".tracker/state.json\");\n",
+      );
+      const violations = auditRuntimeIsolation(root, contract, scripts);
+      assert.ok(violations.some(({ bridgeClass, file }) =>
+        bridgeClass === "cross-tree-module-edge" && file.endsWith("nested-dynamic.ts")));
+      assert.ok(violations.some(({ bridgeClass, file }) =>
+        bridgeClass === "cross-tree-state-access" && file.endsWith("renamed-fs.ts")));
+    });
+  });
+
   it("detects direct invocation, filesystem/state access, runtime calls, proxy/forward/remount, lift, and shared sessions", () => {
     withActiveFixture((root, contract, scripts) => {
       const cases: readonly [string, string, ForbiddenBridgeClass][] = [
         ["process.ts", "spawn(\"node\", [\"src/cli.ts\"]);\n", "cross-tree-process-invocation"],
         ["process-env.ts", "spawn(process.env.LEGACY_COMMAND);\n", "cross-tree-process-invocation"],
         ["files.ts", "readFileSync(\"src/tracker/state.ts\");\n", "cross-tree-filesystem-access"],
+        ["files-namespace-destructure.ts", "import * as fs from \"node:fs\"; const { readFileSync: load } = fs; load(\".tracker/state.json\");\n", "cross-tree-state-access"],
+        ["files-require-destructure.ts", "const { readFileSync: load } = require(\"node:fs\"); load(\".tracker/state.json\");\n", "cross-tree-state-access"],
+        ["files-nested-alias.ts", "import { readFileSync } from \"node:fs\"; function read() { const load = readFileSync; load(\".tracker/state.json\"); }\n", "cross-tree-state-access"],
+        ["process-import-alias.ts", "import { spawn as runLegacy } from \"node:child_process\"; runLegacy(\"node\", [\"src/cli.ts\"]);\n", "cross-tree-process-invocation"],
         ["state.ts", "readFileSync(resolve(process.cwd(), \".tracker\"));\n", "cross-tree-state-access"],
         ["state-env.ts", "readFileSync(process.env.LEGACY_TRACKER_ROOT);\n", "cross-tree-state-access"],
         ["runtime.ts", "fetch(\"http://127.0.0.1:3838/api/entries\");\n", "cross-tree-runtime-bridge"],
@@ -217,7 +242,7 @@ describe("D88 runtime isolation", () => {
       write(
         root,
         "temp_src/core/declarations-only.ts",
-        "// fetch('http://127.0.0.1:3838'); liftLegacyRows();\nconst legacyState = '.tracker';\nfunction liftLegacyRows(): void {}\n",
+        "import { readFileSync as load } from 'node:fs';\n// load('.tracker/state.json'); fetch('http://127.0.0.1:3838'); liftLegacyRows();\nconst legacyState = '.tracker';\nfunction liftLegacyRows(): void {}\n",
       );
       assert.deepEqual(auditRuntimeIsolation(root, contract, scripts), []);
     });
