@@ -87,8 +87,8 @@ const ALLOWLIST: CountAllowlist = {
     reason: "Kuali form-render settle waits; no consistent processing indicator for these steps.",
   },
   "src/systems/new-kronos/navigate.ts": {
-    count: 30,
-    reason: "New Kronos (WFD) is an Angular app with no consistent readiness signal across its many dropdown/grid renders — extensively documented in src/systems/new-kronos/LESSONS.md and CLAUDE.md (2026-06-24 lesson: a removed fixed 2s sleep here already caused a real production miss). Net +1 on 2026-07-30 (29→30): added two POLL INTERVALS inside bounded condition-waits (waitForCalendarHeaderChange, rangeDateSettlesTo) and deleted the flat post-month-step sleep they replaced — the date-range picker now waits on the header moving / the field settling, not on a fixed delay.",
+    count: 29,
+    reason: "New Kronos (WFD) is an Angular app with no consistent readiness signal across its many dropdown/grid renders — extensively documented in src/systems/new-kronos/LESSONS.md and CLAUDE.md (2026-06-24 lesson: a removed fixed 2s sleep here already caused a real production miss). Net -1 on 2026-07-31 (30→29): `selectEmployeeResult` now POLLS for the result checkbox and verifies the selection registered (Go To enabled) instead of probing count() once and falling through to an unverified row click — that deleted two flat 1s post-click settle sleeps and added one 250ms poll interval, and `clickGoToTimecard`'s hand-rolled enabled-button loop was folded into the shared `resolveEnabledGoToButton` helper (one 500ms poll interval instead of two). Every remaining sleep here is either a bounded condition-wait's poll cadence or a documented settle with no DOM signal.",
   },
   "src/systems/old-kronos/navigate.ts": {
     count: 29,

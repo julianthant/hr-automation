@@ -292,6 +292,34 @@ export async function searchEmployee(
 /**
  * Click the checkbox on the first employee search result to select them.
  */
+/**
+ * Poll for the Employee Search panel's "Go To" button to be visible AND
+ * ENABLED, returning the resolved locator (or `null` on timeout).
+ *
+ * The button is `ng-disabled="!quickFind.slatOptions.selectedslats.length"`, so
+ * ENABLED is the only reliable proof that an employee selection actually
+ * registered in Angular — a click landing on the right element is NOT proof.
+ * Go To may render in the search frame OR top-level, so both are polled.
+ */
+async function resolveEnabledGoToButton(page: Page, timeoutMs: number): Promise<Locator | null> {
+  const candidates = [
+    goToMenu.goToButtonInFrame(searchFrame(page)).first(),
+    goToMenu.goToButtonOnPage(page).first(),
+  ];
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const loc of candidates) {
+      try {
+        if ((await loc.isVisible()) && (await loc.isEnabled())) return loc;
+      } catch {
+        // Not present in this context — try the next candidate.
+      }
+    }
+    await page.waitForTimeout(500);
+  }
+  return null;
+}
+
 export async function selectEmployeeResult(page: Page): Promise<boolean> {
   log.step("[New Kronos] Selecting employee from search results...");
 
@@ -301,32 +329,54 @@ export async function selectEmployeeResult(page: Page): Promise<boolean> {
   // directly in BOTH contexts. Checking the "Select Item" checkbox is what
   // registers the slat selection that ENABLES the Go To button. (2026-06-18: the
   // daemon resolved to the wrong context and left Selected[0] / Go To disabled.)
+  //
+  // The checkbox renders ASYNCHRONOUSLY after the search returns, so POLL for it
+  // rather than probing `count()` once — a single probe raced the render and, on
+  // a miss, fell straight through to the row-click fallback below (2026-07-31,
+  // live: EID 10852574 logged "Employee row clicked", Go To stayed disabled, and
+  // the whole timecard read was lost). Same class as the 2026-06-24 Go To
+  // dropdown race: condition-based waiting, not a one-shot check.
   const contexts: SearchRoot[] = [searchFrame(page), page];
-  for (const root of contexts) {
-    const checkbox = searchSelectors.firstResultCheckbox(root);
-    try {
-      if ((await checkbox.count()) > 0) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    for (const root of contexts) {
+      const checkbox = searchSelectors.firstResultCheckbox(root);
+      try {
+        if ((await checkbox.count()) === 0) continue;
         await checkbox.check({ timeout: 5_000 });
-        await page.waitForTimeout(1_000);
-        log.step("[New Kronos] Employee checkbox checked");
-        return true;
+        // VERIFY the selection registered — see `resolveEnabledGoToButton`.
+        if (await resolveEnabledGoToButton(page, 3_000)) {
+          log.step("[New Kronos] Employee checkbox checked");
+          return true;
+        }
+        log.warn("[New Kronos] Checkbox checked but no slat registered (Go To still disabled) — retrying");
+      } catch {
+        log.warn("[New Kronos] Result checkbox present but not checkable in this context — trying the next");
       }
-    } catch {
-      log.warn("[New Kronos] Result checkbox present but not checkable in this context — trying the next");
     }
+    await page.waitForTimeout(250);
   }
 
-  // Fallback: click the result row (the `menuitemradio`) directly, in either context.
+  // Fallback: click the result row (the `menuitemradio`) directly, in either
+  // context. FAIL LOUD (root CLAUDE.md): a row click is NOT self-evidently a
+  // selection, so it must be verified exactly like the checkbox path. Returning
+  // true here unverified is what turned a recoverable selection miss into a
+  // silently-lost timecard read and a Kuali-date fallback.
   for (const root of contexts) {
     const resultRow = searchSelectors.firstResultRow(root);
     if (await clickIfPresent(resultRow, { timeout: 3_000, label: "new kronos search result row" })) {
-      await page.waitForTimeout(1_000);
-      log.step("[New Kronos] Employee row clicked");
-      return true;
+      if (await resolveEnabledGoToButton(page, 3_000)) {
+        log.step("[New Kronos] Employee row clicked");
+        return true;
+      }
+      log.warn("[New Kronos] Result row clicked but no slat registered (Go To still disabled)");
     }
   }
 
-  log.error("[New Kronos] Could not select employee from results");
+  log.error(
+    "[New Kronos] Could not select employee from results — Go To never became enabled, "
+    + "so no slat is selected and the timecard cannot be opened",
+  );
   return false;
 }
 
@@ -395,30 +445,12 @@ async function waitForTimecardEmployee(
 export async function clickGoToTimecard(page: Page, eid: string): Promise<boolean> {
   log.step("[New Kronos] Clicking Go To → Timecard...");
 
-  const frame = searchFrame(page);
-  // Go To may render in the search frame OR top-level. The button is
-  // `ng-disabled` until an employee is selected, so clicking it while disabled
-  // just times out — poll for whichever context's button is visible AND ENABLED
-  // (up to 15s for the Angular selection from selectEmployeeResult to land).
-  const candidates = [
-    goToMenu.goToButtonInFrame(frame).first(),
-    goToMenu.goToButtonOnPage(page).first(),
-  ];
-  let gotoButton: Locator | null = null;
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline && !gotoButton) {
-    for (const loc of candidates) {
-      try {
-        if ((await loc.isVisible()) && (await loc.isEnabled())) {
-          gotoButton = loc;
-          break;
-        }
-      } catch {
-        // Not present in this context — try the next candidate.
-      }
-    }
-    if (!gotoButton) await page.waitForTimeout(500);
-  }
+  // The button is `ng-disabled` until an employee is selected, so clicking it
+  // while disabled just times out — wait for visible AND ENABLED (up to 15s for
+  // the Angular selection from selectEmployeeResult to land). `selectEmployeeResult`
+  // now verifies the same condition before returning, so reaching this timeout
+  // means the selection was LOST between the two calls, not never made.
+  const gotoButton = await resolveEnabledGoToButton(page, 15_000);
 
   if (!gotoButton) {
     log.error(
