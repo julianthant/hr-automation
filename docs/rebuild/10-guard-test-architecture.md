@@ -402,13 +402,21 @@ Four ratified decisions are worthless as prose. Each gets a guard, and each guar
   possible-submit being buried; (3) archiving never touches the write ledger.
 
 - **`runtime-isolation.test.ts` + `legacy-change-accounting.test.ts` (D88/D90 — charter/doc 03).**
-  TypeScript-AST scans consume the closed `forbiddenBridgeClasses` registry, carry lexical
-  constant/import-alias environments through nested executable scopes, and ban static/dynamic
-  imports, `require`, process invocation, filesystem/state/profile access, runtime HTTP calls,
-  proxy/forward/remount, and continuous lift calls across `src`↔`temp_src`. Active configuration
-  fixtures require exact commands and an executable `defineRuntimeIsolation` binding for the
-  state/artifact roots, ports, process lock, and browser profile/session; every named production
-  composition root must import and pass that binding to a call (an unused declaration is not proof).
+  A finite TypeScript-AST normal form consumes the closed `forbiddenBridgeClasses` registry; it is
+  intentionally not described as whole-language runtime soundness. Lexical environments prove
+  only supported literal/`const` expressions and exact properties of the current side's runtime
+  binding. Every direct dynamic import/`require`, process, filesystem/state/profile, runtime HTTP,
+  or proxy/forward/remount sink must resolve its load-bearing target: an unresolved/computed target
+  fails in that sink's existing owning bridge class instead of becoming a non-match. Dangerous
+  named or namespace capabilities may occur only as direct audited callees; assignment/reassignment,
+  `.bind`/`.call`/`.apply`, object/array/class wrapping, return/callback argument, computed member
+  selection, loader factory/alias, and re-export are capability escapes. Comments, declarations,
+  and type-only imports/exports do not count as runtime use. Active configuration fixtures require
+  exact commands and an exported direct-`const` `defineRuntimeIsolation` call for the state/artifact
+  roots, ports, process lock, and browser profile/session. The manifest pins the config factory and
+  every composition factory by module + export and declares the exact binding argument path (for
+  example `0.isolation`); each composition root must use unshadowed named imports in one direct
+  top-level call. Identifier mention or a call hidden in an uninvoked function is not proof.
   The legacy
   tree remains editable: every touched legacy production/test path must map to affected capability
   ids and a rebuild recheck/disposition; deletion fails through initial cutover. The diagnostic

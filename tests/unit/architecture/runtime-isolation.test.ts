@@ -35,8 +35,13 @@ function seedValidActiveRuntime(root: string, contract: RuntimeIsolationContract
   write(root, "src/cli.ts", "export const legacy = true;\n");
   write(
     root,
+    contract.rebuild.runtimeConfig?.factoryModule ?? "missing-factory",
+    "export function defineRuntimeIsolation<T>(value: T): T { return value; }\n",
+  );
+  write(
+    root,
     contract.rebuild.runtimeConfig?.module ?? "missing",
-    `function defineRuntimeIsolation<T>(value: T): T { return value; }
+    `import { defineRuntimeIsolation } from "./define-runtime-isolation.js";
 export const rebuildRuntimeIsolation = defineRuntimeIsolation({
   stateRoot: ".tracker-rebuild",
   artifactRoot: ".tracker-rebuild/artifacts",
@@ -50,9 +55,16 @@ export const rebuildRuntimeIsolation = defineRuntimeIsolation({
   );
   write(
     root,
+    "temp_src/core/runtime-composition.ts",
+    `export function startRebuildRuntime(_value: unknown): void {}
+export function composeRebuildRuntime(_value: unknown): void {}
+`,
+  );
+  write(
+    root,
     "temp_src/cli.ts",
     `import { rebuildRuntimeIsolation } from "./config/runtime-isolation.js";
-declare function startRebuildRuntime(value: unknown): void;
+import { startRebuildRuntime } from "./core/runtime-composition.js";
 startRebuildRuntime({ isolation: rebuildRuntimeIsolation });
 `,
   );
@@ -60,7 +72,7 @@ startRebuildRuntime({ isolation: rebuildRuntimeIsolation });
     root,
     "temp_src/core/workflow-registry.ts",
     `import { rebuildRuntimeIsolation } from "../config/runtime-isolation.js";
-declare function composeRebuildRuntime(value: unknown): void;
+import { composeRebuildRuntime } from "./runtime-composition.js";
 composeRebuildRuntime({ isolation: rebuildRuntimeIsolation });
 `,
   );
@@ -121,11 +133,25 @@ describe("D88 runtime isolation", () => {
       runtimeConfig: {
         module: "temp_src/config/runtime-isolation.ts",
         factory: "defineRuntimeIsolation",
+        factoryModule: "temp_src/config/define-runtime-isolation.ts",
+        factoryExport: "defineRuntimeIsolation",
         exportName: "rebuildRuntimeIsolation",
       },
       compositionRoots: [
-        { path: "temp_src/cli.ts", factory: "startRebuildRuntime" },
-        { path: "temp_src/core/workflow-registry.ts", factory: "composeRebuildRuntime" },
+        {
+          path: "temp_src/cli.ts",
+          factory: "startRebuildRuntime",
+          factoryModule: "temp_src/core/runtime-composition.ts",
+          factoryExport: "startRebuildRuntime",
+          bindingPath: "0.isolation",
+        },
+        {
+          path: "temp_src/core/workflow-registry.ts",
+          factory: "composeRebuildRuntime",
+          factoryModule: "temp_src/core/runtime-composition.ts",
+          factoryExport: "composeRebuildRuntime",
+          bindingPath: "0.isolation",
+        },
       ],
     });
     assert.deepEqual(
@@ -165,6 +191,69 @@ describe("D88 runtime isolation", () => {
         "import { rebuildRuntimeIsolation } from \"../config/runtime-isolation.js\";\nexport const declaredOnly = rebuildRuntimeIsolation;\n",
       );
       assert.ok(auditRuntimeIsolation(root, contract, scripts).some(({ detail }) => detail.includes("executable call")));
+
+      seedValidActiveRuntime(root, contract);
+      write(
+        root,
+        "temp_src/core/workflow-registry.ts",
+        `import { rebuildRuntimeIsolation } from "../config/runtime-isolation.js";
+import { composeRebuildRuntime } from "./runtime-composition.js";
+export function startLater(): void { composeRebuildRuntime({ isolation: rebuildRuntimeIsolation }); }
+`,
+      );
+      assert.ok(auditRuntimeIsolation(root, contract, scripts).some(({ detail }) => detail.includes("top-level")));
+
+      seedValidActiveRuntime(root, contract);
+      write(
+        root,
+        "temp_src/core/workflow-registry.ts",
+        `import { rebuildRuntimeIsolation } from "../config/runtime-isolation.js";
+import { composeRebuildRuntime } from "./runtime-composition.js";
+declare const replacement: unknown;
+((rebuildRuntimeIsolation: unknown) => composeRebuildRuntime({ isolation: rebuildRuntimeIsolation }))(replacement);
+`,
+      );
+      assert.ok(auditRuntimeIsolation(root, contract, scripts).some(({ detail }) => detail.includes("top-level")));
+
+      seedValidActiveRuntime(root, contract);
+      write(
+        root,
+        "temp_src/core/workflow-registry.ts",
+        `import { rebuildRuntimeIsolation } from "../config/runtime-isolation.js";
+import { composeRebuildRuntime } from "./runtime-composition.js";
+composeRebuildRuntime({ unrelated: rebuildRuntimeIsolation });
+`,
+      );
+      assert.ok(auditRuntimeIsolation(root, contract, scripts).some(({ detail }) => detail.includes("binding path")));
+
+      seedValidActiveRuntime(root, contract);
+      write(
+        root,
+        "temp_src/core/workflow-registry.ts",
+        `import { rebuildRuntimeIsolation } from "../config/runtime-isolation.js";
+import { composeRebuildRuntime as compose } from "./runtime-composition.js";
+compose({ isolation: rebuildRuntimeIsolation });
+`,
+      );
+      assert.ok(auditRuntimeIsolation(root, contract, scripts).some(({ detail }) => detail.includes("exact imports")));
+
+      seedValidActiveRuntime(root, contract);
+      write(
+        root,
+        "temp_src/config/runtime-isolation.ts",
+        `function defineRuntimeIsolation<T>(value: T): T { return value; }
+export const rebuildRuntimeIsolation = defineRuntimeIsolation({
+  stateRoot: ".tracker-rebuild",
+  artifactRoot: ".tracker-rebuild/artifacts",
+  backendPort: 3938,
+  frontendPort: 5174,
+  processLockRoot: ".tracker-rebuild/locks",
+  browserProfileRoot: ".auth-rebuild",
+  browserSessionNamespace: "hrauto-rebuild",
+});
+`,
+      );
+      assert.ok(auditRuntimeIsolation(root, contract, scripts).some(({ detail }) => detail.includes("must import defineRuntimeIsolation")));
     });
   });
 
@@ -205,6 +294,108 @@ describe("D88 runtime isolation", () => {
     });
   });
 
+  it("fails closed for unresolved or computed module-loader targets", () => {
+    withActiveFixture((root, contract, scripts) => {
+      const cases: readonly [string, string][] = [
+        ["let-target.ts", "let target = \"../../src/cli.js\"; import(target);\n"],
+        ["let-reassigned.ts", "let target; target = \"../../src/cli.js\"; require(target);\n"],
+        ["array-join.ts", "import([\"..\", \"..\", \"src\", \"cli.js\"].join(\"/\"));\n"],
+        ["path-join.ts", "declare const path: { join(...parts: string[]): string }; import(path.join(\"..\", \"..\", \"src\", \"cli.js\"));\n"],
+        ["conditional.ts", "declare const chooseLegacy: boolean; const target = chooseLegacy ? \"../../src/cli.js\" : \"./local.js\"; import(target);\n"],
+        ["multiple-targets.ts", "const target = [\"./local.js\", \"../../src/cli.js\"]; import(target as unknown as string);\n"],
+        ["loader-alias.ts", "const load = require; load(\"../../src/cli.js\");\n"],
+        ["loader-factory.ts", "import { createRequire } from \"node:module\"; const load = createRequire(import.meta.url); load(\"../../src/cli.js\");\n"],
+      ];
+      for (const [name, content] of cases) {
+        const path = `temp_src/core/${name}`;
+        write(root, path, content);
+        const violations = auditRuntimeIsolation(root, contract, scripts);
+        assert.ok(violations.some(({ bridgeClass, file }) =>
+          bridgeClass === "cross-tree-module-edge" && file.endsWith(name)), name);
+        rmSync(join(root, path));
+      }
+
+      write(
+        root,
+        "temp_src/core/safe-modules.ts",
+        "const local = \"./local.js\"; import(local); require(\"node:fs\");\n",
+      );
+      assert.deepEqual(auditRuntimeIsolation(root, contract, scripts), []);
+    });
+  });
+
+  it("rejects every non-call escape of imported or namespace bridge capabilities", () => {
+    withActiveFixture((root, contract, scripts) => {
+      const cases: readonly [string, string, ForbiddenBridgeClass][] = [
+        ["let-alias.ts", "import { readFileSync } from \"node:fs\"; let load = readFileSync; load(\".tracker/state.json\");\n", "cross-tree-filesystem-access"],
+        ["reassignment.ts", "import { readFileSync } from \"node:fs\"; let load: unknown; load = readFileSync;\n", "cross-tree-filesystem-access"],
+        ["bind.ts", "import { readFileSync } from \"node:fs\"; const load = readFileSync.bind(null);\n", "cross-tree-filesystem-access"],
+        ["call.ts", "import { readFileSync } from \"node:fs\"; readFileSync.call(null, \".tracker/state.json\");\n", "cross-tree-filesystem-access"],
+        ["apply.ts", "import { readFileSync } from \"node:fs\"; readFileSync.apply(null, [\".tracker/state.json\"]);\n", "cross-tree-filesystem-access"],
+        ["object-call.ts", "import { readFileSync } from \"node:fs\"; ({ load: readFileSync }).load(\".tracker/state.json\");\n", "cross-tree-filesystem-access"],
+        ["array-wrapper.ts", "import { readFileSync } from \"node:fs\"; const readers = [readFileSync];\n", "cross-tree-filesystem-access"],
+        ["class-wrapper.ts", "import { readFileSync } from \"node:fs\"; class Reader { readonly load = readFileSync; }\n", "cross-tree-filesystem-access"],
+        ["argument.ts", "import { readFileSync } from \"node:fs\"; declare function register(value: unknown): void; register(readFileSync);\n", "cross-tree-filesystem-access"],
+        ["return.ts", "import { readFileSync } from \"node:fs\"; export function reader() { return readFileSync; }\n", "cross-tree-filesystem-access"],
+        ["local-reexport.ts", "import { readFileSync } from \"node:fs\"; export { readFileSync };\n", "cross-tree-filesystem-access"],
+        ["direct-reexport.ts", "export { readFileSync } from \"node:fs\";\n", "cross-tree-filesystem-access"],
+        ["namespace-reexport.ts", "export * as fs from \"node:fs\";\n", "cross-tree-filesystem-access"],
+        ["namespace-member.ts", "import * as fs from \"node:fs\"; const load = fs.readFileSync;\n", "cross-tree-filesystem-access"],
+        ["namespace-argument.ts", "import * as fs from \"node:fs\"; declare function register(value: unknown): void; register(fs);\n", "cross-tree-filesystem-access"],
+        ["namespace-computed.ts", "import * as fs from \"node:fs\"; const method = \"readFileSync\"; fs[method](\".tracker-rebuild/state.json\");\n", "cross-tree-filesystem-access"],
+        ["require-namespace.ts", "const fs = require(\"node:fs\"); fs.readFileSync(\".tracker-rebuild/state.json\");\n", "cross-tree-filesystem-access"],
+        ["dynamic-namespace.ts", "const fs = await import(\"node:fs\"); fs.readFileSync(\".tracker-rebuild/state.json\");\n", "cross-tree-filesystem-access"],
+        ["process-return.ts", "import { spawn } from \"node:child_process\"; export const getSpawn = () => spawn;\n", "cross-tree-process-invocation"],
+      ];
+      for (const [name, content, expected] of cases) {
+        const path = `temp_src/core/${name}`;
+        write(root, path, content);
+        const violations = auditRuntimeIsolation(root, contract, scripts);
+        assert.ok(violations.some(({ bridgeClass, file, detail }) =>
+          bridgeClass === expected && file.endsWith(name) && detail.includes("capability")), name);
+        rmSync(join(root, path));
+      }
+    });
+  });
+
+  it("fails closed at unresolved sinks and accepts exact current-runtime resources", () => {
+    withActiveFixture((root, contract, scripts) => {
+      const unresolved: readonly [string, string, ForbiddenBridgeClass][] = [
+        ["unknown-fs.ts", "import { readFileSync } from \"node:fs\"; declare const path: string; readFileSync(path);\n", "cross-tree-filesystem-access"],
+        ["multiple-fs.ts", "import { readFileSync } from \"node:fs\"; const paths = [\".tracker-rebuild/state.json\", \"safe.txt\"]; readFileSync(paths as unknown as string);\n", "cross-tree-filesystem-access"],
+        ["unknown-process.ts", "import { spawn } from \"node:child_process\"; declare const command: string; spawn(command);\n", "cross-tree-process-invocation"],
+        ["unknown-runtime.ts", "declare const url: string; fetch(url);\n", "cross-tree-runtime-bridge"],
+        ["unknown-route.ts", "declare const app: { use(...args: unknown[]): void }; declare const route: string; app.use(route);\n", "route-proxy-forward-remount"],
+        ["unknown-profile.ts", "declare const browser: { launchPersistentContext(path: string): void }; declare const profile: string; browser.launchPersistentContext(profile);\n", "shared-browser-session"],
+      ];
+      for (const [name, content, expected] of unresolved) {
+        const path = `temp_src/core/${name}`;
+        write(root, path, content);
+        const violations = auditRuntimeIsolation(root, contract, scripts);
+        assert.ok(violations.some(({ bridgeClass, file, detail }) =>
+          bridgeClass === expected && file.endsWith(name) && detail.includes("unresolved")), name);
+        rmSync(join(root, path));
+      }
+
+      write(
+        root,
+        "temp_src/core/approved-resources.ts",
+        `import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { rebuildRuntimeIsolation } from "../config/runtime-isolation.js";
+declare const app: { use(...args: string[]): void };
+declare const browser: { launchPersistentContext(path: string): void };
+readFileSync(rebuildRuntimeIsolation.stateRoot);
+spawn("tsx", ["temp_src/cli.ts"]);
+fetch(\`http://127.0.0.1:\${rebuildRuntimeIsolation.backendPort}/api/entries\`);
+app.use("/rebuild", "http://127.0.0.1:3938");
+browser.launchPersistentContext(rebuildRuntimeIsolation.browserProfileRoot);
+`,
+      );
+      assert.deepEqual(auditRuntimeIsolation(root, contract, scripts), []);
+    });
+  });
+
   it("detects direct invocation, filesystem/state access, runtime calls, proxy/forward/remount, lift, and shared sessions", () => {
     withActiveFixture((root, contract, scripts) => {
       const cases: readonly [string, string, ForbiddenBridgeClass][] = [
@@ -216,7 +407,7 @@ describe("D88 runtime isolation", () => {
         ["files-nested-alias.ts", "import { readFileSync } from \"node:fs\"; function read() { const load = readFileSync; load(\".tracker/state.json\"); }\n", "cross-tree-state-access"],
         ["process-import-alias.ts", "import { spawn as runLegacy } from \"node:child_process\"; runLegacy(\"node\", [\"src/cli.ts\"]);\n", "cross-tree-process-invocation"],
         ["state.ts", "readFileSync(resolve(process.cwd(), \".tracker\"));\n", "cross-tree-state-access"],
-        ["state-env.ts", "readFileSync(process.env.LEGACY_TRACKER_ROOT);\n", "cross-tree-state-access"],
+        ["state-env.ts", "readFileSync(process.env.LEGACY_TRACKER_ROOT);\n", "cross-tree-filesystem-access"],
         ["runtime.ts", "fetch(\"http://127.0.0.1:3838/api/entries\");\n", "cross-tree-runtime-bridge"],
         ["runtime-port.ts", "connect({ port: 3838 });\n", "cross-tree-runtime-bridge"],
         ["runtime-env.ts", "fetch(process.env.LEGACY_URL);\n", "cross-tree-runtime-bridge"],
@@ -242,7 +433,7 @@ describe("D88 runtime isolation", () => {
       write(
         root,
         "temp_src/core/declarations-only.ts",
-        "import { readFileSync as load } from 'node:fs';\n// load('.tracker/state.json'); fetch('http://127.0.0.1:3838'); liftLegacyRows();\nconst legacyState = '.tracker';\nfunction liftLegacyRows(): void {}\n",
+        "import { readFileSync as load } from 'node:fs';\nimport type { Stats as ReadFileSync } from 'node:fs';\nexport type { BigIntStats as readFileSync } from 'node:fs';\n// load('.tracker/state.json'); fetch('http://127.0.0.1:3838'); liftLegacyRows();\ntype Reader = ReadFileSync & typeof import('node:fs/promises');\nconst legacyState = '.tracker';\nfunction liftLegacyRows(): void {}\n",
       );
       assert.deepEqual(auditRuntimeIsolation(root, contract, scripts), []);
     });

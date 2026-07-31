@@ -35,16 +35,24 @@
     "runtimeConfig": {
       "module": "temp_src/config/runtime-isolation.ts",
       "factory": "defineRuntimeIsolation",
+      "factoryModule": "temp_src/config/define-runtime-isolation.ts",
+      "factoryExport": "defineRuntimeIsolation",
       "exportName": "rebuildRuntimeIsolation"
     },
     "compositionRoots": [
       {
         "path": "temp_src/cli.ts",
-        "factory": "startRebuildRuntime"
+        "factory": "startRebuildRuntime",
+        "factoryModule": "temp_src/core/runtime-composition.ts",
+        "factoryExport": "startRebuildRuntime",
+        "bindingPath": "0.isolation"
       },
       {
         "path": "temp_src/core/workflow-registry.ts",
-        "factory": "composeRebuildRuntime"
+        "factory": "composeRebuildRuntime",
+        "factoryModule": "temp_src/core/runtime-composition.ts",
+        "factoryExport": "composeRebuildRuntime",
+        "bindingPath": "0.isolation"
       }
     ]
   },
