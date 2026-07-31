@@ -24,6 +24,7 @@ const root = join(import.meta.dirname, "..", "..", "..");
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
   scripts: Record<string, string>;
 };
+const eslintConfig = readFileSync(join(root, "eslint.config.js"), "utf8");
 
 describe("gate coverage", () => {
   it("typecheck:all composes the backend AND dashboard tsc programs", () => {
@@ -55,5 +56,25 @@ describe("gate coverage", () => {
       /--max-warnings 0/,
       "npm run lint must carry --max-warnings 0; without it new warnings accumulate invisibly",
     );
+  });
+
+  it("keeps the four coexistence lint gates wired to their exact debt policies", () => {
+    assert.match(pkg.scripts.lint ?? "", /eslint src scripts\/rebuild --max-warnings 0/);
+    assert.match(pkg.scripts["lint:rebuild"] ?? "", /lint-scope\.ts source --max-warnings 0/);
+    assert.match(pkg.scripts["lint:rebuild-tests"] ?? "", /lint-scope\.ts tests --max-warnings 0/);
+    assert.match(pkg.scripts["lint:legacy-tests-ratchet"] ?? "", /legacy-test-lint-ratchet\.ts/);
+    assert.doesNotMatch(Object.values(pkg.scripts).join("\n"), /--no-error-on-unmatched-pattern/);
+  });
+
+  it("keeps ESLint config coverage ready for both rebuild runtime environments", () => {
+    assert.match(eslintConfig, /files:\s*\["temp_src\/\*\*\/\*\.ts"\]/);
+    assert.match(eslintConfig, /temp_src\/dashboard\/\*\*\/\*\.tsx/);
+    assert.match(eslintConfig, /files:\s*\["scripts\/rebuild\/\*\*\/\*\.ts"\]/);
+  });
+
+  it("keeps rebuild test and coverage gates registered", () => {
+    assert.match(pkg.scripts["test:rebuild"] ?? "", /run-rebuild-tests\.ts/);
+    assert.match(pkg.scripts["test:coverage"] ?? "", /run-rebuild-tests\.ts --coverage/);
+    assert.match(pkg.scripts["test:coverage"] ?? "", /suite-size\.ts/);
   });
 });

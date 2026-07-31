@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "phase": "pre-tree",
+  "legacy": {
+    "sourceRoot": "src",
+    "entrypoint": "src/cli.ts",
+    "commands": ["dashboard", "dashboard:prod", "dashboard:watch"],
+    "stateRoot": ".tracker",
+    "artifactRoot": ".tracker",
+    "backendPort": 3838,
+    "frontendPort": 5173,
+    "processLockRoot": ".tracker/daemons",
+    "browserProfileRoot": ".auth",
+    "browserSessionNamespace": "hrauto-legacy"
+  },
+  "rebuild": {
+    "sourceRoot": "temp_src",
+    "entrypoint": "temp_src/cli.ts",
+    "commands": ["rebuild:dashboard", "rebuild:dashboard:prod", "rebuild:cli"],
+    "stateRoot": ".tracker-rebuild",
+    "artifactRoot": ".tracker-rebuild/artifacts",
+    "backendPort": 3938,
+    "frontendPort": 5174,
+    "processLockRoot": ".tracker-rebuild/locks",
+    "browserProfileRoot": ".auth-rebuild",
+    "browserSessionNamespace": "hrauto-rebuild"
+  },
+  "forbiddenRuntimeBridges": [
+    "cross-tree-import",
+    "cross-tree-invocation",
+    "legacy-state-read",
+    "rebuild-state-read",
+    "route-proxy",
+    "continuous-lift",
+    "shared-browser-session"
+  ]
+}

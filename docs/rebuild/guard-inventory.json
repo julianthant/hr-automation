@@ -1,0 +1,697 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-07-31",
+  "architectureRoot": "tests/unit/architecture",
+  "testScript": "test:architecture",
+  "coveragePolicy": {
+    "exclusionListSha256": "2b3bc4a4a56db839722ff4d91f8e193054598802b7ab6a7c1b133092baab4edd",
+    "minimumFloors": {
+      "global": 60,
+      "safetyCritical": 80
+    },
+    "branchPolicy": {
+      "phase1": "report-only",
+      "phase2Global": 50,
+      "phase2SafetyCritical": 70
+    }
+  },
+  "tempSrcRatchetActivation": {
+    "sourceRoot": "temp_src",
+    "requiredGuardNames": [
+      "fail-loud-catch-default",
+      "nullish-literal-data-fallback",
+      "wait-for-timeout-allowlist",
+      "inline-selectors-workflows",
+      "evaluate-named-fn",
+      "import-cycles",
+      "control-layering",
+      "code-conventions",
+      "frontend-tailwind-compliance"
+    ],
+    "state": "planned-until-first-file"
+  },
+  "guards": [
+    {
+      "name": "archetype-coverage",
+      "file": "tests/unit/architecture/archetype-coverage.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed archetype-coverage architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "cancel-mechanism",
+      "file": "tests/unit/architecture/cancel-mechanism.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed cancel-mechanism architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "code-conventions",
+      "file": "tests/unit/architecture/code-conventions.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed code-conventions architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "control-layering",
+      "file": "tests/unit/architecture/control-layering.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed control-layering architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "dashboard-security-boundary",
+      "file": "tests/unit/architecture/dashboard-security-boundary.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed dashboard-security-boundary architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "delegate-to-all-impl-callers",
+      "file": "tests/unit/architecture/delegate-to-all-impl-callers.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed delegate-to-all-impl-callers architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "delegate-to-usage",
+      "file": "tests/unit/architecture/delegate-to-usage.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed delegate-to-usage architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "deletion-tombstones",
+      "file": "tests/unit/architecture/deletion-tombstones.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed deletion-tombstones architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "evaluate-named-fn",
+      "file": "tests/unit/architecture/evaluate-named-fn.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed evaluate-named-fn architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "fail-loud-catch-default",
+      "file": "tests/unit/architecture/fail-loud-catch-default.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed fail-loud-catch-default architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "frontend-tailwind-compliance",
+      "file": "tests/unit/architecture/frontend-tailwind-compliance.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed frontend-tailwind-compliance architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "gate-coverage",
+      "file": "tests/unit/architecture/gate-coverage.test.ts",
+      "status": "active",
+      "owner": "docs/rebuild/10-guard-test-architecture.md",
+      "invariant": "Preserve the reviewed gate-coverage architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "guard-manifest",
+      "file": "tests/unit/architecture/guard-manifest.test.ts",
+      "status": "active",
+      "owner": "docs/rebuild/10-guard-test-architecture.md",
+      "invariant": "Every active architecture guard exists, is registered, and remains reachable from test:architecture.",
+      "replacementRequired": true
+    },
+    {
+      "name": "i9-check-import-guard",
+      "file": "tests/unit/architecture/i9-check-import-guard.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed i9-check-import-guard architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "import-cycles",
+      "file": "tests/unit/architecture/import-cycles.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed import-cycles architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "inline-selectors-workflows",
+      "file": "tests/unit/architecture/inline-selectors-workflows.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed inline-selectors-workflows architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "instance-labels-coverage",
+      "file": "tests/unit/architecture/instance-labels-coverage.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed instance-labels-coverage architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "legacy-capability-disposition",
+      "file": "tests/unit/architecture/legacy-capability-disposition.test.ts",
+      "status": "active",
+      "owner": "docs/rebuild/10-guard-test-architecture.md",
+      "invariant": "Every D58 legacy capability surface is classified exactly once without a proxy disposition.",
+      "replacementRequired": true
+    },
+    {
+      "name": "legacy-change-accounting",
+      "file": "tests/unit/architecture/legacy-change-accounting.test.ts",
+      "status": "active",
+      "owner": "docs/rebuild/10-guard-test-architecture.md",
+      "invariant": "Every change from the explicit Phase-0 legacy baseline maps to capabilities and rebuild rechecks.",
+      "replacementRequired": true
+    },
+    {
+      "name": "legacy-preservation",
+      "file": "tests/unit/architecture/legacy-preservation.test.ts",
+      "status": "active",
+      "owner": "docs/rebuild/10-guard-test-architecture.md",
+      "invariant": "Every baseline legacy source/test path and Vitest project remains present through initial cutover.",
+      "replacementRequired": true
+    },
+    {
+      "name": "legacy-test-disposition",
+      "file": "tests/unit/architecture/legacy-test-disposition.test.ts",
+      "status": "active",
+      "owner": "docs/rebuild/reviews/testing-system-plan-2026-07-27.md",
+      "invariant": "Every legacy test directory is classified exactly once and later-retirement candidates carry rebuild evidence.",
+      "replacementRequired": true
+    },
+    {
+      "name": "legacy-test-lint-debt-ratchet",
+      "file": "tests/unit/architecture/legacy-test-lint-debt-ratchet.test.ts",
+      "status": "active",
+      "owner": "docs/rebuild/10-guard-test-architecture.md",
+      "invariant": "Legacy lint diagnostics may shrink but no new or replacement semantic fingerprint may appear.",
+      "replacementRequired": true
+    },
+    {
+      "name": "nullish-literal-data-fallback",
+      "file": "tests/unit/architecture/nullish-literal-data-fallback.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed nullish-literal-data-fallback architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "origin-workflow-banned",
+      "file": "tests/unit/architecture/origin-workflow-banned.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed origin-workflow-banned architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "queue-row-kind-coverage",
+      "file": "tests/unit/architecture/queue-row-kind-coverage.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed queue-row-kind-coverage architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "rebuild-gates",
+      "file": "tests/unit/architecture/rebuild-gates.test.ts",
+      "status": "active",
+      "owner": "docs/rebuild/10-guard-test-architecture.md",
+      "invariant": "Absent roots are explicit planned states; active lint/test/coverage scopes are non-empty and zero-debt.",
+      "replacementRequired": true
+    },
+    {
+      "name": "runtime-isolation",
+      "file": "tests/unit/architecture/runtime-isolation.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Legacy and rebuild commands, roots, ports, locks, profiles, imports, and sessions remain bidirectionally isolated.",
+      "replacementRequired": true
+    },
+    {
+      "name": "runtime-policy-coverage",
+      "file": "tests/unit/architecture/runtime-policy-coverage.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed runtime-policy-coverage architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "tracker-row-emission",
+      "file": "tests/unit/architecture/tracker-row-emission.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed tracker-row-emission architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "wait-for-timeout-allowlist",
+      "file": "tests/unit/architecture/wait-for-timeout-allowlist.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed wait-for-timeout-allowlist architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "workflow-boundaries",
+      "file": "tests/unit/architecture/workflow-boundaries.test.ts",
+      "status": "active",
+      "owner": "root CLAUDE.md and owning rebuild design doc",
+      "invariant": "Preserve the reviewed workflow-boundaries architecture invariant.",
+      "replacementRequired": true
+    },
+    {
+      "name": "ai-advisory-no-authority",
+      "file": "tests/unit/architecture/ai-advisory-no-authority.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: ai-advisory-no-authority.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "archive-invariants",
+      "file": "tests/unit/architecture/archive-invariants.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: archive-invariants.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "artifact-effect-boundary",
+      "file": "tests/unit/architecture/artifact-effect-boundary.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: artifact-effect-boundary.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "atomic-write-outbox",
+      "file": "tests/unit/architecture/atomic-write-outbox.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: atomic-write-outbox.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "authority-target-no-fallback",
+      "file": "tests/unit/architecture/authority-target-no-fallback.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: authority-target-no-fallback.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "bounded-task-deadline",
+      "file": "tests/unit/architecture/bounded-task-deadline.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: bounded-task-deadline.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "canonical-input-snapshot",
+      "file": "tests/unit/architecture/canonical-input-snapshot.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: canonical-input-snapshot.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "capture-durability-and-scope",
+      "file": "tests/unit/architecture/capture-durability-and-scope.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: capture-durability-and-scope.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "clock-single-source",
+      "file": "tests/unit/architecture/clock-single-source.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: clock-single-source.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "commit-routes-through-mutation",
+      "file": "tests/unit/architecture/commit-routes-through-mutation.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: commit-routes-through-mutation.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "control-command-single-path",
+      "file": "tests/unit/architecture/control-command-single-path.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: control-command-single-path.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "delegation-manifest",
+      "file": "tests/unit/architecture/delegation-manifest.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: delegation-manifest.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "descriptor-coverage",
+      "file": "tests/unit/architecture/descriptor-coverage.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: descriptor-coverage.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "driver-lease-boundary",
+      "file": "tests/unit/architecture/driver-lease-boundary.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: driver-lease-boundary.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "dry-run-composition-submit-free",
+      "file": "tests/unit/architecture/dry-run-composition-submit-free.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: dry-run-composition-submit-free.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "edit-data-field-policy",
+      "file": "tests/unit/architecture/edit-data-field-policy.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: edit-data-field-policy.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "evidence-receipt",
+      "file": "tests/unit/architecture/evidence-receipt.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: evidence-receipt.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "fresh-session-boundary",
+      "file": "tests/unit/architecture/fresh-session-boundary.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: fresh-session-boundary.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "identity-gate-before-commit",
+      "file": "tests/unit/architecture/identity-gate-before-commit.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: identity-gate-before-commit.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "knowledge-fix-integrity",
+      "file": "tests/unit/architecture/knowledge-fix-integrity.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: knowledge-fix-integrity.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "ledger-projector",
+      "file": "tests/unit/architecture/ledger-projector.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: ledger-projector.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "manual-clock-test-only",
+      "file": "tests/unit/architecture/manual-clock-test-only.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: manual-clock-test-only.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "multi-worker-overlap",
+      "file": "tests/unit/architecture/multi-worker-overlap.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: multi-worker-overlap.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "no-positional-identity",
+      "file": "tests/unit/architecture/no-positional-identity.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: no-positional-identity.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "no-secret-values-in-logs",
+      "file": "tests/unit/architecture/no-secret-values-in-logs.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: no-secret-values-in-logs.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "notification-durability",
+      "file": "tests/unit/architecture/notification-durability.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: notification-durability.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "one-projection-counts",
+      "file": "tests/unit/architecture/one-projection-counts.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: one-projection-counts.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "one-time-import-offline",
+      "file": "tests/unit/architecture/one-time-import-offline.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: one-time-import-offline.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "permanent-key-dedupe",
+      "file": "tests/unit/architecture/permanent-key-dedupe.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: permanent-key-dedupe.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "preflight-coverage",
+      "file": "tests/unit/architecture/preflight-coverage.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: preflight-coverage.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "provider-capability-boundary",
+      "file": "tests/unit/architecture/provider-capability-boundary.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: provider-capability-boundary.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "recovery-negative-proof-settlement",
+      "file": "tests/unit/architecture/recovery-negative-proof-settlement.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: recovery-negative-proof-settlement.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "runtime-dependency-coverage",
+      "file": "tests/unit/architecture/runtime-dependency-coverage.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: runtime-dependency-coverage.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "scenario-coverage",
+      "file": "tests/unit/architecture/scenario-coverage.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: scenario-coverage.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "secrets-single-source",
+      "file": "tests/unit/architecture/secrets-single-source.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: secrets-single-source.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "semantic-ui-registry",
+      "file": "tests/unit/architecture/semantic-ui-registry.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: semantic-ui-registry.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "single-flight-login",
+      "file": "tests/unit/architecture/single-flight-login.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: single-flight-login.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "sleep-budget",
+      "file": "tests/unit/architecture/sleep-budget.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: sleep-budget.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "storage-recovery",
+      "file": "tests/unit/architecture/storage-recovery.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: storage-recovery.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "strict-boundary-schemas",
+      "file": "tests/unit/architecture/strict-boundary-schemas.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: strict-boundary-schemas.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "subject-before-fence",
+      "file": "tests/unit/architecture/subject-before-fence.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: subject-before-fence.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "task-driver-boundary",
+      "file": "tests/unit/architecture/task-driver-boundary.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: task-driver-boundary.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "transaction-pairing",
+      "file": "tests/unit/architecture/transaction-pairing.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: transaction-pairing.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "worker-teardown-soak",
+      "file": "tests/unit/architecture/worker-teardown-soak.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: worker-teardown-soak.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "workflow-editor-compile-integrity",
+      "file": "tests/unit/architecture/workflow-editor-compile-integrity.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: workflow-editor-compile-integrity.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
+      "name": "write-safety-contract",
+      "file": "tests/unit/architecture/write-safety-contract.test.ts",
+      "status": "planned",
+      "owner": "owning rebuild design doc",
+      "invariant": "Planned Phase 1+ guard: write-safety-contract.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    }
+  ]
+}
