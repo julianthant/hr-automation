@@ -40,15 +40,20 @@
     "typecheck": "tsc --noEmit",
     "typecheck:dashboard": "tsc -p src/dashboard/tsconfig.json --noEmit",
     "typecheck:all": "tsc --noEmit && tsc -p src/dashboard/tsconfig.json --noEmit",
-    "lint": "eslint src --max-warnings 0",
-    "lint:fix": "eslint src --fix",
+    "lint": "eslint src scripts/rebuild --max-warnings 0",
+    "lint:fix": "eslint src scripts/rebuild --fix",
     "lint:tests": "eslint tests",
+    "lint:rebuild": "tsx scripts/rebuild/lint-scope.ts source --max-warnings 0",
+    "lint:rebuild-tests": "tsx scripts/rebuild/lint-scope.ts tests --max-warnings 0",
+    "lint:legacy-tests-ratchet": "tsx scripts/rebuild/legacy-test-lint-ratchet.ts",
     "test": "vitest run --project unit --reporter=dot && vitest run --project serial --reporter=dot",
     "test:live": "vitest run --config vitest.live.config.ts",
     "test:stderr-audit": "vitest run --project unit --reporter=dot && vitest run --project serial --reporter=dot",
     "test:verbose": "vitest run --reporter=verbose",
     "test:watch": "vitest",
-    "test:architecture": "vitest run tests/unit/architecture --reporter=dot"
+    "test:architecture": "vitest run tests/unit/architecture --reporter=dot",
+    "test:rebuild": "tsx scripts/rebuild/run-rebuild-tests.ts",
+    "test:coverage": "tsx scripts/rebuild/run-rebuild-tests.ts --coverage && tsx scripts/rebuild/suite-size.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -92,6 +97,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.2.2",
+    "@vitest/coverage-v8": "^4.1.9",
     "@types/node": "^25.6.0",
     "@types/papaparse": "^5.5.2",
     "@types/pngjs": "^6.0.5",

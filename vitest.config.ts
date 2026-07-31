@@ -2,6 +2,22 @@ import { defineConfig } from "vitest/config";
 import { resolve } from "node:path";
 import { recordConsoleLog } from "./tests/log-audit-core.js";
 
+export const REBUILD_COVERAGE_INCLUDE = ["temp_src/**/*.ts", "temp_src/**/*.tsx"] as const;
+export const REBUILD_COVERAGE_EXCLUSIONS = [
+  { pattern: "temp_src/**/*.d.ts", activationRoot: "temp_src/**/*.d.ts", reason: "Type declarations are not executable authored code." },
+  { pattern: "temp_src/**/generated/**", activationRoot: "temp_src/**/generated/**", reason: "Generated projections are verified by determinism guards." },
+  { pattern: "temp_src/dashboard/**/*.tsx", activationRoot: "temp_src/dashboard/**/*.tsx", reason: "Presentation components use the headless Playwright lane; extracted .ts logic remains measured." },
+  { pattern: "temp_src/stores/*/driver/raw-page/**", activationRoot: "temp_src/stores/*/driver/raw-page/**", reason: "The sole raw Page internals require the live semantic-driver lane." },
+  { pattern: "temp_src/**/index.ts", activationRoot: "temp_src/**/index.ts", reason: "Pure barrels contain no decision logic." },
+  { pattern: "temp_src/cli.ts", activationRoot: "temp_src/cli.ts", reason: "The process entrypoint is boot-smoke verified." },
+] as const;
+
+export const REBUILD_COVERAGE_FLOORS = {
+  global: { lines: 60, statements: 60, functions: 60 },
+  safetyCritical: { lines: 80, statements: 80, functions: 80 },
+  branches: { phase1ReportOnly: true, phase2Global: 50, phase2SafetyCritical: 70 },
+} as const;
+
 export default defineConfig({
   // Vite's resolver runs on test files too. The `@/` alias is wired the same
   // way as in vite.dashboard.config.ts so dashboard source files (and the
@@ -36,6 +52,22 @@ export default defineConfig({
       {
         extends: true,
         test: {
+          name: "rebuild-unit",
+          include: ["tests/rebuild/unit/**/*.test.ts"],
+          fileParallelism: true,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "rebuild-scenario",
+          include: ["tests/rebuild/scenario/**/*.test.ts"],
+          fileParallelism: true,
+        },
+      },
+      {
+        extends: true,
+        test: {
           name: "serial",
           include: ["tests/delegation/**/*.test.ts", "tests/integration/**/*.test.ts"],
           fileParallelism: false,
@@ -61,5 +93,23 @@ export default defineConfig({
     // comfortably.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      include: [...REBUILD_COVERAGE_INCLUDE],
+      exclude: REBUILD_COVERAGE_EXCLUSIONS.map(({ pattern }) => pattern),
+      thresholds: {
+        lines: REBUILD_COVERAGE_FLOORS.global.lines,
+        statements: REBUILD_COVERAGE_FLOORS.global.statements,
+        functions: REBUILD_COVERAGE_FLOORS.global.functions,
+        "temp_src/core/**": REBUILD_COVERAGE_FLOORS.safetyCritical,
+        "temp_src/stores/common/mutation*.ts": REBUILD_COVERAGE_FLOORS.safetyCritical,
+        "temp_src/**/*write-sequencer*.ts": REBUILD_COVERAGE_FLOORS.safetyCritical,
+        "temp_src/**/*subject-binding*.ts": REBUILD_COVERAGE_FLOORS.safetyCritical,
+        "temp_src/**/*authority-store*.ts": REBUILD_COVERAGE_FLOORS.safetyCritical,
+        "temp_src/**/*recovery*.ts": REBUILD_COVERAGE_FLOORS.safetyCritical,
+        "temp_src/**/*projection*.ts": REBUILD_COVERAGE_FLOORS.safetyCritical,
+      },
+    },
   },
 });

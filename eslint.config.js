@@ -100,6 +100,25 @@ export default ts.config(
     rules: { ...unusedImportsRules, ...typeAwareTuning },
   },
 
+  // Rebuild Node sources. This block is present before activation so the first
+  // temp_src file and its CLI target land under the same type-aware rules.
+  {
+    files: ["temp_src/**/*.ts"],
+    ignores: ["temp_src/dashboard/**"],
+    plugins: { "unused-imports": unusedImports },
+    languageOptions: { globals: { ...globals.node } },
+    rules: { ...unusedImportsRules, ...typeAwareTuning },
+  },
+
+  // Rebuild gate tooling is part of the production-quality umbrella even
+  // before temp_src activation.
+  {
+    files: ["scripts/rebuild/**/*.ts"],
+    plugins: { "unused-imports": unusedImports },
+    languageOptions: { globals: { ...globals.node } },
+    rules: { ...unusedImportsRules, ...typeAwareTuning },
+  },
+
   // Browser dashboard: React 19 + Vite (its own tsconfig). Browser globals plus
   // the React Hooks rules (rules-of-hooks is an error, exhaustive-deps a warn)
   // and the Vite fast-refresh boundary check.
@@ -120,6 +139,24 @@ export default ts.config(
       // co-located with their components (see workflows-context.tsx,
       // edge-registry.tsx); Vite falls back to a full reload for those
       // modules, which this dashboard accepts.
+      "react-refresh/only-export-components": "off",
+    },
+  },
+
+  // Rebuild browser sources mirror the production dashboard's strict tier.
+  {
+    files: ["temp_src/dashboard/**/*.ts", "temp_src/dashboard/**/*.tsx"],
+    plugins: {
+      "unused-imports": unusedImports,
+      "react-hooks": reactHooks,
+      "react-refresh": reactRefresh,
+    },
+    languageOptions: { globals: { ...globals.browser } },
+    rules: {
+      ...unusedImportsRules,
+      ...typeAwareTuning,
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "error",
       "react-refresh/only-export-components": "off",
     },
   },
