@@ -14,7 +14,6 @@ import {
   FileText,
   GitBranch,
   Info,
-  Loader2,
   RotateCcw,
   ScanText,
   Search,
@@ -1500,12 +1499,6 @@ function RecordStreamList({ row, tick }: { row: DemoRow; tick: number }) {
           </span>{" "}
           read
         </span>
-        {stream.streaming && (
-          <span className="inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-status-running-fg)]">
-            <Loader2 aria-hidden className={cn(dsIcon.sm, "animate-spin motion-reduce:animate-none")} />
-            reading
-          </span>
-        )}
       </div>
       {stream.read.length > 0 && (
         <PersonWell>
