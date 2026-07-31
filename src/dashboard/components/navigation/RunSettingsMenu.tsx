@@ -28,6 +28,12 @@ interface RunSettingsMenuProps {
   /** Current dry-run toggle state (`true` = dry run, skip the irreversible write). */
   dryRun?: boolean;
   onToggleDryRun?: (next: boolean) => void;
+  /** When true, render the workflow's independent CRM-check toggle. */
+  supportsCrmCheck?: boolean;
+  /** Current CRM-check state and the active mode's semantic default. */
+  crmCheck?: boolean;
+  crmCheckDefault?: boolean;
+  onToggleCrmCheck?: (next: boolean) => void;
   /** Workflow label for the trigger's tooltip. */
   workflowLabel: string;
 }
@@ -53,19 +59,25 @@ export function RunSettingsMenu({
   supportsDryRun = false,
   dryRun = false,
   onToggleDryRun,
+  supportsCrmCheck = false,
+  crmCheck = false,
+  crmCheckDefault = false,
+  onToggleCrmCheck,
   workflowLabel,
 }: RunSettingsMenuProps) {
   const [open, setOpen] = useState(false);
   const workersDefault = workerChoice === AUTO_WORKERS;
   const presetDefault = presetId === FULL_PRESET_ID;
   const dryRunDefault = !supportsDryRun || !dryRun;
-  const isDefault = workersDefault && presetDefault && dryRunDefault;
+  const crmDefault = !supportsCrmCheck || crmCheck === crmCheckDefault;
+  const isDefault = workersDefault && presetDefault && dryRunDefault && crmDefault;
   const selectedPreset = presetDefault ? null : presets.find((p) => p.id === presetId);
 
   const tooltip = [
     `Workers: ${workerChoiceLabel(workerChoice)}`,
     presets.length > 0 ? `Run mode: ${presetDefault ? "Full" : selectedPreset?.label ?? "(unknown)"}` : null,
     supportsDryRun ? `Dry run: ${dryRun ? "On" : "Off"}` : null,
+    supportsCrmCheck ? `CRM check: ${crmCheck ? "On" : "Off"}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -128,6 +140,40 @@ export function RunSettingsMenu({
                   className={cn(
                     "absolute top-0.5 h-3.5 w-3.5 rounded-full transition-all",
                     dryRun ? "left-4 bg-primary-foreground" : "left-0.5 bg-muted-foreground",
+                  )}
+                />
+              </button>
+            </div>
+          </>
+        )}
+
+        {supportsCrmCheck && (
+          <>
+            <div className="my-1.5 border-t border-border/60" aria-hidden />
+            <div className="flex items-center justify-between gap-3 px-2 py-1.5">
+              <span className="flex flex-col min-w-0">
+                <span className="text-[13px] font-medium text-foreground">CRM check</span>
+                <span className="text-[11px] text-muted-foreground leading-snug">
+                  Cross-check the person and source CRM dates.
+                </span>
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={crmCheck}
+                aria-label="CRM check"
+                onClick={() => onToggleCrmCheck?.(!crmCheck)}
+                className={cn(
+                  "relative shrink-0 h-5 w-9 rounded-full border transition-colors outline-none cursor-pointer",
+                  "focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-card",
+                  crmCheck ? "bg-primary border-primary" : "bg-secondary border-border",
+                )}
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "absolute top-0.5 h-3.5 w-3.5 rounded-full transition-all",
+                    crmCheck ? "left-4 bg-primary-foreground" : "left-0.5 bg-muted-foreground",
                   )}
                 />
               </button>

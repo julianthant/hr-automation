@@ -2,6 +2,7 @@ import {
   DASHBOARD_INPUT_RUN_WORKFLOWS,
   DASHBOARD_UPLOAD_RUN_WORKFLOWS,
 } from "../../domain/dashboard-run-surfaces.js";
+import { parsePersonLookupMatchLine } from "../../workflows/person-lookup/schema.js";
 
 type DashboardInputRunWorkflow = (typeof DASHBOARD_INPUT_RUN_WORKFLOWS)[number];
 type DashboardUploadRunWorkflow = (typeof DASHBOARD_UPLOAD_RUN_WORKFLOWS)[number];
@@ -40,6 +41,33 @@ export interface InputRunParseErr {
 }
 export type InputRunParseResult = InputRunParseOk | InputRunParseErr;
 
+export function applyInputRunOptions(
+  inputs: Array<Record<string, unknown>>,
+  options: { mode?: string; crmCheck?: boolean; dryRun?: boolean },
+): Array<Record<string, unknown>> {
+  return inputs.map((input) => ({
+    ...input,
+    ...(options.mode ? { mode: options.mode } : {}),
+    ...(typeof options.crmCheck === "boolean" ? { crmCheck: options.crmCheck } : {}),
+    ...(options.dryRun ? { dryRun: true } : {}),
+  }));
+}
+
+export interface InputRunMode {
+  /** Stable value folded onto each parsed input as `mode`. */
+  key: string;
+  /** Short operator-facing label for the segmented mode picker. */
+  label: string;
+  /** Mode-specific text-box hint. */
+  placeholder: string;
+  /** Mode-specific parser; owns the full typed-input shape. */
+  parseInput: (raw: string) => InputRunParseResult;
+  /** Short explanation rendered beside the picker. */
+  note?: string;
+  /** Semantic CRM default when this mode becomes active. */
+  crmCheckDefault?: boolean;
+}
+
 export interface InputRunConfig {
   /** Text shown inside the text box when it's empty. */
   placeholder: string;
@@ -50,6 +78,14 @@ export interface InputRunConfig {
    * verbatim in the toast.
    */
   parseInput: (raw: string) => InputRunParseResult;
+  /**
+   * Optional peer modes for one workflow. The first entry is the default.
+   * InputRunPanel renders these generically and folds the selected `key` onto
+   * every parsed input; workflow-specific branching belongs in this registry.
+   */
+  modes?: readonly InputRunMode[];
+  /** Surface the independent CRM-check toggle in run settings. */
+  supportsCrmCheck?: boolean;
   /**
    * When true, the input-run panel surfaces a per-page-load **Dry run**
    * toggle in its run-settings gear. On submit it folds `dryRun: true`
@@ -147,6 +183,30 @@ export function parsePersonLookupInputs(raw: string): InputRunParseResult {
   };
 }
 
+/** Parse semicolon-delimited Person Lookup Match records. */
+export function parsePersonLookupMatchInputs(raw: string): InputRunParseResult {
+  const pieces = raw
+    .split(";")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (pieces.length === 0) {
+    return { ok: false, error: "Enter at least one person to match" };
+  }
+
+  const inputs: Array<Record<string, unknown>> = [];
+  for (const value of pieces) {
+    try {
+      inputs.push(parsePersonLookupMatchLine(value));
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+  return { ok: true, inputs };
+}
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
@@ -195,6 +255,27 @@ export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfi
   "person-lookup": {
     placeholder: "Enter EIDs or names, semicolon-separated (e.g. 10873698; Battistessa, Johnnie)",
     parseInput: parsePersonLookupInputs,
+    supportsCrmCheck: true,
+    modes: [
+      {
+        key: "search",
+        label: "Search",
+        placeholder:
+          "Enter EIDs or names, semicolon-separated (e.g. 10873698; Battistessa, Johnnie)",
+        parseInput: parsePersonLookupInputs,
+        note: "Person Org search; CRM check is on by default.",
+        crmCheckDefault: true,
+      },
+      {
+        key: "match",
+        label: "Match",
+        placeholder:
+          "Last, First, DOB, SSN; use x when DOB or SSN is unavailable",
+        parseInput: parsePersonLookupMatchInputs,
+        note: "HR-Tasks rehire match; CRM check is off by default.",
+        crmCheckDefault: false,
+      },
+    ],
   },
   "oath-signature": {
     placeholder: "Enter EIDs, comma-separated (e.g. 10873611, 10873075)",
