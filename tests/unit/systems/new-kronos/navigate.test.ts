@@ -20,6 +20,7 @@ import {
   mmddyyyyToDate,
   resolveSeparationTimecardDates,
   toIsoDate,
+  normalizeRangeDateReadback,
   calendarDayLabelPattern,
   parseCalendarHeaderOrdinal,
   probeEidInTimecardText,
@@ -246,13 +247,12 @@ describe("resolveSearchResult", () => {
 });
 
 /**
- * Pins the native-date-input helpers that replaced the masked-keystroke entry
- * (ISS-B05, after a live DOM dump proved the WFD "Select range" fields are
- * NATIVE `<input type=date>` — value held as ISO `YYYY-MM-DD`, not a masked text
- * field). `toIsoDate` is what `setRangeDate` fills (the input rejects MM/DD/YYYY,
- * which is why every prior fill "reverted to today"); `parseMmddyyyy`,
- * `calendarDayLabelPattern`, and `parseCalendarHeaderOrdinal` drive the calendar
- * grid FALLBACK (day-cell aria-label match + month-nav stepping).
+ * Pins the "Select range" date helpers. The WFD range fields are DUAL-MODE
+ * (`ng-attr-type="{{rangeInput.useNativeDateInput ? 'date' : 'text'}}"`, live
+ * 2026-07-30): `toIsoDate` is what `setRangeDate` fills in NATIVE mode, and
+ * `normalizeRangeDateReadback` is what makes the readback verify mode-agnostic;
+ * `parseMmddyyyy`, `calendarDayLabelPattern`, and `parseCalendarHeaderOrdinal`
+ * drive the calendar grid (the one path that works in BOTH modes).
  */
 describe("toIsoDate", () => {
   it("converts M/D/YYYY to the ISO value a native date input accepts", () => {
@@ -264,6 +264,48 @@ describe("toIsoDate", () => {
   it("throws loud on a malformed date instead of applying a wrong window", () => {
     assert.throws(() => toIsoDate("2026-05-11"));
     assert.throws(() => toIsoDate("13/40/2026"));
+  });
+});
+
+/**
+ * Regression guard for the 2026-07-30 production abort (WFP-00889): the
+ * calendar had ALREADY set the right day, but the field read back `5/10/2026`
+ * (text mode) while the verify string-compared against ISO `2026-05-10`, so a
+ * CORRECT range was rejected and the separations run lost its Kronos read.
+ * The verify now compares calendar dates, in either mode's spelling.
+ */
+describe("normalizeRangeDateReadback", () => {
+  it("accepts the TEXT-mode spelling the live field actually returns", () => {
+    // Live 2026-07-30: WFD does not pad consistently — the same open picker
+    // showed start "07/30/2026" and end "7/30/2026".
+    assert.equal(normalizeRangeDateReadback("5/10/2026"), "2026-05-10");
+    assert.equal(normalizeRangeDateReadback("05/10/2026"), "2026-05-10");
+    assert.equal(normalizeRangeDateReadback("12/1/2026"), "2026-12-01");
+  });
+
+  it("accepts the NATIVE-mode ISO spelling unchanged", () => {
+    assert.equal(normalizeRangeDateReadback("2026-05-10"), "2026-05-10");
+    assert.equal(normalizeRangeDateReadback("2026-12-01"), "2026-12-01");
+  });
+
+  it("treats both spellings of the same day as equal (the actual bug)", () => {
+    assert.equal(
+      normalizeRangeDateReadback("5/10/2026"),
+      normalizeRangeDateReadback("2026-05-10"),
+    );
+  });
+
+  it("returns null on empty/unparseable so the caller fails loud", () => {
+    assert.equal(normalizeRangeDateReadback(""), null);
+    assert.equal(normalizeRangeDateReadback("   "), null);
+    assert.equal(normalizeRangeDateReadback("not a date"), null);
+    assert.equal(normalizeRangeDateReadback("2026-05"), null);
+  });
+
+  it("rejects impossible days in BOTH spellings — never normalizes a non-date", () => {
+    assert.equal(normalizeRangeDateReadback("2026-02-31"), null);
+    assert.equal(normalizeRangeDateReadback("2/31/2026"), null);
+    assert.equal(normalizeRangeDateReadback("13/01/2026"), null);
   });
 });
 

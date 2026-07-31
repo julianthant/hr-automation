@@ -244,6 +244,22 @@ export const timecard = {
       .first(),
 
   /**
+   * The ACTIVE-period LABEL text ("Current Pay Period" / "5/10/2026 -
+   * 8/10/2026"). Must be read from here, NOT from `payPeriodTriggerButton`:
+   * that trigger is an icon-only `<button class="select-timeframe-button
+   * icon-k-calendar"><i class="caret-down"></i></button>` whose accessible name
+   * comes from `aria-labelledby="quickFindTimeFrameSelectorLabel _timeFrame"` —
+   * its own `textContent` is EMPTY, so a `.textContent()` period read always
+   * came back blank. `#_timeFrame` (class `selected-timeframe`) is the second
+   * labelledby target and holds the real text; it is `display:none` in the
+   * collapsed toolbar, which is fine — `textContent()` does not require
+   * visibility. verified 2026-07-30
+   * @tags pay, period, label, timeframe, selected, timecard, new-kronos
+   */
+  payPeriodLabel: (page: Page): Locator =>
+    page.locator("#_timeFrame").or(page.locator(".selected-timeframe")).first(),
+
+  /**
    * Previous Pay Period option (inside an open period dropdown). verified 2026-06-18
    * @tags previous, pay, period, option, timecard, new-kronos
    */
@@ -258,16 +274,19 @@ export const timecard = {
     page.getByRole("button", { name: "Select range" }),
 
   /**
-   * Start date input (custom range) — NATIVE `<input type=date>`, value held as
-   * ISO `YYYY-MM-DD` (NOT a masked text field). Targeted by id. verified 2026-06-22
-   * @tags start, date, input, range, timecard, native, new-kronos
+   * Start date input (custom range) — DUAL-MODE
+   * (`ng-attr-type="{{rangeInput.useNativeDateInput ? 'date' : 'text'}}"`): ISO
+   * `YYYY-MM-DD` when native, locale `M/D/YYYY` when text. Never assume one.
+   * Targeted by id. verified 2026-07-30
+   * @tags start, date, input, range, timecard, dual-mode, new-kronos
    */
   startDateInput: (page: Page): Locator => page.locator("#startDateTimeInput"),
 
   /**
-   * End date input (custom range) — NATIVE `<input type=date>` (ISO value).
-   * Targeted by id. verified 2026-06-22
-   * @tags end, date, input, range, timecard, native, new-kronos
+   * End date input (custom range) — same dual-mode `ng-attr-type` field as
+   * `startDateInput` (ISO when native, `M/D/YYYY` when text; WFD does not pad
+   * the two fields consistently). Targeted by id. verified 2026-07-30
+   * @tags end, date, input, range, timecard, dual-mode, new-kronos
    */
   endDateInput: (page: Page): Locator => page.locator("#endDateTimeInput"),
 
