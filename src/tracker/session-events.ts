@@ -408,7 +408,6 @@ export const INSTANCE_LABELS: Record<string, string> = {
   onbase: "Import",
   ocr: "OCR",
   "i9-lookup": "I9 Lookup",
-  "person-match": "Person Match",
 };
 
 /**

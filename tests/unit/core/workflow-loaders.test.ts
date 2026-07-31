@@ -14,3 +14,8 @@ test("person-lookup is daemon-spawnable", async () => {
   const workflow = await WORKFLOW_LOADERS["person-lookup"]();
   assert.equal(workflow.config.name, "person-lookup");
 });
+
+test("retired person-match workflow has no daemon-loader alias", () => {
+  assert.ok(!("person-match" in WORKFLOW_LOADERS));
+  assert.ok(!listWorkflowNames().includes("person-match"));
+});

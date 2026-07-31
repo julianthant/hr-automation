@@ -172,9 +172,9 @@ function resolveEmployeeLabel(data: Record<string, string>): string {
 /**
  * A **display-only** row: a tracker row that reports the outcome of work done
  * elsewhere and has NO daemon task of its own (`data.displayOnly === "true"`).
- * Today: the per-person I-9 check results fanned back into the separations
- * queue — the person-match children that produced them ran under the OCR run,
- * not under these rows.
+ * Today: I-9 pages that cannot be searched still emit failed member rows so
+ * the operator can see the per-person outcome, but no daemon task exists for
+ * those rows.
  *
  * Such a row must NOT offer retry / cancel / bump. There is nothing to cancel,
  * and a retry is actively DANGEROUS: with no SQLite task to re-queue,

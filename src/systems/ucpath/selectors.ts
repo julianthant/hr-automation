@@ -467,7 +467,7 @@ export const personSearch = {
    * the PERSON_RESULTS grid (`table#l0PERSON$0`). The real results page carries
    * NO `SEARCH_RESULT` id and no `.PSLEVEL1GRID` class — the previous anchors
    * matched 0 elements on a live found page, so every genuine match timed out
-   * as an ambiguous outcome (live-verified 2026-07-10, 25/104 person-match runs
+   * as an ambiguous outcome (live-verified 2026-07-10, 25/104 HR-Tasks match runs
    * failed that way). Companion per-row name cells: `HTML2$<row>` (legal first
    * name) / `HTML4$<row>` (legal last name) — read by `searchPerson`'s match
    * extraction. verified 2026-07-10

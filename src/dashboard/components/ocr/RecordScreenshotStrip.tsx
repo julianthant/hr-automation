@@ -42,8 +42,9 @@ export function RecordScreenshotStrip({
   refreshKey,
 }: RecordScreenshotStripProps) {
   // The person child item-id prefix is set by the RUN's form type
-  // (orchestrator fan-out `ocr-${oath|ec}-…`; verify `ocr-verify-…`; the i9
-  // form fans out person-MATCH children as `ocr-i9-…`).
+  // (orchestrator fan-out `ocr-${oath|ec}-…`; verify `ocr-verify-…`). The
+  // retired pre-2026-07-17 i9 fan-out also used `ocr-i9-…`; those historical
+  // screenshots are no longer resolved after the hard workflow retirement.
   const personPrefix =
     runFormType === "oath"
       ? "ocr-oath"
@@ -59,10 +60,11 @@ export function RecordScreenshotStrip({
       ? `ocr-verify-i9-${ocrRunId}-r${recordIndex}`
       : null;
 
-  // An i9 run's per-record child is a person-MATCH (UCPath person search);
-  // every other form's child is a person-lookup.
-  const personWorkflow = runFormType === "i9" ? "person-match" : "person-lookup";
-  const { entries: personEntries } = useRunScreenshots(personWorkflow, personItemId, refreshKey);
+  const { entries: personEntries } = useRunScreenshots(
+    "person-lookup",
+    personItemId,
+    refreshKey,
+  );
   const { entries: i9Entries } = useRunScreenshots("i9-lookup", i9ItemId, refreshKey);
 
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
