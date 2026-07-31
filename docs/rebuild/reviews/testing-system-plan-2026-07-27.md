@@ -1,20 +1,22 @@
-# Testing-system plan — coverage policy, test-value standard, and legacy-suite erasure
+# Testing-system plan — coverage policy, test-value standard, and legacy-suite preservation
 
-Status: **PROPOSAL 2026-07-27, awaiting operator sign-off.** On ratification this folds into
-**doc 10** as a Round-9 amendment (new §§10–13) plus two small doc 07 touches (1a work item, final
-old-tree-removal checklist). Until then this file is the plan of record for the testing system.
+Status: **RATIFIED 2026-07-31 (D91).** The operator accepted the coverage floors, Phase-2 branch
+floors, and soft suite-size budget; legacy erasure was rejected in favor of preservation through
+initial cutover and separate later authorization for any retirement. The owning requirements are
+folded into docs 07/10; this file retains the full testing rationale and execution detail.
 
 ## Ownership header (D1)
 
 | | |
 |---|---|
-| **This plan OWNS** | The coverage policy (band, denominator, thresholds, gate), the test-value standard (must-test / skip-list / quality rubric / review checklist), suite sizing + anti-bloat discipline, and the legacy-suite disposition + erasure sequence. |
-| **Imports (never redefines)** | Guard inventory, ratchet port map, TDD tiers, stub/live lanes, D85 testing standard, scenario corpus — **doc 10**. Phases, 1a legacy lint-debt manifest, D73 frozen tree, exit criteria — **doc 07**. `example`-derived fixtures — **doc 01**. ScenarioManifest — **doc 12**. Clock injection — **doc 11**. |
-| **Operator directive (2026-07-27)** | Replace the current test system in the rebuild; aim ~60–80% coverage; skip trivial tests so the suite doesn't bloat; write better tests that pin the behaviors that actually matter; erase the current tests **after** the new system is implemented. |
+| **This plan OWNS** | The coverage policy (band, denominator, thresholds, gate), the test-value standard (must-test / skip-list / quality rubric / review checklist), suite sizing + anti-bloat discipline, and legacy-suite preservation/future-retirement prerequisites. |
+| **Imports (never redefines)** | Guard inventory, ratchet port map, TDD tiers, stub/live lanes, D85 testing standard, scenario corpus — **doc 10**. Phases, 1a legacy lint-debt/change-accounting manifests, D88 isolation, exit criteria — **doc 07**. `example`-derived fixtures — **doc 01**. ScenarioManifest — **doc 12**. Clock injection — **doc 11**. |
+| **Operator directive (2026-07-27, amended 2026-07-31)** | Build a better `temp_src` test system at ~60–80% coverage and skip trivial tests so it does not bloat. The earlier idea of erasing current tests after implementation is superseded: preserve them through initial cutover; any later retirement requires separate explicit authorization. |
 
 **One-sentence thesis.** Doc 10 says *which guards and lanes exist*; this plan says *how much
 behavior testing is enough (60–80%, measured honestly), which tests are banned as noise, how big
-the suite is allowed to get, and exactly when and how the 479-file legacy suite dies.*
+the rebuild suite may get, and how the 479-file legacy suite remains usable without exporting its
+debt into new code.*
 
 ---
 
@@ -23,7 +25,8 @@ the suite is allowed to get, and exactly when and how the 479-file legacy suite 
 Measured 2026-07-27: **479 test files, ~94,760 lines** (`tests/unit` 465-ish across 70+ dirs, plus
 `delegation` 7, `integration` 4, `live` 7). Known properties:
 
-- **1,325 legacy lint errors** in tests (doc 07 baseline) — the suite grew faster than its hygiene.
+- **1,344 legacy lint errors + 2 warnings** in tests (fresh 2026-07-31 baseline) — the suite grew
+  faster than its hygiene.
 - A large share are **parity tests for the ~10 parallel registries** the descriptor SSOT retires
   (doc 10 §4) — they test synchronization ceremony, not behavior.
 - Many are **implementation-detail tests**: they mock internals and assert the mock was called,
@@ -50,11 +53,12 @@ From doc 10, unchanged and imported here:
   extend to `temp_src` with zero-allowlist; parity guards retire into `descriptor-coverage`.
 - **Lanes** (§7): derived-stub happy path from `example`, ScenarioManifest corpus for everything
   `example` can't express, opt-in live lane, headless `playwright-cli` dashboard loop.
-- From doc 07 1a: legacy tests frozen behind the **diagnostic-fingerprinted shrink-only lint
-  manifest**; `lint:rebuild-tests` zero-debt for new test roots.
+- From doc 07 1a: legacy tests remain runnable and maintainable behind a
+  **diagnostic-fingerprinted no-new-debt lint manifest**; `lint:rebuild-tests` is zero-debt for new
+  test roots. Touched legacy files may fix/shrink existing diagnostics but cannot add or change one.
 
 This plan adds the four missing layers on top: **§3 coverage policy, §4 test-value standard,
-§5 suite topology + sizing, §6 erasure.**
+§5 suite topology + sizing, §6 legacy preservation/future retirement.**
 
 ---
 
@@ -80,8 +84,8 @@ This plan adds the four missing layers on top: **§3 coverage policy, §4 test-v
 
 ### 3.3 The denominator — measured over what, honestly
 
-Coverage is measured over **`temp_src/**` only** (after final cutover, the renamed tree — the
-config follows the rename in the same commit). The point of the exclusion list is that 60–80 stays
+Coverage is measured over **`temp_src/**` only** before and after cutover; cutover switches the
+normal launcher and does not rename the source root. The point of the exclusion list is that 60–80 stays
 an *honest* number over code that unit/scenario lanes can actually execute:
 
 | Excluded from denominator | Why | Its real verification instrument |
@@ -107,8 +111,8 @@ stale pattern matching nothing fails too. Nobody quietly shrinks the denominator
 Rationale: the safety-critical set is already driven to high coverage *incidentally* by doc 10's
 guard fixtures (crash injection, fence ordering, probe settlement) — the 80 floor just pins that it
 stays true. Everything else sits in the band. Branch coverage starts report-only because early
-spine code is infra-heavy and branch numbers are noisy at small tree size; gating it is a Phase-2
-exit-review decision with data in hand.
+spine code is infra-heavy and branch numbers are noisy at small tree size; the ratified gate turns
+on at Phase-2 exit at 50 global / 70 safety-critical without another policy decision.
 
 ### 3.5 Gate mechanics + activation
 
@@ -195,14 +199,15 @@ rather than past it? A "coverage improved 92%→96%" commit is a smell, not a wi
   (EXTEND / RE-DERIVE / RETIRE), the manifest pins the path.
 - **`tests/live/`** — ports as-is (doc 10 §7), opt-in, never CI, never in coverage.
 - Vitest projects: `rebuild-unit` (parallel), `rebuild-scenario` (parallel unless a fixture is
-  proven load-sensitive — serialization is per-file opt-in with a reason, not a lane default),
-  legacy `unit`/`serial` projects survive untouched until erasure (§6).
-- At final cutover (old tree deleted): `tests/rebuild/*` renames to `tests/unit` +
-  `tests/scenario`; config and scripts follow in the same commit.
+  proven load-sensitive—serialization is per-file opt-in with a reason, not a lane default).
+  Legacy `unit`/`serial` projects remain runnable through initial cutover and afterward as rollback
+  coverage until a separately authorized retirement (§6).
+- `tests/rebuild/*` keeps its name at cutover, matching the permanent `temp_src/` root. The normal
+  production launcher changes; the source/test roots do not need a risky rename.
 
 ### 5.2 Sizing — the anti-bloat budget
 
-The rebuild deletes the structural need for most of today's mass: parity tests → descriptor
+The rebuild avoids reproducing the structural need for most of today's mass: parity tests → descriptor
 projections; per-workflow step stubs → derived `example` stubs; scattered regression tests →
 indexed scenarios. Expected end-state at full workflow parity:
 
@@ -212,7 +217,7 @@ indexed scenarios. Expected end-state at full workflow parity:
 | Architecture guards | 23 files | ~50 files (ratified growth — doc 10 §5.1) |
 | Scenario corpus | — (hand-written stubs) | manifests as *data* + one runner |
 | delegation/integration | 11 files | absorbed into scenario corpus |
-| **Total test code** | **479 files / ~95k lines** | **≈ 200–220 files / ≤ 40k lines** |
+| **Rebuild test code** | legacy suite remains separate | **≈ 200–220 files / ≤ 40k lines** |
 
 Enforcement is **soft, visible, and reviewed** — a hard file-count gate would just be gamed by
 concatenation. A tiny `suite-size` report (file count + line count per family, printed with the
@@ -222,78 +227,80 @@ SKIP-list rule failed or revise the budget explicitly — silent drift is not an
 
 ---
 
-## 6. Legacy-suite disposition + erasure — "erase after implementation," made exact
+## 6. Legacy-suite preservation and separately authorized retirement
 
 ### 6.1 The rule
 
-**Legacy tests are deleted *with the subsystem they test*, in the same merge that proves its
-replacement — never before, never long after.** "After implementation" is therefore per-subsystem
-and mechanical, not one big end-of-program deletion (which would leave 95k dead lines rotting for
-months) and not an early deletion (which would drop the only safety net the frozen tree has).
+**No legacy test, project, fixture, or harness is deleted during the rebuild or initial cutover.**
+The old automation remains production-authoritative while `temp_src` is built, and the complete
+legacy suite remains its regression and rollback safety net. A later retirement is a separate
+operator decision, never an implied phase-exit cleanup.
 
 Timeline anchored to doc 07:
 
-1. **Now → src freeze (D73):** legacy tests may still change for *production fixes on `src`* only.
-   No new legacy tests otherwise; the D70 fingerprint manifest only shrinks.
-2. **At src freeze:** `tests/unit` etc. become read-only + delete-only, same as `src/`
-   (the `frozen-legacy-tree` guard's glob extends to the legacy test roots in the freeze commit).
-3. **Per migration (Phases 1–3+):** when a workflow/subsystem passes its exit criteria, its mapped
-   legacy test directories are deleted in the same merge, after the one-time salvage sweep (§6.3).
-   The D70 manifest shrinks correspondingly — deletion is *visible* in the gate.
-4. **Final old-tree removal (doc 07):** remaining legacy roots (`tests/unit` remnants,
-   `tests/delegation`, `tests/integration`, legacy vitest projects, `tests/_utils`, `setup.ts`
-   legacy hooks, log-audit legacy wiring) are deleted; the D70 manifest reaches zero and is itself
-   deleted; `lint:tests` becomes mandatory-green (already ratified, doc 07). `tests/rebuild/*`
-   renames into place.
+1. **During the rebuild:** legacy tests may change with production maintenance and may add real
+   regressions for legacy behavior. The D90 fingerprint ratchet permits removal of old diagnostics
+   but rejects a new/changed diagnostic and requires every touched legacy test file to introduce no
+   additional debt. Rebuild tests stay independently zero-debt.
+2. **At each migration milestone:** port high-value behavior and fixtures into rebuild scenarios,
+   but do not delete their legacy originals. Record coverage in the disposition inventory as
+   `ported-and-preserved`, `legacy-only`, or `candidate-for-later-retirement`.
+3. **At initial all-at-once cutover:** run both legacy and rebuild suites, preserve all legacy test
+   roots/projects, and record the cutover commit as the rollback baseline. The legacy lint manifest
+   may remain non-zero; cutover truthfully gates on the no-new-debt ratchet, not a false global
+   `lint:tests` claim.
+4. **Only after a new explicit operator authorization:** a retirement plan may delete exact named
+   paths after capability proof, salvage/port evidence, rollback-window closure, and a recoverable
+   backup/tag. Until that authorization, final-delete mode does not exist.
 
-### 6.2 What is NOT erased
+### 6.2 What is preserved
 
-- **Architecture guards with EXTEND/RE-DERIVE fates** (doc 10 §2) — they are the umbrella, not the
-  bloat; only the RETIRE set (parity guards) dies, each in the commit where `descriptor-coverage`
-  proves its replacement.
-- **`tests/live/`** — ports as-is.
-- **Fixture assets with no substitute** (real-shaped PDFs, OCR goldens, JSONL/SQLite corpora) —
-  they move into the rebuild fixture corpus during salvage, they don't die with the harness around
-  them.
+- **All current legacy test roots and Vitest projects** remain runnable through initial cutover.
+- **Architecture guards with EXTEND/RE-DERIVE fates** continue protecting both trees where their
+  invariants apply. A guard may be replaced for `temp_src` without deleting the legacy guard.
+- **`tests/live/`** remains available to the legacy runtime; rebuild live lanes use isolated state,
+  sessions, and commands.
+- **Fixture assets** (real-shaped PDFs, OCR goldens, JSONL/SQLite corpora) may be copied into the
+  rebuild fixture corpus with provenance; originals stay intact.
 
-### 6.3 The salvage sweep — one pass per directory, before deletion
+### 6.3 The porting sweep — one pass per capability, without deletion
 
-Before a legacy test dir is deleted, one reviewed sweep extracts exactly three things (everything
-else dies with the directory):
+As each rebuild capability lands, one reviewed sweep copies or re-expresses the following high-value
+evidence. The original test directory remains:
 
 1. **Production-incident regressions** → re-expressed as ScenarioManifests with a FixRecord link
    (the 2026-07-15 terminalization class, 2026-06-17 separations batch, Duo re-arm, modal-mask —
-   these are the suite's crown jewels and must not be lost in the deletion).
+   these are the suite's crown jewels and must be present in both regression worlds).
 2. **High-value case tables** → port the *data*, not the harness: name/EID matching corpora,
    address normalization cases, receipt-parser cases, OCR normalization/tier tables, JSONL↔SQLite
    parity cases (the 2026-05-08 lesson class).
 3. **Fixture assets** (§6.2).
 
-### 6.4 Disposition inventory (bucket level; per-file happens at each migration)
+### 6.4 Porting inventory (bucket level; legacy originals remain)
 
-| Legacy bucket | Files | Fate |
+| Legacy bucket | Files | Rebuild porting focus |
 |---|---|---|
-| `unit/tracker/**` (~94) | Largest bucket; mostly re-derives against doc 03's span/projection model. Salvage: reconciliation + terminalization regressions, exporter goldens. Deleted with tracker-successor merges (Phase 1g/2g). |
-| `unit/dashboard/**` (~68) | Mostly render-adjacent + projection tests. Pure-logic tables salvage; component tests die unreplaced (headless loop is the instrument). Deleted with the dashboard flip. |
-| `unit/core/**` (~53) | Re-derived as executor/command/checkpoint scenario fixtures (Phase 1f). Salvage: cancel/claim/requeue regressions. |
-| `unit/services/**` (~49) | OCR/matching/capture/llm: highest salvage density (case tables + goldens) → Phase 2h service stores. |
-| `unit/workflows/**` (~60) | Step-level tests die (derived stubs replace them); per-workflow regressions → scenarios at each Phase-3 migration order. |
+| `unit/tracker/**` (~94) | Port reconciliation + terminalization regressions and exporter goldens into Phase 1g/2g scenarios; preserve originals. |
+| `unit/dashboard/**` (~68) | Port pure-logic tables; use the rebuild headless loop for rebuilt components; preserve legacy dashboard tests. |
+| `unit/core/**` (~53) | Re-express cancel/claim/requeue regressions as executor/command/checkpoint scenarios in Phase 1f; preserve originals. |
+| `unit/services/**` (~49) | Highest porting density: OCR/matching/capture/model case tables + goldens feed Phase 2h stores. |
+| `unit/workflows/**` (~60) | Port operator-visible regressions into scenarios at each Phase-3 migration; derived stubs replace only the rebuild-side ceremony. |
 | `unit/domain/**` (~36) | Much becomes type-guaranteed under strict schemas; genuine logic (presentation resolution, trace-id) ports as tier-1 units. |
-| `unit/systems/**` (~31) | Selector-adjacent tests retire into the semantic-UI registry + live lane; parser logic salvages. |
-| `unit/architecture/**` (23) | **Not erased** — doc 10 §2 fate table governs. |
-| `unit/{control,utils,infra,scripts}` (~44) | Control → command-service scenarios; utils mostly SKIP-list material — expect high pure-deletion rate. |
-| `delegation/` (7), `integration/` (4) | Absorbed into the scenario corpus (which is deterministic where these were load-flaky). |
-| `workflows/kronos-pay-rule` (2), stragglers | Fold into their workflow's migration order. |
+| `unit/systems/**` (~31) | Port parser logic and verified semantic cases into the semantic-UI registry + rebuild live lane. |
+| `unit/architecture/**` (23) | Preserve; doc 10 §2 governs how corresponding rebuild coverage is extended/re-derived. |
+| `unit/{control,utils,infra,scripts}` (~44) | Port load-bearing control/infra behavior into command-service scenarios; SKIP-list material is simply not copied. |
+| `delegation/` (7), `integration/` (4) | Re-express the behavior in deterministic rebuild scenarios without removing legacy lanes. |
+| `workflows/kronos-pay-rule` (2), stragglers | Record alongside their workflow migration and preserve originals. |
 
-### 6.5 Erasure guard
+### 6.5 Preservation and future-retirement guard
 
 Extend the `legacy-capability-disposition` mechanism (doc 10 §3.11) with a sibling
-**`legacy-test-disposition`** arm: every legacy test directory is classified exactly once
-({salvage-then-delete | delete | not-erased-per-doc-10}) with its owning migration milestone; a new
-legacy test dir fails until classified; **final-delete mode** rejects any surviving legacy test
-path, any non-zero D70 manifest, and any salvage item without a landed scenario/fixture id. This is
-the mechanical proof that "erase the current tests" actually completed and lost nothing it meant
-to keep.
+**`legacy-test-disposition`** arm: every legacy test directory is classified exactly once as
+`preserved`, `ported-and-preserved`, or `candidate-for-later-retirement`, with its rebuild evidence
+ids. A new legacy directory fails until classified. During the rebuild and initial cutover the
+guard rejects deletion or project removal. A future retirement mode may be introduced only by a
+separate operator-ratified decision naming exact paths, capability proof, rollback-window closure,
+and backup/recovery evidence; it must reject missing port evidence and any new lint debt.
 
 ---
 
@@ -306,9 +313,8 @@ to keep.
    fast inner loop), suite-size report bolted onto the coverage run.
 4. Guard-manifest additions: coverage-script + threshold-floor pin, exclusion-list pin,
    `legacy-test-disposition` arm registration.
-5. Doc edits on ratification: doc 10 gains §§10–13 (this plan's §§3–6); doc 07 1a gains the
-   coverage-tooling install + disposition-inventory seed; doc 07 final-removal checklist gains
-   §6.1 step 4.
+5. Ratification fold: doc 10 owns the executable guard/coverage requirements; doc 07 1a owns the
+   tooling + lint/change-accounting/disposition seeds and its cutover gate preserves legacy tests.
 
 ## 8. Phase mapping
 
@@ -317,14 +323,17 @@ to keep.
 | 1a (pre-tree) | Coverage tooling installed inert; `legacy-test-disposition` inventory seeded; suite-size report script |
 | 1b+ (first `temp_src` file) | Coverage gate activates atomically (non-empty include proof); rebuild lanes live; SKIP-list review discipline in force |
 | Phase 1 exit | Global floor 60 green over the spine; safety-critical floor 80 green over 1f/1g code |
-| Phase 2 exit | Branch-gating decision (report-only → 50?) with real data; first salvage sweeps (core/tracker buckets) |
-| Phase 3+, per workflow | Salvage sweep + same-merge deletion of that workflow's legacy tests; scenario regressions land with each migration |
-| Final old-tree removal | §6.1 step 4 + final-delete disposition check; `tests/rebuild/*` renames into place |
+| Phase 2 exit | Branch gates activate at ratified 50 global / 70 safety-critical; first porting sweeps recorded (core/tracker buckets) |
+| Phase 3+, per workflow | Porting sweep recorded; scenario regressions land while legacy originals remain |
+| Initial all-at-once cutover | Both suites run; all legacy tests/projects remain as rollback coverage; no rename or deletion |
+| Later explicit retirement, if authorized | Exact-path capability/port/rollback/backup proof before any deletion; not part of this rebuild plan |
 
-## 9. Open decisions for the operator
+## 9. Operator decisions — ratified 2026-07-31
 
-1. **Floor numbers** — proposed 60 global / 80 safety-critical (lines). Accept, or shift?
-2. **Branch coverage** — proposed report-only until Phase 2 exit, then gate at 50/70. Accept?
-3. **Suite-size budget** — proposed soft (report + phase-exit review), not a hard gate. Accept?
-4. **Erasure cadence** — proposed per-subsystem same-merge deletion (§6.1), not one big deletion at
-   program end. Accept? (This is the main interpretation choice in "erase after implementation.")
+1. **Coverage floors accepted:** 60 global and 80 safety-critical for lines, statements, and
+   functions.
+2. **Branch policy accepted:** report-only through Phase 1; 50 global / 70 safety-critical gates
+   activate at Phase-2 exit.
+3. **Suite-size policy accepted:** report + phase-exit review, not a hard file-count gate.
+4. **Legacy erasure rejected for this program:** preserve legacy source, tests, fixtures, and test
+   projects through initial cutover. Any later retirement is a separate explicit operator decision.

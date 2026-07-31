@@ -1,24 +1,23 @@
 # 07 — Master Plan: the single phased build order for `temp_src`
 
-Status: **Phase 0 whole-plan revision complete 2026-07-22; amended 2026-07-30 through the
-frontend/backend integration audit. No `temp_src` implementation exists.**
+Status: **Phase 0 ratified 2026-07-31 through Round 10. No `temp_src` implementation exists.**
 This is the ONE plan the charter demands (§"One master plan"): every design doc converges here,
-and there must never be a competing plan. It awaits operator approval before Phase 1 begins.
+and there must never be a competing plan. Phase 1 may begin with item 1a.
 
-**Round-8 amendment summary (what changed on 2026-07-26 and why).** Four ratified decisions
-restructure this plan rather than adding to it:
+**Round-10 amendment summary (operator ratification 2026-07-31).** D88–D92 supersede the
+incompatible Round-8 migration assumptions while preserving the phase dependency order:
 
-- **D73 pause-until-done** — the old system no longer runs during the rebuild. §4 stops being
-  "coexistence mechanics" and becomes an enumeration of the machinery this *deletes*.
-- **D74 Phase-1 spine** — Phase 1 is cut to what can carry one workflow end to end, and
-  person-lookup running live becomes its exit test instead of a later phase.
-- **D76 build speed as tie-breaker + D73's corollary** — every week of build is a week of manual
-  HR work, so §3.7 adds an explicit size model and a MUST/SHOULD/LATER tier. This plan previously
-  contained no sizing of any kind, which under pause-until-done is a safety omission, not a
-  project-management one.
-- **D84 order optimizes total time-to-resume** — no per-workflow weighting exists (every workflow
-  costs the operator real manual time), so §3.3 optimizes reuse leverage and states the trade it
-  makes.
+- **D88/D90 isolated coexistence** — existing `src` automation and tests remain live and
+  maintainable; `temp_src` is operationally isolated; legacy change accounting replaces a freeze.
+- **D89 one cutover** — workflow migrations are rebuild proofs, not production flips; the normal
+  launcher changes once after full readiness, with `src` preserved for rollback.
+- **D91 testing** — 60/80 lines/statements/functions, Phase-2 50/70 branch gates, soft suite-size
+  review, and no legacy-test deletion during rebuild/initial cutover.
+- **D92 probes** — UCPath, ServiceNow, and OnBase proof remains mandatory at its named later gate,
+  but none blocks Phase 1.
+
+D74's Phase-1 spine, D76's build-speed tie-breaker, and D84's reuse-leverage ordering remain
+binding; only their former manual-work/pause rationale is superseded.
 
 **What this doc is.** It *sequences* and *indexes* the build. It states the order phases run in, the
 dependencies between them, and the hard exit criteria for each. For every work item it names the
@@ -48,8 +47,8 @@ Every concept has exactly one owner (reconciliation `04` D1). Reference the owne
 |---|---|
 | Task contract (`defineTaskContract`/`defineTask`), contract/impl split (D3), task-namespace grammar + closed `SystemId` union (D2), error taxonomy, three effects/dry-run mechanics, retry, decoration, system/service stores + pure workflow mini-stores, session providers + login signature, `stores/common/` leaf homes | **Doc 01** |
 | Workflow builder API (single), descriptor shape, `RunEnvelope`, run-state machine incl. gates/parks (D5), checkpoint/resume + freshness walk (D8), label precedence (D16) | **Doc 02** |
-| Span/event wire schema (D10), notes stream, storage layout, SQLite projection role (D14), SSE wire shapes, completion (fan-out/approval) union (D11), the ONE run/queue projection every count reads (D81), run versioning + archive-on-bump (D80), run display names (D83) — *the D12/D13 lift adapter + flip plan are deleted by D73, §4* | **Doc 03** |
-| Binding cross-doc reconciliation (D1–D87, through 2026-07-30 Round 9) | **Doc 04** |
+| Span/event wire schema (D10), notes stream, storage layout, SQLite projection role (D14), SSE wire shapes, completion (fan-out/approval) union (D11), isolated-runtime/import boundary + one-time import rules (D88/D89), the ONE run/queue projection every count reads (D81), run versioning + archive-on-bump (D80), run display names (D83) | **Doc 03** |
+| Binding cross-doc reconciliation (D1–D92, through 2026-07-31 Round 10) | **Doc 04** |
 | One-item workers, queue dispatch/backpressure, explicit browser-session boundaries + driver leases, speed/sleep-tax contract, page/subject-isolation invariant | **Doc 05** |
 | Data-service systems: CSV/PDF extraction, typed contact/address normalization, roster matching, durable mobile capture, operator column mapping, immutable intake manifest/rerun, Edit Data checkpoint UI | **Doc 06** |
 | Cross-cutting gap findings memo (owns nothing — a design input) | **Doc 08** |
@@ -160,16 +159,16 @@ than inventing one mid-migration.
 
 | Phase | Headline deliverable | Gate to exit | Size |
 |---|---|---|---|
-| **0** | Corrected foundation design approved; empty rebuild tree | Decisions reconciled through Round 9; executable feasibility + honest gate baseline recorded; write-proof probes carry explicit later milestone gates (§3.8) | **M** |
+| **0** | Corrected foundation design approved; empty rebuild tree | **COMPLETE 2026-07-31:** decisions reconciled through Round 10; testing policy ratified; executable feasibility + honest gate baseline recorded; write-proof probes carry explicit later milestone gates (§3.8) | **M** |
 | **1** | **The SPINE** — the minimum base that can carry one workflow end to end (1a–1f + the span/projection slice + the queue-surface slice) | **person-lookup runs LIVE on it** (D74 — a fixture cannot falsify a contract the way a real run can); full gates green; strict/subject/control/delegation/recovery/scenario fixtures pinned | **XL** |
 | **2** | **Transaction proof, then the deferred base tails** — controlled real commit + crash/recovery, *then* trust tails, data services/intake/capture, explorer | subject-bound dry-run and controlled commit/crash/outbox/ledger proof green; then evidence/notification/knowledge, intake/capture/Edit-Data, and read-only explorer land against a proven spine | **XL** |
-| **3+** | Per-workflow migration, one at a time (order §3.3), plus explicit non-workflow capability closure (§3.6) | each: §b questionnaire answered; live dry-run + controlled write evidence where applicable; every capability inventory entry advances to native/replaced/retired; docs updated | **XL** |
+| **3+** | Per-workflow rebuild migration, one at a time (order §3.3), plus explicit non-workflow capability closure (§3.6) | each: §b questionnaire answered; isolated live dry-run + controlled write evidence where applicable; every capability inventory entry advances to native/replaced/retired; docs updated; legacy production remains authoritative until the final gate | **XL** |
+| **Cutover** | One all-at-once production authority switch (D89) | every workflow/shared capability ready; legacy enqueues stopped; active/uncertain work reconciled; both states backed up; imports versioned/idempotent; launcher switches atomically; rollback bridge verified; legacy code/tests preserved | **L** |
 
 **Reading the Size column.** These are relative build sizes, not calendar — the calendar depends
 on session cadence, which the plan does not own. The unit is *work sessions of the kind this
-program actually runs in*: **S** ≈ 1, **M** ≈ 2–4, **L** ≈ 5–10, **XL** ≈ 10+. They exist because
-under pause-until-done (D73) program duration is manual HR work the operator personally absorbs,
-so an unsized plan hides a real operational cost. Per-item sizes are in §3.7; they are estimates
+program actually runs in*: **S** ≈ 1, **M** ≈ 2–4, **L** ≈ 5–10, **XL** ≈ 10+. They expose
+delivery risk and help keep a long coexistence program tractable. Per-item sizes are in §3.7; they are estimates
 offered for correction, not commitments.
 
 ---
@@ -182,13 +181,12 @@ offered for correction, not commitments.
 before any `temp_src` code is built (charter §Process: nothing is built before its design part is
 approved).
 
-**Status (2026-07-22 revision).** Docs 00–12 have been reconciled through Round 7 (D46–D72) after
-the entire design and relevant legacy code were reread. The abandoned skeleton and spike remain
-deleted; Phase 1 has not started. This corrected design now awaits operator approval as one set.
+**Status (2026-07-31).** **COMPLETE.** Docs 00–13 are reconciled through Round 10 (D1–D92); the
+operator ratified isolated `temp_src` coexistence, all-at-once cutover, the testing policy, and the
+later probe gates. Phase 1 has not started.
 
-**What remains.** Operator approval of this revised document set and explicit acceptance that the
-system-specific questions below block only their named migrations, not Phase 1. No foundational
-design document remains unwritten.
+**What remains.** Nothing in Phase 0. Phase 1 starts at 1a; system-specific proof questions below
+remain mandatory only at their named milestones (D92).
 
 **Deferred decisions (logged, resolved at the named point).** Kuali `save-verify` and OnBase
 `upload-verify` vs always-park (doc 09 OQ1/OQ2—before their first migration); per-workflow prewrite
@@ -213,11 +211,11 @@ failed—pre-propagation negative evidence could contribute a vote—and is now 
 479 unit files / 4,619 tests, 11 serial files / 20 tests, and 23 architecture files / 129 tests all
 pass. Test lint remains red at 1,344 errors + 2 warnings. D70/doc 10 §1.1 makes this explicit: new
 rebuild source/tests are zero-warning from their first file; legacy test diagnostics are
-fingerprinted, shrink-only coexistence debt and must reach zero before final cutover. No plan
+fingerprinted, no-new-debt coexistence debt. It may remain non-zero through initial cutover; no plan
 milestone may report `npm run lint:tests` green until it actually is.
 
-**Exit criteria.** Docs 00–12 and this build order approved; every deferred question has an owner,
-evidence needed, and resolution point. No `temp_src` code before this gate.
+**Exit criteria.** **MET 2026-07-31.** Docs 00–13 and this build order are approved; every deferred
+question has an owner, evidence needed, and resolution point.
 
 ---
 
@@ -247,7 +245,7 @@ and a real consumer. **No contract in docs 01–06 changed — only delivery ord
 
 | # | Work item | Owner | Key guards that must be green at this step |
 |---|---|---|---|
-| 1a | **Pre-tree guard plumbing + honest legacy baselines.** With `temp_src` still absent, first extract shared walk/allowlist helpers as a zero-count-change commit; add the reviewed guard inventory, D58 capability baseline, and exact path-exemption tests; repair the 2-error/1-warning source-lint baseline without suppressions; generate D70's diagnostic-fingerprinted shrink-only legacy-test lint manifest and zero-debt/non-vacuous rebuild lint commands. Do not add unmatched CLI globs or pretend an absent tree was scanned | **Docs 07/10** | helper-refactor preserves measured architecture file/test count; `npm run lint` green before 1b; legacy diagnostic fingerprints reproduce exactly then only shrink; new-tree lint commands reject warnings and unmatched paths; guard/capability inventories self-validate; every workflow/service/route/UI/CLI/tool family classified; nested-`scripts` fixture |
+| 1a | **Pre-tree guard plumbing + honest legacy baselines.** With `temp_src` still absent, first extract shared walk/allowlist helpers as a zero-count-change commit; add the reviewed guard inventory, D58 capability baseline, D90 legacy-change-accounting + preservation manifests, and exact path/isolation tests; generate the diagnostic-fingerprinted no-new-debt legacy-test lint manifest and zero-debt/non-vacuous rebuild lint/coverage commands. Install coverage tooling inertly; seed the legacy-test disposition inventory; do not add unmatched globs or pretend an absent tree was scanned | **Docs 07/10 + ratified testing-system plan** | helper-refactor preserves architecture count; `npm run lint` stays green; 1,344-error/2-warning fingerprints reproduce; touched legacy tests add/change no diagnostics; runtime roots/ports/locks/browser profiles and import graphs are isolated; rebuild lint/coverage rejects warnings, empty sets, and exclusions drift; 60/80 line-statement-function floors encoded; branch report enabled; guard/capability/test inventories self-validate; no legacy path deletion |
 | 1b | **First strict domain leaf + full coverage activation, atomically.** Add closed/branded ids, canonical JSON/absence/error types, Clock/config/secrets/redaction classifications, exhaustive runtime-dependency + environment/preflight registries, and base failure/evidence/scenario/knowledge schemas; activate `temp_src` typecheck, ESLint CLI+config, whole-tree ratchets, and layer matrix in the same commit | **Docs 01/10/11/12** | strict-boundary schema inventory; typecheck/lint non-vacuity; clock/secrets/config/preflight/redaction canaries; defaults parse; resolver return types; bidirectional system/provider/endpoint/secret prerequisite coverage; no open decision maps |
 | 1c | **Authority storage + recovery + command/write type shell.** Create the infra-owned native authority adapter, versioned authority/projection table classes, self-describing `node:sqlite` online-backup manifest/doctor/degraded-mode/restore APIs, full command-family types, `ProbeVerdict`/negative-settlement policy, typed write-binding proof union, permanent intent/attempt, dependency/manifest, gate-result, notification, outbox and ledger-head schemas before consumers refer to them | **Docs 03/09/11** | DDL/invariants; raw `DatabaseSync` private; authority vs projection enumeration; boot corruption fixture; native backup opens/read-checks its own generation + follow-up trigger; restore skeleton; committed key cannot reinsert; pre-window/single negative cannot unlock retry; no untyped command/proof/gate/notification arm |
 | 1d | **Semantic UI registry, typed drivers, task + provider contracts and stores/sessions.** Inventory legacy selector keys into one canonical id/alias migration map; implement the server-only recipe registry, safe generated `UI-CATALOG.md` projection, driver boundary, then read/prepare/commit overloads, subject specs, mutation capability, freshness/provenance, artifact writer, declared provider capabilities with narrowed injected clients, store/session providers and exclusivity. Fully typed recipes populate as tasks migrate; no task may port first and bypass this step | **Docs 01/05/12** | semantic-id uniqueness/dependencies/catalog; catalog omits recipes; commit UI actions require mutation capability; raw Page/Locator absent outside driver/session internals; remote I/O requires provider declaration and infra adapter; effect/capability/subject/contract/impl/example/error/store/no-any/artifact/OnBase guards; every new observation/recipe has fixture plus live/read-only verification evidence |
@@ -280,10 +278,10 @@ shape simplification rather than being normalized as editor lag.
 - `npm run typecheck:all` (both tsc programs), `npm run lint`, `npm run lint:rebuild`,
   `npm run lint:rebuild-tests`, `npm run lint:legacy-tests-ratchet`, `npm run test`, and
   `npm run test:architecture` are **all green**, with every guard inventoried and covering
-  `temp_src`. The fingerprinted legacy-test ratchet is the honest gate while the frozen legacy
-  tests still exist; `npm run lint:tests` becomes mandatory once its D70 manifest reaches zero and
-  is deleted. **D73 note:** with `src` frozen, that manifest no longer churns — it only shrinks as
-  legacy tests are deleted.
+  `temp_src`. The fingerprinted legacy-test ratchet is the honest gate while maintained legacy
+  tests still exist; `npm run lint:tests` is reported truthfully but is not an initial-cutover gate.
+  The manifest may remain or shrink, but any new/replaced fingerprint fails and touched legacy files
+  cannot add debt. `test:coverage` gates 60/80 lines/statements/functions; branches are report-only.
 - Write-safety fixtures pin simultaneous and later sequential same-key dedupe, proof validation for
   every completion arm, fresh subject binding, crash injection across atomic commit, and ledger
   projector concurrency/tail loss. Alternating-EID/file-digest mismatch produces zero fence/click.
@@ -304,25 +302,17 @@ shape simplification rather than being normalized as editor lag.
 - Every activated guard arm resolves a non-empty file set; ESLint's CLI target and typed config block
   both cover `temp_src`. Missing paths and unmatched patterns are failures, not skips.
 - **No external HR WRITE yet.** The exit test is a submit-free live read; existing selector
-  knowledge maps from the frozen legacy registry, and newly introduced page-state/observation
+  knowledge maps from the maintained legacy registry, and newly introduced page-state/observation
   recipes receive read-only live verification as they enter the catalog. All external-write proof
   begins in Phase 2.
 
-**Program invariant Phase 1 establishes — a frozen reference, not a maintained parallel tree
-(D73, REPLACES the prior "versioned legacy compatibility" invariant).** On the day 1a lands, `src`
-is frozen: no feature work, no selector fixes, no legacy enqueues, no dual maintenance. Three
-things follow, and all three are simplifications:
-
-- **No legacy wire-schema versioning.** The prior invariant required every legacy row/log/session
-  shape change to ship a version bump + lift adapter + golden fixtures in the same commit. A
-  frozen tree emits no new shapes, so this whole mechanism is deleted (§4).
-- **No dual-maintenance windows.** The prior plan owed an explicit, honestly program-length
-  UCPath/CRM window and a per-system close-out. There is nothing to keep in sync.
-- **The D70 lint-debt manifest stops being a tax.** Frozen tests generate no new diagnostics; the
-  manifest only shrinks, as legacy tests are deleted.
-
-The old tree stays readable — it is the port source for live-verified leaf knowledge (charter:
-"port, don't rewrite") and the reference for behavior questions. It just does not run.
+**Program invariant Phase 1 establishes — two isolated runtimes, one production authority
+(D88/D90).** `src` keeps running and may receive production maintenance. `temp_src` cannot import,
+invoke, proxy, or read/write its live state; commands, roots, ports, locks, and browser profiles/
+sessions are distinct in both directions. Verified leaf knowledge is ported with provenance.
+Every legacy change maps to affected capabilities and rebuild evidence; legacy source/tests are
+preserved, while new/touched test diagnostics cannot add debt. Phase 1 proves only inside the
+isolated rebuild runtime and never changes production routing.
 
 ---
 
@@ -381,9 +371,8 @@ questionnaire names a real workflow that wants it.
 
 **Hard exit criteria (Phase 2).**
 - *(Live person-lookup, `descriptor-coverage`, surface rendering, and speed sanity all moved to
-  Phase 1's exit — see D74. The **D13 golden-payload parity gate is deleted**, not moved: under
-  D73 there is no running legacy dashboard to be byte-parity with. The new surfaces are validated
-  by their own fixtures + the live run, per §4.)*
+  Phase 1's exit—see D74. The historical D13 live-lift parity gate remains rejected: D88 isolates
+  the runtimes. New surfaces are validated by strict fixtures + isolated live proof, per §4.)*
 - Docs updated: doc 02 §8 marked as-built; any contract flaw found is fixed in the owning doc first.
 - Transaction dry-run shows prepare preview and zero commit span/intent. Controlled write proof
   records a fresh matching subject proof; the forced mismatch/unknown variants produce no intent or
@@ -427,8 +416,8 @@ to order 6. One later checkpoint remains:
 
 **Goal.** Migrate the remaining workflows onto the new base, **one at a time**, slowly populating the
 task stores with what each needs. Every workflow gets its own migration plan doc (a child of this
-plan) answering the §b questionnaire and recording its reuse/additions. Per-system old code is
-deleted the moment that system's workflows are fully migrated (charter §Migration).
+plan) answering the §b questionnaire and recording its reuse/additions. These are rebuild
+capability milestones only; legacy source/tests remain production and rollback assets.
 
 #### 3.1 Migration loop (per workflow)
 
@@ -447,16 +436,14 @@ deleted the moment that system's workflows are fully migrated (charter §Migrati
    configured test instance or a deliberately harmless, operator-approved canary. If neither exists,
    cutover is blocked—dry-run alone cannot prove landing, recovery, or dedupe. The §b questionnaire
    records target, cleanup/reversibility, expected proof, and stop condition before this test.
-6. **Go-live (D73 — replaces "generation cutover").** There is no drain, no generation increment,
-   and no mixed-engine period: `src` has been frozen since 1a and has enqueued nothing. The
-   workflow simply becomes available, and **the operator decides when to resume using it** — per
-   workflow as each lands, or all at once at the end. That is a runtime choice with no plan
-   machinery behind it either way. The old workflow directory is deleted when its systems have no
-   remaining un-migrated consumer (§3.2).
+6. **Mark rebuild-ready; do not go live (D89).** Record the workflow's native evidence and
+   capability closure, but leave production routing on `src`. There is no workflow-scoped flip,
+   legacy proxy, engine generation, or mixed-engine production. All workflows switch together only
+   after the whole-program cutover gate (§6).
 7. **Close the learning loop.** Any failure discovered produces a regression scenario + structured
    knowledge/fix record; stale knowledge is superseded rather than appended beside the correction.
-   Update affected D58 capability entries, delete old code only when every named consumer is gone,
-   and update the nearest CLAUDE.md + owning docs.
+   Update affected D58 capability entries and the legacy-change-accounting map; preserve old source
+   and tests; update the nearest CLAUDE.md + owning docs.
 
 #### 3.2 Exit criteria (per workflow)
 
@@ -469,33 +456,30 @@ deleted the moment that system's workflows are fully migrated (charter §Migrati
   appears outside the system driver.
 - **Live dry-run** green against every real system it touches (submit-free).
 - Every commit/probe/verify has controlled live evidence on the configured target; unavailable safe
-  evidence blocks go-live rather than converting dry-run success into a write-safety claim.
-- Old per-system `src` code is **deletable** once that system has no remaining un-migrated consumer
-  (the actual deletion is an operator command, D73). No dual-maintenance window exists to bound —
-  the frozen tree is a read-only port source, so a shared UCPath/CRM directory simply stays
-  readable until its last consumer migrates, with nothing to keep in sync.
+  evidence blocks rebuild-ready status rather than converting dry-run success into a write-safety claim.
+- Old per-system `src` code and tests remain runnable and preserved through initial cutover. A
+  capability may become `candidate-for-later-retirement`, but deletion requires separate explicit
+  operator authorization after cutover and rollback-window closure.
 - Every old service/route/dashboard/CLI/tool capability touched by the workflow has an updated D58
   disposition; every removed source path has zero remaining imports.
 
 #### 3.3 Recommended migration order (by risk / complexity / reuse)
 
-**The ordering objective, made explicit (D84, operator 2026-07-26).** Asked which workflows cost
-the most manual time under pause-until-done, the operator answered **all of them** — no workflow
-dominates. So there is no per-workflow priority to weight by, and the order optimizes a different
-thing: **total time until all automation is back**. That means maximizing reuse leverage — each
+**The ordering objective, made explicit (D84, amended by D88/D89).** Production availability does
+not vary by migration order because legacy automation remains authoritative until one final
+cutover. The order optimizes **total rebuild delivery time** by maximizing reuse leverage—each
 migration must make the next cheaper — which is what the risk-ordered sequence below already does
 (reads populate the stores every later workflow draws from; the OCR service pipeline unblocks four
 consumers; the write-heavy workflows land last on top of everything).
 
-**The trade this makes, stated plainly.** Onboarding and separations migrate last (orders 8–9), so
-they stay **manual the longest** — and they are also the two whose incidents motivated the whole
-program. That is deliberate: they are the highest-stakes writes, they reuse the most, and doing
+**The trade this makes, stated plainly.** Onboarding and separations migrate last (orders 8–9).
+That is deliberate: they are the highest-stakes writes, they reuse the most, and doing
 them early would mean proving the write-safety contract on the two workflows least able to absorb
-a contract flaw. Two things make the cost bearable: the operator may **resume each workflow as it
-lands** rather than waiting for the whole program, and the separations identity-approval gate (doc
+a contract flaw. The existing workflows continue serving production while this sequence runs, and
+the separations identity-approval gate (doc
 09 §14) is designed in Phase 0 rather than at order 8, so nothing about that workflow is
-discovered late. If the manual burden of one specific workflow becomes the binding constraint,
-this order is the thing to revisit — say so and it moves.
+discovered late. If a dependency or evidence target becomes the binding constraint, this order is
+the thing to revisit.
 
 Read-only and simple first (populate the read stores, low blast radius); OCR/approval flows next
 (exercise the completion union + gates); write-heavy last (the write-safety contract's real test),
@@ -520,8 +504,7 @@ to the OCR workflow's own surface set and is built native together with the OCR 
 and its first approval consumers (order 4), so the completion union + approval gates are exercised
 by the real review UI. Per the 2026-07-24 layout ratification it renders as an **expanded page ↔
 extracted-text pair** — each PDF page beside the fields extracted from it, never a collapsed
-table. (Under D73 there is no proxied legacy alternative to fall back to; this is simply when it
-gets built.)
+table. Production continues using the isolated legacy OCR surface until the single cutover.
 
 **Order-8 prerequisite — RESOLVED, and pulled into Phase 0 (D77).** This slot previously read "the
 separations identity-approval GATE-NODE has no design yet." That was the sharpest priority
@@ -534,7 +517,7 @@ in **doc 09 §14** during Phase 0, with its node mechanism owned by doc 02 §4. 
 designed gate instead of owing one.
 
 **Order-6 canonical-EID audit gate.** The base decision is already made: `Eid` is
-`/^10\d{6}$/`; there is no `legacyEid`. Before work-study/separations cutover, replay their real
+`/^10\d{6}$/`; there is no `legacyEid`. Before work-study/separations rebuild-ready status, replay their real
 stored/fixture inputs through the canonical schema and surface every rejection. If evidence reveals
 a genuinely different source identifier, model it under a specific domain name/brand with an
 explicit verified conversion to `Eid`; do not widen the canonical type. This is an evidence gate,
@@ -604,13 +587,14 @@ Embed in **every** workflow's migration plan doc; answer with the operator BEFOR
   fixed retention roster—but it does exercise the same stable artifact/outbox/evidence machinery.
   Work-study and onboarding therefore validate an already-built mapping surface rather than owning it.
 - **Mobile capture** backend/session recovery/bundle outbox lands in **2h** and its dashboard/phone UI
-  in **2i** over synthetic handoffs. It remains frozen-reference-only until the native OCR workflow cutover
-  at order 3, then flips with OCR so finalized PDFs cannot cross old/new authority implicitly.
+  in **2i** over synthetic handoffs. Legacy capture remains production-authoritative; rebuild
+  capture uses isolated state and hands off only within `temp_src`. Both switch together at final cutover.
 
 #### 3.6 Non-workflow capability closure inventory (D58)
 
 Workflow directories are only part of the old program. `config/rebuild/legacy-capabilities.json`
-is created in 1a from a source inventory and maintained through deletion. Every entry has a stable
+is created in 1a from a source inventory and maintained through rebuild, cutover, and any later
+retirement. Every entry has a stable
 capability id, non-empty source paths, kind (`service|route|dashboard|cli|export|codegen|maintenance|
 dev-tool`), known consumers, one strict disposition, owner milestone, verification evidence, and
 status. Dispositions are a discriminated union:
@@ -618,57 +602,53 @@ status. Dispositions are a discriminated union:
 - `native { milestone, targetIds }` — equivalent/improved native capability exists;
 - `replaced { milestone, replacement, differencesAccepted }` — intentionally solved another way;
 - `retired { milestone, evidence, reason }` — proven unused/unwanted; “seems dead” is insufficient;
-- `proxy { removeBy, nativeDisposition }` — temporary only, with the closing milestone embedded.
+- `candidateForRetirement { evidence, requiresOperatorAuthorization: true }` — replacement proof is
+  complete, but legacy source remains preserved until a later explicit retirement decision.
 
-**D73 note — `proxy` is now nearly empty.** A proxy meant "the new dashboard calls the old
-endpoint until its native replacement lands." With `src` frozen and not running, there is nothing
-to proxy *to*: a capability is either built native, deliberately replaced, or retired, and the
-gap in between is simply a capability the operator does without until it lands. The disposition
-stays in the union for the rare case where a **read-only offline tool** (an exporter, a one-time
-importer) is legitimately run by hand against frozen data, but every dashboard/API proxy entry in
-the §3.6 table below collapses to `native` with a milestone. Anything that would have been proxied
-is instead an explicit "not available until milestone X" line the operator can see.
+**D88 boundary:** `proxy` is not a disposition. The rebuild never calls a legacy endpoint and the
+legacy runtime never calls `temp_src`. A capability is implemented native/replaced inside the
+isolated rebuild, deliberately retired in the target, or remains open; completed replacements may
+be marked `candidateForRetirement` without deleting the production/rollback source.
 
 The initial grouped decisions are:
 
 | Legacy capability family | Binding disposition and milestone |
 |---|---|
-| `services/capture` + capture routes/components/ngrok | native durable capture foundation in 2h/2i; frozen reference remains until OCR order 3, then old route/service/UI delete together |
+| `services/capture` + capture routes/components/ngrok | native durable capture foundation in 2h/2i; legacy route/service/UI preserved through cutover |
 | `services/address` + `llm/normalize-contact` | replaced by `normalization` service contracts in 2h; OCR order 3 proves real contact normalization/approval parity |
 | OCR vision provider pool/rate limits/key status | native shared provider infra + OCR store in 2h; OCR workflow/order 3 closes legacy provider consumers |
 | LLM triage/sanity/selector/summarize routes + ops scripts | native optional advisory adapters in 2i after trust surfaces; deterministic explain/rules/catalog remain primary; no authority edge |
 | `services/matching` | roster/domain identity contracts in 2h; each real consumer closes during orders 3–9; no hardcoded header matcher survives |
 | `services/timecard` | pure Clock-injected domain range logic + semantic common driver helper in 1d; Old Kronos adapter closes at order 2, New Kronos at order 8 after its last separations consumer |
-| queue/task/dependency/worker/browser/daemon control routes | native command/worker/session protocol in 1f and operator UI in 2i; workflow-specific aliases disappear as each workflow cuts over |
-| files, screenshots, search/failures, SSE/projection routes | native projection spine in 1g, then artifact/evidence/query UI in 2g/2i; compatibility aliases disappear with the frozen tree |
-| settings, preflight, credentials reference | native strict config/secrets foundation in 1b and storage-health UI in 2i; no legacy proxy ships during pause-until-done |
+| queue/task/dependency/worker/browser/daemon control routes | native command/worker/session protocol in 1f and operator UI in 2i; legacy aliases remain isolated rollback code |
+| files, screenshots, search/failures, SSE/projection routes | native projection spine in 1g, then artifact/evidence/query UI in 2g/2i; no cross-runtime aliases/proxies |
+| settings, preflight, credentials reference | native strict config/secrets foundation in 1b and storage-health UI in 2i; no legacy proxy ships |
 | workflow presentation/design/data-bank/modifier | read-only explorer and constrained editor/replacement in 2i; old generated design briefs are migrated as history or retired, never runtime authority |
-| OCR review/approve/retry/research/discard routes | native OCR workflow/gates/commands at orders 3–4; no compatibility mutation route remains afterward |
-| oath-upload/sharepoint and other workflow-special routes | absorbed into descriptor start surfaces and standard commands at that workflow's migration; route removal is part of its exit gate |
-| export to xlsx, setup, test-login, tracker clean/compact, schema/catalog/search codegen | native CLI/maintenance work items attached to 1b/1d/1g/2i as appropriate; behavioral CLI fixtures and help output required before old-tree deletion |
+| OCR review/approve/retry/research/discard routes | native OCR workflow/gates/commands at orders 3–4; legacy routes remain isolated and production-authoritative until cutover |
+| oath-upload/sharepoint and other workflow-special routes | absorbed into descriptor start surfaces and standard commands at that workflow's migration; legacy routes remain rollback code |
+| export to xlsx, setup, test-login, tracker clean/compact, schema/catalog/search codegen | native CLI/maintenance work items attached to 1b/1d/1g/2i as appropriate; behavioral CLI fixtures and help output required before cutover |
 | one-off debug/dev helpers (for example Kronos debug and dashboard dev components) | port only if a named supported diagnostic remains; otherwise retire with zero-consumer search plus accepted replacement/evidence |
-| general `utils`/infra helpers | no bulk copy; each consumer-driven port maps to domain/infra/store ownership, and the capability guard blocks an orphan at final deletion |
+| general `utils`/infra helpers | no bulk copy; each consumer-driven port maps to domain/infra/store ownership, and the capability guard blocks an orphan at cutover |
 
-At every workflow go-live, the migration commit updates affected capability entries and proves no
-remaining legacy path imports a removed source. Before deleting `src`, the guard requires: zero
-`proxy`, zero undecided/missing entries, every `retired` entry has evidence, every native/replaced
-target resolves, every old route/service/script/component path is covered exactly once, and the
-final operator CLI/help and dashboard navigation inventories match the accepted replacement set.
+At every workflow rebuild-ready milestone, the commit updates affected capability entries and the
+legacy-change-accounting map. Before cutover, the guard requires zero undecided/missing entries,
+every `retired` target decision has evidence, every native/replaced target resolves, every old
+route/service/script/component path is covered exactly once, and the final CLI/help/dashboard
+inventories match. Nothing in this inventory authorizes legacy deletion.
 
 ---
 
 ### 3.7 Size model and delivery tiers (added 2026-07-26 per D76)
 
-This plan previously contained **no sizing of any kind**. Under D73 that is not a project-
-management omission but a safety one: program duration *is* manual HR work the operator personally
-absorbs, so a plan that cannot say how big it is cannot be traded off against that cost.
+This plan previously contained **no sizing of any kind**. Sizing keeps the isolated coexistence
+program reviewable and exposes overruns before they compound integration risk.
 
 **Sizes are relative build sizes, not calendar** (unit and scale defined under the §2 phase
 table: S ≈ 1 session, M ≈ 2–4, L ≈ 5–10, XL ≈ 10+). They are estimates offered for correction.
 
 | Item | Size | What dominates it |
 |---|---|---|
-| 1a guard plumbing + honest baselines | **L** | not the guards — the **D58 capability inventory** over the whole legacy tree (every service/route/UI/CLI/tool classified exactly once) and the D70 diagnostic-fingerprinted manifest over 1,325 test-lint errors |
+| 1a guard plumbing + honest baselines | **L** | not the guards—the D58 capability inventory, D90 isolation/change-accounting/preservation manifests, coverage activation, and diagnostic fingerprints over 1,344 test-lint errors + 2 warnings |
 | 1b strict domain leaf + coverage activation | **L** | the exhaustive **bidirectional** runtime-dependency registry (D68 — every system endpoint, provider key, secret, feature flag, legacy env name, in both directions) |
 | 1c authority storage + recovery + type shell | **XL** | backup/doctor/degraded-mode/**restore drill** is a subsystem, not a table; plus the full command family + proof union types |
 | 1d semantic UI registry + drivers + task contracts | **XL** | inventorying every legacy selector key into one canonical id/alias map, then the driver boundary + effect overloads + capability + provider narrowing |
@@ -685,7 +665,7 @@ table: S ≈ 1 session, M ≈ 2–4, L ≈ 5–10, XL ≈ 10+). They are estimat
 
 **Delivery tiers — what may slip without invalidating the base.** The charter lists 27
 non-negotiables and every one is currently mandatory, with no articulated reduced-scope fallback
-behind the stop-loss (§5.1). These tiers give the freeze a defined shape:
+behind the stop-loss (§5.1). These tiers give a paused/reassessed rebuild a defined shape:
 
 - **MUST (the spine — never cut).** Write-safety contract and the transaction sequence; authority
   storage + recovery; fail-loud/strict schemas; task/descriptor contracts; executor + command
@@ -720,6 +700,9 @@ design constraints (save is UI-silent so reload read-back is mandatory; date val
 child text nodes; DOM refs change every reload so anchor on role + exact label; ~8–10s per
 fill→save→reload→verify cycle) that would otherwise have been discovered mid-migration.
 
+**D92 gate placement is ratified:** these probes are mandatory at the milestones below and are not
+Phase-1 blockers. Deferral changes timing only; it does not waive proof.
+
 | System | Completion arm | Status | Gate |
 |---|---|---|---|
 | **Kuali** | `save-verify` | ✅ **RESOLVED buildable** (live probe 2026-07-23, docs 4444/4453; read-only + a full write round-trip restored byte-identically) | — |
@@ -730,47 +713,37 @@ fill→save→reload→verify cycle) that would otherwise have been discovered m
 Each probe is read-only-plus-restorable in the Kuali shape: read the completion surface, confirm a
 deterministic anchor, and where a write is authorized, write → verify → restore. If OnBase lands
 on `unverifiableByPage`, order-7 automation degrades to "operator manually confirms every upload"
-— which changes the operator's daily workload, so it is worth knowing before plan approval rather
-than at order 7.
+— which changes the rebuilt workflow contract, so it must be settled at order 7 before readiness.
 
 ---
 
-## 4. What pause-until-done DELETES (was: coexistence / migration mechanics)
+## 4. Isolated coexistence and all-at-once cutover (D88–D90)
 
-**This section used to design coexistence. D73 deleted the problem.** Old `src` no longer runs
-during the rebuild — it is frozen on the day 1a lands and enqueues nothing — so there is no
-concurrent second authority to reconcile with, no drift to guard, and no compatibility surface to
-build and then remove. This is the single largest scope reduction available to the program, and it
-is cashed here explicitly rather than left to decay into contradiction.
+During development, `src` remains the sole production authority and `temp_src` is a separate test/
+rebuild runtime. Phase 1a mechanically enforces distinct commands/entrypoints, state/artifact
+roots, ports, process locks, and browser profiles/sessions, plus bidirectional import/invocation/
+state-access bans. Legacy maintenance continues; each changed path is recorded against affected
+capabilities and rebuild evidence. Verified knowledge is ported with provenance, never linked at
+runtime. Legacy source and tests cannot be deleted during the rebuild or initial cutover.
 
-**Deleted outright** (do not build these; if you find a doc still specifying one, it is stale):
+The following are forbidden: continuous tracker lift, legacy API proxy/remount, a compatibility
+SPA, per-run engine/generation authority, workflow-scoped production flips, and any interval where
+both engines accept production work. An optional historical importer is an explicit versioned,
+idempotent one-time command over an immutable backup; it is never a runtime adapter.
 
-| Machinery | Why it existed | Why it's gone |
-|---|---|---|
-| **Lift adapter as a live compatibility layer (D12)** | decode old terminal contracts into the new span model continuously while both trees ran | nothing emits old-shaped rows any more. Survives only as an **optional one-time historical import** of existing `.tracker` data, run by hand if the operator wants old runs visible — no version keying, no per-version adapters, no zero-quarantine gate on every commit |
-| **Version-keyed legacy wire schemas + per-version adapters + golden fixtures** | a legacy shape change mid-program could mis-lift | a frozen tree produces no new shapes |
-| **Golden-payload parity gate + scoped-flip harness (D13)** | prove the new dashboard matches the old one byte-for-relevant-field | there is no running old dashboard to compare against. Surfaces are validated by their own fixtures + the Phase-1 live run instead — which is a *better* test: parity with a legacy surface would have pinned the new dashboard to bugs the rebuild exists to remove (e.g. the count divergence D81 fixes) |
-| **One-week legacy-SPA fallback + compatibility API** | de-risk the flip by keeping the old UI readable | nothing to fall back *to* |
-| **Per-run `(engine, cutoverGeneration)` authority (D37)** | keep native and legacy runs from claiming the same run | no mixed-engine period exists |
-| **In-flight drain sets + hand-migration of parked legacy runs** | let legacy work finish after cutover | there is no in-flight legacy work |
-| **Dual-maintenance windows + per-system close-out** | keep a selector fixed in one tree from rotting the other | one tree is read-only |
-| **Calendar stop-loss on the coexistence window (§5.1c)** | bound the drift risk above | replaced by operator-controlled go-live (§5.1) |
+**Single cutover procedure (D89):**
 
-**What replaces all of it — three rules, no machinery:**
-
-- **`src` is frozen at 1a.** No feature work, no selector fixes, no enqueues. It remains the port
-  source for live-verified leaf knowledge (charter: "port, don't rewrite") and the reference for
-  behavior questions. A guard asserts no new commits touch it once frozen.
-- **Go-live is an operator command.** "I will let you know when to go live, when to test, when to
-  delete." A workflow becomes available when it passes its exit gate; whether the operator resumes
-  it immediately or waits for the whole set is theirs to choose, per workflow, with no plan
-  machinery either way.
-- **Deletion is an operator command too**, subject to the D58 capability guard (§3.6) — the guard
-  says when it is *safe* to delete; the operator says when it *happens*.
-
-**The cost this buys, stated honestly.** Pause-until-done trades operator manual work for program
-simplicity and speed. That is why build speed became the tie-breaker (D76) and why §3.7 sizes the
-work: the plan's duration is now a bill the operator pays directly, so it must be visible.
+1. Pass every phase/workflow/capability gate, including 60/80 coverage, Phase-2 50/70 branches,
+   live dry-runs, controlled write proofs, restore/soak, and the complete doc 13 surface matrix.
+2. Stop new legacy enqueues; enumerate active/queued/gated/parked/unknown-write runs and drain,
+   terminalize, park, or reconcile each explicitly. No uncertain write may be buried.
+3. Back up legacy state/config and rebuild state/config; verify both backups. Run only approved
+   versioned one-time imports, recording source digests and idempotent manifests.
+4. Atomically switch the normal launcher/production authority to `temp_src`; verify legacy launch
+   is disabled and rebuild health/read/write smoke gates pass.
+5. Preserve `src`, legacy commands, tests, and state backup as rollback assets. After native writes,
+   rollback requires intent/ledger reconciliation and dedupe proof before an atomic switch back.
+   Deletion/retirement is outside this cutover and requires separate operator authorization.
 
 ---
 
@@ -779,8 +752,8 @@ work: the plan's duration is now a bill the operator pays directly, so it must b
 | # | Risk | Why it bites | Mitigation |
 |---|---|---|---|
 | 1 | **A contract flaw surfaces late** | a fixture-proven base can be wrong in ways only a real run reveals | **D74 is the mitigation**: person-lookup runs live as Phase 1's *exit*, so the spine is falsified by reality before the tails are built on it; Phase 2 then adds the controlled transaction proof with crash/outbox/dedupe evidence |
-| 2 | **Phase 1 (XL) overruns and the manual-work bill grows** | replaces the old "dashboard flip slips" risk, which D73 deleted. Under pause-until-done every extra week is manual HR work | Phase 1 is cut to the spine (D74); §3.7 sizes each item and defines MUST/SHOULD/LATER so a freeze has a shape; D79 trims are already taken; build speed is the standing tie-breaker (D76); the operator can resume workflows individually as they land rather than waiting for the whole program |
-| 3 | **The frozen tree turns out to be needed** | an urgent HR need arrives mid-rebuild that only the old automation can serve | D73 is the operator's own decision with eyes open — the fallback is manual HR work, which is the accepted baseline for the whole program, not an incident. `src` stays readable and runnable-in-principle; unfreezing is an operator call, not a plan mechanism. *(This replaces the old dual-maintenance/legacy-wire-drift risk, which cannot occur while one tree is read-only.)* |
+| 2 | **Phase 1 (XL) overruns** | a long isolated build increases integration drift and delays the single cutover | Phase 1 is cut to the spine (D74); §3.7 sizes each item; D79 trims are taken; D90 change accounting forces rebuild rechecks after legacy maintenance |
+| 3 | **The two maintained runtimes drift** | a necessary legacy production fix changes knowledge already ported to `temp_src` | D90 maps every legacy change to capability ids and rebuild evidence; isolation bans runtime coupling; affected rebuild scenarios/ports must be reverified before readiness |
 | 4 | **A target can make settlement unknowable** (write-safety residual) | UI-only systems may expose neither an idempotent API nor a trustworthy immediate negative read after a click; early absence can be eventual-consistency lag, and a positive match can still be for the wrong subject | D48/D64/D69/doc 09: permanent key fence; fresh binding proof; typed positive proof; every counted negative observation must occur after the target-specific propagation window and repeated authoritative checks must agree; unsettled/ambiguous evidence parks; per-probe live verification at migration. The guarantee is at most one unattended commit attempt per intent generation plus verified convergence—not unconditional distributed exactly-once |
 | 5 | **Build context + operator-attention limits** | The program is long (16 workflow directories across 10 migration orders, plus shared capability closure); high WIP and oversized sessions cause ownership drift | One-at-a-time Phase 3, coherent local commits, explicit handoffs/checkpoints when needed, Phase-2 gates before scale, machine inventories/guards so review concentrates on live evidence; §3.7 sizes the work so attention is spent where the mass actually is |
 | 11 | **Decisions drift ahead of the docs that own them** | *Observed 2026-07-26*: the 07-23/24 operator ratifications sat in a review file for four days while docs 00/07/09 still specified the world they replaced — the master plan would have had Phase 1 build a lift adapter, a parity harness, and a generation-authority stamp that the operator had already deleted | Charter standing rule: **a decision is not ratified until it lands in its owning doc, in the same commit that records the answer.** Doc 04 is a changelog with pointers, never a second spec; review files are history. A doc's amendment date must be ≥ the latest round that touched it |
@@ -788,13 +761,13 @@ work: the plan's duration is now a bill the operator pays directly, so it must b
 | 7 | **Authority backup exists but has never been restored** | Corruption is discovered during a real run and the “backup” is unusable | Phase-1 automated corruption/restore drill and recurring doctor/backup-health surface; degraded mode blocks mutations instead of creating an empty DB |
 | 8 | **Evidence volume recreates an unreadable log pile** | screenshots/notes/bundles consume disk and hide the decisive facts | structured failure/receipt index, confidence and required-evidence rules, on-demand bundles, 7d notes/30d spans, content-addressed dedupe, explicit missing capture, disk warnings/redaction |
 | 9 | **Constrained editor expands into unsafe code generation or dual graph authority** | a UI edit changes bind/selector/proof semantics without review, or handwritten and DSL graphs diverge | per-workflow source-vs-DSL authoring mode is exclusive; closed editable union, deterministic codegen, compile+scenario+diff+version+restart-gated atomic apply/rollback; prohibited fields generate a code-change brief, with no arbitrary TypeScript/selector/proof edits |
-| 10 | **All workflows migrate but a shared old capability is forgotten** | capture, AI assist, exports, settings, maintenance, or a special route remains an undeclared dependency and blocks/degrades final deletion | D58 machine-readable capability inventory covers old services/routes/UI/CLI/tools exactly once; proxies have removal milestones; final-delete mode rejects proxy/undecided/unproven retirement entries |
+| 10 | **All workflows migrate but a shared capability is forgotten** | capture, AI assist, exports, settings, maintenance, or a special route blocks/degrades final cutover | D58 inventory covers old services/routes/UI/CLI/tools exactly once; cutover rejects undecided/unproven entries; no proxy disposition exists |
 
 ### 5.1 Program stop-loss / abort gate
 
-The migration is reversible until the old `src` is deleted (§6). Rather than sink cost into a base
+The migration is reversible because production remains on `src` until the single cutover. Rather than sink cost into a base
 that is not holding, the program has **objective STOP-AND-REASSESS triggers**. Hitting any one
-freezes migration — no new workflow goes live — and the reassessment happens before proceeding:
+freezes rebuild migration—no new workflow is marked ready—and reassessment happens before proceeding:
 
 - **(a) The Phase-1 live exit test fails twice.** Person-lookup fails to run correctly on the
   spine, is fixed, and fails again — the spine is not actually stable, and every tail built on it
@@ -803,20 +776,16 @@ freezes migration — no new workflow goes live — and the reassessment happens
   has to change shape once ≥2 workflows already depend on it — the "coupled by contract" thesis is
   not holding and the churn will compound downstream.
 - **(c) Phase 1 exceeds twice its estimated size** (§3.7). Not a calendar date — a *size* overrun
-  against the estimate this plan now publishes. Because pause-until-done bills program duration
-  directly to the operator as manual work, an overrun of that magnitude means the sizing was wrong
-  and the scope, not the schedule, needs revisiting.
+  against the estimate this plan publishes. An overrun of that magnitude means sizing or scope is
+  wrong and must be revisited.
 
-*(The former trigger (c) — a 60-day coexistence calendar budget — is deleted with the coexistence
-model itself (D73, §4). It was also incoherent as written: the charter conceded UCPath/CRM windows
-were "honestly program-length" across ~10 migration orders, so a 60-day budget fired by
-construction and would have been waived on first contact, which neuters a stop-loss.)*
+*(The historical 60-day coexistence deadline remains rejected: evidence-based phase gates and the
+single-cutover readiness checklist govern progress, while D90 continuously accounts for legacy
+drift.)*
 
-**Defined fallback when a trigger fires:** freeze the build in place and reassess **scope**, using
-§3.7's tiers as the instrument — cut LATER, then SHOULD, and never MUST. The operator's baseline
-during any freeze is the same one pause-until-done already accepted: manual HR work, with `src`
-available as a readable reference. A freeze strands no in-flight automation, because under D73
-there is none.
+**Defined fallback when a trigger fires:** pause the rebuild and reassess **scope**, using §3.7's
+tiers—cut LATER, then SHOULD, never MUST. Production `src` continues normally; D90 accounting
+continues for any maintenance edits while the rebuild is paused.
 
 ---
 
@@ -827,19 +796,20 @@ The rebuild is complete when **all** hold:
 1. **Every workflow migrated** (§3.3 orders 0–9) and **live-verified** by a submit-free dry-run
    against every real system it touches; every commit/probe/verification path also has the controlled
    live evidence required by its migration exit gate.
-2. **Old `src` deleted** — on the operator's command (D73), once the D58 capability inventory has
-   zero proxy/undecided entries and every old workflow/service/route/dashboard/CLI/tool path is
-   covered exactly once. No dual-maintenance window has to be closed because none was ever opened.
-3. **No compat layer was ever built** — under D73 the lift adapter (as a live layer), the
+2. **One all-at-once cutover is ready and executed** — D58 has zero undecided entries; legacy work
+   is drained/parked/reconciled; both states are backed up; approved imports are versioned and
+   idempotent; the launcher switches atomically; `src`, legacy commands/tests, and backup remain
+   rollback assets. No deletion occurs.
+3. **No compat layer was built** — under D88 the lift adapter (as a live layer), the
    golden-payload parity harness, the legacy-SPA fallback, and per-run generation authority were
    deleted from the plan rather than built and removed (§4). The dashboard serves entirely from the
    descriptor + span contract, all surfaces native. If a one-time historical import of old
    `.tracker` data was run, it is a script that ran once and left no runtime surface.
-4. **All guards green with no inherited debt** — guard inventory shows every applicable guard
-   covering `temp_src`; `lint:rebuild`, `lint:rebuild-tests`, ordinary source lint, full
-   `lint:tests`, typecheck, and tests pass; D70's legacy-test diagnostic manifest has reached zero
-   and is deleted; retired parity guards are gone; graph/transaction/write/outbox/provenance
-   fixtures pass; ratchet allowlists hold no new-code entries.
+4. **All applicable guards green with isolated debt** — guard inventory covers `temp_src`;
+   `lint:rebuild`, `lint:rebuild-tests`, ordinary source lint, typecheck, tests, 60/80 coverage,
+   Phase-2 50/70 branch gates, isolation/change-accounting/preservation, and architecture guards
+   pass. Legacy `lint:tests` may retain only fingerprinted pre-existing debt; no new/replaced
+   fingerprint exists and touched legacy files add no debt.
 5. **The docs match what is built** — every owning doc updated to as-built (charter: the foundation's
    documentation is part of the foundation), and this master plan's phase table fully checked off.
 6. **The immutable ledger is live** — every real commit writes an atomic outbox projected into one
@@ -914,7 +884,7 @@ is ported into `temp_src/dashboard/`, while strict schema-valid fixture adapters
 
 ### 7.4 Added program-wide exit criteria
 
-Before definition-of-done item 2 (old `src` deletion), all of doc 13 §10 must pass. In particular:
+Before definition-of-done item 2 (single cutover), all of doc 13 §10 must pass. In particular:
 
 - production React has one typed transport client and no direct component `fetch`/`EventSource`;
 - no raw legacy tracker/session/log row crosses the rebuilt API boundary;
