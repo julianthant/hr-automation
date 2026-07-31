@@ -1,7 +1,7 @@
 # 07 — Master Plan: the single phased build order for `temp_src`
 
-Status: **Phase 0 whole-plan revision complete 2026-07-22; amended 2026-07-26 for the Round-8
-operator ratifications (D73–D86). No `temp_src` implementation exists.**
+Status: **Phase 0 whole-plan revision complete 2026-07-22; amended 2026-07-30 through the
+frontend/backend integration audit. No `temp_src` implementation exists.**
 This is the ONE plan the charter demands (§"One master plan"): every design doc converges here,
 and there must never be a competing plan. It awaits operator approval before Phase 1 begins.
 
@@ -56,7 +56,8 @@ Every concept has exactly one owner (reconciliation `04` D1). Reference the owne
 | Write-safety contract, permanent-key intents, typed proof, atomic outboxes/recovery, serialized anchored ledger | **Doc 09** |
 | Guard/test architecture suite: ratchet port map, safety guards, descriptor-coverage crosswalk, guard-of-guards manifest, TDD tiers, stub + live lanes | **Doc 10** |
 | The Clock (sole time source), config resolver (env>settings>default), per-run prod/test instance (D6-adjacent), fiscal-year rollover, secrets accessor, environment/preflight registry | **Doc 11** |
-| Semantic UI vocabulary + typed drivers, failures/diagnostic bundles/evidence receipts, scenario corpus, structured knowledge/fix history, durable trust/explain surfaces, workflow explorer/editor, local-only scope, base capability inventory | **Doc 12** |
+| Semantic UI vocabulary + typed drivers, failures/diagnostic bundles/evidence receipts, scenario corpus, structured knowledge/fix history, durable trust/explain surfaces, workflow explorer/editor, local-first seams/safety floor, base capability inventory | **Doc 12** |
+| Production dashboard composition boundary: bootstrap/day/detail resources, one typed client, cursor-based SSE, product command-family coverage, surface-to-authority matrix, visual-parity harness | **Doc 13** |
 
 ### 0.3 Standing rule — each completed phase documents itself
 
@@ -148,10 +149,10 @@ Justification:
   the umbrella silently shrinking.
 
 The **data-service stores** (doc 06's `extraction`/`normalization`/`ocr`/`roster` contract+impl, D4)
-are built as ordinary stores in Phase 1h after strict task/scenario/evidence contracts exist. Their
-column-mapping, durable mobile-capture, intake-manifest/rerun, and Edit-Data UI lands in 1h/1i over
-synthetic fixtures, so Phase 3 workflows consume an already-proven base instead of inventing ingest
-semantics mid-migration.
+land in Phase-2 tail `2h`, after the live spine and controlled transaction proof. Their column
+mapping, durable mobile capture, intake manifest/rerun, progressive Review, and Edit Data surfaces
+land in the same end-to-end slice, so Phase 3 workflows consume a proven ingest contract rather
+than inventing one mid-migration.
 
 ---
 
@@ -253,7 +254,7 @@ and a real consumer. **No contract in docs 01–06 changed — only delivery ord
 | 1e | **Complete workflow DAG + result/delegation/scenario descriptor.** Real-scale type spike first; then ingress parser plus transform-free canonical-input validator, read/transaction/branch/fork-join/typed child result/gate nodes, complete delegation policies/manifests, enqueue/actions, completion, fingerprints, checkpoints/migrations and registered scenarios | **Docs 02/03/12** | realistic graph type suite; ingress→canonical round-trip and corrupted-authority rejection; strict terminal/gate result; delegation matrix; transaction pairing; descriptor projection matrix; no erased target; every branch/gate/policy has an executable scenario |
 | 1f | **Core registry + executor/checkpoints/command service/write sequencer.** Composition root above workflows; claims/lanes/provider budgets; standard run/gate/notification/capture commands; authority-only target resolution; context-exclusive transactions; probe→prepare→binding proof→fence→commit→proof→atomic outbox; evidence-qualified negative recovery and parked-intent resolution | **Docs 02/03/05/09** | command idempotency/CAS; lookup failure creates no duplicate; no visible-root fallback; dry-run commit-free; binding mismatch/unknown creates zero fence/click; a bare/early negative cannot retry; provider admission, probe-age/settlement/CAS/dedupe/crash/context tests |
 | 1g-spine | **Span emission + the ONE projection (slice only).** Strict spans/notes on the executor's paths, and the single server-side run/queue projection that every surface reads. **D81: counts have exactly one code path** — Workflow Panel badges, Status Bar, and Queue Panel rows all read this projection; a second count path is a guard failure, not a bug to fix later. Evidence receipts, failure records, diagnostic bundles, notifications, knowledge, and the ledger *services* defer to Phase 2 (the ledger *tables + atomic outbox* already landed in 1c, so no write is unrecorded) | **Docs 03/09** | boundary corruption; redaction canaries; atomic projection tests; **one-projection guard: no count computed off a second path**; span identity `(runId, attempt, spanPath)` |
-| 1i-spine | **The four parity surfaces only.** Queue Panel rows (row-model D1–D5: three row types, eight statuses), Log Panel (five tabs + the persistent step strip), Session Cards, Workflow Panel counts. Rendered from the 1g-spine projection. Explorer, AI advisories, storage-health UI, catalog UI, Edit Data, intake and capture surfaces all defer | **Docs 03/12** | client renders finished wires only; no workflow-id switches in the projection path; row type/kind/identity stamped once at enqueue from the descriptor; headless a11y + screenshots via the seed→boot→assert loop |
+| 1i-spine | **The exact Person Lookup capability slice in the approved shell.** Queue Panel rows (three row types, eight statuses); run/member `Logs · Receipt`; persistent timeline; Context rail; typed Start Run; Session Cards; Workflow Panel/Status Bar/day counts. Rendered from the 1g-spine BFF. Review/People tabs, full trust/data surfaces, Archive/Explorer/Activity/Settings tails defer | **Docs 03/12/13** | one typed transport client; finished wires only; no workflow-id switches; both-theme headless a11y + screenshot parity at reference viewports |
 
 **Item 1e begins with a new real-scale type-inference proof.** The deleted spike covered only two
 effects and three linear steps. The replacement must compile a representative 15–25-node graph with
@@ -674,7 +675,7 @@ table: S ≈ 1 session, M ≈ 2–4, L ≈ 5–10, XL ≈ 10+). They are estimat
 | 1e workflow DAG + delegation + completion | **XL** | starts with the real-scale type proof (below); delegation policy matrix + completion program are each substantial on their own |
 | 1f registry + executor + commands + write sequencer | **XL** | the write sequence (probe→prepare→binding proof→fence→commit→proof→atomic outbox) plus lanes/leases/budgets and evidence-qualified negative recovery |
 | 1g-spine spans + the one projection | **M** | thin by design — emission + one projection, no services |
-| 1i-spine four parity surfaces | **M** | thin by design — the row model is already ratified and demoed (`?view=rebuild-demo`) |
+| 1i-spine exact Person Lookup surface slice | **M** | thin by capability, exact by presentation — the target is already ratified and demoed (`?view=rebuild-demo`) |
 | **Phase 1 total** | **XL** | four XL items on the critical path; this is the program's centre of mass |
 | Phase 2 transaction proof | **L** | mostly protocol + crash matrix; needs a named live target (§3.8) |
 | Phase 2 tails 2g / 2h / 2i / 2j | **L / XL / L / M** | 2h is the largest tail (four service stores + mapping + manifests + capture + Edit Data) |
@@ -854,9 +855,72 @@ The rebuild is complete when **all** hold:
    knowledge records, and fix records have no unresolved duplicates/orphans/stale references. Every
    migrated production bug has a regression scenario and supersedes conflicting lessons.
 10. **Authoring tools respect their boundary** — the explorer renders the exact as-built graph and
-    source links; constrained edits compile/diff/version/restart/apply/rollback in one declared
-    source-authored or DSL-authored mode; code-only selector/schema/subject/proof changes cannot be
-    emitted by the editor, and no workflow has dual graph authority.
-11. **Local-only scope remains true** — the operator server binds loopback, contains no dormant
-    RBAC/LAN mode, and diagnostic/backup/evidence permissions + redaction tests pass; the only remote
+    source links; presentation-only changes use the strict atomic override; graph/policy edits emit
+    a reviewed patch scaffold; code-only selector/schema/subject/proof changes cannot be emitted by
+    the editor, and no workflow has dual graph authority.
+11. **Local-first scope remains true** — the operator server currently binds loopback and retains
+    the actor/auth-checkpoint/credential-set/per-actor-notification seams without dormant RBAC or
+    LAN mode. Diagnostic/backup/evidence permissions + redaction tests pass; the only remote
     listener is a live-session-scoped mobile-capture ingress whose deny-by-default route tests pass.
+
+---
+
+## 7. Frontend/backend integration amendment (2026-07-30)
+
+`docs/rebuild/13-frontend-backend-integration.md` is now the owning companion for the composition
+boundary between the approved rebuild frontend and docs 02/03/06/09/11/12's backend contracts. It
+does **not** introduce another sequence; the delivery slices below amend the existing work items in
+this plan.
+
+### 7.1 Reconciled phase boundaries
+
+- The approved target has panel-kind tabs: run/member `Logs · Receipt`, review
+  `Review · Logs · Receipt`, group `People · Logs · Receipt`; Data is in the permanent Context rail
+  and captures are inside Receipt/Review. Gate and Failure remain always visible in the centre.
+- “Four parity surfaces” means the **exact Person Lookup capability slice inside the approved full
+  shell**, not four approximate legacy components. It includes the typed Start Run surface,
+  day/count/navigation shell, Context rail, Receipt placeholder, and live/reconnecting Session
+  Panel states needed to operate that workflow.
+- Data-service contract/impl work and its mapping/capture/Edit Data UI are deferred to `2h` under
+  D74; only their boundary primitives and command type shells land earlier where required.
+- Product Settings, Archive, Explorer, Activity, full evidence/failure, intake/capture, and
+  progressive Review remain Phase-2 tails; their wire primitives and command-family type shells
+  land earlier only where `1b`/`1c`/`1e` need them to prevent later protocol breakage.
+
+### 7.2 Required additions to existing work items
+
+| Existing item | Integration addition | Exit evidence |
+|---|---|---|
+| **1b** | strict bootstrap/day/detail/subscription/artifact primitives, schema versions, revisions, projection cursors and explicit absence/error unions | every boundary schema parses fixtures and rejects unknown/invalid combinations |
+| **1c** | durable command type shells for start, intake, worker/browser, atomic settings and version/archive targets in addition to the existing run/gate/notification/capture arms | every product mutation has one idempotent actor-stamped command family before a route can exist |
+| **1e** | one complete client descriptor projection: start methods, dry-run/instance absence reasons, panel kind/sections, actions, graph summary and capability availability | no workflow/start/panel registry exists outside the descriptor projection |
+| **1g-spine** | in-process typed dashboard BFF; bootstrap/day/run-detail queries; one transport client; resumable cursor-based SSE; Phase-1 start/run command route | snapshot + any valid patch sequence equals a fresh snapshot; gaps/hash/generation changes reset visibly |
+| **1i-spine** | port the approved tokens/primitives and exact Person Lookup shell composition; wire Start, Queue, Detail/Context/Receipt, counts and Session Panel end to end | live Person Lookup plus both-theme Playwright a11y/screenshot parity at the reference viewports |
+| **Phase-2 transaction proof** | wire preview, binding, fenced write, read-back, receipt/failure, write-parked resolution and command conflict through the same production client | the trust UI is backed by real intent/proof/ledger state, never fixture prose |
+| **2g** | Receipt/Failure/captures, rerun diff, notifications/search, archive snapshot generation and lazy detail resources | terminal and archived runs remain explainable without live-system or old-code access |
+| **2h** | descriptor upload/capture/spreadsheet starts, intake mapping/manifests, progressive Review records and Edit Data | complete upload→review→manifest/fan-out and correction→same-run/new-run flows |
+| **2i** | Settings/doctor/storage, Archive/version bump, Explorer overlay, Activity, worker capacity controls and remaining product shell states | every product surface in doc 13 §5 has query/patch/command/authority coverage |
+
+### 7.3 Integration execution rule
+
+Every surface lands as one vertical slice: strict schema → server query/projector → subscription
+invalidation/patch → command path (when interactive) → production component → schema fixture →
+Playwright a11y/screenshot proof. Building the whole React tree against mocks and wiring it later,
+or building backend routes with no production surface consumer, does not satisfy a work item.
+
+The demo remains the visual oracle but never becomes runtime infrastructure. Production code may
+not import `src/dashboard/components/dev/rebuild-demo/**`; approved design-system and surface code
+is ported into `temp_src/dashboard/`, while strict schema-valid fixture adapters remain test-only.
+
+### 7.4 Added program-wide exit criteria
+
+Before definition-of-done item 2 (old `src` deletion), all of doc 13 §10 must pass. In particular:
+
+- production React has one typed transport client and no direct component `fetch`/`EventSource`;
+- no raw legacy tracker/session/log row crosses the rebuilt API boundary;
+- all authoritative counts and Activity aggregates come from the one run-projection family;
+- every visible action is a served command/navigation descriptor or clearly local UI state;
+- reconnect, cursor gap/reset, command conflict/idempotency and degraded read-only behavior are
+  proven in the real built app;
+- the complete reference route matrix matches the approved frontend in both themes; and
+- deleting the dev demo/mock wires removes no production capability or primitive.

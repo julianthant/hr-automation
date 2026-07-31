@@ -1,5 +1,10 @@
 # Backend capabilities the demo discovered (2026-07-28)
 
+**Status (2026-07-30): harvest complete and incorporated.** The numbered findings remain the
+evidence appendix for individual backend capabilities. The cross-surface production architecture,
+route/stream/command composition, state ownership, delivery slices, and parity gates now live in
+`docs/rebuild/13-frontend-backend-integration.md`; doc 07 remains the only build sequence.
+
 **Why this exists.** The `?view=rebuild-demo` redesign programme (commits `d1530a1f`..`fa6c251c`,
 on top of `1d656f76`..`a380406c`) was never only a frontend exercise. The operator's stated
 purpose, verbatim: *"the whole point of the mock is to build a frontend very realistic, we learn
@@ -16,6 +21,13 @@ half of the contract, kept deliberately close to what a real server would serve.
 Owners: most items land in doc 02 (descriptor), doc 03 (wire/projection/commands), doc 06
 (data/checkpoints), doc 09 (write safety), doc 12 (evidence). Suggested owner noted where it is
 not obvious.
+
+The final whole-frontend audit added six integration-level requirements that cut across the
+numbered capabilities rather than belonging to one demo component: one bootstrap document, one
+strict frontend transport client, resumable cursor-based SSE, panel-kind/section projection for the
+approved tabs + Context + Receipt composition, a command family for every product mutation, and a
+surface-to-authority acceptance matrix. They are specified once in doc 13 rather than duplicated as
+items 19–24 here.
 
 ---
 
