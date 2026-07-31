@@ -1,22 +1,24 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import inventory from "../../../config/rebuild/legacy-capabilities.json" with { type: "json" };
-import { REPO_ROOT, repoRelative, walkFiles } from "./helpers/guard-files.js";
+import { gitVisibleFiles, REPO_ROOT } from "./helpers/guard-files.js";
 
 function childDirectories(path: string): string[] {
-  return readdirSync(join(REPO_ROOT, path), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => `${path}/${entry.name}`)
-    .sort();
+  const prefix = `${path}/`;
+  return [...new Set(gitVisibleFiles([path]).flatMap((file) => {
+    const relativePath = file.slice(prefix.length);
+    return relativePath.includes("/") ? [`${path}/${relativePath.split("/")[0]}`] : [];
+  }))].sort();
 }
 
 function directTsFiles(path: string): string[] {
-  return readdirSync(join(REPO_ROOT, path), { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".ts") && entry.name !== "index.ts")
-    .map((entry) => `${path}/${entry.name}`)
-    .sort();
+  const prefix = `${path}/`;
+  return gitVisibleFiles([path]).filter((file) => {
+    const name = file.slice(prefix.length);
+    return !name.includes("/") && name.endsWith(".ts") && name !== "index.ts";
+  });
 }
 
 function discoveredCapabilityPaths(): string[] {
@@ -27,7 +29,7 @@ function discoveredCapabilityPaths(): string[] {
     ...childDirectories("src/dashboard/components"),
     "src/cli.ts",
     "src/cli-daemon.ts",
-    ...walkFiles(join(REPO_ROOT, "src/scripts"), { extensions: [".ts"] }).map(repoRelative),
+    ...gitVisibleFiles(["src/scripts"]).filter((file) => file.endsWith(".ts")),
     ...directTsFiles("src/tracker/exports"),
     "tests/unit/architecture",
   ].sort();

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { extname, relative, resolve } from "node:path";
 
@@ -41,6 +42,22 @@ export function walkFiles(
 
 export function repoRelative(path: string): string {
   return relative(REPO_ROOT, path).replaceAll("\\", "/");
+}
+
+/**
+ * Repository-visible files: tracked files plus non-ignored untracked files.
+ *
+ * Architecture inventories use this instead of the raw filesystem so ignored
+ * OS artifacts and empty local scratch directories cannot make a clean
+ * worktree behave differently from an isolated Git worktree.
+ */
+export function gitVisibleFiles(paths: readonly string[]): string[] {
+  if (paths.length === 0) return [];
+  return execFileSync(
+    "git",
+    ["ls-files", "--cached", "--others", "--exclude-standard", "--", ...paths],
+    { cwd: REPO_ROOT, encoding: "utf8" },
+  ).trim().split("\n").filter(Boolean).sort();
 }
 
 export interface CountAllowlistEntry {

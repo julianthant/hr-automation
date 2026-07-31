@@ -48,7 +48,7 @@
       "path": "tests/unit/architecture/helpers/guard-files.ts",
       "changeKind": "added",
       "beforeSha256": null,
-      "afterSha256": "53420adeee3da1a3c5e213b7b82b0c15f4a93b143b4dd56f2f87bf3284e57929",
+      "afterSha256": "8bc5833aea14d17737ceb72924fcc6a05e442b1e3a772941c6ddf1f2ae4b5748",
       "capabilityIds": [
         "legacy-dev-tool-architecture-guards"
       ],
@@ -104,7 +104,7 @@
       "path": "tests/unit/architecture/legacy-capability-disposition.test.ts",
       "changeKind": "added",
       "beforeSha256": null,
-      "afterSha256": "124d4b39aa9ad24dc7cacc911821fc70e8fb88f629f5341c7a1dc3f47545f85a",
+      "afterSha256": "6af6b18d75b78ec9d577971acd6786486b4e1d4db2f3f62320ccd5f20acb9773",
       "capabilityIds": [
         "legacy-dev-tool-architecture-guards"
       ],
@@ -118,7 +118,7 @@
       "path": "tests/unit/architecture/legacy-change-accounting.test.ts",
       "changeKind": "added",
       "beforeSha256": null,
-      "afterSha256": "09e87d4dcebe5dc9ab8c1a7841c1025aef6908a966f1b3dd37dbf3d85d6f1393",
+      "afterSha256": "5f4f9a0ffcb71c723021df4a82e2cc1e879a9dd69a9e1fc0c0d4215fb46dfe23",
       "capabilityIds": [
         "legacy-dev-tool-architecture-guards"
       ],
