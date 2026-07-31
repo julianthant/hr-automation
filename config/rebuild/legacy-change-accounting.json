@@ -45,6 +45,20 @@
       "preservation": "preserved"
     },
     {
+      "path": "src/systems/new-kronos/navigate.ts",
+      "changeKind": "modified",
+      "beforeSha256": "49b2fa7c165bcc6a3c59620e192b0055ad46e758c412c5a1c8c655ebbe9508c6",
+      "afterSha256": "4f6710e71c06f07c620e0c422288729770073ba2ec6b67c10a5c60947164f494",
+      "capabilityIds": [
+        "legacy-workflow-separations"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
       "path": "src/workflows/separations/CLAUDE.md",
       "changeKind": "modified",
       "beforeSha256": "705842e6a4800e8775cd1b002207bfef73af656070dc1751bf539b1bee018893",
@@ -300,7 +314,7 @@
       "path": "tests/unit/architecture/wait-for-timeout-allowlist.test.ts",
       "changeKind": "modified",
       "beforeSha256": "d0f3949d6e35ef2889bde2db6b68bc842ce33fce34b2a44aacd9353682e83b0f",
-      "afterSha256": "98580dfc139b368651d33915b37b252d74cdab24dd5a36431bab23da74a46088",
+      "afterSha256": "0a110e5fd6ca71bbabdd6f6b26eb027a8c6e2e1e55eb32c40547987852fbd696",
       "capabilityIds": [
         "legacy-dev-tool-architecture-guards"
       ],
