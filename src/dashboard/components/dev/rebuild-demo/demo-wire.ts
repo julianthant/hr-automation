@@ -199,7 +199,6 @@ export type DemoWorkflowId =
   | "separations"
   | "onboarding"
   | "person-lookup"
-  | "person-match"
   | "i9-lookup"
   | "work-study"
   | "kronos-pay-rule"
@@ -301,13 +300,14 @@ export interface MemberOutcomeSpec {
  */
 
 /** a value a typed box accepts. More than one means PER-TOKEN discrimination. */
-export type StartValueKind = "eid" | "name" | "email" | "docId";
+export type StartValueKind = "eid" | "name" | "email" | "docId" | "personMatch";
 
 export const START_VALUE_NOUN: Record<StartValueKind, { one: string; many: string }> = {
   eid: { one: "EID", many: "EIDs" },
   name: { one: "name", many: "names" },
   email: { one: "campus email", many: "campus emails" },
   docId: { one: "Kuali doc ID", many: "Kuali doc IDs" },
+  personMatch: { one: "person match", many: "person matches" },
 };
 
 /**
@@ -350,6 +350,8 @@ export interface TypedStartMethod {
   /** how the server describes its own parser — the client never invents one */
   parserLabel: string;
   note: string;
+  /** Select this peer parser only while a descriptor choice has this value. */
+  visibleWhen?: { choice: string; equals: string[] };
   /**
    * Fixture shortcuts for the demo, and labelled as such. These are VALUES,
    * not run modes: the real "skip these steps" control is a `preset` choice
@@ -463,7 +465,7 @@ export interface StartChoiceWire {
  * EID, because only the packet path has an irreversible write to suppress.
  */
 export interface StartFlagWire {
-  key: "dryRun" | "duplicateCheck";
+  key: "dryRun" | "duplicateCheck" | "crmCheck";
   label: string;
   note: string;
   /** absent = offered on every method */
@@ -487,6 +489,14 @@ function dryRunFlag(methods?: StartMethodKind[]): StartFlagWire {
     label: "Dry run",
     note: "Reads everything for real and writes nothing, anywhere. The row carries a dry-run chip for its whole life, so it can never be mistaken for a filing.",
     methods,
+  };
+}
+
+function crmCheckFlag(): StartFlagWire {
+  return {
+    key: "crmCheck",
+    label: "Check CRM too",
+    note: "Cross-checks the identity and reads CRM dates. Search defaults on; Match defaults off unless the operator enables it.",
   };
 }
 
@@ -525,6 +535,12 @@ const OCR_FORM_TYPE_OPTIONS: StartChoiceOptionWire[] = [
   { value: "onbase-emergency-contact", label: "OnBase Emergency Contact", note: "Approving files each page under its person's record in OnBase." },
   { value: "verify", label: "Verify (mixed)", note: "A read-only completeness report. There is no approve step, so nothing is released." },
   { value: "i9", label: "I-9 (UCPath check)", note: "No approve gate: the review completes itself and fans out one UCPath check per person." },
+];
+
+/** Person Lookup asks two distinct read-only questions through one workflow. */
+const PERSON_LOOKUP_MODE_OPTIONS: StartChoiceOptionWire[] = [
+  { value: "search", label: "Search", note: "Person Org lookup by EID or name; CRM is checked by default." },
+  { value: "match", label: "Match", note: "HR-Tasks rehire check by legal name plus DOB and/or SSN; CRM is off by default." },
 ];
 
 /** the OnBase Import Document type list, exactly as the dropdown reads it */
@@ -859,6 +875,24 @@ const PERSON_LOOKUP_MEMBER_OUTCOMES: MemberOutcomeSpec[] = [
     tone: "danger",
     meaning: "UCPath returned nobody for this name or EID. Whatever asked for the lookup cannot proceed until the input is corrected.",
   },
+  {
+    key: "matched",
+    label: "Matched",
+    tone: "quiet",
+    meaning: "HR-Tasks found one existing UCPath identity for the supplied legal name and hard identifier.",
+  },
+  {
+    key: "no-match",
+    label: "No match",
+    tone: "danger",
+    meaning: "HR-Tasks definitively found no existing UCPath identity for the supplied criteria.",
+  },
+  {
+    key: "ambiguous",
+    label: "Ambiguous",
+    tone: "warn",
+    meaning: "The criteria returned more than one plausible UCPath identity, so the operator must resolve the person.",
+  },
 ];
 
 /**
@@ -978,7 +1012,7 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
     code: "pl",
     label: "Person Lookup",
     category: "Search",
-    version: 4,
+    version: 5,
     systems: ["ucpath", "crm"],
     memberOutcomes: PERSON_LOOKUP_MEMBER_OUTCOMES,
     start: {
@@ -986,20 +1020,45 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
       methods: [
         {
           kind: "typed",
-          label: "EIDs or names",
+          label: "People",
           accepts: ["eid", "name"],
           separator: "semicolon",
           placeholder: "10084412; Battistessa, Johnnie",
           parserLabel: "EIDs or names, SEMICOLON-separated — a name holds a comma, so a comma cannot separate the list",
           note: "Each value is read on its own: all digits is an EID, anything else is a name.",
+          visibleWhen: { choice: "mode", equals: ["search"] },
           examples: [
             { key: "mixed", label: "An EID and a name", values: ["10084412", "Battistessa, Johnnie"], note: "the same box takes both — nothing had to be typed twice" },
             { key: "two", label: "Two lookups", values: ["10084412", "10091755"], note: "a two-member group" },
           ],
         },
+        {
+          kind: "typed",
+          label: "People",
+          accepts: ["personMatch"],
+          separator: "semicolon",
+          placeholder: "Reyes, Marta, 01/02/1980, x; Patel, Rina, x, 123456789",
+          parserLabel: "Name, DOB, SSN records, SEMICOLON-separated — the final two comma fields are DOB then SSN; x means unavailable",
+          note: "Every person needs a legal name and at least one hard identifier. A line with x for both DOB and SSN is refused.",
+          visibleWhen: { choice: "mode", equals: ["match"] },
+          examples: [
+            { key: "two", label: "Two people", values: ["Reyes, Marta, 01/02/1980, x", "Patel, Rina, x, 123456789"], note: "one matches by DOB and one by SSN" },
+            { key: "no-ssn", label: "No SSN", values: ["Reyes, Marta, 01/02/1980, x"], note: "x explicitly marks the unavailable SSN" },
+            { key: "refused", label: "Refused line", values: ["Reyes, Marta, x, x"], note: "both hard identifiers are absent, so the server refuses it" },
+          ],
+        },
       ],
-      choices: [workerChoice()],
-      flags: [],
+      choices: [
+        {
+          key: "mode",
+          label: "Lookup mode",
+          note: "Which UCPath question this run asks.",
+          options: PERSON_LOOKUP_MODE_OPTIONS,
+          defaultValue: "search",
+        },
+        workerChoice(),
+      ],
+      flags: [crmCheckFlag()],
     },
     absences: {
       dryRun: {
@@ -1019,24 +1078,6 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
       systemWrite: {
         state: "not-applicable",
         reason: "Read-only by design. It is the workflow other workflows delegate to precisely because it cannot change anything.",
-      },
-    },
-  },
-  "person-match": {
-    id: "person-match",
-    code: "pm",
-    label: "Person Match",
-    category: "Search",
-    version: 2,
-    systems: ["ucpath"],
-    notStartable:
-      "Delegated only — and nothing has delegated to it since 2026-07-16. Inventing a start path for code nothing calls would be worse than leaving it absent.",
-    absences: {
-      memberOutcomes: NO_MEMBERS,
-      delegation: NO_DELEGATION,
-      systemWrite: {
-        state: "not-applicable",
-        reason: "Read-only. It compares two identities and answers; changing one is its caller's job.",
       },
     },
   },
@@ -1842,13 +1883,29 @@ export function requireStartCapability(workflow: DemoWorkflowRef): StartCapabili
   return workflow.start;
 }
 
-/** the method matching a kind, or a loud failure — a kind is never guessed */
-export function requireStartMethod(capability: StartCapabilityWire, kind: StartMethodKind): StartMethodWire {
-  const found = capability.methods.find((m) => m.kind === kind);
-  if (!found) {
+/** the method matching a kind + current choice values, or a loud failure */
+export function requireStartMethod(
+  capability: StartCapabilityWire,
+  kind: StartMethodKind,
+  values: Record<string, string> = {},
+): StartMethodWire {
+  const candidates = capability.methods.filter((method) => method.kind === kind);
+  if (candidates.length === 0) {
     throw new Error(`demo wire: this start declares no "${kind}" method — it offers [${capability.methods.map((m) => m.kind).join(", ")}]`);
   }
-  return found;
+  const matching = candidates.filter((method) => {
+    if (method.kind !== "typed" || !method.visibleWhen) return true;
+    const gate = capability.choices.find((choice) => choice.key === method.visibleWhen?.choice);
+    if (!gate) {
+      throw new Error(`demo wire: ${kind} method is gated on "${method.visibleWhen.choice}", which this start does not declare`);
+    }
+    const value = values[gate.key] ?? gate.defaultValue;
+    return method.visibleWhen.equals.includes(value);
+  });
+  if (matching.length !== 1) {
+    throw new Error(`demo wire: ${kind} resolves to ${matching.length} methods for choices ${JSON.stringify(values)} — expected exactly one`);
+  }
+  return matching[0];
 }
 
 /** every choice's declared default — the value set a fresh modal opens on */

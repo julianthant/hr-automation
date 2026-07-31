@@ -272,13 +272,16 @@ function MethodTabs({
   value: StartMethodKind;
   onChange: (next: StartMethodKind) => void;
 }) {
+  const peerMethods = methods.filter(
+    (method, index) => methods.findIndex((candidate) => candidate.kind === method.kind) === index,
+  );
   return (
     <div
       role="tablist"
       aria-label="How to start this run"
       className={cn("inline-flex items-center gap-[var(--ds-space-hair)] p-[var(--ds-space-hair)]", dsRadius.md, "bg-[var(--ds-surface-2)]")}
     >
-      {methods.map((method) => {
+      {peerMethods.map((method) => {
         const selected = method.kind === value;
         return (
           <button
@@ -534,7 +537,7 @@ export function DemoRunModal({
 
   const workflow = DEMO_WORKFLOWS[workflowId];
   const capability = requireStartCapability(workflow);
-  const methodWire = requireStartMethod(capability, method);
+  const methodWire = requireStartMethod(capability, method, choiceValues);
   const builtContract = formContract[workflowId] ?? startContractToken(workflow);
 
   const choices = visibleChoices(capability, method, choiceValues);

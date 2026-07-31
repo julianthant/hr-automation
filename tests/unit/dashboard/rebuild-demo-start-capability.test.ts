@@ -79,17 +79,17 @@ test("a workflow with no start path is not offered", () => {
     "work-study",
   ]);
 
-  // The two that stay delegated-only, each with its own reason. Old Kronos
+  // The one that stays delegated-only gives its own reason. Old Kronos
   // Reports left this list in wave 12: its report timeout was a global setting
   // for a workflow the dashboard could not start, and the honest fix was to make
   // the span (and the patience that tracks it) a per-run choice.
   const blocked = unstartableWorkflows().map((b) => b.workflow.id).sort();
-  assert.deepEqual(blocked, ["i9-lookup", "person-match"]);
+  assert.deepEqual(blocked, ["i9-lookup"]);
   for (const entry of unstartableWorkflows()) assert.ok(entry.reason.length > 20, `${entry.workflow.id} has no reason`);
 
   // ...and asking for a capability they do not have FAILS LOUD rather than
   // drawing an empty modal.
-  assert.throws(() => requireStartCapability(DEMO_WORKFLOWS["person-match"]), /declares no start capability/);
+  assert.throws(() => requireStartCapability(DEMO_WORKFLOWS["i9-lookup"]), /declares no start capability/);
 });
 
 test("the picker groups by the same real categories the rail uses, empty groups dropped", () => {
@@ -115,7 +115,7 @@ test("every workflow declares the input kinds production actually accepts", () =
   const expected: Record<string, StartMethodKind[]> = {
     separations: ["typed"],
     onboarding: ["typed"],
-    "person-lookup": ["typed"],
+    "person-lookup": ["typed", "typed"],
     "kronos-pay-rule": ["typed"],
     "crm-doc-download": ["typed"],
     "work-study": ["typed", "spreadsheet"],
@@ -150,6 +150,11 @@ test("the typed values and separators match production, not the demo's old guess
   // comma because a name holds one ("Battistessa, Johnnie").
   assert.deepEqual(typed("person-lookup").accepts, ["eid", "name"]);
   assert.equal(typed("person-lookup").separator, "semicolon");
+  const match = requireStartMethod(capabilityOf("person-lookup"), "typed", { mode: "match" });
+  assert.equal(match.kind, "typed");
+  if (match.kind !== "typed") throw new Error("unreachable");
+  assert.deepEqual(match.accepts, ["personMatch"]);
+  assert.equal(match.separator, "semicolon");
 
   // DRIFT 3: onboarding is started by campus email, not by name.
   assert.deepEqual(typed("onboarding").accepts, ["email"]);
@@ -178,7 +183,7 @@ test("only OnBase merges several files into one document", () => {
 test("each workflow offers exactly the sub-selections it declares", () => {
   assert.deepEqual(choiceKeys("separations", "typed"), ["preset", "workers"]);
   assert.deepEqual(choiceKeys("onboarding", "typed"), ["workers"]);
-  assert.deepEqual(choiceKeys("person-lookup", "typed"), ["workers"]);
+  assert.deepEqual(choiceKeys("person-lookup", "typed"), ["mode", "workers"]);
   assert.deepEqual(choiceKeys("kronos-pay-rule", "typed"), ["workers"]);
   assert.deepEqual(choiceKeys("crm-doc-download", "typed"), ["workers"]);
   assert.deepEqual(choiceKeys("ocr", "upload"), ["formType", "rosterSource", "rosterFile", "workers"]);
@@ -282,7 +287,7 @@ test("run flags are method-scoped, and absent where there is nothing to suppress
   assert.deepEqual(keys("oath-upload", "upload"), ["dryRun", "duplicateCheck"]);
   assert.deepEqual(keys("i9-check", "upload"), []);
   assert.deepEqual(keys("ocr", "upload"), []);
-  assert.deepEqual(keys("person-lookup", "typed"), []);
+  assert.deepEqual(keys("person-lookup", "typed"), ["crmCheck"]);
   assert.deepEqual(keys("separations", "typed"), ["dryRun"]);
 });
 
@@ -314,6 +319,16 @@ test("a comma inside a semicolon-separated name is not a separator", () => {
   const entries = parseEntries("Battistessa, Johnnie", ["eid", "name"], "semicolon");
   assert.equal(entries.length, 1);
   assert.equal(entries[0].value, "Battistessa, Johnnie");
+});
+
+test("Match records keep their internal commas and refuse a line with neither hard identifier", () => {
+  const entries = parseEntries(
+    "Reyes, Marta, 01/02/1980, x; Patel, Rina, x, 123456789; Reyes, Marta, x, x",
+    ["personMatch"],
+    "semicolon",
+  );
+  assert.deepEqual(entries.map((entry) => entry.kind), ["personMatch", "personMatch", undefined]);
+  assert.match(entries[2].problem?.message ?? "", /not both/);
 });
 
 // ---------------------------------------------------------------------------

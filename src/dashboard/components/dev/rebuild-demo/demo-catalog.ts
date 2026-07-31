@@ -86,8 +86,7 @@ export const ROW_VARIANTS: RowVariantSpec[] = [
     workflows: [
       { code: "se", label: "Separations", note: "Kuali → UCPath → Kronos; pauses on identity approval before the termination write." },
       { code: "on", label: "Onboarding", note: "Same identity gate; new hire has no prior EID, so one candidate is always EID-less." },
-      { code: "pl", label: "Person Lookup", note: "Read-only. Terminal states include Not found — a real outcome, not a failure." },
-      { code: "pm", label: "Person Match", note: "Usually runs delegated; standalone it is an ordinary person run." },
+      { code: "pl", label: "Person Lookup", note: "Read-only Search/Match modes. Terminal states include Not found — a real outcome, not a failure." },
       { code: "i9", label: "I-9 Lookup", note: "Enrichment lookup — often invisible, folded into its caller's timeline." },
       { code: "ws", label: "Work-Study", note: "Typed input run; one UCPath transaction per person." },
       { code: "kp", label: "Kronos Pay Rule", note: "Kronos-only; the receipt is the observed pay rule after the write." },
