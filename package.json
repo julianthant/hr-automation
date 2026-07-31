@@ -9,6 +9,7 @@
     "node": ">=26.0.0",
     "npm": ">=11.0.0"
   },
+  "packageManager": "npm@11.13.0",
   "scripts": {
     "test-login": "tsx --env-file=.env src/cli.ts test-login",
     "onboarding:stop": "tsx --env-file=.env src/cli.ts daemon-stop onboarding",
