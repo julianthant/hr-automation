@@ -4,11 +4,10 @@
  * Owns two person-lookup-specific status rules that used to be hardcoded in the
  * generic `EntryItem` dashboard component:
  *
- *   - **notFound** — BOTH UCPath and CRM missed. The automation succeeded, so
- *     the tracker status is still `done`; the queue should read "Not found"
- *     instead. A CRM-only hit stamps `activeStatus: "n/a"` and is NOT notFound.
- *     Delegates to {@link isTerminalNotFoundEntry}, the same predicate the
- *     search/sort/snapshot surfaces use.
+ *   - **notFound** — Search mode's Person Org/CRM chain resolved to terminal
+ *     `activeStatus: "not-found"`, or Match mode's HR-Tasks search stamped
+ *     `found: "false"`. The automation succeeded, so tracker status remains
+ *     `done`; the queue should still present the negative business answer.
  *
  *   - **A / IA secondary tag** — Active / Inactive / "Active (non-HDH dept)"
  *     chip derived from `data.activeStatus` (`active` | `inactive` | `non-hdh`)
@@ -25,7 +24,10 @@ import type { WorkflowStatusExtensions } from "./queue-row-status.js";
 
 export const personLookupStatusExtensions: WorkflowStatusExtensions = {
   derivedStatus: (entry) =>
-    entry.status === "done" && isTerminalNotFoundEntry(entry) ? "notFound" : null,
+    entry.status === "done" &&
+    (isTerminalNotFoundEntry(entry) || entry.data?.found === "false")
+      ? "notFound"
+      : null,
   secondaryTag: (entry, { isDone }) => {
     const activeStatus =
       typeof entry.data?.activeStatus === "string" ? entry.data.activeStatus : null;

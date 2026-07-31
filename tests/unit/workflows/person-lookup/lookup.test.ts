@@ -80,6 +80,9 @@ describe("person-lookup workflow helper", () => {
         ["startDate", "Start Date"],
         ["terminationDate", "End Date"],
         ["terminationReason", "Term Reason"],
+        ["found", "Found in UCPath"],
+        ["matchedEmplId", "Matched Empl ID"],
+        ["matchedName", "Matched Name"],
       ],
     );
   });
