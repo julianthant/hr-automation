@@ -8,6 +8,7 @@ import { REPO_ROOT } from "./helpers/guard-files.js";
 import {
   auditRuntimeIsolation,
   SUPPORTED_FORBIDDEN_BRIDGE_CLASSES,
+  SUPPORTED_MODULE_FAMILIES,
   type ForbiddenBridgeClass,
   type RuntimeIsolationContract,
 } from "./helpers/runtime-isolation-audit.js";
@@ -99,6 +100,7 @@ function bridgeClasses(root: string, contract: RuntimeIsolationContract, scripts
 
 describe("D88 runtime isolation", () => {
   it("pins distinct exact runtime resources and consumes every forbidden bridge class", () => {
+    assert.equal(isolation.schemaVersion, 2);
     assert.deepEqual(isolation.legacy, {
       sourceRoot: "src",
       entrypoint: "src/cli.ts",
@@ -158,6 +160,40 @@ describe("D88 runtime isolation", () => {
       [...isolation.forbiddenBridgeClasses].sort(),
       [...SUPPORTED_FORBIDDEN_BRIDGE_CLASSES].sort(),
     );
+    assert.deepEqual(
+      isolation.moduleFamilies,
+      [
+        {
+          family: "filesystem",
+          specifiers: ["fs", "fs/promises", "node:fs", "node:fs/promises"],
+          bridgeClasses: ["cross-tree-filesystem-access"],
+        },
+        {
+          family: "network-route",
+          specifiers: ["dgram", "http", "http2", "https", "net", "node:dgram", "node:http", "node:http2", "node:https", "node:net", "node:tls", "tls", "undici", "ws"],
+          bridgeClasses: ["cross-tree-runtime-bridge", "route-proxy-forward-remount"],
+        },
+        {
+          family: "process-execution",
+          specifiers: ["child_process", "cluster", "node:child_process", "node:cluster", "node:vm", "node:worker_threads", "vm", "worker_threads"],
+          bridgeClasses: ["cross-tree-process-invocation"],
+        },
+        {
+          family: "module-loader",
+          specifiers: ["module", "node:module"],
+          bridgeClasses: ["cross-tree-module-edge"],
+        },
+        {
+          family: "browser-profile",
+          specifiers: ["@playwright/test", "playwright", "playwright-core", "puppeteer", "puppeteer-core"],
+          bridgeClasses: ["shared-browser-session"],
+        },
+      ],
+    );
+    assert.deepEqual(
+      isolation.moduleFamilies.map(({ family }) => family).sort(),
+      [...SUPPORTED_MODULE_FAMILIES].sort(),
+    );
 
     for (const key of ["stateRoot", "artifactRoot", "processLockRoot", "browserProfileRoot", "browserSessionNamespace"] as const) {
       assert.notEqual(isolation.legacy[key], isolation.rebuild[key], `${key} must differ`);
@@ -168,6 +204,21 @@ describe("D88 runtime isolation", () => {
 
   it("audits the real pre-tree checkout and exact legacy commands", () => {
     assert.deepEqual(auditRuntimeIsolation(REPO_ROOT, isolation, packageJson.scripts), []);
+  });
+
+  it("rejects missing, duplicate, or open module-family catalog entries", () => {
+    const missing = { ...isolation, moduleFamilies: isolation.moduleFamilies.slice(1) };
+    assert.ok(auditRuntimeIsolation(REPO_ROOT, missing, packageJson.scripts)
+      .some(({ bridgeClass, detail }) => bridgeClass === "runtime-binding" && detail.includes("moduleFamilies")));
+
+    const duplicate = {
+      ...isolation,
+      moduleFamilies: isolation.moduleFamilies.map((family, index) => index === 1
+        ? { ...family, specifiers: [...family.specifiers, "node:fs"] }
+        : family),
+    };
+    assert.ok(auditRuntimeIsolation(REPO_ROOT, duplicate, packageJson.scripts)
+      .some(({ bridgeClass, detail }) => bridgeClass === "runtime-binding" && detail.includes("moduleFamilies")));
   });
 
   it("accepts only executable exact runtime config consumed by every composition root", () => {
@@ -345,6 +396,8 @@ export const rebuildRuntimeIsolation = defineRuntimeIsolation({
         ["namespace-computed.ts", "import * as fs from \"node:fs\"; const method = \"readFileSync\"; fs[method](\".tracker-rebuild/state.json\");\n", "cross-tree-filesystem-access"],
         ["require-namespace.ts", "const fs = require(\"node:fs\"); fs.readFileSync(\".tracker-rebuild/state.json\");\n", "cross-tree-filesystem-access"],
         ["dynamic-namespace.ts", "const fs = await import(\"node:fs\"); fs.readFileSync(\".tracker-rebuild/state.json\");\n", "cross-tree-filesystem-access"],
+        ["family-named-escape.ts", "import { unlinkSync } from \"node:fs\"; const erase = unlinkSync;\n", "cross-tree-filesystem-access"],
+        ["family-default-escape.ts", "import browserRuntime from \"puppeteer\"; declare function register(value: unknown): void; register(browserRuntime);\n", "shared-browser-session"],
         ["process-return.ts", "import { spawn } from \"node:child_process\"; export const getSpawn = () => spawn;\n", "cross-tree-process-invocation"],
       ];
       for (const [name, content, expected] of cases) {
@@ -396,6 +449,71 @@ browser.launchPersistentContext(rebuildRuntimeIsolation.browserProfileRoot);
     });
   });
 
+  it("classifies every runtime module-family binding and audits calls plus constructors", () => {
+    withActiveFixture((root, contract, scripts) => {
+      const cases: readonly [string, string, ForbiddenBridgeClass][] = [
+        ["unlink.ts", "import { unlinkSync } from \"node:fs\"; unlinkSync(\".tracker/state.json\");\n", "cross-tree-state-access"],
+        ["fs-default.ts", "import filesystem from \"node:fs\"; filesystem.truncateSync(\".tracker/state.json\");\n", "cross-tree-state-access"],
+        ["http-get.ts", "import { get } from \"node:http\"; get(\"http://127.0.0.1:3838/api/entries\");\n", "route-proxy-forward-remount"],
+        ["https-namespace.ts", "import * as transport from \"node:https\"; transport.get(\"http://127.0.0.1:3838/api/entries\");\n", "cross-tree-runtime-bridge"],
+        ["puppeteer-launch.ts", "import { launch } from \"puppeteer\"; launch({ userDataDir: \".auth\" });\n", "shared-browser-session"],
+        ["puppeteer-default.ts", "import browserRuntime from \"puppeteer-core\"; browserRuntime.launch({ userDataDir: \".auth\" });\n", "shared-browser-session"],
+        ["worker.ts", "import { Worker } from \"node:worker_threads\"; new Worker(\"../../src/cli.js\");\n", "cross-tree-process-invocation"],
+        ["module-loader-member.ts", "import { load as loadModule } from \"node:module\"; loadModule(\"../../src/cli.js\");\n", "cross-tree-module-edge"],
+        ["websocket.ts", "import { WebSocket as Socket } from \"ws\"; new Socket(\"http://127.0.0.1:3838/events\");\n", "cross-tree-runtime-bridge"],
+      ];
+      for (const [name, content, expected] of cases) {
+        const path = `temp_src/core/${name}`;
+        write(root, path, content);
+        const violations = auditRuntimeIsolation(root, contract, scripts);
+        assert.ok(violations.some(({ bridgeClass, file }) =>
+          bridgeClass === expected && file.endsWith(name)), name);
+        rmSync(join(root, path));
+      }
+
+      write(
+        root,
+        "temp_src/core/approved-module-families.ts",
+        `import { unlinkSync as remove } from "node:fs";
+import transport from "node:http";
+import browserRuntime from "puppeteer-core";
+import { Worker as Thread } from "node:worker_threads";
+import { rebuildRuntimeIsolation } from "../config/runtime-isolation.js";
+remove(rebuildRuntimeIsolation.stateRoot + "/state.json");
+transport.get(\`http://127.0.0.1:\${rebuildRuntimeIsolation.backendPort}/api/entries\`);
+browserRuntime.launch({ userDataDir: rebuildRuntimeIsolation.browserProfileRoot });
+new Thread("temp_src/cli.ts");
+`,
+      );
+      assert.deepEqual(auditRuntimeIsolation(root, contract, scripts), []);
+    });
+  });
+
+  it("rejects computed runtime-global capability selection while allowing literal members", () => {
+    withActiveFixture((root, contract, scripts) => {
+      for (const [name, content] of [
+        ["global-this.ts", "const m = \"fetch\"; globalThis[m](\"http://127.0.0.1:3838/api/entries\");\n"],
+        ["window.ts", "declare const window: Record<string, (value: string) => void>; declare const method: string; window[method](\"http://127.0.0.1:3838\");\n"],
+      ] as const) {
+        const path = `temp_src/core/${name}`;
+        write(root, path, content);
+        const violations = auditRuntimeIsolation(root, contract, scripts);
+        assert.ok(violations.some(({ bridgeClass, file, detail }) =>
+          bridgeClass === "cross-tree-runtime-bridge"
+          && file.endsWith(name)
+          && detail.includes("computed runtime-global")), name);
+        rmSync(join(root, path));
+      }
+
+      write(
+        root,
+        "temp_src/core/literal-global.ts",
+        "globalThis[\"fetch\"](\"http://127.0.0.1:3938/api/entries\");\n",
+      );
+      assert.deepEqual(auditRuntimeIsolation(root, contract, scripts), []);
+    });
+  });
+
   it("detects direct invocation, filesystem/state access, runtime calls, proxy/forward/remount, lift, and shared sessions", () => {
     withActiveFixture((root, contract, scripts) => {
       const cases: readonly [string, string, ForbiddenBridgeClass][] = [
@@ -433,7 +551,7 @@ browser.launchPersistentContext(rebuildRuntimeIsolation.browserProfileRoot);
       write(
         root,
         "temp_src/core/declarations-only.ts",
-        "import { readFileSync as load } from 'node:fs';\nimport type { Stats as ReadFileSync } from 'node:fs';\nexport type { BigIntStats as readFileSync } from 'node:fs';\n// load('.tracker/state.json'); fetch('http://127.0.0.1:3838'); liftLegacyRows();\ntype Reader = ReadFileSync & typeof import('node:fs/promises');\nconst legacyState = '.tracker';\nfunction liftLegacyRows(): void {}\n",
+        "import { readFileSync as load } from 'node:fs';\nimport type { Stats as ReadFileSync } from 'node:fs';\nimport type browserRuntime from 'puppeteer';\nimport type { RequestOptions } from 'node:http';\nimport type { WorkerOptions } from 'node:worker_threads';\nexport type { BigIntStats as readFileSync } from 'node:fs';\n// load('.tracker/state.json'); fetch('http://127.0.0.1:3838'); liftLegacyRows();\ntype Reader = ReadFileSync & RequestOptions & WorkerOptions & typeof browserRuntime & typeof import('node:fs/promises');\nconst legacyState = '.tracker';\nfunction liftLegacyRows(): void {}\n",
       );
       assert.deepEqual(auditRuntimeIsolation(root, contract, scripts), []);
     });
