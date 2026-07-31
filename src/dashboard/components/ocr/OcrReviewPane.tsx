@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { AlertTriangle, Check, CheckCheck, FileScan, ListX, Loader2, RotateCw, UploadCloud } from "lucide-react";
+import { AlertTriangle, Check, CheckCheck, FileScan, ImageDown, ListX, Loader2, RotateCw, UploadCloud } from "lucide-react";
 import { toast } from "@/lib/notify";
 import {
   Dialog,
@@ -24,6 +24,7 @@ import { buildI9RenderList, i9SectionPages, type I9RenderEntry } from "./i9-pers
 import {
   isApprovable,
   isApprovalSelectionBlocked,
+  promoteManualEidMatch,
   scrubHardBlockedSelection,
 } from "./approval-selection";
 import {
@@ -168,7 +169,14 @@ function mergePrepRecordRows(
     // Inactive / unknown must never stay selected — Select all and stale
     // localStorage used to leave them checked while Approve N ignored them
     // (count looked frozen when the operator "selected everything").
-    out.push({ originalIndex, record: scrubHardBlockedSelection(merged) });
+    //
+    // Promotion happens HERE, not in the edit handler, so an EID typed in an
+    // earlier session (restored from localStorage) is promoted on load too —
+    // otherwise a stored edit stays `unresolved` and can never be approved.
+    out.push({
+      originalIndex,
+      record: scrubHardBlockedSelection(promoteManualEidMatch(baseRow, merged)),
+    });
   }
   return out;
 }
@@ -342,6 +350,13 @@ function useOcrReviewPrepApi(
     Record<number, PreviewPageStatus | undefined>
   >({});
   useEffect(() => { setPreviewStatusByPage({}); }, [sessionId, runId]);
+  // Operator opt-in: fetch every source page now instead of waiting for the
+  // scroll to bring each one near the viewport. Approval gates on every page
+  // having RENDERED, so on a 30+ page pile the gate otherwise costs a full
+  // manual scroll. This does not weaken the gate — a page that fails to
+  // render still blocks approval, it just stops being busywork to find out.
+  const [eagerLoadPreviews, setEagerLoadPreviews] = useState(false);
+  useEffect(() => { setEagerLoadPreviews(false); }, [sessionId, runId]);
   const handlePreviewStatusChange = useCallback((page: number, status: PreviewPageStatus) => {
     setPreviewStatusByPage((prev) => (prev[page] === status ? prev : { ...prev, [page]: status }));
   }, []);
@@ -421,6 +436,8 @@ function useOcrReviewPrepApi(
   }, [recordRows, dependencyChildren, entryStatusForLookup, entryStepForLookup]);
 
   const setRecord = (index: number, next: AnyPreviewRecord): void => {
+    // The manual-EID promotion is applied by mergePrepRecordRows, so it covers
+    // both a fresh edit and one restored from localStorage.
     setLocalEdits((prev) => ({ ...prev, [index]: next }));
   };
 
@@ -551,11 +568,10 @@ function useOcrReviewPrepApi(
     () => records.some((r) => r.selected),
     [records],
   );
-  // Selectable = same as the per-row checkbox (unknown + inactive disabled).
+  // Selectable = same as the per-row checkbox (only unknown pages disabled —
+  // inactive employees are submittable, operator decision 2026-07-27).
   // Select All covers every checkbox-enabled row — not only isApprovable
   // (matched/resolved) — so form-EID / still-verifying records aren't skipped.
-  // Inactive is hard-blocked (same as Approve N), so selecting it never bumps
-  // the count and must not be offered as a fake "Select all" win.
   const unselectedSelectableCount = useMemo(
     () =>
       recordRows.filter(
@@ -841,6 +857,37 @@ function useOcrReviewPrepApi(
                 }}
               />
             )}
+            {/* Approval gates on every source page having rendered. Rather than
+                scroll a 30+ page pile by hand to satisfy it, load them all. */}
+            {isDelegation && previewApprovalGate.pendingPages.length > 0 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEagerLoadPreviews(true);
+                }}
+                disabled={eagerLoadPreviews}
+                aria-label={`Load all ${previewApprovalGate.totalCount} source pages`}
+                title="Fetch every source page now — approval stays blocked until each one renders"
+                className={cn(
+                  "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-secondary/40 px-2.5 text-xs font-medium leading-none text-muted-foreground",
+                  "transition-colors duration-150 hover:bg-secondary hover:text-foreground",
+                  "disabled:cursor-not-allowed disabled:hover:bg-secondary/40 disabled:hover:text-muted-foreground",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                )}
+              >
+                {eagerLoadPreviews ? (
+                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
+                ) : (
+                  <ImageDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                )}
+                <span className="tabular-nums" aria-live="polite">
+                  {eagerLoadPreviews
+                    ? `Loading ${previewApprovalGate.loadedCount}/${previewApprovalGate.totalCount}`
+                    : `Load all ${previewApprovalGate.totalCount} pages`}
+                </span>
+              </button>
+            )}
             {/* Variant B — one connected pill: Select all | Unselect all | Reupload | Approve.
                 Selection segments only on delegated approve runs. */}
             {(onReupload || isDelegation) && (
@@ -855,7 +902,7 @@ function useOcrReviewPrepApi(
                       }}
                       disabled={submitting || unselectedSelectableCount <= 0}
                       aria-label="Select all records"
-                      title="Select every record that can be approved (skips inactive / unknown)"
+                      title="Select every record that can be approved (skips unknown pages)"
                       className={cn(
                         "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium leading-none text-muted-foreground",
                         "transition-colors duration-150 hover:bg-secondary hover:text-foreground",
@@ -981,6 +1028,7 @@ function useOcrReviewPrepApi(
                         parentRunId={sessionId}
                         page={renderEntry.page}
                         fileId={data.pdfFileId}
+                        eagerLoad={eagerLoadPreviews}
                       />
                     </div>
                     <div>
@@ -1010,6 +1058,7 @@ function useOcrReviewPrepApi(
                       pages={pages}
                       fileId={data.pdfFileId}
                       onPreviewStatusChange={handlePreviewStatusChange}
+                      eagerLoadPreview={eagerLoadPreviews}
                       formCard={renderFormCard({
                         record,
                         cfg,
@@ -1048,6 +1097,7 @@ function useOcrReviewPrepApi(
                       page={page}
                       fileId={data.pdfFileId}
                       onPreviewStatusChange={handlePreviewStatusChange}
+                      eagerLoadPreview={eagerLoadPreviews}
                       titleBar={renderFormCardNav({
                         record,
                         cfg,
@@ -1129,6 +1179,7 @@ function useOcrReviewPrepApi(
                   formCards={cards}
                   onAddRow={addBlankRow}
                   onPreviewStatusChange={handlePreviewStatusChange}
+                  eagerLoadPreview={eagerLoadPreviews}
                 />
               </section>
             );

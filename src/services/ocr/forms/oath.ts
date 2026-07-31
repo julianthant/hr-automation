@@ -428,9 +428,8 @@ export const oathOcrFormSpec: OcrFormSpec<
       // (mirrors applyCarryForward's legacy tolerance), so it still fans out.
       const kind = record.formKind as string | undefined;
       if (kind === "emergency-contact" || kind === "unknown") return false;
-      // Inactive employees are hard-blocked in the review pane — mirror here so
-      // a stale selected flag cannot enqueue a signer transaction.
-      if (record.verification?.state === "inactive") return false;
+      // Inactive employees ARE submittable (operator decision 2026-07-27) —
+      // verification state is a review-pane signal, not a fan-out gate.
       return hasOathSignerInput(record);
     },
   },

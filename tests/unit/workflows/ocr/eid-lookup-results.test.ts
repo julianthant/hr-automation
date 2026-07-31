@@ -36,7 +36,7 @@ test("patchOcrRecordFromEidLookupOutcome resolves a name lookup with EID and ver
   assert.equal(rec.selected, true);
 });
 
-test("patchOcrRecordFromEidLookupOutcome deselects inactive records", () => {
+test("patchOcrRecordFromEidLookupOutcome keeps inactive records selected (submittable — operator decision 2026-07-27)", () => {
   const records: unknown[] = [{ employeeId: "10000001", selected: true }];
 
   patchOcrRecordFromEidLookupOutcome(records, 0, {
@@ -51,7 +51,7 @@ test("patchOcrRecordFromEidLookupOutcome deselects inactive records", () => {
     },
   }, "verify");
 
-  assert.equal((records[0] as { selected?: boolean }).selected, false);
+  assert.equal((records[0] as { selected?: boolean }).selected, true);
 });
 
 test("patchOcrRecordFromEidLookupOutcome does not let a later not-found candidate overwrite a resolved record", () => {
@@ -250,5 +250,5 @@ test("patchOcrRecordFromActiveCheckOutcome deselects inactive active-check resul
 
   const rec = records[0] as Record<string, unknown>;
   assert.deepEqual((rec.verification as { state: string }).state, "inactive");
-  assert.equal(rec.selected, false);
+  assert.equal(rec.selected, true);
 });

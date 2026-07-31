@@ -14,6 +14,8 @@ export interface PrepReviewMultiPairProps {
   /** Optional: when provided, renders an "Add row to this page" footer button. */
   onAddRow?: (page: number) => void;
   onPreviewStatusChange?: (page: number, status: "loading" | "ok" | "error") => void;
+  /** Force the page image to fetch now instead of on scroll. */
+  eagerLoadPreview?: boolean;
 }
 
 /**
@@ -36,6 +38,7 @@ export function PrepReviewMultiPair({
   titleBar,
   onAddRow,
   onPreviewStatusChange,
+  eagerLoadPreview,
 }: PrepReviewMultiPairProps) {
   const cards: ReactNode[] = [
     ...formCards,
@@ -65,6 +68,7 @@ export function PrepReviewMultiPair({
           page={page}
           fileId={fileId}
           onStatusChange={onPreviewStatusChange}
+          eagerLoad={eagerLoadPreview}
         />
       }
       formCards={cards}
