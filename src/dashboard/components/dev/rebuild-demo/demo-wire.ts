@@ -2038,7 +2038,7 @@ export function panelKindOf(row: Pick<DemoRow, "rowType" | "records">): PanelKin
  * Tabs are a CAPABILITY of the panel kind, not a fixed five.
  *  - Review exists only on the row that owns records.
  *  - People exists only on a Group Row.
- *  - Screenshots is not a tab at all — evidence is a rail SECTION (D19b).
+ *  - Screenshots is not a tab at all — captures are evidence inside Receipt (D19b).
  *  - Data and Edit Data are ONE surface (D19c) — and that one surface is the
  *    rail's, not a tab's, so it can be read WHILE the stream runs.
  */
@@ -2102,10 +2102,11 @@ export type DemoCommandKey =
 
 /**
  * Where a descriptor renders. One descriptor can appear in more than one place.
- * `data` is the merged Data surface's own footer (D19c) — the same descriptor
- * protocol as every other control, so the Save button is not a special case.
+ * `data` is the merged Data surface's own footer (D19c); `review` is the
+ * record-by-record OCR surface. Both use the same descriptor protocol as every
+ * other control, so neither Save nor Approve becomes a client-invented action.
  */
-export type ActionPlacement = "footer" | "banner" | "outcome" | "menu" | "data";
+export type ActionPlacement = "footer" | "banner" | "outcome" | "menu" | "data" | "review";
 
 export type ActionIntent = "primary" | "neutral" | "destructive" | "violet" | "success" | "info" | "warning";
 
@@ -2188,6 +2189,8 @@ export interface GateOptionSpec {
   detail?: string;
   intent: ActionIntent;
   command: DemoCommandKey;
+  /** Defaults to the gate banner; record approval is confined to Review. */
+  placement?: ActionPlacement[];
   resolution?: string;
   confirm?: ActionConfirmWire;
   icon?: ActionIconKey;
@@ -2309,7 +2312,9 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
   const v = ctx.projectedVersion;
   const isGroup = spec.rowType === "group";
 
-  // 1. Gate answers — the decision the row is sitting on, above the tabs.
+  // 1. Gate answers — usually above the tabs. Record approval is the one
+  //    deliberate exception: it is served only to the Review surface so the
+  //    operator cannot bypass the page-by-page pass from Logs.
   for (const opt of spec.gate?.options ?? []) {
     out.push({
       key: opt.key,
@@ -2319,7 +2324,7 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
       detail: opt.detail,
       intent: opt.intent,
       icon: opt.icon,
-      placement: ["banner"],
+      placement: opt.placement ?? ["banner"],
       expectedVersion: v,
       resolution: opt.resolution,
       confirm: opt.confirm,
@@ -2462,7 +2467,18 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
             },
       );
       break;
-    case "failed":
+    case "failed": {
+      // A mirrored file failure and a delegated OCR review child have nothing
+      // useful to replay from the queue footer — the packet needs a new scan,
+      // and the OCR row's failure record is in the log stream. Other failed
+      // rows (incl. mirrored person lookups) keep ↺.
+      const skipFooterRetry =
+        (spec.mirroredFrom !== undefined && spec.subjectKind === "file") ||
+        (spec.workflowId === "ocr" && spec.reviewOf !== undefined);
+      if (!skipFooterRetry) out.push(retry);
+      out.push(hide);
+      break;
+    }
     case "cancelled":
       out.push(retry, hide);
       break;
@@ -2522,9 +2538,9 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
       key: "rerun-existing",
       kind: "command",
       command: "rerun-with-existing-data",
-      label: "Start a new run",
+      label: "Start custom run",
       detail:
-        "Enqueues a FRESH run on the current workflow version using these values. This row keeps its own history; the two are separate runs with separate receipts.",
+        "Enqueues a FRESH custom run on the current workflow version using the complete data set shown here, including your corrections. This row keeps its own history; the two are separate runs with separate receipts.",
       intent: resumable ? "neutral" : "primary",
       icon: "retry",
       placement: ["data"],
@@ -2561,41 +2577,11 @@ export function deriveActions(spec: DemoRowSpec, ctx: ActionPolicyContext): Acti
 }
 
 function deriveOutcomeAction(spec: DemoRowSpec, ctx: ActionPolicyContext): ActionDescriptorWire | null {
-  // A row that failed because its LINKED child failed is fixed at the child,
-  // never here — but WHICH fix depends on what the child was reading.
-  //
-  // A PACKET came from a file, so the answer is a better file, and that is an
-  // answer the footer does not have: `Re-upload` opens a file picker and starts
-  // a DIFFERENT run. It is the row's only route to that, so it stays on the
-  // outcome bar.
-  //
-  // A PERSON's mid-run lookup came from a name, so the answer is to replay that
-  // lookup — and THE FOOTER'S ↺ ALREADY DOES EXACTLY THAT, same `retry`
-  // command, same replayed child. So the outcome bar no longer offers it.
-  // Operator: *"retry the lookup is not needed here since i know i can just do
-  // it myself from the footer."* The child-replay confirm copy did not die with
-  // the button — `deriveActions` hands it to the footer ↺ on precisely these
-  // rows, so the promise the operator reads before replaying is unchanged; only
-  // the second door to it is gone. The row falls through to `Open failure`,
-  // which is what every other failed row shows.
-  if (spec.mirroredFrom && spec.subjectKind === "file") {
-    return {
-      key: "reupload",
-      kind: "command",
-      command: "rerun-with-different-input",
-      label: "Re-upload",
-      intent: "destructive",
-      icon: "retry",
-      placement: ["outcome", "menu"],
-      expectedVersion: ctx.projectedVersion,
-      confirm: {
-        title: "Start a new run from a different file?",
-        body: `This row stays failed and keeps its evidence. A NEW ${ctx.workflow.label} run is enqueued from the file you pick — the two are separate runs with separate receipts.`,
-        confirmLabel: "Choose a file…",
-        tone: "neutral",
-      },
-    };
-  }
+  // A failed packet whose OCR child broke has no queue-card outcome CTA —
+  // operator: the card carries the mirrored error and navigation chips only;
+  // re-upload and open-failure live in the log panel, not beside the title.
+  if (spec.mirroredFrom && spec.subjectKind === "file") return null;
+
   switch (ctx.status) {
     case "waiting":
       return { key: "open-gate", kind: "navigation", label: "Review", intent: "info", icon: "review", placement: ["outcome", "menu"], navigate: { kind: "self" } };

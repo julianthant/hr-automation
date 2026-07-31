@@ -123,7 +123,7 @@ export function DemoRunStartButton({ onOpen }: { onOpen: () => void }) {
   return (
     <Button
       size="toolbar"
-      variant="primary"
+      variant="brand"
       onClick={onOpen}
       icon={<Play aria-hidden className={dsIcon.sm} />}
       // No `r` hint on the face of it. A shortcut badge on a control the

@@ -131,20 +131,7 @@ export function ParkResolveDialog({
     const result = onAction(row, { ...action, confirm: undefined, payload });
     if (!result) return;
     if (result.state === "applied") {
-      if (result.settling) {
-        onSettling(result.settling);
-        toast({
-          tone: "warning",
-          title: "Observation recorded — still parked",
-          description: `${result.settling.observations} of ${result.settling.required} qualifying observations. Retry stays locked until the probe at ${fmtClock(result.settling.nextProbeAt)} agrees.`,
-        });
-      } else {
-        toast({
-          tone: arm === "present" ? "success" : "info",
-          title: result.headline,
-          description: result.detail,
-        });
-      }
+      if (result.settling) onSettling(result.settling);
       onClose();
       return;
     }

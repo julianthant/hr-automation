@@ -37,7 +37,7 @@ import { MemberOutcomePending, MemberOutcomeWord, StatusBadge, type ProposedStat
 import { panelKindOf, panelKindSpec, rowVariantSpec } from "./demo-catalog";
 import { BannerActions, OutcomeActionButton, ParkResolutions, type DemoActionHandler } from "./DemoActions";
 import { ContextRail, ContextRailSpine, useContextRail } from "./DemoContextRail";
-import { CaptureLightbox, PageFacsimile, SystemChip } from "./DemoEvidence";
+import { CaptureLightbox, PageFacsimile, ReceiptCapturesSection, SystemChip } from "./DemoEvidence";
 import { RunProvenanceBar } from "./DemoRunIdentity";
 import {
   candidateCaptureFor,
@@ -135,7 +135,7 @@ const TERMINAL: ProposedStatus[] = ["verifiedDone", "doneWarnings", "failed", "c
  * Tabs are derived from the PANEL KIND, not fixed at five.
  *  - Review exists only on the Review Run Row (the only row that owns records).
  *  - People exists only on a Group Row.
- *  - Screenshots is not a tab at all — evidence rides the bar above the tabs.
+ *  - Screenshots is not a tab at all — captures live inside Receipt as evidence.
  */
 /**
  * The tabs a row gets are SERVED (`detailSurfaces`), not decided here. The
@@ -932,7 +932,7 @@ function DecisionNotice({
             "active:translate-y-px hover:brightness-110",
           )}
         >
-          <span className={cn(dsText.meta, "flex min-w-0 items-center gap-[var(--ds-space-tight)] font-semibold", fg)}>
+          <span className={cn(dsText.meta, "flex min-w-0 items-center gap-[var(--ds-space-tight)] font-semibold", dsText.flush, fg)}>
             <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
             <span className="min-w-0 truncate">{gate.title}</span>
           </span>
@@ -1268,9 +1268,9 @@ function ReviewTab({
     (recordId: string) => corrections.filter((c) => c.recordId === recordId),
     [corrections],
   );
-  /** the gate's own approve descriptor — the client never invents this button */
+  /** the Review surface's approve descriptor — the client never invents this button */
   const approveAction = useMemo<ActionDescriptorWire | undefined>(
-    () => actionsAt(row.actions, "banner").find((a) => a.resolution?.startsWith("approve:")),
+    () => actionsAt(row.actions, "review").find((a) => a.resolution?.startsWith("approve:")),
     [row.actions],
   );
 
@@ -1424,7 +1424,7 @@ function ReviewTab({
           Stacking is the last resort, not the 1280px default it became: an
           extraction the operator has to scroll to reach is the exact complaint
           this surface exists to answer. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 @min-[29rem]:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)] @min-[42.5rem]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="grid flex-1 grid-cols-1 gap-0 @min-[29rem]:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)] @min-[42.5rem]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="flex min-h-[var(--ds-h-review-page-min)] flex-col gap-1.5 border-b border-border/60 p-3 @min-[29rem]:min-h-0 @min-[29rem]:border-b-0 @min-[29rem]:border-r">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{rec.pageNote}</span>
           {/* THE PAGE CLAIMS THE REVIEW'S LEFT COLUMN. The old glyph box sized
@@ -1615,7 +1615,7 @@ function ReviewTab({
       </div>
 
       {/* per-person decision — absent entirely on a read-only report */}
-      <div className="flex items-center gap-1.5 border-t border-border/60 bg-secondary/20 px-3 py-2">
+      <div className="flex shrink-0 items-center gap-1.5 border-t border-border/60 bg-secondary/20 px-3 py-2">
         {readOnly ? (
           <>
             <button
@@ -1626,9 +1626,6 @@ function ReviewTab({
               <ArrowRight aria-hidden className="size-3" />
               Next person
             </button>
-            <span className="ml-auto text-[10.5px] text-muted-foreground">
-              Nothing is delegated to this run, so approval would release nothing — the report IS the outcome.
-            </span>
           </>
         ) : (
           <>
@@ -1933,6 +1930,10 @@ function PeopleTab({
  * list inline (D17). The acceptance test is that the operator can double-check
  * the run without opening UCPath.
  *
+ * Screenshot captures render below either receipt form. They remain reachable
+ * for pending and failed runs because those runs still have evidence even when
+ * no full `RunEvidenceReceipt` can honestly be produced.
+ *
  * When it does not resolve, the row's own short verdict stands — and every one
  * of those is an honest "no receipt" state (pending, cancelled before any write,
  * the write could not be verified). A pending run is not given a fabricated
@@ -1941,15 +1942,21 @@ function PeopleTab({
 function ReceiptTab({ row }: { row: DemoRow }) {
   const full = runReceiptFor(row);
   const staged = row.data.filter((d) => d.staged || d.unconfirmed);
-  if (full) {
-    return (
-      <div>
-        <ReceiptView receipt={full} row={row} />
-        {staged.length > 0 && <StagedBlock points={staged} />}
+  return (
+    <div>
+      {full ? (
+        <>
+          <ReceiptView receipt={full} row={row} />
+          {staged.length > 0 && <StagedBlock points={staged} />}
+        </>
+      ) : (
+        <ShortReceipt row={row} />
+      )}
+      <div className="border-t border-[color:var(--ds-border-subtle)] p-[var(--ds-space-cozy)]">
+        <ReceiptCapturesSection row={row} />
       </div>
-    );
-  }
-  return <ShortReceipt row={row} />;
+    </div>
+  );
 }
 
 /** the values that are filled but not submitted, or submitted but never read back */
@@ -2206,9 +2213,8 @@ const OUTCOME_TONE: Record<DemoRow["outcome"]["tone"], { bar: string; dot: strin
  *  - **≥ 1480px** — the centre column is wide enough to hold the shape on its
  *    own, so the rail rises beside it and gets the full height for its ledger.
  *
- * 1480 is measured, not chosen: 470 queue + 348 rail + 2 gaps + the region's
- * padding leaves the centre column ~590px there, which is the width at which
- * a six-segment timeline still prints readable labels.
+ * At the wide rung the queue and context rail share the same side-panel token;
+ * the centre column receives the remainder and stays the largest of the three.
  */
 function PanelRegion({
   row,
@@ -2478,7 +2484,7 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
       */}
       <div
         ref={scrollRef}
-        className="scroll-pt-[var(--ds-panel-head-h,0px)] flex min-h-0 flex-1 flex-col overflow-y-auto"
+        className="scroll-pt-[var(--ds-panel-head-h,0px)] flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto"
       >
       <div ref={headRef} className={cn("sticky top-0 shrink-0 bg-card", dsLayer.sticky)}>
       {isMember ? (
@@ -2489,12 +2495,18 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
       ) : (
         <div
           className={cn(
-            "flex items-center border-b",
+            // Wrap band: identity (title) never truncates to make room for the
+            // ⓘ + trace. Those ride `ml-auto`; when the row is too tight they
+            // drop under at their natural length — same rule as the queue
+            // redirect chips. Operator: title was getting cut off for space.
+            "flex flex-wrap items-center border-b",
             dsBorder.subtle,
-            "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
+            "gap-x-[var(--ds-space-base)] gap-y-[var(--ds-space-tight)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]",
           )}
         >
-          <span className={cn(dsText.title, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>{row.title}</span>
+          <span className={cn(dsText.title, dsText.flush, "min-w-0 max-w-full break-words font-semibold text-[color:var(--ds-fg)]")}>
+            {row.title}
+          </span>
           {/* THE STATUS CHIP IS GONE FROM THIS HEADER, and so is the running
               total that went before it.
 
@@ -2519,9 +2531,10 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
               production dashboard does not label its own panels; a demo that
               needs to teach what a panel kind is has one sanctioned place to do
               it, and this is it. */}
-          <span className="ml-auto" />
-          <PanelKindInfo row={row} variantName={variant.name} panelName={panel.name} />
-          <span className={cn(dsText.meta, dsText.nums, "shrink-0 text-[color:var(--ds-fg-muted)]")}>{row.trace}</span>
+          <span className="ml-auto flex min-w-0 max-w-full items-center gap-[var(--ds-space-base)]">
+            <PanelKindInfo row={row} variantName={variant.name} panelName={panel.name} />
+            <span className={cn(dsText.meta, dsText.nums, "min-w-0 break-all text-[color:var(--ds-fg-muted)]")}>{row.trace}</span>
+          </span>
         </div>
       )}
 
@@ -2532,13 +2545,15 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
           top-of-panel statement the operator asked to keep BRIEF. */}
       <div
         className={cn(
-          "flex items-center border-b",
-          "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
+          // Same wrap rule as the identity header: the sentence fills; age +
+          // action sit beside when they fit, else under at natural length.
+          "flex flex-wrap items-center border-b",
+          "gap-x-[var(--ds-space-base)] gap-y-[var(--ds-space-tight)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
           tone.bar,
         )}
       >
         <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
-        <span className={cn(dsText.body, "min-w-0 truncate")}>{row.outcome.text}</span>
+        <span className={cn(dsText.body, "min-w-0 max-w-full flex-1")}>{row.outcome.text}</span>
         {/* HOW LONG IT HAS NEEDED YOU, and this is the only place on the
             surface that says it now that the header chip is gone. It is not the
             run's total elapsed (that is the queue footer's, and it is not a
@@ -2546,17 +2561,18 @@ export function DemoLogPanel({ row, tab, onTab, onSelect, onOpenPanel, checkedId
             decides which of two waiting runs you open first. It rides the
             outcome bar rather than the header because this is the band that
             already carries the state and its action. */}
-        {gateAge(row, tick) && (
-          <span className={cn(dsText.meta, dsText.nums, "ml-auto shrink-0 tabular-nums opacity-80")}>
-            {gateAge(row, tick)}
-          </span>
-        )}
-        <OutcomeActionButton
-          row={row}
-          onAction={handleAction}
-          omitKeys={PANEL_OMITS_OUTCOME_ACTIONS}
-          className={cn(!gateAge(row, tick) && "ml-auto")}
-        />
+        <span className="ml-auto flex min-w-max items-center gap-[var(--ds-space-base)]">
+          {gateAge(row, tick) && (
+            <span className={cn(dsText.meta, dsText.nums, "shrink-0 tabular-nums opacity-80")}>
+              {gateAge(row, tick)}
+            </span>
+          )}
+          <OutcomeActionButton
+            row={row}
+            onAction={handleAction}
+            omitKeys={PANEL_OMITS_OUTCOME_ACTIONS}
+          />
+        </span>
       </div>
 
       {/* Requeue-while-settling: an absence observation was accepted, the row

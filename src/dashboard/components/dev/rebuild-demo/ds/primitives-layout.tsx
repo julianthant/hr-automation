@@ -78,7 +78,7 @@ export function PanelHeader({
     >
       {icon && <span className="shrink-0 text-[color:var(--ds-fg-muted)]">{icon}</span>}
       <span className={cn("flex min-w-0 flex-col", subtitle && "gap-[var(--ds-space-hair)]")}>
-        <span className={cn(subtitle ? dsText.section : dsText.title, "truncate font-semibold text-[color:var(--ds-fg)]")}>
+        <span className={cn(subtitle ? dsText.section : dsText.title, dsText.flush, "truncate font-semibold text-[color:var(--ds-fg)]")}>
           {title}
         </span>
         {subtitle && (
@@ -877,6 +877,7 @@ export function Tab({
         "relative inline-flex cursor-pointer items-center gap-[var(--ds-space-snug)]",
         "h-[var(--ds-h-bar)] px-[var(--ds-space-base)]",
         dsText.ui,
+        dsText.flush,
         dsFocus,
         dsMotion.fast,
         "active:translate-y-px",

@@ -71,13 +71,33 @@ function ctx(status: ProposedStatus): ActionPolicyContext {
 const dataCommands = (status: ProposedStatus, reads = 2) =>
   actionsAt(deriveActions(spec(status, reads), ctx(status)), "data").map((a) => a.command);
 
+test("OCR approval is available only inside the record-by-record Review surface", () => {
+  const packet = DEMO_ROWS["oath-summer"];
+  const review = DEMO_ROWS["ocr-summer"];
+
+  assert.equal(
+    actionsAt(packet.actions, "banner").some((action) => action.resolution?.startsWith("approve:")),
+    false,
+    "the packet gate must route into Review instead of offering bulk approval",
+  );
+  assert.equal(
+    actionsAt(review.actions, "banner").some((action) => action.resolution?.startsWith("approve:")),
+    false,
+    "the OCR log gate must not bypass the page-by-page review",
+  );
+
+  const reviewApproval = actionsAt(review.actions, "review").filter((action) => action.resolution?.startsWith("approve:"));
+  assert.equal(reviewApproval.length, 1, "the delegated OCR Review surface must retain its approval command");
+  assert.equal(reviewApproval[0].label, "Approve 5 of 6");
+});
+
 test("a stopped run is offered BOTH outcomes, and continuing it is the primary one", () => {
   for (const status of ["failed", "cancelled"] as const) {
     const actions = actionsAt(deriveActions(spec(status), ctx(status)), "data");
     assert.deepEqual(
       actions.map((a) => a.command),
       ["continue-with-data", "rerun-with-existing-data"],
-      `${status} must offer continue-this-run and start-a-new-run, in that order`,
+      `${status} must offer continue-this-run and start-a-custom-run, in that order`,
     );
     // Exactly one primary per surface, and on a run with work left to release
     // it is the one that releases it.
@@ -87,11 +107,12 @@ test("a stopped run is offered BOTH outcomes, and continuing it is the primary o
     );
     // The labels are the operator-facing difference between the two outcomes;
     // if they ever read the same the surface has stopped keeping them apart.
-    // They are SHORT (wave 11) because they share one action row inside a
-    // 348px rail — the long form lives on each descriptor's `detail`, which the
+    // They are SHORT because they share one action row inside the resting
+    // Run Data panel — the long form lives on each descriptor's `detail`, which the
     // button carries as its title.
     assert.match(actions[0].label, /continue/i);
-    assert.match(actions[1].label, /new run/i);
+    assert.equal(actions[1].label, "Start custom run");
+    assert.match(actions[1].detail ?? "", /complete data set/i);
     assert.match(actions[0].detail ?? "", /releases the SAME run/i);
   }
 });
@@ -102,7 +123,7 @@ test("a run with nothing left to continue is offered a correction, not a resume"
     assert.deepEqual(
       actions.map((a) => a.command),
       ["edit-checkpoint", "rerun-with-existing-data"],
-      `${status} has no stopped work to release, so it gets a save and a new run`,
+      `${status} has no stopped work to release, so it gets a save and a custom run`,
     );
     assert.deepEqual(
       actions.map((a) => a.intent),

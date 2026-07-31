@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import {
   ArrowDownToLine,
-  ArrowRight,
   ArrowUpFromLine,
-  ClipboardList,
+  ArrowUpRight,
   Database,
   History,
   Info,
@@ -15,7 +14,6 @@ import {
   RotateCcw,
   Save,
   TriangleAlert,
-  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -48,7 +46,7 @@ import {
   dsText,
   useToasts,
 } from "./demo-ui";
-import { EvidenceSection, SystemChip } from "./DemoEvidence";
+import { SystemChip } from "./DemoEvidence";
 import { RunSelector } from "./DemoRunIdentity";
 import { actionsAt, fmtClock, plural, type ActionDescriptorWire } from "./demo-wire";
 import {
@@ -63,10 +61,11 @@ import {
 } from "./demo-flows-wire";
 import type { DemoActionHandler } from "./DemoActions";
 import { hasRefusalCode, type DemoCommandResult } from "./demo-commands";
-import { DEMO_ROWS, linkedGroupSummary, type DemoDataPoint, type DemoRow } from "./demo-data";
+import { DEMO_ROWS, effectiveStatus, linkedGroupSummary, type DemoDataPoint, type DemoRow } from "./demo-data";
+import { statusText } from "./demo-status";
 
 /**
- * DEV-ONLY — the run's CONTEXT RAIL: the third column of the detail region.
+ * DEV-ONLY — the run's DATA WORKSPACE: the third column of the detail region.
  *
  * WHY IT EXISTS. The Log Panel used to stack nine bands over one scrolling
  * body — run header, delegation link, linked-children chip, outcome bar,
@@ -81,9 +80,11 @@ import { DEMO_ROWS, linkedGroupSummary, type DemoDataPoint, type DemoRow } from 
  *
  *  - **live state** — what the run is doing and what it needs from you. Read
  *    continuously, changes constantly. That stays in the centre column.
- *  - **reference** — what it read and wrote, what it captured, who asked for
- *    it, which attempt this is, what it was delegated by. Read on demand,
- *    changes rarely. That is this rail.
+ *  - **run data** — the complete field set the run read and wrote, editable
+ *    where policy allows and reusable as the input to a fresh custom run. That
+ *    is the primary surface here. Attempts and delegation remain secondary
+ *    reference sections below it. Captures are receipt evidence and live on
+ *    the Receipt tab.
  *
  * So the split is by reading pattern, not by importance: nothing was deleted
  * and nothing was hidden behind a hover. The Data surface in particular STOPS
@@ -100,23 +101,21 @@ import { DEMO_ROWS, linkedGroupSummary, type DemoDataPoint, type DemoRow } from 
  * are shown and never editable, staged is staged, unconfirmed is unconfirmed,
  * and nothing gains success styling it has not earned.
  *
- * ORDER, and where the editing happens (2026-07-27, operator direction).
- * EVIDENCE COMES FIRST — it is what an operator reaches for while reading a
- * run, and it was sitting underneath the longest section on the rail. And DATA
- * IS ONE SURFACE again: the `Edit & re-run` Dialog is gone, reads are corrected
- * in place in the ledger itself, and the two outcomes — carry THIS run on with
+ * Where the editing happens (2026-07-27, operator direction). DATA IS ONE
+ * SURFACE again: the `Edit & re-run` Dialog is gone, reads are corrected in
+ * place in the ledger itself, and the two outcomes — carry THIS run on with
  * these values, or start a NEW run from them — are that ledger's own footer. A
  * dialog turned "correct a value" into "open a thing, correct a value, close
  * the thing", which is the same mutual exclusion that moving Data off the tab
- * set existed to end. 348px is tight for editing, so the surface WIDENS itself
- * (`--ds-w-context-rail-wide`) instead of hiding in a modal.
+ * set existed to end. The resting rail is tight for editing, so the surface
+ * WIDENS itself (`--ds-w-context-rail-wide`) instead of hiding in a modal.
  *
  * The ledger's row STACKS in three levels — step, then sub-step, then the value
  * on its own full-width line below it (2026-07-27, operator: "have the step,
  * have the sub step and below that put the data extracted. not the substep and
- * data in one line"). Label and value used to share a line inside 348px and
- * both truncated; splitting them gives the value the whole column and the label
- * room for its whole name. See `LedgerRow`.
+ * data in one line"). Label and value used to share a line inside the resting
+ * rail and both truncated; splitting them gives the value the whole column and
+ * the label room for its whole name. See `LedgerRow`.
  */
 
 // ---------------------------------------------------------------------------
@@ -141,7 +140,7 @@ function readStoredRailOpen(): boolean {
  * The three-column threshold, as a matchMedia the LAYOUT also uses. It is here
  * in JS as well as in the class names for one reason: collapsing is a
  * three-column affordance. Below the threshold the region is a scrolling stack,
- * and a collapsed spine there would hide Data and Evidence behind a control
+ * and a collapsed spine there would hide Data and delegation behind a control
  * that gives back 34px of a column that no longer exists — so the stored
  * preference is simply not applied at that width.
  */
@@ -272,7 +271,7 @@ function DirectionMark({ dir }: { dir: DemoDataPoint["dir"] }) {
  *
  * WHY IT STACKS (2026-07-27, operator: "have the step, have the sub step and
  * below that put the data extracted. not the substep and data in one line").
- * The label and the value used to share one line inside a 348px rail, so they
+ * The label and the value used to share one line inside the resting rail, so they
  * competed for the same pixels and the value lost: the operator's own screen
  * showed `Roster rows matc…` beside `5 approvab…` — both halves of the line
  * clipped, and a clipped VALUE is the one thing on the row that cannot be
@@ -332,9 +331,13 @@ function LedgerRow({
   // label IS the field's label — which also makes it a click target that focuses
   // the input, one more thing saying "this line takes typing".
   const fieldId = useId();
-  const labelClass = cn(dsText.meta, "min-w-0 flex-1 truncate text-[color:var(--ds-fg-muted)]");
+  const labelClass = cn(
+    dsText.body,
+    dsText.flush,
+    "min-w-0 flex-1 truncate font-medium text-[color:var(--ds-fg-secondary)]",
+  );
   return (
-    <div className="flex gap-[var(--ds-space-tight)] py-[var(--ds-space-tight)]">
+    <div className="flex gap-[var(--ds-space-snug)] py-[var(--ds-space-snug)]">
       <DirectionMark dir={point.dir} />
       <div className="flex min-w-0 flex-1 flex-col gap-[var(--ds-space-hair)]">
         {/* LEVEL 2 — the sub-step. It gives up width to the badges, never the
@@ -448,8 +451,8 @@ function LedgerRow({
  *
  * And it keeps the two outcomes APART, in words: the save arm either continues
  * THIS run or just records a correction (the server decides which by sending
- * one descriptor or the other), and beside it `Start a new run with these
- * values` mints a separate run with its own trace and its own receipt.
+ * one descriptor or the other), and beside it `Start custom run` mints a
+ * separate run from the complete data set with its own trace and receipt.
  */
 function DataSection({
   row,
@@ -566,7 +569,7 @@ function DataSection({
     setSeededFrom(null);
     setEdits({});
     if (result.checkpoint) setBaseGeneration(result.checkpoint.generation);
-    toast({ tone: "success", title: result.headline, description: result.detail });
+    return;
   };
 
   const submitRerun = (payload: Record<string, string>) => {
@@ -576,7 +579,6 @@ function DataSection({
     setOverrideReason("");
     if (!result) return;
     if (result.state === "applied") {
-      toast({ tone: "info", title: result.headline, description: result.detail });
       return;
     }
     // A refused or conflicted new run is not a silent no-op. It used to be.
@@ -587,7 +589,7 @@ function DataSection({
   return (
     <section aria-label="Data" className="flex shrink-0 flex-col gap-[var(--ds-space-snug)]">
       <div className="flex items-center gap-[var(--ds-space-snug)]">
-        <SectionLabel className="min-w-0 truncate">Data</SectionLabel>
+        <SectionLabel className="min-w-0 truncate">Extracted fields</SectionLabel>
         {/* THE ⓘ IS WHERE THE EXPLAINING GOES NOW.
             Three sentences used to be printed on this surface at all times:
             the writes-are-never-edited rule, the freshness limit, and a
@@ -599,12 +601,12 @@ function DataSection({
           <PopoverTrigger asChild>
             <IconButton
               size="xs"
-              label="About this ledger"
+              label="About run data"
               icon={<Info aria-hidden className={dsIcon.sm} />}
               className="text-[color:var(--ds-fg-faint)] hover:text-[color:var(--ds-fg)] data-[state=open]:text-[color:var(--ds-fg)]"
             />
           </PopoverTrigger>
-          <PopoverContent title="Data" side="bottom" align="start" width="lg">
+          <PopoverContent title="Run data" side="bottom" align="start" width="lg">
             <div className="flex flex-col gap-[var(--ds-space-base)]">
               {/* The CHECKPOINT's own provenance. It used to be a `MetaLine`
                   under the ledger reading `gen 4 · captured 6m ago` — a fact
@@ -622,19 +624,20 @@ function DataSection({
               />
               <BulletList
                 items={[
+                  "This ledger contains every field the run recorded, grouped by the workflow step that produced it.",
                   "Reads are correctable in place. Writes are shown and never edited — they are the record of what happened.",
                   `Reusing reads older than ${cp.maxAgeMin} minutes takes a reason, and the reason goes on the receipt.`,
                   continues
                     ? "Saving continues THIS run from where it stopped — same run id, same receipt."
                     : "Saving records a correction on this run. Nothing runs.",
-                  "Starting a new run leaves this one exactly as it is, with its own trace and its own receipt.",
+                  "Starting a custom run uses the complete data set shown here, including your corrections, while leaving this run and its receipt unchanged.",
                   ...(editPolicySummary(row) ? [editPolicySummary(row)] : []),
                 ]}
               />
             </div>
           </PopoverContent>
         </Popover>
-        {/* The expand affordance, not a modal: 348px is tight for typing a date
+        {/* The expand affordance, not a modal: the resting rail is tight for typing a date
             into, so the surface takes the room it needs and gives it back. */}
         <IconButton
           size="sm"
@@ -655,7 +658,7 @@ function DataSection({
 
       {row.data.length === 0 ? (
         <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
-          No data points recorded — this run has not read or written anything yet.
+          No run data recorded — this run has not extracted or written any fields yet.
         </p>
       ) : (
         <>
@@ -756,34 +759,47 @@ function DataSection({
               groups is `cozy` and the gap under the heading is nothing —
               more space above a heading than below it is what makes the
               heading belong to the rows that follow it. */}
-          <div className="flex flex-col gap-[var(--ds-space-cozy)]">
-            {steps.map((step) => (
-              <div key={step} className="flex flex-col">
-                <div className="flex items-center gap-[var(--ds-space-snug)]">
-                  <span className={cn(dsText.caps, "min-w-0 truncate text-[color:var(--ds-fg-secondary)]")}>{step}</span>
-                  <span aria-hidden className="h-px flex-1 bg-[var(--ds-border-subtle)]" />
-                </div>
-                {row.data
-                  .filter((d) => d.step === step)
-                  .map((d, i) => {
-                    const base = baseValue(d);
-                    const value = edits[d.field] ?? base;
-                    return (
-                      <LedgerRow
-                        key={`${d.field}-${i}`}
-                        point={d}
-                        base={base}
-                        value={value}
-                        policy={editPolicyFor(row, d)}
-                        dirty={value !== base}
-                        refreshed={refreshedValue(d)}
-                        corrected={correctedFrom(d)}
-                        onEdit={(next) => setEdits((prev) => ({ ...prev, [d.field]: next }))}
-                      />
-                    );
-                  })}
-              </div>
-            ))}
+          <div className="flex flex-col gap-[var(--ds-space-base)]">
+            {steps.map((step) => {
+              const points = row.data.filter((d) => d.step === step);
+              return (
+                <Well key={step} className="overflow-hidden p-0">
+                  {/* A step is a recessed band over ONE continuous ledger, not
+                      a floating heading over unrelated controls. The band and
+                      row dividers make the requested step → sub-step → value
+                      hierarchy visible before any copy is read. */}
+                  <div className="flex min-h-[var(--ds-h-sm)] items-center px-[var(--ds-space-base)] py-[var(--ds-space-tight)]">
+                    <span className={cn(dsText.caps, dsText.flush, "min-w-0 truncate text-[color:var(--ds-fg-secondary)]")}>{step}</span>
+                  </div>
+                  <div className="border-t border-[color:var(--ds-recess-border)] bg-[var(--ds-surface-1)]">
+                    {points.map((d, i) => {
+                      const base = baseValue(d);
+                      const value = edits[d.field] ?? base;
+                      return (
+                        <div
+                          key={`${d.field}-${i}`}
+                          className={cn(
+                            "px-[var(--ds-space-base)]",
+                            i > 0 && "border-t border-[color:var(--ds-border-subtle)]",
+                          )}
+                        >
+                          <LedgerRow
+                            point={d}
+                            base={base}
+                            value={value}
+                            policy={editPolicyFor(row, d)}
+                            dirty={value !== base}
+                            refreshed={refreshedValue(d)}
+                            corrected={correctedFrom(d)}
+                            onEdit={(next) => setEdits((prev) => ({ ...prev, [d.field]: next }))}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Well>
+              );
+            })}
           </div>
 
           {/* WHAT IS LEFT ON THIS SURFACE: the hazard, and nothing else.
@@ -808,14 +824,14 @@ function DataSection({
               sent a save arm, so there is nothing here to disable, and a parked
               row is sent neither. */}
           {(saveAction || rerunAction) && (
-            <div className="flex flex-col gap-[var(--ds-space-snug)] border-t border-[color:var(--ds-border-subtle)] pt-[var(--ds-space-snug)]">
+            <Well className="flex flex-col gap-[var(--ds-space-snug)] p-[var(--ds-space-snug)]">
               {/*
                 ONE GRID, TWO ROWS, TWO COLUMNS — and every edge is a column.
 
                 It was two rows that had each decided their own shape: a `mr-auto`
                 pair of BORDERLESS buttons pinned left, an OUTLINED save and a
                 FILLED rerun pinned right, on a `flex-wrap` that broke wherever
-                348px ran out. Three button treatments, four widths, and no two
+                the resting rail ran out. Three button treatments, four widths, and no two
                 of the four sharing a left or a right edge. Four buttons genuinely
                 do not fit on one line in this rail — which is an argument for
                 laying out two rows on purpose, not for letting a wrap do it.
@@ -834,18 +850,18 @@ function DataSection({
                 bottom-right cell of a grid of equals is unmistakable in a way
                 that a filled button beside a borderless one never was.
 
-                THE STATE LINE went into the grid's own quiet meta slot: row
-                zero, spanning both columns, at `meta` weight. It is a note about
-                the form, not a fifth control, and it was sitting at the same
-                weight and the same left edge as the buttons underneath it.
+                THE STATE LINE lives in the action dock's own quiet meta slot:
+                row zero, spanning both columns, at `meta` weight. The recessed
+                dock groups the four commands into one editing surface without
+                adding another card to the rail.
               */}
               <div className="grid grid-cols-2 gap-[var(--ds-space-snug)]">
-                <p className={cn(dsText.meta, "col-span-2 text-[color:var(--ds-fg-muted)]")}>
+                <p aria-live="polite" className={cn(dsText.meta, "col-span-2 text-[color:var(--ds-fg-muted)]")}>
                   {changed.length > 0
                     ? `${changed.length} value${changed.length === 1 ? "" : "s"} changed, not saved yet.`
                     : seededFrom !== null
                       ? `Loaded the values from run #${seededFrom} — they match what this run holds.`
-                      : "Nothing is changed yet."}
+                      : "No unsaved changes."}
                 </p>
                 <Button
                   size="sm"
@@ -864,7 +880,7 @@ function DataSection({
                     );
                   }}
                 >
-                  Prior run
+                  Load prior run
                 </Button>
                 <Button
                   size="sm"
@@ -877,7 +893,7 @@ function DataSection({
                     setSeededFrom(null);
                   }}
                 >
-                  Reset
+                  Reset edits
                 </Button>
                 {saveAction && (
                   <Button
@@ -910,7 +926,7 @@ function DataSection({
                   </Button>
                 )}
               </div>
-            </div>
+            </Well>
           )}
         </>
       )}
@@ -993,8 +1009,9 @@ function DelegationLinks({ row, onOpenPanel }: { row: DemoRow; onOpenPanel: (wor
     dsText.body,
     dsFocus,
     dsMotion.fast,
-    "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
-    "hover:brightness-125",
+    // Same gray redirect language as the queue chips — never info-blue.
+    "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-fg-muted)]",
+    "hover:text-[color:var(--ds-fg)]",
   );
 
   return (
@@ -1002,26 +1019,28 @@ function DelegationLinks({ row, onOpenPanel }: { row: DemoRow; onOpenPanel: (wor
       <SectionLabel>Delegation</SectionLabel>
       {target && linkedTarget && (
         <button type="button" onClick={() => onOpenPanel(target.wfLabel, linkedTarget)} className={linkClass}>
-          <ClipboardList aria-hidden className={cn(dsIcon.md, "mt-px shrink-0")} />
           <span className="min-w-0 flex-1">
             {row.reviewRunId
-              ? `Records live on the OCR review row — open the OCR panel (${plural(DEMO_ROWS[row.reviewRunId]?.records?.length ?? 0, "person", "people")})`
+              ? `OCR Review · ${statusText(effectiveStatus(target)).toLowerCase()} — records live there (${plural(DEMO_ROWS[row.reviewRunId]?.records?.length ?? 0, "person", "people")})`
               : row.reviewOf
-                ? `Delegated by ${DEMO_ROWS[row.reviewOf]?.title ?? "the packet"} — open the packet row`
-                : // one level of back, no breadcrumb trail: `← OCR · <packet>`
-                  `← ${target.wfLabel} · ${target.title} — the run that asked for this one`}
+                ? `${target.wfLabel} · ${statusText(effectiveStatus(target)).toLowerCase()} — the packet that delegated this`
+                : `${target.wfLabel} · ${statusText(effectiveStatus(target)).toLowerCase()} — the run that asked for this one`}
           </span>
-          <ArrowRight aria-hidden className={cn(dsIcon.sm, "mt-px shrink-0")} />
+          <ArrowUpRight aria-hidden className={cn(dsIcon.sm, "mt-px shrink-0")} />
         </button>
       )}
       {linked && (
         <button type="button" onClick={() => onOpenPanel(linked.panel, linked.targetId)} className={linkClass}>
-          <Users aria-hidden className={cn(dsIcon.md, "mt-px shrink-0")} />
           <span className="min-w-0 flex-1">
-            {linked.label} — {linked.total === 1 ? "it runs" : "each runs"} in the {linked.panel} panel, counted there and
-            not here
+            {linked.panel} ·{" "}
+            {(() => {
+              const child = DEMO_ROWS[linked.targetId];
+              if (linked.total === 1 && child) return statusText(effectiveStatus(child)).toLowerCase();
+              return linked.done === linked.total ? "done" : `${linked.done} done`;
+            })()}{" "}
+            — {linked.total === 1 ? "it runs" : "each runs"} in that panel, counted there and not here
           </span>
-          <ArrowRight aria-hidden className={cn(dsIcon.sm, "mt-px shrink-0")} />
+          <ArrowUpRight aria-hidden className={cn(dsIcon.sm, "mt-px shrink-0")} />
         </button>
       )}
     </section>
@@ -1035,7 +1054,7 @@ function DelegationLinks({ row, onOpenPanel }: { row: DemoRow; onOpenPanel: (wor
 export function ContextRailSpine({ row, onOpen, className }: { row: DemoRow; onOpen: () => void; className?: string }) {
   return (
     <aside
-      aria-label="Run context, collapsed"
+      aria-label="Run data, collapsed"
       className={cn(
         "flex min-h-0 flex-col items-center gap-[var(--ds-space-base)] overflow-hidden border pb-[var(--ds-space-base)]",
         "border-[color:var(--ds-border)] bg-[var(--ds-surface-1)] rounded-[var(--ds-radius-lg)]",
@@ -1049,7 +1068,7 @@ export function ContextRailSpine({ row, onOpen, className }: { row: DemoRow; onO
           replaces, so undoing the press needs no pointer travel. */}
       <span className="flex h-[var(--ds-h-bar)] shrink-0 items-center">
         <IconButton
-          label="Show run context — data, evidence and provenance"
+          label="Show run data — extracted fields, attempts and delegation"
           size="sm"
           onClick={onOpen}
           icon={<PanelRightOpen aria-hidden className={dsIcon.md} />}
@@ -1057,9 +1076,9 @@ export function ContextRailSpine({ row, onOpen, className }: { row: DemoRow; onO
       </span>
       {/* A collapsed rail still says what is in it. A blank spine is a control
           the operator has to click to find out whether it was worth clicking. */}
-      <span className={cn(dsText.caps, "[writing-mode:vertical-rl] text-[color:var(--ds-fg-muted)]")}>Context</span>
+      <span className={cn(dsText.caps, "[writing-mode:vertical-rl] text-[color:var(--ds-fg-muted)]")}>Run data</span>
       <span className={cn(dsText.micro, dsText.nums, "[writing-mode:vertical-rl] text-[color:var(--ds-fg-faint)]")}>
-        {row.data.length} data · {row.shots.length} captures
+        {plural(row.data.length, "field")}
       </span>
     </aside>
   );
@@ -1098,7 +1117,7 @@ export function ContextRail({
 
   return (
     <aside
-      aria-label="Run context"
+      aria-label="Run data"
       className={cn(
         // A CONTAINER, so the ledger row can decide for itself whether the
         // clock fits. Its width is a function of the rail's own expanded state
@@ -1116,10 +1135,10 @@ export function ContextRail({
       >
         <Database aria-hidden className={cn(dsIcon.md, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
         <span className={cn(dsText.title, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>
-          {dataExpanded ? "Context · editing data" : "Context"}
+          {dataExpanded ? "Run data · editing" : "Run data"}
         </span>
         <IconButton
-          label="Hide run context"
+          label="Hide run data"
           size="sm"
           className="ml-auto"
           onClick={onClose}
@@ -1129,12 +1148,9 @@ export function ContextRail({
 
       <div className="flex min-h-0 flex-1 flex-col gap-[var(--ds-space-cozy)] overflow-y-auto px-[var(--ds-space-cozy)] py-[var(--ds-space-cozy)]">
         {/**
-         * ORDER: Evidence · Data · Attempts · Delegation.
-         *
-         * Evidence first on the operator's own instruction, and it holds up on
-         * its own terms: it is the shortest section and the one most often
-         * reached for mid-read, so putting the long editable ledger above it
-         * meant scrolling past a form to look at a screenshot.
+         * ORDER: Data · Attempts · Delegation. Screenshots moved to Receipt:
+         * they are evidence that qualifies the run's outcome, not contextual
+         * input beside the live stream.
          *
          * **Provenance is no longer a section here.** It was seven chips on
          * every run, five of which said the same words on all of them; the one
@@ -1145,18 +1161,10 @@ export function ContextRail({
          * is the ATTEMPT selector, which was never provenance: it changes which
          * run you are reading.
          *
-         * Expanding Data hides ATTEMPTS AND DELEGATION only. Evidence stays
-         * where it is on purpose, and not just because the order was asked for:
-         * the expand control lives in the Data section's own header, and
-         * folding the section above it would teleport that control to the top
-         * of the rail the moment it was pressed. Undoing a press has to cost no
-         * pointer travel — the swap retargets a grid column, which is a layout
-         * property nothing may animate, so there is no motion to carry the eye
-         * to a button that moved.
+         * Expanding Data hides ATTEMPTS AND DELEGATION only. The expand control
+         * stays in the Data section's own header, at the top of the rail, so
+         * undoing a press costs no pointer travel.
          */}
-        <EvidenceSection row={row} />
-        <Separator />
-
         <DataSection
           row={row}
           onAction={onAction}

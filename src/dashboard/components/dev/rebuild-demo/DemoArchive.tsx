@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
-  AppWindow,
   ArrowDownToLine,
   ArrowLeft,
   ArrowUpFromLine,
@@ -18,7 +17,6 @@ import {
   Lock,
   RotateCw,
   TriangleAlert,
-  Workflow,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -84,6 +82,7 @@ import {
   archivedRunTouchedTest,
   archivedVersionTag,
   changeRecordFor,
+  bumpNameLabel,
   bumpTargetLabel,
   deriveRelaunchPlan,
   deriveVersionRegistry,
@@ -520,7 +519,6 @@ function ArchiveTable({
           <col className="w-[var(--ds-w-archive-status)]" />
           <col />
           <col className="w-[var(--ds-w-archive-trace)]" />
-          <col className="w-[var(--ds-w-archive-workflow)]" />
           <col className="w-[var(--ds-w-archive-when)]" />
           <col className="w-[var(--ds-w-archive-duration)]" />
         </colgroup>
@@ -529,15 +527,14 @@ function ArchiveTable({
             <TH {...head("status")} />
             <TH {...head("name")} />
             <TH {...head("trace")} />
-            <TH {...head("workflow")} />
             <TH {...head("when")} />
-            <TH align="right" {...head("duration")} />
+            <TH align="right" className="whitespace-nowrap" {...head("duration")} />
           </TR>
         </THead>
         <TBody>
           {before > 0 && (
             <tr aria-hidden style={{ height: before }}>
-              <td colSpan={6} />
+              <td colSpan={5} />
             </tr>
           )}
           {windowed.map((virtual) => {
@@ -566,7 +563,7 @@ function ArchiveTable({
           })}
           {after > 0 && (
             <tr aria-hidden style={{ height: after }}>
-              <td colSpan={6} />
+              <td colSpan={5} />
             </tr>
           )}
         </TBody>
@@ -583,12 +580,47 @@ function ArchiveTable({
  * rather than six. Dry-run and test-instance flags ride the name cell as icons
  * with their own labels — they are hazards, so they may not be columns that
  * scroll off, and they may not be hidden either.
+ *
+ * The status column shares a lead slot with the bump header: a fixed-width
+ * chevron well, then the pill. Empty on run rows so every Done / Cancelled
+ * left-edge sits on the same x as the `major` badge above it.
  */
+function ArchiveStatusLead({ children }: { children?: ReactNode }) {
+  return (
+    <span
+      aria-hidden={children ? undefined : true}
+      className={cn(dsIcon.sm, "inline-flex shrink-0 items-center justify-center")}
+    >
+      {children}
+    </span>
+  );
+}
+
 function ArchiveRow({ run, selected, onSelect }: { run: ArchivedRunWire; selected: boolean; onSelect: () => void }) {
+  const warnCount =
+    run.finalStatus === "doneWarnings" ? (run.warnings?.count ?? 1) : undefined;
   return (
     <TR interactive selected={selected} onClick={onSelect} className="cursor-pointer">
       <TD className="truncate">
-        <StatusPill status={run.finalStatus} size="sm" hideIcon />
+        <span className="inline-flex min-w-0 items-center gap-[var(--ds-space-snug)]">
+          <ArchiveStatusLead />
+          <StatusPill status={run.finalStatus} size="sm" hideIcon />
+          {warnCount != null && warnCount > 0 && (
+            <span
+              title={run.warnings?.first ?? "Finished with warnings"}
+              className={cn(
+                "inline-flex h-[var(--ds-h-xs)] shrink-0 items-center gap-[var(--ds-space-tight)] rounded-[var(--ds-radius-sm)] border px-[var(--ds-space-snug)]",
+                "border-[color:var(--ds-status-done-warnings-border)] bg-[var(--ds-status-done-warnings-bg)] text-[color:var(--ds-status-done-warnings-fg)]",
+                dsText.meta,
+                dsText.nums,
+                dsText.flush,
+              )}
+            >
+              <TriangleAlert aria-hidden className={dsIcon.sm} />
+              {warnCount}
+            </span>
+          )}
+        </span>
       </TD>
       <TD className="min-w-0">
         <span className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
@@ -599,11 +631,27 @@ function ArchiveRow({ run, selected, onSelect }: { run: ArchivedRunWire; selecte
               onSelect();
             }}
             className={cn("min-w-0 flex-1 truncate text-left text-[color:var(--ds-fg)]", dsFocus)}
+            title={`${run.displayName ?? run.title} · ${run.workflowCode} ${archivedVersionTag(run)}`}
           >
             {run.displayName ?? run.title}
+            <span className={cn(dsText.meta, dsText.nums, "text-[color:var(--ds-fg-muted)]")}>
+              {" "}
+              · {run.workflowCode} {archivedVersionTag(run)}
+            </span>
           </button>
           {run.dryRun && (
-            <FlaskConical aria-label="dry run" className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-info-fg)]")} />
+            <span
+              title="Dry run — this rehearsal reads the systems and writes nothing."
+              className={cn(
+                "inline-flex h-[var(--ds-h-xs)] shrink-0 items-center gap-[var(--ds-space-tight)] rounded-[var(--ds-radius-sm)] border px-[var(--ds-space-snug)]",
+                "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
+                dsText.meta,
+                dsText.flush,
+              )}
+            >
+              <FlaskConical aria-hidden className={dsIcon.sm} />
+              dry run
+            </span>
           )}
           {archivedRunTouchedTest(run) && (
             <TriangleAlert
@@ -616,18 +664,10 @@ function ArchiveRow({ run, selected, onSelect }: { run: ArchivedRunWire; selecte
       <TD numeric className="truncate text-[color:var(--ds-fg-muted)]">
         {run.traceId}
       </TD>
-      <TD className="truncate">
-        <span className="flex min-w-0 items-baseline gap-[var(--ds-space-snug)]">
-          <span className="min-w-0 truncate">{run.workflowLabel}</span>
-          <span className={cn(dsText.micro, dsText.nums, "shrink-0 text-[color:var(--ds-fg-muted)]")}>
-            {archivedVersionTag(run)}
-          </span>
-        </span>
-      </TD>
-      <TD numeric className="truncate text-[color:var(--ds-fg-muted)]">
+      <TD numeric className="whitespace-nowrap text-[color:var(--ds-fg-muted)]">
         {run.endedAt}
       </TD>
-      <TD align="right" numeric className="text-[color:var(--ds-fg-faint)]">
+      <TD align="right" numeric className="whitespace-nowrap text-[color:var(--ds-fg-faint)]">
         {run.durationLabel}
       </TD>
     </TR>
@@ -649,11 +689,12 @@ function ArchiveRow({ run, selected, onSelect }: { run: ArchivedRunWire; selecte
  * supposed to sit over. Two grids cannot be made to agree by choosing better
  * numbers; there is one grid now, and it is the table's `<colgroup>`.
  *
- * So the head is six real `<td>`s, and every fact went to the column it rhymes
- * with: the sweep's own id lands in the trace column, what it changed lands in
- * the workflow column, when it ran lands over the runs' own clocks, and how many
- * it swept lands right-aligned where their durations are. Change a `<col>` and
- * the head follows, because it has no widths of its own to keep in sync.
+ * So the head is five real `<td>`s, and every fact went to the column it rhymes
+ * with: the sweep's own id lands in the trace column, the workflow code folds
+ * into the Name cell (`ec v3.1 → v4.0`), when it ran lands over the runs' own
+ * clocks, and how many it swept lands right-aligned where their durations are.
+ * Change a `<col>` and the head follows, because it has no widths of its own
+ * to keep in sync.
  *
  * THE DESCRIPTION IS IN THE ⓘ. It was the one variable-length thing in the row
  * and it was doing two jobs badly: crowding the facts out of the bar, and
@@ -710,7 +751,9 @@ function BumpSectionRow({
             dsRadius.sm,
           )}
         >
-          <Chevron aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+          <ArchiveStatusLead>
+            <Chevron aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+          </ArchiveStatusLead>
           <span className="sr-only">{summary}</span>
           {record ? (
             <Badge tone={record.kind === "major" ? "warning" : "neutral"} title={BUMP_KIND_LABEL[record.kind]}>
@@ -724,11 +767,14 @@ function BumpSectionRow({
         </button>
       </TD>
 
-      {/* the NAME column — the sweep's own name is the version it moved to */}
+      {/* the NAME column — workflow code + version pair (`ec v3.1 → v4.0`) */}
       <TD className={cn(cell, "min-w-0")}>
         {record ? (
-          <span className={cn(dsText.meta, dsText.nums, "block min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>
-            {record.fromVersion} → {record.toVersion}
+          <span
+            className={cn(dsText.meta, dsText.nums, "block min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}
+            title={target ? `${BUMP_SCOPE_LABEL[record.scope]} — ${target.full}` : undefined}
+          >
+            {bumpNameLabel(record)}
           </span>
         ) : (
           <span className={cn(dsText.meta, "block min-w-0 truncate text-[color:var(--ds-danger)]")}>
@@ -742,25 +788,8 @@ function BumpSectionRow({
         {bumpId}
       </TD>
 
-      {/* the WORKFLOW column — what changed, over the workflows it changed */}
-      <TD className={cn(cell, "truncate")}>
-        {target ? (
-          <span
-            className="flex min-w-0 items-center gap-[var(--ds-space-tight)]"
-            title={record ? `${BUMP_SCOPE_LABEL[record.scope]} — ${target.full}` : undefined}
-          >
-            {target.appUpdate ? (
-              <AppWindow aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
-            ) : (
-              <Workflow aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
-            )}
-            <span className="min-w-0 truncate text-[color:var(--ds-fg-secondary)]">{target.text}</span>
-          </span>
-        ) : null}
-      </TD>
-
       {/* the WHEN column — a sweep's date directly over the dates it swept */}
-      <TD numeric className={cn(cell, "truncate text-[color:var(--ds-fg-muted)]")}>
+      <TD numeric className={cn(cell, "whitespace-nowrap text-[color:var(--ds-fg-muted)]")}>
         {record?.at}
       </TD>
 
@@ -773,13 +802,13 @@ function BumpSectionRow({
               <IconButton
                 size="xs"
                 onClick={(event) => event.stopPropagation()}
-                label={record ? `About this bump — ${record.fromVersion} → ${record.toVersion}` : `About ${bumpId}`}
+                label={record ? `About this bump — ${bumpNameLabel(record)}` : `About ${bumpId}`}
                 icon={<Info aria-hidden className={dsIcon.sm} />}
                 className="shrink-0 data-[state=open]:bg-[var(--ds-surface-3)] data-[state=open]:text-[color:var(--ds-fg)]"
               />
             </PopoverTrigger>
             <PopoverContent
-              title={record ? `${record.fromVersion} → ${record.toVersion}` : "Change record missing"}
+              title={record ? bumpNameLabel(record) : "Change record missing"}
               description={record ? BUMP_KIND_LABEL[record.kind] : undefined}
               width="lg"
               align="end"

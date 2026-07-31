@@ -167,7 +167,7 @@ export function DemoQueueToolbar({
         className={cn(
           "flex items-center",
           dsSize.hBar,
-          "gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
+          "gap-[var(--ds-space-snug)] px-[var(--ds-shell-inset)]",
         )}
       >
         {leading}
@@ -230,7 +230,7 @@ export function DemoQueueToolbar({
             "flex items-center border-t bg-[var(--ds-recess-bg)]",
             dsSize.hBar,
             dsBorder.subtle,
-            "gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
+            "gap-[var(--ds-space-snug)] px-[var(--ds-shell-inset)]",
           )}
         >
           <Button size="sm" variant="secondary" onClick={allSelected ? onClearSelection : onSelectAll}>

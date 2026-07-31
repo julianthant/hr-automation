@@ -168,7 +168,10 @@ the same indigo. On Graphite Warm they are NOT: its accent is amber, the same
 family as `warning`, so filling every primary button with it would make the
 primary action shout at exactly the volume reserved for `Waiting on you` — a
 rule-1 violation. There, the primary action is the highest-contrast neutral fill
-and the amber survives on marks.
+and the amber survives on marks. The **queue toolbar's `Start a run` is the one
+exception**: it uses the **`brand` button variant** (`--ds-info-solid-*`) so the
+product launch CTA reads as info blue on Graphite Warm rather than the same
+near-white chip as every dialog primary.
 
 ### Themes — a togglable pair
 
@@ -221,26 +224,31 @@ icon and label — so colour is never doing the work alone.
 
 | Status | Hue | Tier (the non-colour cue) | Icon | Loudness |
 |---|---|---|---|---|
-| **Waiting on you** | amber `--warning` | **solid fill**, dark ink, semibold, `· age` suffix | `UserRoundSearch` | **1 — loudest** |
+| **Review** (was Waiting on you) | info blue `--ds-info-solid-*` | **solid fill**, dark ink, semibold, **no age**, word only | `UserRoundSearch` (solo/filters) | **1 — loudest** |
 | **Failed** | red `--destructive` | **solid fill**, dark ink, semibold | `TriangleAlert` | **2 — loudest** |
-| **Write parked** | amber, dashed | tint + **dashed** hairline (nothing else dashes) | `PauseCircle` | 3 |
-| **Done with warnings** | amber, faint tint | amber icon, **muted grey label** — FYI, not a demand | `CircleAlert` | 4 |
+| **Write parked** | amber, dashed | tint + **dashed** hairline (nothing else dashes), **no age** | `PauseCircle` | 3 |
+| **Done** (with warnings) | amber, faint tint | **word only** (`Done`) + muted grey — FYI; △ count chip beside it names the warnings | `CircleAlert` (solo/filters) | 4 |
 | **Running** | **none — neutral** | tint + **the only spinning icon** | `Loader2` | 5 |
 | **Queued** | neutral | **outline only, no fill** — nothing has happened yet | `Clock` | 6 |
-| **Cancelled** | neutral muted | ghost + **struck-through label** | `Ban` | 7 |
-| **Verified done** | green `--success` | **no chip at all** — green check, muted label | `CheckCircle2` | 8 — quietest |
+| **Cancelled** | neutral muted gray | **solid fill**, dark/light ink, semibold, **no icon, no strikethrough** — same shape as Done | `Ban` (solo only) | 7 |
+| **Done** | green `--success` | **solid fill**, dark ink, semibold, **no icon, no age** | `CheckCircle2` (solo only) | 8 — quietest of the solids |
 
 Three decisions worth knowing:
 
 - **Waiting, Write parked and Done-with-warnings all share amber on purpose.**
   Amber means "a human is involved". Solid fill = act now; dashed = a write is
   in doubt; faint tint = look when you can. The fill weight, not the hue, is
-  the priority signal.
+  the priority signal. The warnings Done pill says the same short word as
+  verified Done; the amber tint and the △ count chip carry the qualifier.
 - **Running has no hue.** It is the most common status on screen, so a hue
   spent there is a hue spent everywhere. Its spinner is the only moving icon in
   the product, which is a stronger signal than a colour ever was.
 - **Cancelled is neutral, not amber and not red.** A deliberate stop is neither
-  a warning nor a failure; the strikethrough carries it.
+  a warning nor a failure; the solid gray pill (same shape as Done) carries it.
+- **Done is a green solid pill — word only.** Same shape as Waiting on you /
+  Failed, quieter hue. No icon on the pill (the row already leads with the
+  check), and never an age suffix. The receipt proof lives on the Receipt tab,
+  not as a second shield glyph beside the status.
 
 Every status carries two colour tokens, and they are not interchangeable:
 `--ds-status-<s>-fg` is what it is rendered as **text** (held to 4.5:1 on every
@@ -252,8 +260,9 @@ On the light theme they differ — the swatch that reads as a 6px dot fails as
 outline) · hollow ring (ghost). Always pair a bare dot with the label somewhere
 in the row — the dot carries an accessible name, but the eye needs the word too.
 
-Always pass `age` when you have it. *"Waiting on you"* is a state;
-*"Waiting on you · 10m"* is a priority.
+Always pass `age` when you have it — `StatusPill` suppresses it on Review,
+Write parked, and Done. *"Waiting on you · 10m"* used to be a priority signal;
+the timer now lives on the detail outcome bar / footer where triage needs it.
 
 ---
 
@@ -365,15 +374,38 @@ Two things this rule does **not** license:
   element held down by a fixed `mt-*` will sit a line low the moment a sibling
   wraps.
 - Rows are `--ds-h-row` (32px). Do not invent a row height.
+- **The shell has ONE left/right edge: `--ds-shell-inset`.** Top Bar, Queue
+  Toolbar (and its select-mode band), the panel region, and the Sessions bar
+  all hang off it. Do not reintroduce `px-base` / bare `p-3` on those bands —
+  three different insets was the jagged edge the operator called out.
 - **A queue row's rhythm is ONE grid and ONE gap.** Its body is
   `grid-cols-[var(--ds-w-row-indent)_minmax(0,1fr)]` with a single `gap-y`: the
   status tick sits in the leading track and every line under the title hangs off
   the same edge because the edge is a column, not an `ml-5` retyped on each of
   the six things that can appear there. Never add a `mt-*` to space one of them.
+  Every run, group and member uses the same wrapping header: subject text wraps
+  with `overflow-wrap:anywhere`, while the right-side status cluster moves to a
+  second line before it can clip or ellipsize the subject. The status glyph
+  remains aligned to the first title line.
 - **A row footer's facts WRAP; they never truncate.** `time · #run · trace ·
   timing` is a wrapping provenance line with the controls as a sibling pinned
   top-right — so a run with a queue note takes a second line instead of cutting
   its trace id to `1…`. A row with little to say stays one line high.
+- **Member status changes order and ink, never row shape.** Failed, waiting,
+  parked and warning members sort ahead of routine members but keep the same
+  one-line `status · name · detail · EID` tracks. The mini-table's summary strip
+  aligns to the status-glyph edge and pins its cross-panel route at the far
+  right. Its `Name` column heading starts at that same far-left edge and spans
+  the status + name tracks; person names themselves remain aligned after their
+  status glyphs. Tallies are icon + number only; Done, Running and Queued keep
+  their slots at zero while attention counts appear only when present. The two
+  local disclosures below the table persist together and split one row 50/50:
+  inline `Expand` and the dedicated roster route (`View all signers` for oath
+  packets).
+- **The member roster drill-in is search-first.** Its list is already complete
+  and attention-first, so it does not repeat `Attention` / `All` summary chips
+  that look like filters but change nothing. Back, the wrapping group title and
+  search share the first header row; the title yields before search moves down.
 - **Toolbars group by what a control DOES**, and the groups are separated by a
   hairline, not by uniform gaps: where you are and what you start, then what you
   are looking at, then how you are looking at it (right-aligned). A MODE (bulk
@@ -591,8 +623,9 @@ that teleports on every ⓘ is the same defect wearing a different trigger.
   architecture guard fails the build.
 - ❌ Render a status as anything other than `StatusPill` / `StatusDot`; recolour
   one; abbreviate a label; drop the icon in a place where it fits.
-- ❌ Give `Verified done` a fill, or make anything other than `Waiting on you` /
-  `Failed` the loudest thing on a screen.
+- ❌ Put an age on `Done`, or a second shield glyph beside it — the solid green
+  pill is the whole status. Never make Done louder than `Waiting on you` /
+  `Failed` (different hue, same shape is fine).
 - ❌ Put two primary buttons, or two danger buttons, on one surface.
 - ❌ Use a shadow on something that is not floating.
 - ❌ Write a key-frame animation or a bare `animation` property anywhere under

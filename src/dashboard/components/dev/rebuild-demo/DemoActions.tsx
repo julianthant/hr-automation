@@ -43,6 +43,7 @@ import {
 } from "./demo-ui";
 import type { DemoRow } from "./demo-data";
 import type { DemoCommandResult } from "./demo-commands";
+import type { DsToastTone } from "./demo-ui";
 
 /**
  * DEV-ONLY — every control in the rebuild demo, rendered from the row's
@@ -297,19 +298,47 @@ export function OutcomeActionButton({
   className?: string;
   /**
    * Keys this SURFACE refuses to draw, because it already renders the thing the
-   * action travels to. Exactly one caller uses it, and the case is Write
-   * parked: on the queue card `Resolve` is honest — it leaves for a surface
-   * that can settle the write — but inside the detail panel the two typed
-   * resolutions are already on screen in the decision card, so a pill promising
-   * to "resolve" that only scrolls is a second copy of an action it cannot
-   * perform. Operator, on that pill: *"the resolve button should not be there
-   * either. avoid redundancy."* `Review` is NOT omitted the same way — it
-   * promises to take you to a review, and it does.
+   * action travels to. Queue cards omit `Resolve` (`open-park`) and the Review
+   * ↗ (`open-gate`) — operator clicks the row (or the OCR / parent redirect
+   * below) — and inside the detail panel the typed resolutions are already on
+   * screen, so a pill that only scrolls is redundant.
    */
   omitKeys?: readonly string[];
 }) {
   const action = outcomeAction(row);
   if (!action || omitKeys?.includes(action.key)) return null;
+
+  // Waiting used to open with a gray ↗ beside the gate line. Queue cards now
+  // omit `open-gate` entirely — the OCR / parent redirect under the line (or
+  // clicking the row) is enough. This branch stays for any surface that still
+  // asks for the icon-only Review jump.
+  if (action.key === "open-gate") {
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onAction(row, action);
+        }}
+        title={action.label}
+        aria-label={action.label}
+        className={cn(
+          "inline-flex shrink-0 cursor-pointer items-center justify-center border",
+          "h-[var(--ds-h-xs)] w-[var(--ds-h-xs)]",
+          "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)]",
+          "text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
+          dsRadius.sm,
+          dsFocus,
+          dsMotion.fast,
+          "active:translate-y-px",
+          className,
+        )}
+      >
+        <ArrowUpRight aria-hidden className={dsIcon.sm} />
+      </button>
+    );
+  }
+
   return (
     <button
       type="button"
@@ -475,16 +504,33 @@ function ConfirmBody({
 }
 
 // ---------------------------------------------------------------------------
-// Results — applied / conflict / rejected, all three visible
+// Results — applied toasts; conflict / rejected stay in the feed
 // ---------------------------------------------------------------------------
 
-const RESULT_TONE: Record<DemoCommandResult["state"], { wrap: string; text: string; icon: ReactNode; word: string }> = {
-  applied: {
-    wrap: "border-[color:var(--ds-success-border)] bg-[var(--ds-success-bg)]",
-    text: "text-[color:var(--ds-success-fg)]",
-    icon: <CheckCircle2 aria-hidden className={dsIcon.md} />,
-    word: "Applied",
-  },
+/**
+ * Applied command outcomes toast from the bottom-right stack. Conflict and
+ * rejected results stay in `CommandResultFeed` — they need the persistent band
+ * and its row-refresh affordance.
+ */
+export function toastAppliedCommandResult(
+  toast: (input: { tone: DsToastTone; title: string; description?: string; duration?: number }) => string,
+  result: DemoCommandResult,
+): void {
+  if (result.state !== "applied") return;
+
+  let tone: DsToastTone = "success";
+  if (result.settling) tone = "warning";
+  else if (result.command === "rerun-with-existing-data" || result.command === "resolve-write-absent") tone = "info";
+
+  const meta = `${result.actionLabel} · ${result.clock} · ${result.requestedBy}`;
+  toast({
+    tone,
+    title: result.headline,
+    description: result.detail ? `${result.detail} — ${meta}` : meta,
+  });
+}
+
+const RESULT_TONE: Record<Exclude<DemoCommandResult["state"], "applied">, { wrap: string; text: string; icon: ReactNode; word: string }> = {
   conflict: {
     wrap: "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]",
     text: "text-[color:var(--ds-status-waiting-fg)]",
@@ -499,10 +545,15 @@ const RESULT_TONE: Record<DemoCommandResult["state"], { wrap: string; text: stri
   },
 };
 
+function isPersistentCommandResult(
+  result: DemoCommandResult,
+): result is DemoCommandResult & { state: "conflict" | "rejected" } {
+  return result.state !== "applied";
+}
+
 /**
- * The command result feed. Every submission lands here — including the two that
- * did nothing. A partial outcome may never be collapsed into "Done", so each
- * result keeps its own card with its own state word.
+ * chrome — conflict and rejected. Applied results toast instead (see
+ * `toastAppliedCommandResult`).
  */
 export function CommandResultFeed({
   results,
@@ -513,7 +564,8 @@ export function CommandResultFeed({
   onDismiss: (id: string) => void;
   onRefreshRow: (rowId: string, serverVersion: number) => void;
 }) {
-  if (results.length === 0) return null;
+  const feed = results.filter(isPersistentCommandResult);
+  if (feed.length === 0) return null;
   return (
     <div
       className={cn(
@@ -524,7 +576,7 @@ export function CommandResultFeed({
       aria-live="polite"
       data-demo-result-feed=""
     >
-      {results.map((r) => {
+      {feed.map((r) => {
         const tone = RESULT_TONE[r.state];
         return (
           <div

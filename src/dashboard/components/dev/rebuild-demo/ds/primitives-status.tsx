@@ -26,11 +26,11 @@ import { dsClip, dsIcon, dsRadius, dsText } from "./tokens";
  *   3. ICON         — a distinct silhouette per status
  *   4. TEXT         — the label itself, always present, never abbreviated
  *
- * Two statuses are deliberately the loudest things that can appear on screen —
- * `waiting` and `failed` are the only ones with a SOLID fill, which on a
- * near-black UI reads as a lit block from across the room. `verifiedDone` is
- * deliberately the quietest: no fill, no border, a green check and muted text.
- * Most rows in a healthy day are done; they must recede.
+ * Two statuses share the SOLID fill shape — `waiting` and `failed` stay the
+ * loudest (amber / red). `verifiedDone` uses the same solid pill shape in
+ * green with the word only (no icon, no age), so Done reads finished without
+ * looking like a demand. Most rows in a healthy day are done; the quieter hue
+ * is what lets them recede beside Waiting on you.
  *
  * Colour never carries meaning alone — an operator with a red/green deficiency
  * still reads emphasis tier, icon shape and the label.
@@ -101,17 +101,21 @@ export interface DsStatusSpec {
 
 export const DS_STATUS: Record<DsStatus, DsStatusSpec> = {
   waiting: {
-    label: "Waiting on you",
+    // Was "Waiting on you · age" in solid amber. Operator: drop the timer,
+    // and every waiting tag becomes the blue `Review` pill (same info solid
+    // as the old outcome CTA) — the word names the work, not the wait.
+    label: "Review",
     tier: "solid",
     icon: UserRoundSearch,
-    chip: "bg-[var(--ds-status-waiting-solid-bg)] border-transparent",
-    text: "text-[color:var(--ds-status-waiting-solid-fg)] font-semibold",
-    iconTone: "text-[color:var(--ds-status-waiting-solid-fg)]",
-    soloTone: "text-[color:var(--ds-status-waiting-fg)]",
-    dot: "bg-[var(--ds-status-waiting-mark)]",
-    dotBorder: "border-[color:var(--ds-status-waiting-mark)]",
+    chip: "bg-[var(--ds-info-solid-bg)] border-transparent",
+    text: "text-[color:var(--ds-info-solid-fg)] font-semibold",
+    pillHideIcon: true,
+    iconTone: "text-[color:var(--ds-info-solid-fg)]",
+    soloTone: "text-[color:var(--ds-info-fg)]",
+    dot: "bg-[var(--ds-info-solid-bg)]",
+    dotBorder: "border-[color:var(--ds-info-solid-bg)]",
     meaning:
-      "Stopped at a gate for a decision. Nothing is written until you answer.",
+      "Stopped at a gate for a decision. Nothing is written until you answer. Open Review to act.",
   },
   failed: {
     label: "Failed",
@@ -141,18 +145,24 @@ export const DS_STATUS: Record<DsStatus, DsStatusSpec> = {
       "A write may or may not have landed. Never auto-retried — you resolve present or absent.",
   },
   doneWarnings: {
-    label: "Done with warnings",
+    // Word is just `Done` — same length as verified Done. The long
+    // "with warnings" qualifier shoved the title off the header beside the
+    // triangle count chip that already names the warning (operator: keep
+    // Done + △ n, drop "with warnings"). Amber tint + that chip distinguish
+    // it from the green solid Done; the CircleAlert stays for filters/solo.
+    label: "Done",
     tier: "tinted",
     icon: CircleAlert,
     chip:
       "bg-[var(--ds-status-done-warnings-bg)] border-[color:var(--ds-status-done-warnings-border)]",
     text: "text-[color:var(--ds-fg-secondary)]",
+    pillHideIcon: true,
     iconTone: "text-[color:var(--ds-status-done-warnings-fg)]",
     soloTone: "text-[color:var(--ds-status-done-warnings-fg)]",
     dot: "bg-[var(--ds-status-done-warnings-mark)]",
     dotBorder: "border-[color:var(--ds-status-done-warnings-mark)]",
     meaning:
-      "Finished, but something needs your eyes — a fallback, a gap, a rejected page.",
+      "Finished, but something needs your eyes — a fallback, a gap, a rejected page. The △ count beside the pill names how many.",
   },
   running: {
     label: "Running",
@@ -182,36 +192,35 @@ export const DS_STATUS: Record<DsStatus, DsStatusSpec> = {
     meaning: "Accepted, nothing has run. Can be bumped or cancelled.",
   },
   cancelled: {
+    // Operator: same solid pill shape as Done, gray, no strikethrough.
+    // Neither amber nor red — a deliberate stop is not a warning and not a failure.
     label: "Cancelled",
-    tier: "ghost",
+    tier: "solid",
     icon: Ban,
-    chip: "bg-transparent border-transparent",
-    text: "text-[color:var(--ds-status-cancelled-fg)]",
-    iconTone: "text-[color:var(--ds-status-cancelled-fg)]",
+    chip: "bg-[var(--ds-status-cancelled-solid-bg)] border-transparent",
+    text: "text-[color:var(--ds-status-cancelled-solid-fg)] font-semibold",
+    pillHideIcon: true,
+    iconTone: "text-[color:var(--ds-status-cancelled-solid-fg)]",
     soloTone: "text-[color:var(--ds-status-cancelled-fg)]",
     dot: "bg-[var(--ds-status-cancelled-mark)]",
     dotBorder: "border-[color:var(--ds-status-cancelled-mark)]",
-    // The shape cue: a struck-through label. Neither amber nor red — a
-    // deliberate stop is not a warning and not a failure.
-    labelDecoration: "line-through decoration-1",
     meaning: "You stopped it. Not an alert — a deliberate act.",
   },
   verifiedDone: {
-    // `Verified done` → `Done`. The qualifier was doing two jobs badly: it
-    // made the quietest status the longest label in the vocabulary, and beside
-    // `Done with warnings` it asked the operator to work out whether THAT one
-    // was verified too. `Done` / `Done with warnings` is the coherent pair —
-    // one word plus its qualifier — and the sibling deliberately did NOT
-    // shorten, because the qualifier IS the difference between them.
+    // `Verified done` → `Done`. Both terminal dones now share the short word;
+    // green solid vs amber tint (+ △ count chip when warnings exist) is the
+    // distinction — not a longer label that crowds the title.
+    //
+    // SOLID green fill, same shape as Waiting on you — just the word, no icon
+    // and no age. A bare green `Done` next to a shield glyph was the prior
+    // look; the operator asked for the Waiting-on-you pill, in green (2026-07-29).
     label: "Done",
-    tier: "ghost",
+    tier: "solid",
     icon: CheckCircle2,
-    chip: "bg-transparent border-transparent",
-    // Green, not muted grey: with the icon gone the word carries the whole
-    // chip, and a muted `Done` beside a muted `Cancelled` is two greys.
-    text: "text-[color:var(--ds-status-verified-done-fg)]",
+    chip: "bg-[var(--ds-status-verified-done-solid-bg)] border-transparent",
+    text: "text-[color:var(--ds-status-verified-done-solid-fg)] font-semibold",
     pillHideIcon: true,
-    iconTone: "text-[color:var(--ds-status-verified-done-fg)]",
+    iconTone: "text-[color:var(--ds-status-verified-done-solid-fg)]",
     soloTone: "text-[color:var(--ds-status-verified-done-fg)]",
     dot: "bg-[var(--ds-status-verified-done-mark)]",
     dotBorder: "border-[color:var(--ds-status-verified-done-mark)]",
@@ -300,6 +309,7 @@ export function StatusPill({
         dsClip.token,
         dsRadius.sm,
         dsText.meta,
+        dsText.flush,
         PILL_SIZE[size],
         spec.chip,
         spec.text,
@@ -320,10 +330,15 @@ export function StatusPill({
       <span className={cn(dsClip.text, label === undefined && spec.labelDecoration)}>
         {label ?? spec.label}
       </span>
-      {/* The AGE never gives. `Waiting on you` is a state and `Waiting on you ·
-          10m` is a priority — if one of the two has to be cut it is the word,
-          which the icon and the fill are already carrying. */}
-      {age && (
+      {/* The AGE never gives — except on Done, Review, and Write parked,
+          which never carry one. Operator: timer not needed on Write parked;
+          click the row to resolve. Gate age still lives on the detail panel's
+          outcome bar where triage across two open gates needs it. */}
+      {age &&
+        status !== "verifiedDone" &&
+        status !== "doneWarnings" &&
+        status !== "waiting" &&
+        status !== "parked" && (
         <span className={cn(dsText.nums, "shrink-0 opacity-80")} aria-label={`for ${age}`}>
           · {age}
         </span>

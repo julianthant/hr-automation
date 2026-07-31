@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { DEMO_ROWS } from "@/components/dev/rebuild-demo/demo-data";
 import {
+  CAPTURE_STEP_UNSCOPED,
   capturesFor,
+  groupCapturesByStep,
   reviewPageFacsimile,
 } from "@/components/dev/rebuild-demo/demo-evidence-wire";
 
@@ -31,5 +33,30 @@ describe("rebuild demo — evidence facsimiles are synthetic and complete", () =
       expect(drawnValues).toEqual(paperValues);
       expect(page.formTitle).not.toBe("");
     }
+  });
+
+  it("groups EC packet captures under OCR extraction", () => {
+    const captures = capturesFor(DEMO_ROWS["ec-packet"]);
+    expect(captures.every((c) => c.step === "OCR extraction")).toBe(true);
+
+    const groups = groupCapturesByStep(
+      captures,
+      DEMO_ROWS["ec-packet"].steps?.map((s) => s.label),
+    );
+    expect(groups.map((g) => g.step)).toEqual(["OCR extraction"]);
+    expect(groups[0].captures.map((c) => c.label)).toEqual([
+      "Packet page 1",
+      "Page 7 (rejected)",
+    ]);
+  });
+
+  it("orders groups by the run's step list and parks unscoped last", () => {
+    const captures = [
+      { id: "a", label: "A", kind: "step" as const, failure: false, step: "Rollup" },
+      { id: "b", label: "B", kind: "error" as const, failure: true },
+      { id: "c", label: "C", kind: "step" as const, failure: false, step: "OCR extraction" },
+    ];
+    const groups = groupCapturesByStep(captures, ["OCR extraction", "Your review", "Rollup"]);
+    expect(groups.map((g) => g.step)).toEqual(["OCR extraction", "Rollup", CAPTURE_STEP_UNSCOPED]);
   });
 });

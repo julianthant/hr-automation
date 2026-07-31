@@ -152,8 +152,9 @@ export interface DemoGate {
   candidates?: GateCandidateSpec[];
   staged?: { field: string; value: string; system: SystemKey; unconfirmed?: boolean }[];
   /**
-   * The typed answers this gate accepts. They become banner-placement entries in
+   * The typed answers this gate accepts. They become placement-scoped entries in
    * the row's `actions[]` — there is no second list of gate buttons anywhere.
+   * Most live in the banner; OCR approval lives only inside Review.
    * A Write-parked gate's two options (`resolve-write-present` /
    * `resolve-write-absent`) are the ONLY two exits it has; there is no Resume,
    * because resuming an unknown write is how you terminate somebody twice.
@@ -178,6 +179,8 @@ export interface DemoReceipt {
 export interface DemoShot {
   label: string;
   kind: "step" | "error" | "form";
+  /** Workflow step this frame was taken on — optional when CAPTURE_META supplies it. */
+  step?: string;
 }
 
 export interface DemoFact {
@@ -185,6 +188,8 @@ export interface DemoFact {
   value: string;
   arrowTo?: string;
   warn?: boolean;
+  /** Give a sentence-like fact its own complete line in the queue summary. */
+  fullRow?: boolean;
 }
 
 /**
@@ -251,11 +256,11 @@ export interface DemoRecord {
   /**
    * WHEN THE EXTRACTION EMITTED THIS RECORD.
    *
-   * The count chip (`12 lookups`) only ever meant something once the whole
-   * document had been read, so a fifteen-minute extraction showed a number and
-   * nothing else until it finished. The operator: *"the 12 should also appear
-   * like [a member list] as they get read. so i can see in the queue panel as
-   * well in the ocr."*
+   * The old count chip (`12 lookups`) only ever meant something once the whole
+   * document had been read, so it was removed from the header. The member list
+   * itself now appears as records arrive. The operator: *"the 12 should also
+   * appear like [a member list] as they get read. so i can see in the queue
+   * panel as well in the ocr."*
    *
    * **This is a wire change, not a UI trick.** The run reports each person AS IT
    * READS THEM — one record, one instant — instead of batching the set at
@@ -413,6 +418,11 @@ export interface DemoRowSpec {
   /** reached a terminal state — absent while live */
   endedAt?: string;
   evidence?: DemoEvidenceWire;
+  /**
+   * Curated queue summary of values this run ALREADY knows. Never derive this
+   * automatically from the full Data ledger or author a future result merely
+   * because a later step is expected to produce one.
+   */
   facts?: DemoFact[];
   warnings?: { count: number; first: string };
   /** cross-run retry lineage shown as a chip — `retryOf` is the id it replays */
@@ -427,7 +437,6 @@ export interface DemoRowSpec {
   receiptShield?: string;
   error?: string;
   liveText?: string;
-  queueNote?: string;
   outcome: DemoOutcome;
   steps: DemoStep[];
   lines: DemoLine[];
@@ -451,19 +460,6 @@ export interface DemoRowSpec {
    * fanned out yet) but it still knows how many people are in the document.
    */
   extractedCount?: number;
-  /**
-   * group only — bulk approval offered on the ROW itself, so a clean packet
-   * never has to be opened. Editing an extracted value is deliberately NOT
-   * offered here: a value may only change with its scanned page on screen.
-   *
-   * `excluded` is the ONE fact about this packet the row states — a count and a
-   * clause naming who and why, rendered as a single line. The paragraph that
-   * used to sit here explained the EDITING POLICY, which is identical for every
-   * packet in the product and therefore belongs in the row's ⓘ (where it is
-   * derived, not authored) and in the panel's decision, never wrapped into a
-   * five-line block inside a 400px column.
-   */
-  bulkApprove?: { approvable: number; total: number; excluded?: { count: number; reason: string } };
   /** group only — the delegated OCR Review Row that owns this packet's records */
   reviewRunId?: string;
   /** review run only — the records the operator works through, and the group they belong to */
@@ -630,20 +626,20 @@ export function projectRow(spec: DemoRowSpec, rawById: Map<string, DemoRowSpec>)
 
   const stagedWrites = spec.data.filter((d) => d.dir === "write" && d.staged).length;
 
-  // A counted anchor titles itself from the member set it actually holds —
-  // "5 separations", "6 lookups". The number is never typed into a fixture, so
-  // a title cannot drift from the group.
+  // A counted anchor without a parent titles itself from the member set —
+  // "5 separations". The number is never typed into a fixture, so a title
+  // cannot drift from the group.
   //
-  // THE PARENT'S NAME IS NOT PART OF THE TITLE WHEN THE CARD ALREADY DRAWS IT.
-  // A delegated group carries a back chip one line below the title
-  // (`← OCR · Oath_Packet_Summer.pdf`), so `6 lookups · Oath_Packet_Summer.pdf`
-  // printed the packet twice on one card — and, at a 400px queue, the copy that
-  // truncated (`6 lookups · Oath_Packet_S…`) was the redundant one. Same rule
-  // the member preview and the group subline were held to: two truncations on a
-  // card is one too many, and the second is a duplicate rather than a fact.
-  const namedByBackChip = Boolean(spec.linkedParentId);
+  // A DELEGATED group (linkedParentId) takes the PARENT'S name instead —
+  // operator: instead of "6 lookups", use the parent. The back chip already
+  // says which PANEL it came from (`← OCR`); the title names the packet the
+  // lookups are for. Printing `6 lookups · Oath_Packet_Summer.pdf` used to
+  // truncate the only unique part; naming the parent alone keeps that.
+  const namedByParent = Boolean(spec.linkedParentId);
   const title = spec.groupNoun
-    ? [`${realMembers.length} ${spec.groupNoun}`, namedByBackChip ? undefined : spec.title].filter(Boolean).join(" · ")
+    ? namedByParent
+      ? spec.title
+      : [`${realMembers.length} ${spec.groupNoun}`, spec.title].filter(Boolean).join(" · ")
     : spec.title;
   const previewNames = realMembers.slice(0, 3).map((m) => m.title);
   const memberPreview =
@@ -735,6 +731,11 @@ const sepMaria: DemoRowSpec = {
   enqueuedAt: at("14:02:04"),
   startedAt: at("14:02:11"),
   evidence: { confidence: "unknown" },
+  facts: [
+    { label: "separation", value: "07/16/2026" },
+    { label: "type", value: "Voluntary" },
+    { label: "dept", value: "000371" },
+  ],
   outcome: { tone: "warning", text: "Paused on identity approval — 18m in gate · nothing written yet" },
   steps: [
     { label: "Kuali extraction", state: "done", system: "kuali", durationSec: 41, hasShot: true, keyLines: ["last day worked = 07/15/2026", "termination type = Voluntary"] },
@@ -794,21 +795,8 @@ const sepMaria: DemoRowSpec = {
     options: [
       { key: "use-eid", label: "Use 10583942", intent: "primary", command: "resolve-gate", resolution: "pick-eid:10583942" },
       { key: "manual-eid", label: "Enter EID…", intent: "neutral", command: "resolve-gate", resolution: "manual-eid" },
-      {
-        key: "dismiss",
-        label: "Dismiss",
-        intent: "neutral",
-        command: "resolve-gate",
-        resolution: "dismiss",
-        confirm: {
-          title: "End this separation with nothing written?",
-          body: "Maria Lopez-Garcia stays employed in UCPath and the Kuali document stays open. The 2 staged writes are discarded. This does not undo the Kuali extraction — it just stops here.",
-          confirmLabel: "Dismiss and end the run",
-          tone: "destructive",
-        },
-      },
     ],
-    note: "The run stopped BEFORE the UCPath transaction and cannot pass it until you answer — the 2 writes are staged, not sent. Resolving returns it to Running at UCPath transaction and the staged writes go live. Dismiss ends the run with nothing written.",
+    note: "The run stopped BEFORE the UCPath transaction and cannot pass it until you answer — the 2 writes are staged, not sent. Resolving returns it to Running at UCPath transaction and the staged writes go live. There is no dismiss path: the identity has to be answered.",
   },
   receipt: {
     tone: "muted",
@@ -855,6 +843,11 @@ const sepRosa: DemoRowSpec = {
   startedAt: at("13:48:02"),
   // the write was attempted and never read back — that IS the unknown
   evidence: { confidence: "unknown" },
+  facts: [
+    { label: "separation", value: "07/18/2026" },
+    { label: "action", value: "Voluntary" },
+    { label: "confirmation", value: "unknown", warn: true },
+  ],
   outcome: {
     tone: "violet",
     text: "Write outcome unknown — submit sent, confirmation never came back. Do not re-run until you resolve it.",
@@ -968,6 +961,7 @@ const plDaniel: DemoRowSpec = {
   enqueuedAt: at("14:25:41"),
   startedAt: at("14:25:46"),
   evidence: { confidence: "unknown" },
+  facts: [{ label: "dept", value: "000512" }],
   liveText: "Cross-verification — matching CRM record by start date",
   outcome: { tone: "info", text: "Cross-verification · matching the CRM record by start date" },
   steps: [
@@ -1060,7 +1054,6 @@ const oathBatch: DemoRowSpec = {
   // span covers the steps — see the rule on the oath member factory
   endedAt: at("11:24:20"),
   evidence: { receiptId: "rcpt-os-c2f0", failureId: "fail-os-c2f0-m2", confidence: "partial" },
-  warnings: { count: 1, first: "1 signer failed — signature field never rendered" },
   memberIds: oathMemberIds,
   reviewRunId: "ocr-spring",
   outcome: { tone: "destructive", text: "11/12 signed · Grace Egan failed — signature field never rendered" },
@@ -1337,6 +1330,10 @@ const cdSamuel: DemoRowSpec = {
     ],
   },
   failShots: 3,
+  facts: [
+    { label: "query", value: "samuel.ortiz@ucsd.edu" },
+    { label: "results", value: "0 records", warn: true },
+  ],
   error: "CRM search returned no record for samuel.ortiz@ucsd.edu — download step never reached",
   outcome: { tone: "destructive", text: "CRM search returned no record for samuel.ortiz@ucsd.edu" },
   steps: [
@@ -1387,7 +1384,7 @@ const wsPriya: DemoRowSpec = {
   dryRun: true,
   enqueuedAt: at("14:24:01"),
   evidence: { confidence: "unknown" },
-  queueNote: "3m waiting · 2 ahead",
+  facts: [{ label: "effective", value: "07/01/2026" }],
   outcome: { tone: "muted", text: "Behind two items on this workflow" },
   steps: [
     { label: "UCPath auth", state: "pending", system: "ucpath" },
@@ -1474,7 +1471,6 @@ const spRefresh: DemoRowSpec = {
   version: 2,
   enqueuedAt: at("14:23:10"),
   evidence: { confidence: "unknown" },
-  queueNote: "2m waiting · 1 ahead",
   outcome: { tone: "muted", text: "A start that asked for a fresh roster is waiting behind this one" },
   steps: [
     { label: "SharePoint auth", state: "pending", system: "crm" },
@@ -1737,7 +1733,6 @@ function i9Member(i: number): DemoRowSpec {
         ...base,
         startedAt: undefined,
         memberFact: "—",
-        queueNote: `#${i - 37} in line`,
         outcome: { tone: "muted", text: "Not started" },
         steps: [
           { label: "Person match", state: "pending", system: "ucpath" },
@@ -1976,18 +1971,10 @@ const oathSummer: DemoRowSpec = {
   // KNOWS — how many people came off the pages.
   memberIds: [],
   extractedCount: 6,
-  bulkApprove: {
-    approvable: 5,
-    total: 6,
-    // One clause, on one line. WHY an inactive employee cannot be signed, and
-    // the rule about editing a value with its page on screen, are both in the
-    // gate's own `note` below — the panel's decision renders that in full.
-    excluded: { count: 1, reason: "Diego Diaz is inactive in UCPath" },
-  },
   reviewRunId: "ocr-summer",
   outcome: {
     tone: "warning",
-    text: "Approve 5 of 6 people, or open the review to work through them.",
+    text: "Review all 6 people before approving signer tasks.",
   },
   steps: [
     { label: "OCR extraction", state: "done", system: "i9", durationSec: 128, keyLines: ["6 people on 8 pages", "2 pages had no form"] },
@@ -2002,7 +1989,7 @@ const oathSummer: DemoRowSpec = {
     { ts: "2:22:51", kind: "ok", system: "i9", text: "Roster re-match — 6/6 matched to July_Roster.xlsx", duration: "31s", step: "Roster match" },
     { ts: "2:22:54", kind: "warn", text: "Diego Diaz — UCPath status Inactive (separated 06/30/2026), record blocked", step: "Roster match" },
     { ts: "2:22:55", kind: "warn", text: "Ben Brooks — EID read at 0.44 confidence, flagged for your eyes", step: "Roster match" },
-    { ts: "2:22:56", kind: "pause", text: "Approve people to fan out signer tasks. Open the OCR review row to work through them.", card: "gate", step: "Your review" },
+    { ts: "2:22:56", kind: "pause", text: "Open the OCR review and inspect every person before approving signer tasks.", card: "gate", step: "Your review" },
   ],
   data: [
     { step: "OCR extraction", dir: "read", field: "People found", value: "6 (8 pages)", system: "i9", ts: "2:22:20" },
@@ -2013,10 +2000,9 @@ const oathSummer: DemoRowSpec = {
     kind: "approval",
     title: "Approve the people to sign",
     openedAt: at("14:22:31"),
-    note: "Approve straight from here if the packet reads clean; open the review to look at each person beside their page. Approving fans out one signer task per approved person — that is when member rows appear. Diego Diaz is blocked (inactive) and is excluded from the count.",
+    note: "Open the review and inspect every person beside their scanned page before approving. Approval fans out one signer task per approved person — that is when member rows appear. Diego Diaz is blocked and excluded from the count.",
     options: [
-      { key: "approve-5", label: "Approve 5 of 6", intent: "primary", command: "resolve-gate", resolution: "approve:5" },
-      { key: "open-review", label: "Open review", intent: "neutral", command: "resolve-gate", resolution: "open-review", icon: "review" },
+      { key: "open-review", label: "Open review", intent: "primary", command: "resolve-gate", resolution: "open-review", icon: "review" },
       {
         key: "discard",
         label: "Discard packet",
@@ -2098,7 +2084,14 @@ const ocrSummer: DemoRowSpec = {
     openedAt: at("14:22:34"),
     note: "Each person is shown beside the page they were read from. Approve per person; the packet fans out only what you approved.",
     options: [
-      { key: "approve-5", label: "Approve 5 of 6", intent: "primary", command: "resolve-gate", resolution: "approve:5" },
+      {
+        key: "approve-5",
+        label: "Approve 5 of 6",
+        intent: "primary",
+        command: "resolve-gate",
+        resolution: "approve:5",
+        placement: ["review"],
+      },
       { key: "reupload", label: "Reupload packet", intent: "neutral", command: "rerun-with-different-input", resolution: "reupload" },
       {
         key: "discard",
@@ -2206,10 +2199,10 @@ const ocrSpring: DemoRowSpec = {
 // ===========================================================================
 // An OCR run MID-READ — the streaming-records fixture.
 //
-// Every other OCR row in the corpus is terminal, which is why the count chip
-// looked fine: on a finished run `12 lookups` and a list of twelve say the same
-// thing. The defect only exists while the document is being read, so the demo
-// has to hold a run that is being read.
+// Every other OCR row in the corpus is terminal, which hid the original defect:
+// a finished run's `12 lookups` badge and its list of twelve said the same thing.
+// The badge is gone; this fixture proves the member list itself stays useful
+// while the document is still being read.
 //
 // Each record carries its own `readAt`, staggered around the demo clock, so the
 // queue row genuinely fills in on the shell's heartbeat: at the fixed demo NOW
@@ -2348,6 +2341,7 @@ function ouSigner(i: number): DemoRowSpec {
     startedAt: s.startedAt,
     endedAt: signedAt,
     evidence: done ? { receiptId: `rcpt-os-s${pad(i, 3)}`, confidence: "verified" } : { confidence: "unknown" },
+    facts: done ? [{ label: "signed", value: signedClock }] : undefined,
     liveText: running ? "Signing oath — UCPath signature canvas" : undefined,
     outcome: done
       ? { tone: "success", text: `Oath signed ${signedClock} — CRM verified` }
@@ -2427,7 +2421,7 @@ const ouPacket: DemoRowSpec = {
   linkedGroup: { ids: OU_SIGNER_IDS, noun: "signers", panel: "Oath Signature" },
   facts: [
     { label: "pages", value: "6" },
-    { label: "ticket", value: "filed after signing" },
+    { label: "ticket", value: "filed after signing", fullRow: true },
   ],
   outcome: {
     tone: "info",
@@ -2567,7 +2561,6 @@ function wsMember(i: number): DemoRowSpec {
       ...base,
       startedAt: undefined,
       memberFact: "—",
-      queueNote: `#${i - 15} in line`,
       outcome: { tone: "muted", text: "Not started" },
       steps: [
         { label: "UCPath auth", state: "pending", system: "ucpath" },
@@ -2792,8 +2785,8 @@ const ecPacket: DemoRowSpec = {
     note: "A rejected page is not a failure and not a success — it is work that never existed. Delete it (or acknowledge it) and the packet settles to Done.",
   },
   shots: [
-    { label: "Packet page 1", kind: "step" },
-    { label: "Page 7 (rejected)", kind: "error" },
+    { label: "Packet page 1", kind: "step", step: "OCR extraction" },
+    { label: "Page 7 (rejected)", kind: "error", step: "OCR extraction" },
   ],
 };
 
@@ -3068,7 +3061,7 @@ const plSummer: DemoRowSpec = {
   rowType: "group",
   subjectKind: "person",
   workflowId: "person-lookup",
-  // no title of its own — the count + the parent name ARE the title (S7)
+  // Parent packet name is the card title when linked (operator: not "N lookups")
   title: "Oath_Packet_Summer.pdf",
   groupNoun: "lookups",
   runId4: "8c30",
@@ -3084,6 +3077,10 @@ const plSummer: DemoRowSpec = {
   endedAt: at("14:24:02"),
   evidence: { confidence: "verified" },
   memberIds: PL_SUMMER_IDS,
+  // One member finished Separated — the group is Done with that warning count
+  // on the triangle chip beside the status pill (same shape as every other
+  // warned Done card).
+  warnings: { count: 1, first: "Diego Diaz — found inactive (separated); the packet cannot sign them" },
   feedsInto: {
     label: "Oath_Packet_Summer.pdf · one EID per extracted record",
     targetRunId: "ocr-summer",
@@ -3171,6 +3168,7 @@ const sepNathan: DemoRowSpec = {
   enqueuedAt: at("14:24:31"),
   startedAt: at("14:24:38"),
   evidence: { confidence: "unknown" },
+  facts: [{ label: "last day", value: "08/01/2026" }],
   // ONE linked child. Same mechanism the Oath Upload row uses for six signers —
   // a set of one is still a set, and it still lives in its own panel.
   linkedGroup: { ids: ["pl-nathan"], noun: "person lookup", panel: "Person Lookup" },
@@ -3216,6 +3214,7 @@ const plDana: DemoRowSpec = {
   endedAt: at("13:19:26"),
   evidence: { failureId: "fail-pl-e88f", confidence: "unknown" },
   failShots: 2,
+  facts: [{ label: "results", value: "0 matches", warn: true }],
   error: "UCPath person search returned 0 matches for “Dana Whitmore” — the name on the Kuali document is not a UCPath person",
   feedsInto: {
     label: "Dana Whitmore · separations identity check → EID for the termination write",
@@ -3262,6 +3261,7 @@ const sepDana: DemoRowSpec = {
   startedAt: at("13:18:18"),
   endedAt: at("13:19:28"),
   evidence: { failureId: "fail-se-31c6", confidence: "unknown" },
+  facts: [{ label: "last day", value: "07/31/2026" }],
   linkedGroup: { ids: ["pl-dana"], noun: "person lookup", panel: "Person Lookup" },
   // D13: a failed linked child makes the parent Failed — never "Waiting on you",
   // because nobody is being asked to decide anything — and the child's error is
@@ -3389,21 +3389,8 @@ function sepListMember(i: number): DemoRowSpec {
         options: [
           { key: "use-eid", label: `Use ${eid}`, intent: "primary", command: "resolve-gate", resolution: `pick-eid:${eid}` },
           { key: "manual-eid", label: "Enter EID…", intent: "neutral", command: "resolve-gate", resolution: "manual-eid" },
-          {
-            key: "dismiss",
-            label: "Dismiss",
-            intent: "neutral",
-            command: "resolve-gate",
-            resolution: "dismiss",
-            confirm: {
-              title: "Drop this person from the list?",
-              body: `${name} is removed from this group with nothing written. The other four separations are untouched and keep running.`,
-              confirmLabel: "Drop this person",
-              tone: "destructive",
-            },
-          },
         ],
-        note: "This member is stopped at Identity check and has written nothing; it cannot reach the UCPath transaction until you answer. Resolving returns it to Running at Identity check. The other members never stopped — a group waits on nobody.",
+        note: "This member is stopped at Identity check and has written nothing; it cannot reach the UCPath transaction until you answer. Resolving returns it to Running at Identity check. There is no dismiss path — the identity has to be answered. The other members never stopped.",
       },
       receipt: { tone: "muted", headline: "Receipt — pending", note: "Nothing written. This member is holding the whole group at Waiting on you." },
     };
@@ -3432,8 +3419,7 @@ function sepListMember(i: number): DemoRowSpec {
     return {
       ...base,
       memberFact: "—",
-      queueNote: "#1 in line",
-      outcome: { tone: "muted", text: "#1 in line behind the running member" },
+      outcome: { tone: "muted", text: "Not started" },
       steps: SEP_LIST_STEPS.map((label) => step(label, "pending")),
       lines: [{ ts: "1:49:40", kind: "event", text: "Fanned out from the typed list", step: "Queued" }],
       receipt: { tone: "muted", headline: "Receipt — pending", note: "Nothing has run yet." },
@@ -3675,7 +3661,7 @@ const ocrVerify: DemoRowSpec = {
   linkedGroup: { ids: PL_VERIFY_IDS, noun: "lookups", panel: "Person Lookup", groupId: "pl-verify" },
   outcome: {
     tone: "warning",
-    text: "Report complete — 3 people read, 2 completeness gaps on page 2. Nothing downstream: this run answers a question, it does not start work.",
+    text: "Report complete — 3 people read · 2 completeness gaps on page 2",
   },
   steps: [
     { label: "Split pages", state: "done", system: "i9", durationSec: 6, keyLines: ["3 pages · 3 readable forms"] },
@@ -3727,6 +3713,7 @@ interface CompactRunArgs {
   workflowVersion?: number;
   linkedParentId?: string;
   data?: DemoDataPoint[];
+  facts?: DemoFact[];
   gate?: DemoGate;
 }
 
@@ -3753,6 +3740,7 @@ function compactRun(args: CompactRunArgs): DemoRowSpec {
     startedAt,
     endedAt,
     evidence: { confidence: failed || live ? "unknown" : "verified" },
+    facts: args.facts,
     outcome: {
       tone: failed ? "destructive" : cancelled ? "muted" : args.status === "doneWarnings" ? "warning" : "success",
       text: args.outcome,
@@ -3800,6 +3788,11 @@ const i9LookupRuns: DemoRowSpec[] = [
     outcome: "Profile found · signed · representative Elena Cruz",
     receipt: "Done · signed profile found",
     linkedParentId: "i9-batch",
+    facts: [
+      { label: "profile", value: "Found" },
+      { label: "signed", value: "Yes" },
+      { label: "rep", value: "Elena Cruz" },
+    ],
     data: [
       { step: "Lookup", dir: "read", field: "Profile", value: "Found", system: "i9", ts: "10:31:22" },
       { step: "Lookup", dir: "read", field: "Signed", value: "Yes", system: "i9", ts: "10:31:22" },
@@ -3818,6 +3811,10 @@ const i9LookupRuns: DemoRowSpec[] = [
     outcome: "Profile found · employee signature still missing",
     receipt: "Done with warnings · unsigned profile",
     linkedParentId: "i9-batch",
+    facts: [
+      { label: "profile", value: "Found" },
+      { label: "signed", value: "No", warn: true },
+    ],
     data: [
       { step: "Lookup", dir: "read", field: "Profile", value: "Found", system: "i9", ts: "10:32:22" },
       { step: "Lookup", dir: "read", field: "Signed", value: "No", system: "i9", ts: "10:32:22" },
@@ -3835,6 +3832,7 @@ const i9LookupRuns: DemoRowSpec[] = [
     outcome: "No I-9 profile · lookup completed normally",
     receipt: "Done · no profile found",
     linkedParentId: "i9-batch",
+    facts: [{ label: "profile", value: "Not found" }],
     data: [{ step: "Lookup", dir: "read", field: "Profile", value: "Not found", system: "i9", ts: "10:33:22" }],
   }),
   compactRun({
@@ -3865,6 +3863,10 @@ const personLookupMatchRuns: DemoRowSpec[] = [
     system: "ucpath",
     outcome: "Matched · existing UCPath identity 10844121",
     receipt: "Done · Match found one identity",
+    facts: [
+      { label: "match", value: "10844121" },
+      { label: "candidates", value: "1" },
+    ],
     data: [
       { step: "Search", dir: "read", field: "Found", value: "Yes", system: "ucpath", ts: "9:41:22" },
       { step: "Search", dir: "read", field: "Matched EID", value: "10844121", system: "ucpath", ts: "9:41:22" },
@@ -3883,6 +3885,10 @@ const personLookupMatchRuns: DemoRowSpec[] = [
     system: "ucpath",
     outcome: "No match · HR-Tasks returned nobody (a normal negative answer)",
     receipt: "Done · no existing identity",
+    facts: [
+      { label: "match", value: "None" },
+      { label: "candidates", value: "0" },
+    ],
     data: [
       { step: "Search", dir: "read", field: "Found", value: "No", system: "ucpath", ts: "9:42:22" },
       { step: "Search", dir: "read", field: "Candidates", value: "0", system: "ucpath", ts: "9:42:22" },
@@ -3899,6 +3905,10 @@ const personLookupMatchRuns: DemoRowSpec[] = [
     system: "ucpath",
     outcome: "Ambiguous · duplicate-results dialog returned two candidates",
     receipt: "Done with warnings · identity is ambiguous",
+    facts: [
+      { label: "match", value: "Ambiguous", warn: true },
+      { label: "candidates", value: "2" },
+    ],
     data: [
       { step: "Search", dir: "read", field: "Found", value: "Ambiguous", system: "ucpath", ts: "9:43:22" },
       { step: "Search", dir: "read", field: "Candidates", value: "2", system: "ucpath", ts: "9:43:22" },
@@ -3933,12 +3943,52 @@ const thinCoverageRuns: DemoRowSpec[] = [
     },
   }),
   compactRun({ id: "ou-cancelled", workflowId: "oath-upload", title: "Oath_Packet_Cancelled.pdf", runId4: "84a4", status: "cancelled", clock: "08:14:02", step: "Wait signatures", outcome: "Cancelled before ServiceNow filing", receipt: "Cancelled · nothing filed" }),
-  compactRun({ id: "kp-no-change", workflowId: "kronos-pay-rule", title: "Jamie Park", runId4: "85a5", status: "verifiedDone", clock: "08:15:02", step: "Determine action", system: "kronos", outcome: "Already on SDCMP-WS · no change needed", receipt: "Done · pay rule already correct" }),
+  compactRun({
+    id: "kp-no-change",
+    workflowId: "kronos-pay-rule",
+    title: "Jamie Park",
+    runId4: "85a5",
+    status: "verifiedDone",
+    clock: "08:15:02",
+    step: "Determine action",
+    system: "kronos",
+    outcome: "Already on SDCMP-WS · no change needed",
+    receipt: "Done · pay rule already correct",
+    facts: [{ label: "pay rule", value: "SDCMP-WS" }],
+  }),
   compactRun({ id: "kp-failed", workflowId: "kronos-pay-rule", title: "Casey Ford", runId4: "86a6", status: "failed", clock: "08:16:02", step: "Update pay rule", system: "kronos", outcome: "Save verification failed · retry available", receipt: "Failed · pay rule not verified", error: "Kronos saved but the pay-rule read-back did not match SDCMP-WS." }),
-  compactRun({ id: "cd-none", workflowId: "crm-doc-download", title: "no-record@ucsd.edu", runId4: "87a7", status: "verifiedDone", clock: "08:17:02", step: "Search record", system: "crm", outcome: "No CRM record · normal not-found answer", receipt: "Done · no record found" }),
+  compactRun({
+    id: "cd-none",
+    workflowId: "crm-doc-download",
+    title: "no-record@ucsd.edu",
+    runId4: "87a7",
+    status: "verifiedDone",
+    clock: "08:17:02",
+    step: "Search record",
+    system: "crm",
+    outcome: "No CRM record · normal not-found answer",
+    receipt: "Done · no record found",
+    facts: [{ label: "result", value: "No CRM record" }],
+  }),
   compactRun({ id: "cd-failed", workflowId: "crm-doc-download", title: "archive@ucsd.edu", runId4: "88a8", status: "failed", clock: "08:18:02", step: "Download", system: "crm", outcome: "Document download failed · retry available", receipt: "Failed · no file archived", error: "CRM attachment stream ended before the PDF checksum could be verified." }),
   compactRun({ id: "kr-cancelled", workflowId: "old-kronos-reports", title: "Cancelled report set", runId4: "89a9", status: "cancelled", clock: "08:19:02", step: "Report run", system: "kronos", outcome: "Cancelled while reports were still queued", receipt: "Cancelled · no archive written" }),
-  compactRun({ id: "kr-vnext", workflowId: "old-kronos-reports", title: "Payroll audit bundle", runId4: "90b0", status: "doneWarnings", clock: "08:20:02", step: "Download", system: "kronos", outcome: "3 reports downloaded · one optional report empty", receipt: "Done with warnings · 3 files", workflowVersion: Math.max(1, DEMO_WORKFLOWS["old-kronos-reports"].version - 1) }),
+  compactRun({
+    id: "kr-vnext",
+    workflowId: "old-kronos-reports",
+    title: "Payroll audit bundle",
+    runId4: "90b0",
+    status: "doneWarnings",
+    clock: "08:20:02",
+    step: "Download",
+    system: "kronos",
+    outcome: "3 reports downloaded · one optional report empty",
+    receipt: "Done with warnings · 3 files",
+    workflowVersion: Math.max(1, DEMO_WORKFLOWS["old-kronos-reports"].version - 1),
+    facts: [
+      { label: "reports", value: "3 downloaded" },
+      { label: "optional", value: "1 empty", warn: true },
+    ],
+  }),
 ];
 
 // ===========================================================================
@@ -4077,7 +4127,7 @@ export function isTerminal(status: ProposedStatus): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Streaming records — a count that fills in as the document is read
+// Streaming records — the member list fills in as the document is read
 // ---------------------------------------------------------------------------
 
 export interface RecordStream {
@@ -4092,10 +4142,11 @@ export interface RecordStream {
 /**
  * WHAT THE RUN HAS READ SO FAR.
  *
- * The count chip said `12 lookups` and nothing else until the whole document
- * was through, which on a fifteen-minute extraction is fifteen minutes of a
- * number that could not be acted on. The operator: *"the 12 should also appear
- * like [a member list] as they get read."*
+ * The old header chip said `12 lookups` and nothing else until the whole
+ * document was through, which on a fifteen-minute extraction is fifteen
+ * minutes of a number that could not be acted on. That redundant badge is now
+ * removed; the operator: *"the 12 should also appear like [a member list] as
+ * they get read."*
  *
  * A record is on screen when its own `readAt` instant has passed — the run
  * reports each person as it reads them, and the surface renders what has
@@ -4121,6 +4172,24 @@ export function recordStream(row: DemoRow, tick = 0): RecordStream {
   const now = demoNowMs(tick);
   const read = reading ? records.filter((r) => r.readAt === undefined || Date.parse(r.readAt) <= now) : records;
   return { read, total: records.length, streaming: reading && read.length < records.length };
+}
+
+/**
+ * Map an OCR record stream onto the SAME tally buckets a group's member strip
+ * uses, so the queue can render both with one counts component.
+ *
+ * `ready` → done · `warn` → warnings · `blocked` → rejected (never approvable)
+ * · unread pages while streaming → running (still being reported).
+ */
+export function recordCountsFromStream(stream: RecordStream): GroupCounts {
+  const out: GroupCounts = { done: 0, running: 0, queued: 0, failed: 0, warnings: 0, waiting: 0, parked: 0, rejected: 0 };
+  for (const rec of stream.read) {
+    if (rec.state === "ready") out.done += 1;
+    else if (rec.state === "warn") out.warnings += 1;
+    else if (rec.state === "blocked") out.rejected += 1;
+  }
+  if (stream.streaming) out.running = stream.total - stream.read.length;
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -4163,20 +4232,15 @@ export const MEMBER_LIST_SHAPE = {
  * j/k should walk.
  *
  * Deriving traversal from the same rule that renders them is what keeps the
- * keyboard and the eye in the same place. It lives beside `isSettledRow` (its
- * only input beyond the member set) rather than in the component, because a
- * second opinion about what is visible is a keyboard that walks into rows
- * nobody can see.
+ * keyboard and the eye in the same place. A second opinion about what is
+ * visible is a keyboard that walks into rows nobody can see.
  *
- * The ONE branch left is settlement, not size: a settled group is collapsed
- * SHUT, so it puts nothing on screen to walk until the operator opens it. A
- * group that is still asking for something keeps every member available inside
- * the well, however many there are.
+ * Groups no longer collapse shut when settled. The well always lists every
+ * member; height is what changes (5 → 20), not presence. `expandedGroups` stays
+ * on the signature so callers remain stable, and is ignored.
  */
-export function visibleMemberIds(row: DemoRow, expandedGroups: ReadonlySet<string>): string[] {
-  const ids = orderedMemberIds(row.id);
-  if (isSettledRow(row) && !expandedGroups.has(row.id)) return [];
-  return ids;
+export function visibleMemberIds(row: DemoRow, _expandedGroups: ReadonlySet<string>): string[] {
+  return orderedMemberIds(row.id);
 }
 
 // ---------------------------------------------------------------------------
@@ -4406,5 +4470,3 @@ export function isSettledRow(row: DemoRow): boolean {
   const counts = groupCounts(row.id);
   return counts.waiting + counts.failed + counts.parked === 0;
 }
-
-

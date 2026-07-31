@@ -36,7 +36,7 @@ import { ALL_DEMO_ROWS, DEMO_DAYS, topLevelRowsForDay } from "../../../src/dashb
 
 test("the quiet terminal status is `Done`, and nothing in the corpus says `Verified done`", () => {
   assert.equal(DS_STATUS.verifiedDone.label, "Done");
-  assert.equal(DS_STATUS.doneWarnings.label, "Done with warnings");
+  assert.equal(DS_STATUS.doneWarnings.label, "Done");
 
   // The receipt reads its verdict word off `DS_STATUS`, so the fixtures are the
   // only place the retired label could still be written down.
@@ -103,7 +103,7 @@ test("no panel kind serves a Data tab, and none of them can", () => {
   for (const kind of kinds) {
     const names = tabNamesForPanelKind(kind);
     assert.ok(!names.includes("Data"), `${kind} must not offer a Data tab — Data is a context-rail section`);
-    assert.ok(!names.includes("Screenshots"), `${kind} must not offer a Screenshots tab — evidence is a rail section`);
+    assert.ok(!names.includes("Screenshots"), `${kind} must not offer a Screenshots tab — captures belong inside Receipt`);
   }
   // Review is the one panel that owns records, and the only one that reviews.
   assert.deepEqual(kinds.filter((k) => tabNamesForPanelKind(k).includes("Review")), ["review"]);
@@ -117,8 +117,15 @@ test("nothing deleted from the panel is listed as always visible", () => {
   // is no gate banner" is the answer to "where did it go".
   const alwaysVisible = PANEL_KINDS.flatMap((spec) => spec.pinned).join(" ");
   assert.ok(!/gate banner/i.test(alwaysVisible), "the gate banner was deleted in wave 6 — the decision is inline in the stream");
-  assert.ok(!/evidence bar/i.test(alwaysVisible), "evidence is a context-rail section, not a bar above the tabs");
+  assert.ok(!/evidence bar/i.test(alwaysVisible), "screenshot evidence belongs inside Receipt, not in a bar above the tabs");
   assert.ok(!/\bData tab\b/i.test(alwaysVisible), "Data is a context-rail section, not a tab");
+});
+
+test("the standalone OCR outcome keeps only the facts the operator acts on", () => {
+  const report = ALL_DEMO_ROWS["ocr-verify"];
+  assert.ok(report, "the standalone OCR report fixture is missing");
+  assert.equal(report.outcome.text, "Report complete — 3 people read · 2 completeness gaps on page 2");
+  assert.doesNotMatch(report.outcome.text, /nothing downstream|does not start work/i);
 });
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import {
   ArrowLeft,
-  Boxes,
   Camera,
   Cog,
   Database,
@@ -35,7 +34,6 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-  ProgressBar,
   Refusal,
   SectionLabel,
   Select,
@@ -62,9 +60,7 @@ import {
   type CapabilityKey,
 } from "./demo-capability-wire";
 import {
-  DEMO_BUDGETS,
   DEMO_ENVIRONMENT_FACTS,
-  DEMO_LANE_BUDGET,
   DEMO_SETTINGS,
   DEMO_SYSTEM_BEHAVIOUR,
   DEMO_SYSTEM_URLS,
@@ -122,7 +118,6 @@ export type SettingsSectionKey =
   | "environment"
   | "behaviour"
   | "system-urls"
-  | "budgets"
   | "storage"
   | "capabilities"
   | "keyboard";
@@ -170,13 +165,6 @@ const STATUS_SECTIONS: SectionSpec[] = [
     label: "System hosts",
     icon: Link2,
     blurb: "Which machine each system resolves to. Choosing between them is a per-run question, asked in the run modal.",
-    status: true,
-  },
-  {
-    key: "budgets",
-    label: "Performance budgets",
-    icon: Boxes,
-    blurb: "Executor lanes and per-system concurrency caps. Pool mode is a property of the system, not a preference.",
     status: true,
   },
   {
@@ -870,71 +858,6 @@ function SystemUrlsSection() {
 }
 
 // ---------------------------------------------------------------------------
-// Status: performance budgets
-// ---------------------------------------------------------------------------
-
-function BudgetsSection() {
-  return (
-    <Panel className="min-h-0 flex-1">
-      <PanelHeader
-        title="Performance budgets"
-        subtitle="What the executor is allowed to hold at once. A cap that is full is why a queued row is not moving."
-        icon={<Boxes aria-hidden className={dsIcon.lg} />}
-        meta={`${DEMO_LANE_BUDGET.inUse} of ${DEMO_LANE_BUDGET.cap} lanes in use`}
-      />
-      <PanelBody className="flex flex-col gap-[var(--ds-space-cozy)] p-[var(--ds-space-cozy)]">
-        <Card>
-          <CardBody className="flex flex-col gap-[var(--ds-space-snug)]">
-            <div className="flex items-baseline gap-[var(--ds-space-base)]">
-              <span className={cn(dsText.title, "font-semibold text-[color:var(--ds-fg)]")}>Executor lanes</span>
-              <span className={cn(dsText.display, dsText.nums, "ml-auto text-[color:var(--ds-fg)]")}>
-                {DEMO_LANE_BUDGET.inUse}/{DEMO_LANE_BUDGET.cap}
-              </span>
-            </div>
-            <ProgressBar
-              label="Executor lanes in use"
-              value={DEMO_LANE_BUDGET.inUse}
-              max={DEMO_LANE_BUDGET.cap}
-              tone={DEMO_LANE_BUDGET.inUse >= DEMO_LANE_BUDGET.cap ? "warning" : "accent"}
-            />
-            <p className={cn(dsText.body, "text-[color:var(--ds-fg-muted)]")}>{DEMO_LANE_BUDGET.note}</p>
-          </CardBody>
-        </Card>
-
-        <Table label="Per-system concurrency caps">
-          <THead>
-            <TR>
-              <TH>System</TH>
-              <TH>Pool mode</TH>
-              <TH align="right">In use</TH>
-              <TH align="right">Cap</TH>
-              <TH>Why</TH>
-            </TR>
-          </THead>
-          <TBody>
-            {DEMO_BUDGETS.map((budget) => (
-              <TR key={budget.system}>
-                <TD>{budget.label}</TD>
-                <TD>
-                  <Chip tone={budget.poolMode === "single" ? "warning" : "neutral"}>{budget.poolMode}</Chip>
-                </TD>
-                <TD align="right" numeric className={budget.inUse >= budget.cap ? "text-[color:var(--ds-status-waiting-fg)]" : undefined}>
-                  {budget.inUse}
-                </TD>
-                <TD align="right" numeric>
-                  {budget.cap}
-                </TD>
-                <TD className="max-w-[380px]">{budget.reason}</TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
-      </PanelBody>
-    </Panel>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Status: storage health
 // ---------------------------------------------------------------------------
 
@@ -1192,8 +1115,6 @@ export function DemoSettingsPage({
           <BehaviourSection />
         ) : section.key === "system-urls" ? (
           <SystemUrlsSection />
-        ) : section.key === "budgets" ? (
-          <BudgetsSection />
         ) : section.key === "storage" ? (
           <StorageSection storage={storage} />
         ) : section.key === "capabilities" ? (
