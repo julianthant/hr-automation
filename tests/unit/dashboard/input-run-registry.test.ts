@@ -2,9 +2,11 @@ import { test } from "vitest";
 import assert from "node:assert/strict";
 
 import {
+  applyInputRunOptions,
   getInputRunConfig,
   parseCrmDocDownloadInputs,
   parsePersonLookupInputs,
+  parsePersonLookupMatchInputs,
 } from "../../../src/dashboard/lib/input-run-registry.js";
 
 test("person-lookup input run accepts EIDs and names separated by semicolons", () => {
@@ -31,6 +33,63 @@ test("person-lookup is visible in the dashboard input-run registry", () => {
 
   assert.ok(config);
   assert.match(config.placeholder, /EIDs or names/);
+  assert.equal(config.supportsCrmCheck, true);
+  assert.deepEqual(
+    config.modes?.map((mode) => ({
+      key: mode.key,
+      label: mode.label,
+      crmCheckDefault: mode.crmCheckDefault,
+    })),
+    [
+      { key: "search", label: "Search", crmCheckDefault: true },
+      { key: "match", label: "Match", crmCheckDefault: false },
+    ],
+  );
+});
+
+test("person-lookup Match mode parses semicolon-delimited legal names with DOB/SSN fields", () => {
+  assert.deepEqual(
+    parsePersonLookupMatchInputs(
+      "Reyes, Marta, 01/02/1980, x; van Buren, John, x, 123456789",
+    ),
+    {
+      ok: true,
+      inputs: [
+        {
+          mode: "match",
+          lastName: "Reyes",
+          firstName: "Marta",
+          dob: "01/02/1980",
+        },
+        {
+          mode: "match",
+          lastName: "Van Buren",
+          firstName: "John",
+          ssn: "123456789",
+        },
+      ],
+    },
+  );
+});
+
+test("person-lookup Match mode surfaces the offending record when both identifiers are absent", () => {
+  assert.deepEqual(parsePersonLookupMatchInputs("Reyes, Marta, X, x"), {
+    ok: false,
+    error: 'Person Lookup Match input "Reyes, Marta, X, x" cannot use x for both DOB and SSN',
+  });
+});
+
+test("input-run options fold the selected mode and explicit CRM state onto every item", () => {
+  assert.deepEqual(
+    applyInputRunOptions(
+      [{ name: "Reyes, Marta" }, { emplId: "10873698" }],
+      { mode: "search", crmCheck: false },
+    ),
+    [
+      { name: "Reyes, Marta", mode: "search", crmCheck: false },
+      { emplId: "10873698", mode: "search", crmCheck: false },
+    ],
+  );
 });
 
 test("crm-doc-download input run accepts EIDs separated by commas", () => {

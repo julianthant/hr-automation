@@ -701,7 +701,7 @@ export function QueuePanel({
       </div>
 
       {runControlsSlot && (
-        <div className="flex h-12 w-full min-w-0 items-center gap-2 px-3 min-[1440px]:px-4 bg-card/40 shrink-0">
+        <div className="flex min-h-12 w-full min-w-0 items-center gap-2 px-3 py-2 min-[1440px]:px-4 bg-card/40 shrink-0">
           {runControlsSlot}
         </div>
       )}
