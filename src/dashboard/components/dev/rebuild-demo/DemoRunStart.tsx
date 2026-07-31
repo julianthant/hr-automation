@@ -41,6 +41,7 @@ import {
   START_SEPARATOR,
   START_VALUE_NOUN,
   defaultChoiceValues,
+  defaultFlagValues,
   effectiveChoiceValues,
   requireStartCapability,
   requireStartMethod,
@@ -514,10 +515,11 @@ export function DemoRunModal({
 
   const selectWorkflow = useCallback((next: DemoWorkflowId) => {
     const capability = requireStartCapability(DEMO_WORKFLOWS[next]);
+    const choices = defaultChoiceValues(capability);
     setWorkflowId(next);
     setMethod(capability.methods[0].kind);
-    setChoiceValues(defaultChoiceValues(capability));
-    setFlagValues({});
+    setChoiceValues(choices);
+    setFlagValues(defaultFlagValues(capability, choices));
     setText("");
     setFileIds([]);
     setSheetId(SOURCE_SHEETS.find((s) => s.workflow === next)?.id ?? "");
@@ -544,6 +546,7 @@ export function DemoRunModal({
   const flags = visibleFlags(capability, method);
   const dryRun = flags.some((f) => f.key === "dryRun") && flagValues.dryRun === true;
   const duplicateCheck = flags.some((f) => f.key === "duplicateCheck") && flagValues.duplicateCheck === true;
+  const crmCheck = flags.some((f) => f.key === "crmCheck") && flagValues.crmCheck === true;
 
   const entries = useMemo(
     () => (methodWire.kind === "typed" ? parseEntries(text, methodWire.accepts, methodWire.separator) : []),
@@ -607,13 +610,14 @@ export function DemoRunModal({
         policy,
         dryRun,
         duplicateCheck,
+        crmCheck,
         instances,
         choices: effectiveChoiceValues(capability, method, choiceValues),
         scopeLabel,
         activeConflictSubject: conflict?.label,
       }),
     );
-  }, [workflowId, builtContract, method, plan, policy, dryRun, duplicateCheck, instances, capability, choiceValues, scopeLabel, conflict]);
+  }, [workflowId, builtContract, method, plan, policy, dryRun, duplicateCheck, crmCheck, instances, capability, choiceValues, scopeLabel, conflict]);
 
   const isHandoff = methodWire.kind === "spreadsheet";
 
@@ -737,7 +741,16 @@ export function DemoRunModal({
                       choice={choice}
                       value={choiceValues[choice.key] ?? choice.defaultValue}
                       onChange={(next) => {
-                        setChoiceValues((prev) => ({ ...prev, [choice.key]: next }));
+                        const nextChoices = { ...choiceValues, [choice.key]: next };
+                        setChoiceValues(nextChoices);
+                        setFlagValues((prev) => {
+                          const defaults = defaultFlagValues(capability, nextChoices);
+                          const changed = { ...prev };
+                          for (const flag of capability.flags) {
+                            if (flag.defaultWhen?.choice === choice.key) changed[flag.key] = defaults[flag.key];
+                          }
+                          return changed;
+                        });
                         setResult(null);
                       }}
                     />
@@ -776,7 +789,7 @@ export function DemoRunModal({
                       <StartFlagControl
                         key={flag.key}
                         flag={flag}
-                        checked={flagValues[flag.key] === true}
+                        checked={flagValues[flag.key] ?? defaultFlagValues(capability, choiceValues)[flag.key]}
                         onChange={(next) => {
                           setFlagValues((prev) => ({ ...prev, [flag.key]: next }));
                           setResult(null);

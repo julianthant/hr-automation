@@ -4,6 +4,7 @@ import {
   DEMO_WORKFLOWS,
   DEMO_WORKFLOW_LIST,
   effectiveChoiceValues,
+  defaultFlagValues,
   requireStartCapability,
   requireStartMethod,
   startWorkflowGroups,
@@ -289,6 +290,12 @@ test("run flags are method-scoped, and absent where there is nothing to suppress
   assert.deepEqual(keys("ocr", "upload"), []);
   assert.deepEqual(keys("person-lookup", "typed"), ["crmCheck"]);
   assert.deepEqual(keys("separations", "typed"), ["dryRun"]);
+});
+
+test("Person Lookup CRM defaults follow the selected mode", () => {
+  const capability = capabilityOf("person-lookup");
+  assert.equal(defaultFlagValues(capability, { mode: "search" }).crmCheck, true);
+  assert.equal(defaultFlagValues(capability, { mode: "match" }).crmCheck, false);
 });
 
 // ---------------------------------------------------------------------------

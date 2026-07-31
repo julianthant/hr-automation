@@ -470,6 +470,8 @@ export interface StartFlagWire {
   note: string;
   /** absent = offered on every method */
   methods?: StartMethodKind[];
+  /** The flag opens on when this descriptor choice has one of these values. */
+  defaultWhen?: { choice: string; equals: string[] };
 }
 
 export interface StartCapabilityWire {
@@ -497,6 +499,7 @@ function crmCheckFlag(): StartFlagWire {
     key: "crmCheck",
     label: "Check CRM too",
     note: "Cross-checks the identity and reads CRM dates. Search defaults on; Match defaults off unless the operator enables it.",
+    defaultWhen: { choice: "mode", equals: ["search"] },
   };
 }
 
@@ -1962,6 +1965,24 @@ export function effectiveChoiceValues(
 /** the run flags this method offers */
 export function visibleFlags(capability: StartCapabilityWire, method: StartMethodKind): StartFlagWire[] {
   return capability.flags.filter((f) => !f.methods || f.methods.includes(method));
+}
+
+/** A fresh form's flag values, derived from the descriptor and current choices. */
+export function defaultFlagValues(
+  capability: StartCapabilityWire,
+  choiceValues: Record<string, string>,
+): Record<StartFlagWire["key"], boolean> {
+  const out = { dryRun: false, duplicateCheck: false, crmCheck: false };
+  for (const flag of capability.flags) {
+    if (!flag.defaultWhen) continue;
+    const gate = capability.choices.find((choice) => choice.key === flag.defaultWhen?.choice);
+    if (!gate) {
+      throw new Error(`demo wire: flag "${flag.key}" defaults from undeclared choice "${flag.defaultWhen.choice}"`);
+    }
+    const value = choiceValues[gate.key] ?? gate.defaultValue;
+    out[flag.key] = flag.defaultWhen.equals.includes(value);
+  }
+  return out;
 }
 
 /** an option's label, for a value the modal is showing back to the operator */

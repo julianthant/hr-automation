@@ -951,6 +951,7 @@ export interface EnqueueRequest {
   policy: EnqueuePolicy;
   dryRun: boolean;
   duplicateCheck?: boolean;
+  crmCheck?: boolean;
   instances: InstanceChoice;
   /** the resolved sub-selections — a hidden choice is not in here */
   choices?: Record<string, string>;
@@ -1049,6 +1050,11 @@ export function submitDemoEnqueue(req: EnqueueRequest): DemoEnqueueResult {
     ? " This is a DRY RUN: every read happens for real, nothing is written to any system, and the row carries a dry-run chip so it can never be mistaken for a filing."
     : "";
   const dupeNote = req.duplicateCheck ? " A duplicate check runs first — if this document has already been filed for this person the run refuses rather than filing it twice." : "";
+  const crmNote = req.workflow === "person-lookup"
+    ? req.crmCheck
+      ? " CRM cross-check is enabled for this run."
+      : " CRM cross-check is disabled for this run."
+    : "";
   const testNote = test.length ? ` Targeting the TEST instance of ${test.map((s) => SYSTEM_LABEL[s]).join(", ")} — the row carries a test badge.` : "";
   const policyNote = superseded
     ? ` The active run for ${req.activeConflictSubject} was superseded and left the queue; it keeps its receipt.`
@@ -1060,7 +1066,7 @@ export function submitDemoEnqueue(req: EnqueueRequest): DemoEnqueueResult {
     ...base,
     state: "applied",
     headline: req.dryRun ? "Dry run enqueued" : "Run enqueued",
-    detail: `${req.plan.headline} for ${scope}.${policyNote}${dryNote}${dupeNote}${testNote}`,
+    detail: `${req.plan.headline} for ${scope}.${policyNote}${dryNote}${dupeNote}${crmNote}${testNote}`,
     created: req.plan.rows.filter((r) => r.bornAs !== "not yet created"),
   };
 }
