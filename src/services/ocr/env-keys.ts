@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ApiError, GoogleGenAI } from "@google/genai";
 import { log } from "../../utils/log.js";
 
 const GEMINI_KEY_BASE = "GEMINI_API_KEY";
@@ -33,7 +33,13 @@ export async function callGeminiJsonText(
     } catch (err) {
       lastError = err;
       const message = err instanceof Error ? err.message : String(err);
-      if (/401|unauthor|invalid\s*api\s*key/i.test(message)) {
+      // Prefer the SDK's structured status over the message regex — a message
+      // format change would otherwise stop this loop from recognizing an auth
+      // failure and keep walking keys that cannot work.
+      const isAuthError =
+        (err instanceof ApiError && err.status === 401) ||
+        /401|unauthor|invalid\s*api\s*key/i.test(message);
+      if (isAuthError) {
         log.warn(`${logTag}: auth error on Gemini key — ${message}`);
         break;
       }
@@ -47,15 +53,22 @@ export async function callGeminiJsonTextWithKey(
   key: string,
   prompt: string,
 ): Promise<string> {
-  const genai = new GoogleGenerativeAI(key);
-  const model = genai.getGenerativeModel({
+  const genai = new GoogleGenAI({ apiKey: key });
+  const raw = await genai.models.generateContent({
     model: "gemini-2.5-flash",
-    generationConfig: { responseMimeType: "application/json" },
+    contents: [{ text: prompt }],
+    config: { responseMimeType: "application/json" },
   });
-  const raw = (await model.generateContent([{ text: prompt }])) as {
-    response: { text(): string };
-  };
-  return raw.response.text();
+  // `response.text` is a getter yielding undefined when the candidate carries
+  // no text part. Throw so `callGeminiJsonText` can rotate to the next key
+  // instead of handing an empty string to `parseJsonLoose`.
+  const text = raw.text;
+  if (text === undefined) {
+    throw new Error(
+      `Gemini returned no text part (finishReason=${raw.candidates?.[0]?.finishReason ?? "unknown"})`,
+    );
+  }
+  return text;
 }
 
 /**
