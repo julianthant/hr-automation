@@ -29,6 +29,36 @@ import {
 
 export const NEW_KRONOS_URL = "https://ucsd-sso.prd.mykronos.com/wfd/home";
 
+// ─── "Select range" date-picker pacing ────────────────────────────────────
+// WFD's range picker is an Angular widget whose model updates a digest AFTER
+// the DOM click; driving it faster than it settles is what produced the
+// 2026-07-30 "did not stick" → abort. These are deliberately unhurried — the
+// picker runs at most twice per separation doc, so a slower, reliable pass is
+// strictly cheaper than a failed run. Override per-environment if needed.
+const num = (env: string | undefined, fallback: number): number => {
+  const n = Number(env);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+/** Settle after the timeframe dropdown opens. */
+const PICKER_OPEN_MS = num(process.env.KRONOS_PICKER_OPEN_MS, 3_000);
+/** Settle after "Select range" reveals the date fields + calendar. */
+const PICKER_RANGE_MS = num(process.env.KRONOS_PICKER_RANGE_MS, 2_000);
+/** Settle after clicking a field so the shared calendar binds to it. */
+const CALENDAR_BIND_MS = num(process.env.KRONOS_CALENDAR_BIND_MS, 800);
+/** Settle after a calendar day click / unparseable-header retry. */
+const CALENDAR_SETTLE_MS = num(process.env.KRONOS_CALENDAR_SETTLE_MS, 600);
+/** Poll interval while waiting for a month step to land. */
+const CALENDAR_POLL_MS = num(process.env.KRONOS_CALENDAR_POLL_MS, 250);
+/** Budget for ONE month step to move the header. */
+const CALENDAR_STEP_TIMEOUT_MS = num(process.env.KRONOS_CALENDAR_STEP_TIMEOUT_MS, 4_000);
+/** Budget for a range field to settle on the value we just set. */
+const RANGE_READBACK_TIMEOUT_MS = num(process.env.KRONOS_RANGE_READBACK_TIMEOUT_MS, 5_000);
+/** Poll interval for the range-field readback. */
+const RANGE_READBACK_POLL_MS = num(process.env.KRONOS_RANGE_READBACK_POLL_MS, 250);
+/** Settle after Apply so the grid re-renders before it is read. */
+const PICKER_APPLY_MS = num(process.env.KRONOS_PICKER_APPLY_MS, 3_500);
+
 /**
  * The WFD Employee Search sidebar renders its input/results either INSIDE the
  * portal-frame iframe (fresh page load) or TOP-LEVEL on the page (e.g. when
@@ -519,11 +549,12 @@ export async function switchToPreviousPayPeriod(page: Page): Promise<boolean> {
   // Use payPeriodTriggerButton (regex-based) so it matches regardless of whether
   // the button shows "Current Pay Period" or a date range after setDateRange runs.
   const periodBtn = timecard.payPeriodTriggerButton(page);
-  // Positive-assert baseline: the trigger button always displays the active
-  // period ("Current Pay Period" / "Previous Pay Period" / a date range), so
-  // its text before the switch is the comparison point for the post-switch
-  // readback below.
-  const beforeLabel = (await periodBtn.textContent().catch(() => null))?.trim() ?? "";
+  // Positive-assert baseline: the ACTIVE-PERIOD LABEL ("Current Pay Period" /
+  // "Previous Pay Period" / a date range) before the switch is the comparison
+  // point for the post-switch readback below. Read via `readPeriodLabel` — the
+  // trigger BUTTON's own textContent is empty (aria-labelledby), which made
+  // this baseline blank and threw the "cannot be verified" branch every time.
+  const beforeLabel = await readPeriodLabel(page);
   if (await clickIfPresent(periodBtn, { timeout: 5_000, label: "new kronos pay period trigger button" })) {
     await page.waitForTimeout(2_000);
 
@@ -538,7 +569,7 @@ export async function switchToPreviousPayPeriod(page: Page): Promise<boolean> {
       // the SAME trigger-button selector and fail loud if it still shows the
       // pre-switch label (or is still literally "Current Pay Period"), instead
       // of letting the caller read the grid believing the switch landed.
-      const afterLabel = (await timecard.payPeriodTriggerButton(page).textContent().catch(() => null))?.trim() ?? "";
+      const afterLabel = await readPeriodLabel(page);
       if (!didPeriodLabelSwitch(beforeLabel, afterLabel, /current pay period/i)) {
         const detail = beforeLabel.trim()
           ? `the pay-period trigger button did not switch (before="${beforeLabel}", after="${afterLabel}")`
@@ -878,6 +909,46 @@ export function toIsoDate(dateStr: string): string {
 }
 
 /**
+ * Normalize whatever the WFD range field reads back into ISO `YYYY-MM-DD`, so
+ * the verify compares CALENDAR DATES rather than string spellings.
+ *
+ * The field is dual-mode (`ng-attr-type="{{rangeInput.useNativeDateInput ?
+ * 'date' : 'text'}}"`), so its `.value` is ISO in native mode but locale
+ * `M/D/YYYY` in text mode — and WFD does not even pad consistently between the
+ * two fields (live 2026-07-30: start read `07/30/2026` while end read
+ * `7/30/2026` in the same open picker). Returns `null` for empty/unrecognized
+ * input so the caller FAILS LOUD instead of guessing.
+ *
+ * This is normalization, not a fallback: `5/10/2026` and `2026-05-10` are the
+ * same day, and anything that isn't a parseable date still fails. Pure +
+ * unit-pinned.
+ */
+export function normalizeRangeDateReadback(raw: string): string | null {
+  const value = raw.trim();
+  // Native mode reads back ISO `YYYY-MM-DD`; text mode reads back locale
+  // `M/D/YYYY`. Anything else is an unreadable field, not a date.
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const us = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!iso && !us) return null;
+
+  const year = Number(iso ? iso[1] : us![3]);
+  const month = Number(iso ? iso[2] : us![1]);
+  const day = Number(iso ? iso[3] : us![2]);
+
+  // Round-trip so an impossible day (2026-02-31, 2/31/2026) can never pass the
+  // verify as though the field held a real date.
+  const roundTrip = new Date(year, month - 1, day);
+  if (
+    roundTrip.getFullYear() !== year
+    || roundTrip.getMonth() !== month - 1
+    || roundTrip.getDate() !== day
+  ) {
+    return null;
+  }
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
  * `M/D/YYYY` → local-midnight `Date`. Throws on a malformed string (via
  * `parseMmddyyyy`). Used to build the `TimecardDateRange` that
  * `getSeparationTimecardData` resolves grid dates against from the same
@@ -967,6 +1038,22 @@ async function dumpDatePickerStructure(page: Page, label: string): Promise<void>
 }
 
 /**
+ * Read the ACTIVE-period label ("Current Pay Period" / "5/10/2026 -
+ * 8/10/2026") — the baseline + proof that a period switch actually landed.
+ *
+ * Reads `timecard.payPeriodLabel`, NOT the trigger button: the trigger is an
+ * icon-only button named via `aria-labelledby`, so its own `textContent` is
+ * always "" (live 2026-07-30). Every period-switch verify that read the button
+ * therefore saw a BLANK label and threw "cannot be verified". Returns "" when
+ * genuinely unreadable so the callers' fail-loud blank-baseline branch still
+ * fires — this never invents a label.
+ */
+async function readPeriodLabel(page: Page): Promise<string> {
+  const raw = await timecard.payPeriodLabel(page).textContent({ timeout: 5_000 }).catch(() => null);
+  return (raw ?? "").replace(/\s+/g, " ").trim();
+}
+
+/**
  * Step the moment-picker calendar to `target`'s month/year by clicking the
  * Previous/Next-month arrows, re-reading the header each step so it converges
  * even if a click is dropped. Bounded (24 steps) so a stuck header can't spin
@@ -980,14 +1067,33 @@ async function navigateCalendarToMonth(page: Page, target: ParsedDate): Promise<
     const current = parseCalendarHeaderOrdinal(headerText);
     if (current === want) return;
     if (current === null) {
-      if (i < 3) { await page.waitForTimeout(300); continue; } // header not rendered yet
+      if (i < 5) { await page.waitForTimeout(CALENDAR_SETTLE_MS); continue; } // header not rendered yet
       return; // genuinely unparseable — let the readback verify fail loud
     }
     const arrow = want < current
       ? timecard.calendarPrevMonth(page)
       : timecard.calendarNextMonth(page);
     await arrow.click({ timeout: 5_000 });
-    await page.waitForTimeout(300);
+    // Wait for the header to actually MOVE off `current` rather than sleeping a
+    // flat guess — a dropped/slow month step otherwise burns a loop iteration
+    // and can overshoot once the click lands late (the "jamming" mode).
+    await waitForCalendarHeaderChange(page, current);
+  }
+}
+
+/**
+ * Poll the moment-picker header until it no longer reads `fromOrdinal` (i.e.
+ * the month step landed), bounded by `CALENDAR_STEP_TIMEOUT_MS`. Best-effort:
+ * on timeout we return and let the loop re-read/re-step, and the caller's
+ * readback verify is the real gate.
+ */
+async function waitForCalendarHeaderChange(page: Page, fromOrdinal: number): Promise<void> {
+  const deadline = Date.now() + CALENDAR_STEP_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(CALENDAR_POLL_MS);
+    const text = ((await timecard.calendarMonthHeader(page).textContent().catch(() => "")) ?? "").trim();
+    const now = parseCalendarHeaderOrdinal(text);
+    if (now !== null && now !== fromOrdinal) return;
   }
 }
 
@@ -1004,66 +1110,122 @@ async function pickRangeDateViaCalendar(
   target: ParsedDate,
 ): Promise<void> {
   await input.click({ timeout: 5_000 });
-  await page.waitForTimeout(400);
+  // The shared calendar re-binds to the clicked field on focus; give the
+  // Angular digest room before reading the header (live 2026-07-30: clicking
+  // the end field does NOT re-sync the grid to that field's month, so the
+  // month navigator below must start from whatever is on screen).
+  await page.waitForTimeout(CALENDAR_BIND_MS);
   await navigateCalendarToMonth(page, target);
   await timecard
     .calendarDayCell(page, calendarDayLabelPattern(target))
     .first()
     .click({ timeout: 5_000 });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(CALENDAR_SETTLE_MS);
 }
 
 /**
  * Set ONE of WFD's "Select range" date fields and VERIFY the readback.
  *
- * These are NATIVE `<input type=date>` controls (`#startDateTimeInput` /
- * `#endDateTimeInput`, value held as ISO `YYYY-MM-DD`) — NOT the JS-masked text
- * inputs the old code assumed. Every prior fix fed them `MM/DD/YYYY`, which a
- * native date input silently rejects (it keeps today's value → OBS-006's "fill
- * reverts to today", and per-key typing scrambled the segmented mask →
- * WFP-00889 / ISS-B05). The fix is to speak the input's own language:
+ * The field is **DUAL-MODE** — the live DOM is
+ * `<input ng-attr-type="{{rangeInput.useNativeDateInput ? 'date' : 'text'}}"
+ *  ng-model="rangeInput.useNativeDateInput ? rangeInput.isoStartDate
+ *            : rangeInput.formattedStartDate">`
+ * so the SAME id is a native date input on some renders and an Angular-managed
+ * masked TEXT input on others. Both prior models of this field were half-right,
+ * and each broke the other mode:
+ *   - native mode: `.value` is ISO, `fill(iso)` sticks;
+ *   - text mode:   `.value` is locale `M/D/YYYY`, keystrokes go through
+ *     `ng-keydown → rangeInput.handleKeydown`, and a programmatic `fill()` of
+ *     EITHER format is wiped by the next Angular digest (live-proven
+ *     2026-07-30: filling `2026-05-10` and `05/10/2026` both reverted to
+ *     `07/30/2026`).
  *
- *   1. FAST PATH — `fill()` the ISO string. Playwright sets a native date
- *      input's value directly (no segment race), and the inputValue reads back
- *      as ISO, so the verify is exact.
- *   2. FALLBACK — if the model didn't accept the programmatic fill, click
- *      through the visible moment-picker calendar (`pickRangeDateViaCalendar`).
- *   3. Re-read and FAIL LOUD if the field still doesn't equal the wanted ISO,
- *      rather than applying a wrong timecard window.
+ * Strategy, by mode:
+ *   1. NATIVE — `fill()` the ISO string (fast path), then verify.
+ *   2. TEXT (or unknown) — go straight to the moment-picker calendar. It drives
+ *      the widget's own model, so it is the ONE path that works in both modes.
+ *   3. Verify by CALENDAR DATE (`normalizeRangeDateReadback`), not string
+ *      equality — text mode reads back `5/10/2026`, native reads `2026-05-10`,
+ *      and WFD does not pad consistently even between its own two fields. The
+ *      2026-07-30 production abort was exactly this: the calendar had ALREADY
+ *      set the right day and the ISO string compare rejected it.
+ *   4. FAIL LOUD if the field still isn't the wanted day, rather than applying
+ *      a wrong timecard window.
  */
 async function setRangeDate(page: Page, input: Locator, dateStr: string, label: string): Promise<void> {
   const target = parseMmddyyyy(dateStr);
-  const wantIso = `${target.year}-${String(target.monthIndex + 1).padStart(2, "0")}-${String(target.day).padStart(2, "0")}`;
+  const wantIso = toIsoDate(dateStr);
+  const mode = await rangeInputMode(input);
 
-  try {
-    await input.fill(wantIso, { timeout: 5_000 });
-  } catch {
-    // Native fill rejected outright — fall through to the calendar.
+  if (mode === "date") {
+    try {
+      await input.fill(wantIso, { timeout: 5_000 });
+    } catch {
+      // Native fill rejected outright — fall through to the calendar.
+    }
+    if (await rangeDateSettlesTo(input, wantIso)) return;
+    log.warn(
+      `[New Kronos] ${label} date fill did not stick (native mode) — picking ${dateStr} via the calendar grid`,
+    );
+  } else {
+    // Text mode: a programmatic fill is provably wiped by the Angular digest,
+    // so don't waste a round trip (or leave a dirty half-set value) on it.
+    log.step(`[New Kronos] ${label} date: setting ${dateStr} via the calendar grid (text-mode field)`);
   }
-  if ((await input.inputValue().catch(() => "")) === wantIso) return;
 
-  log.warn(`[New Kronos] ${label} date fill did not stick — picking ${dateStr} via the calendar grid`);
   await pickRangeDateViaCalendar(page, input, target);
+  if (await rangeDateSettlesTo(input, wantIso)) return;
 
   const after = await input.inputValue().catch(() => "");
-  if (after === wantIso) return;
   throw new Error(
     `[New Kronos] Could not set ${label} date to ${dateStr} — the field reads `
-    + `"${after || "<empty>"}" (wanted ISO ${wantIso}). Aborting before applying `
-    + `a wrong timecard range (WFP-00889).`,
+    + `"${after || "<empty>"}" (normalized `
+    + `"${normalizeRangeDateReadback(after) ?? "<unparseable>"}", wanted ${wantIso}; `
+    + `input mode "${mode}"). Aborting before applying a wrong timecard window (WFP-00889).`,
   );
+}
+
+/**
+ * Which mode the dual-mode range field is currently rendering in. Read from the
+ * resolved `type` attribute — `ng-attr-type` has already been evaluated by the
+ * time the picker is open. `"unknown"` (attribute missing/unreadable) is
+ * treated as text mode by the caller, i.e. it takes the calendar path that
+ * works in BOTH modes — never a guess about the value format.
+ */
+async function rangeInputMode(input: Locator): Promise<"date" | "text" | "unknown"> {
+  const type = await input.getAttribute("type").catch(() => null);
+  if (type === "date") return "date";
+  if (type === "text") return "text";
+  return "unknown";
+}
+
+/**
+ * Poll the field until it reads the wanted DAY (in either mode's spelling),
+ * bounded by `RANGE_READBACK_TIMEOUT_MS`. Polling rather than a single read is
+ * what stops the Angular digest from racing the verify — the old code read once
+ * a fixed 300ms after the click, which is the "jam and error out" window.
+ */
+async function rangeDateSettlesTo(input: Locator, wantIso: string): Promise<boolean> {
+  const deadline = Date.now() + RANGE_READBACK_TIMEOUT_MS;
+  for (;;) {
+    const raw = await input.inputValue().catch(() => "");
+    if (normalizeRangeDateReadback(raw) === wantIso) return true;
+    if (Date.now() >= deadline) return false;
+    await input.page().waitForTimeout(RANGE_READBACK_POLL_MS);
+  }
 }
 
 /**
  * Set a custom date range on the New Kronos timecard view.
  * Must be called after navigating to the Timecards page.
  *
- * Mapped via playwright-cli 2026-04-06; native-date-input rework 2026-06-22
- * (ISS-B05, after a live DOM dump proved the fields are `<input type=date>`):
+ * Mapped via playwright-cli 2026-04-06; dual-mode rework 2026-07-30 (live DOM
+ * proved the fields are `ng-attr-type`-switched between `date` and `text`):
  *   1. Click "Current Pay Period" button → opens the timeframe dropdown
- *   2. Click "Select range" → reveals the native Start/End date inputs + calendar
- *   3. `setRangeDate` each field: native ISO `fill()` (fast path) → calendar
- *      grid click (fallback) → readback verify (fail loud), see `setRangeDate`
+ *   2. Click "Select range" → reveals the Start/End date inputs + calendar
+ *   3. `setRangeDate` each field: mode-aware set (native ISO `fill()` fast path
+ *      / calendar grid for text mode) → polled calendar-date readback verify
+ *      (fail loud), see `setRangeDate`
  *   4. Click "Apply"
  *
  * After applying, the button text changes from "Current Pay Period"
@@ -1076,10 +1238,10 @@ export async function setDateRange(
 ): Promise<void> {
   log.step(`[New Kronos] Setting date range: ${startDate} – ${endDate}`);
 
-  // Positive-assert baseline (read BEFORE any interaction): the trigger
-  // button always displays the active period, so its text now is the
-  // comparison point for the post-Apply readback below.
-  const beforeLabel = (await timecard.payPeriodTriggerButton(page).textContent().catch(() => null))?.trim() ?? "";
+  // Positive-assert baseline (read BEFORE any interaction): the active-period
+  // LABEL now is the comparison point for the post-Apply readback below. Read
+  // via `readPeriodLabel`, not the icon-only trigger button (empty textContent).
+  const beforeLabel = await readPeriodLabel(page);
 
   // Step 1: Click the timeframe button to open the dropdown
   // The button text varies: "Current Pay Period", "Previous Pay Period", or a date range string
@@ -1087,30 +1249,52 @@ export async function setDateRange(
     timeout: 10_000,
     label: "new kronos pay period trigger button",
   });
-  await page.waitForTimeout(2_000);
+  await page.waitForTimeout(PICKER_OPEN_MS);
 
   // Step 2: Click "Select range" to switch to custom date range mode
   await safeClick(timecard.selectRangeButton(page), {
     timeout: 5_000,
     label: "new kronos select range button",
   });
-  await page.waitForTimeout(1_000);
+  await page.waitForTimeout(PICKER_RANGE_MS);
+
+  // The fields render a beat after the panel does; wait for the one we touch
+  // first to be actually interactive rather than trusting the settle above.
+  await timecard
+    .startDateInput(page)
+    .waitFor({ state: "visible", timeout: 10_000 })
+    .catch(() => {
+      /* Not visible yet — setRangeDate's own click/readback reports it loudly. */
+    });
 
   // DEBUG (DEBUG_SCREENSHOTS=1): capture the open picker's DOM (kept while the
   // native-input + calendar-grid path is verified live; remove once stable).
   await dumpDatePickerStructure(page, "open");
 
-  // Step 3: Set + verify each native date input (ISO fill → calendar fallback).
+  // Step 3: Set + verify each date input (mode-aware; see `setRangeDate`).
+  // Both fields are set BEFORE Apply, and each verifies its own readback, so a
+  // half-set range can never reach the grid.
   await setRangeDate(page, timecard.startDateInput(page), startDate, "start");
   await setRangeDate(page, timecard.endDateInput(page), endDate, "end");
+
+  // Setting the end date can nudge the start field (the widget auto-advances
+  // between the two tabs), so re-verify the start still holds the wanted day
+  // before Apply — otherwise a silently-reset start applies a wrong window.
+  if (!(await rangeDateSettlesTo(timecard.startDateInput(page), toIsoDate(startDate)))) {
+    const drifted = await timecard.startDateInput(page).inputValue().catch(() => "");
+    throw new Error(
+      `[New Kronos] Start date drifted to "${drifted || "<empty>"}" after setting the end date `
+      + `(wanted ${startDate}) — refusing to Apply a wrong timecard window (WFP-00889).`,
+    );
+  }
 
   // Step 4: Click Apply
   await safeClick(timecard.applyButton(page), {
     timeout: 5_000,
     label: "new kronos date range apply button",
   });
-  // Wait for WFD to reload the timecard grid with the new range (reduced from 5s).
-  await page.waitForTimeout(2_500);
+  // Wait for WFD to reload the timecard grid with the new range.
+  await page.waitForTimeout(PICKER_APPLY_MS);
 
   // Positive assert: `setRangeDate`'s readback above only proves the DIALOG
   // fields accepted the ISO dates — it does not prove the underlying timecard
@@ -1120,7 +1304,7 @@ export async function setDateRange(
   // period) and fail loud if it still shows the PRE-switch label, so a grid
   // that silently stayed on the OLD period is never read as though the
   // requested range is active.
-  const afterLabel = (await timecard.payPeriodTriggerButton(page).textContent().catch(() => null))?.trim() ?? "";
+  const afterLabel = await readPeriodLabel(page);
   if (!didPeriodLabelSwitch(beforeLabel, afterLabel)) {
     const detail = beforeLabel.trim()
       ? `did not update the displayed period (before="${beforeLabel}", after="${afterLabel}")`
