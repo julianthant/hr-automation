@@ -1,7 +1,10 @@
 # 10 — Guard & Test Architecture SSOT (`temp_src`)
 
-Status: **revised 2026-07-22 after the whole-plan/legacy-code review; amended 2026-07-31
-(Round 10).** No `temp_src` guard implementation currently exists; this document now covers strict
+Status: **Phase 1a pre-tree scaffold implemented 2026-07-31; revised 2026-07-22 after the
+whole-plan/legacy-code review; amended 2026-07-31 (Round 10).** `temp_src` remains absent by design,
+but the reviewed guard inventory, D58/D90/preservation/disposition manifests, semantic legacy-lint
+ratchet, exact runtime-isolation contract, and planned-state rebuild lint/test/coverage launchers
+now exist. Source-scanning guard arms activate atomically with the first `temp_src` file. This document covers strict
 schemas, semantic UI/driver boundaries, subject binding, queue commands/delegation,
 evidence/scenarios, notifications, and authority-store recovery in addition to the existing rebuild
 safety promises. **Round 10 amends §3.13** to replace frozen-tree enforcement with strict runtime
@@ -399,9 +402,39 @@ Four ratified decisions are worthless as prose. Each gets a guard, and each guar
   possible-submit being buried; (3) archiving never touches the write ledger.
 
 - **`runtime-isolation.test.ts` + `legacy-change-accounting.test.ts` (D88/D90 — charter/doc 03).**
-  Source scans ban imports/invocation across `src`↔`temp_src`; configuration fixtures require
-  distinct commands/entrypoints, state/artifact roots, ports, process locks, and browser
-  profiles/sessions. Production composition roots may register only their own engine. The legacy
+  A finite TypeScript-AST normal form consumes the closed `forbiddenBridgeClasses` registry; it is
+  intentionally not described as whole-language runtime soundness. Lexical environments prove
+  only supported literal/`const` expressions and exact properties of the current side's runtime
+  binding. Every `temp_src` file plus every new/modified/hash-mismatched `src` file is strict: each
+  direct dynamic import/`require`, process, filesystem/state/profile, runtime HTTP, or
+  proxy/forward/remount sink must resolve its load-bearing target, and an unresolved/computed target
+  fails in that sink's existing owning bridge class instead of becoming a non-match. Dangerous
+  named/default/namespace capabilities may occur only as direct audited callees or constructors;
+  assignment/reassignment,
+  `.bind`/`.call`/`.apply`, object/array/class wrapping, return/callback argument, computed member
+  selection, loader factory/alias, and re-export are capability escapes. A closed manifest catalog
+  maps filesystem (`fs`/promises), HTTP/network (`http`/`https`/`http2`/`net`/`tls`/`dgram` plus
+  `undici`/`ws`), process/code execution (`child_process`/workers/cluster/`vm`), module loaders, and
+  Playwright/Puppeteer packages to their owning classes. **Every** non-type binding/member from a
+  catalogued family inherits that classification regardless of export name; `CallExpression` and
+  `NewExpression` use the same operand proof. Computed selection from a runtime-global root fails
+  closed in `cross-tree-runtime-bridge`. An exhaustive path→whole-file-SHA map in
+  `legacy-preservation.json` is the sole preservation-mode authority: an exact matching legacy file
+  suppresses only unresolved side-local/escape-shaped debt already frozen in that content, while
+  statically resolved legacy→rebuild imports, resources, ports, and profiles still fail. A missing,
+  stale, added, or modified file cannot claim preservation and is scanned strictly. The activation
+  replay copies the actual `src`, adds a minimal valid runtime-bound `temp_src`, and requires zero;
+  mutation fixtures then prove preserved known crossings still fail and unresolved sinks in new or
+  hash-mismatched legacy files fail closed. Missing/duplicate module families or specifiers and
+  missing/stale preservation paths/hashes fail the binding audit, while comments, declarations, and
+  type-only imports/exports do not count as runtime use.
+  Active configuration fixtures require
+  exact commands and an exported direct-`const` `defineRuntimeIsolation` call for the state/artifact
+  roots, ports, process lock, and browser profile/session. The manifest pins the config factory and
+  every composition factory by module + export and declares the exact binding argument path (for
+  example `0.isolation`); each composition root must use unshadowed named imports in one direct
+  top-level call. Identifier mention or a call hidden in an uninvoked function is not proof.
+  The legacy
   tree remains editable: every touched legacy production/test path must map to affected capability
   ids and a rebuild recheck/disposition; deletion fails through initial cutover. The diagnostic
   ratchet rejects new/replaced lint fingerprints in legacy tests while rebuild source/tests retain
@@ -522,14 +555,16 @@ nobody notices the umbrella shrank. Extends the existing `gate-coverage` meta-gu
 `docs/rebuild/guard-inventory.json` is the reviewed design inventory (owner, invariant, replacement
 required on removal). `tests/unit/architecture/guard-manifest.test.ts` loads it rather than defining
 a second inline name set. The test asserts:
-1. every inventory name maps to a real file under `tests/unit/architecture/`;
-2. every `*.test.ts` file present is in the inventory (no unregistered guard — forces a
+1. every inventory name maps to a real file recursively under `tests/unit/architecture/`;
+2. every recursively discovered `*.test.ts` file is in the inventory (no unregistered guard — forces a
    conscious add, and forces this doc's inventory to stay honest);
-3. `test:architecture` in `package.json` still globs the directory (a rename can't orphan the suite);
+3. `test:architecture` in `package.json` selects the complete directory exactly, with no narrower
+   file/glob/project/config/exclude escape hatch (a rename or nested guard cannot orphan the suite);
 4. every active `temp_src` scan resolves at least one file; a family is activated in the same commit
    as its first file, and `ENOENT`/an unmatched glob is never converted to green;
-5. the `temp_src`-scoped ratchets (the extend-set in §2) each still include a `temp_src` glob token,
-   so nobody can quietly narrow a ratchet back to legacy `src/` only during coexistence;
+5. the `temp_src`-scoped ratchets (the extend-set in §2) each have a registered executable scanner;
+   every scanner is run against a violating fixture so a comment or dead declaration cannot stand in
+   for enforcement, and active scanner results are non-empty;
 6. `gate-coverage`'s existing assertions (both `tsc` programs, `--max-warnings 0`) are kept inline;
 7. ESLint's CLI target and the matching `eslint.config.js` typed rule block both include `temp_src`;
 8. D70's four lint scripts exist with exact scopes: new source/tests use zero-debt strict lint,

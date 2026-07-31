@@ -1,7 +1,14 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  REPO_ROOT,
+  auditCountAllowlist,
+  repoRelative,
+  walkFiles,
+  type CountAllowlist,
+} from "./helpers/guard-files.js";
 
 /**
  * Guard: extends `tests/unit/systems/inline-selectors.test.ts`'s rule (no
@@ -24,23 +31,8 @@ import { join, relative } from "node:path";
  * src/workflows/** fail the guard immediately.
  */
 
-const ROOT = process.cwd();
+const ROOT = REPO_ROOT;
 const WORKFLOWS_DIR = join(ROOT, "src", "workflows");
-
-function walk(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    const stat = statSync(full);
-    if (stat.isDirectory()) out.push(...walk(full));
-    else if (full.endsWith(".ts")) out.push(full);
-  }
-  return out;
-}
-
-function rel(path: string): string {
-  return relative(ROOT, path);
-}
 
 // Same conservative pattern set as tests/unit/systems/inline-selectors.test.ts.
 const INLINE_PATTERNS: Array<{ name: string; re: RegExp }> = [
@@ -54,7 +46,7 @@ const INLINE_PATTERNS: Array<{ name: string; re: RegExp }> = [
 ];
 
 /** file (relative to repo root) -> { count, reason } */
-const ALLOWLIST: Record<string, { count: number; reason: string }> = {};
+const ALLOWLIST: CountAllowlist = {};
 
 function countInlineSelectors(content: string): number {
   if (content.includes("// allow-inline-selectors")) return 0;
@@ -82,30 +74,20 @@ const FIX_GUIDANCE =
 describe("inline-selectors guard: src/workflows/**", () => {
   it("src/workflows/** files contain no new unallowlisted inline Playwright selector constructors", () => {
     const found = new Map<string, number>();
-    for (const file of walk(WORKFLOWS_DIR)) {
+    for (const file of walkFiles(WORKFLOWS_DIR, { extensions: [".ts"] })) {
       const content = readFileSync(file, "utf8");
       const n = countInlineSelectors(content);
-      if (n > 0) found.set(rel(file), n);
+      if (n > 0) found.set(repoRelative(file), n);
     }
 
-    const violations: string[] = [];
-    for (const [file, n] of found) {
-      const entry = ALLOWLIST[file];
-      if (!entry) {
-        violations.push(`${file}: ${n} unallowlisted inline selector(s) — new inline Playwright selector introduced outside the allowlist.`);
-        continue;
-      }
-      if (entry.count !== n) {
-        violations.push(
-          `${file}: allowlisted for ${entry.count} inline selector(s) but found ${n} — update the ALLOWLIST count (and reason, if the shape changed).`,
-        );
-      }
-    }
-    for (const file of Object.keys(ALLOWLIST)) {
-      if (!found.has(file)) {
-        violations.push(`${file}: allowlisted for ${ALLOWLIST[file].count} inline selector(s) but none found anymore — remove the stale entry.`);
-      }
-    }
+    const violations = auditCountAllowlist(found, ALLOWLIST, {
+      unallowlisted: (file, count) =>
+        `${file}: ${count} unallowlisted inline selector(s) — new inline Playwright selector introduced outside the allowlist.`,
+      changed: (file, expected, actual) =>
+        `${file}: allowlisted for ${expected} inline selector(s) but found ${actual} — update the ALLOWLIST count (and reason, if the shape changed).`,
+      stale: (file, expected) =>
+        `${file}: allowlisted for ${expected} inline selector(s) but none found anymore — remove the stale entry.`,
+    });
 
     assert.deepEqual(violations, [], `\n${FIX_GUIDANCE}\n\n${violations.join("\n")}`);
   });

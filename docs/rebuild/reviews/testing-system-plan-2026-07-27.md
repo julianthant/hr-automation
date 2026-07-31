@@ -98,9 +98,12 @@ an *honest* number over code that unit/scenario lanes can actually execute:
 | `tests/**` themselves, fixtures, scenario manifests | not product code | — |
 
 **Exclusion-creep guard:** the exclusion list lives in exactly one place (the coverage config) and
-the guard-of-guards manifest (doc 10 §5) pins its exact contents, fail-both-ways — adding a new
-exclusion pattern requires the same reviewed one-line reason as a ratchet allowlist entry, and a
-stale pattern matching nothing fails too. Nobody quietly shrinks the denominator to fake the band.
+the guard-of-guards manifest (doc 10 §5) pins its full contents, fail-both-ways. Each exclusion has
+an independently owned exact activation root and explicit `planned|active` status: planned requires
+both owner and matches absent; active requires the owner and at least one match. The broad `.d.ts`,
+raw-page, barrel, and CLI exclusions are intentionally not pre-authorized in Phase 1a because no
+independent owning family exists yet; add each only with its concrete owner. Adding a pattern still
+requires a reviewed reason. Nobody quietly shrinks the denominator to fake the band.
 
 ### 3.4 Thresholds — two tiers
 

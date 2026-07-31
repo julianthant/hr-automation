@@ -1,0 +1,396 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "353739ac9e1db01cae9da8a13da53605cd767574",
+  "entries": [
+    {
+      "path": "tests",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/_utils",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/delegation",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/delegation/_runtime",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/fixtures",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/fixtures/kronos-pay-rule",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/integration",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/integration/core",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/live",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/architecture",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/architecture/helpers",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/control",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/core",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/core/daemon",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/core/e2e",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/dashboard",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/dashboard/hono",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/dashboard/ocr",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/dashboard/workflow-graph",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/domain",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/domain/identity",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/domain/settings",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/domain/workflow-design",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/domain/workflow-presentation",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/infra",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/infra/auth",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/infra/browser",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/scripts",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/scripts/codegen",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/scripts/ops",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/scripts/selectors",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/services",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/services/address",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/services/capture",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/services/llm",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/services/matching",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/services/ocr",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/services/ocr/forms",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/services/timecard",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/systems",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/systems/common",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/systems/crm",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/systems/i9",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/systems/kuali",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/systems/new-kronos",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/systems/old-kronos",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/systems/onbase",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/systems/ucpath",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/tests",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/tracker",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/tracker/dashboard",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/tracker/dashboard/hono",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/tracker/exports",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/tracker/sessions",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/tracker/settings",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/tracker/state",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/tracker/tasks",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/tracker/workflow-design",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/tracker/workflow-presentation",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/utils",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/workflows",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/workflows/crm-doc-download",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/workflows/emergency-contact",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/workflows/i9-check",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/workflows/i9-lookup",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/workflows/oath-signature",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/workflows/oath-upload",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/workflows/ocr",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/workflows/old-kronos-reports",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/workflows/onbase",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/workflows/onboarding",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/workflows/person-lookup",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/workflows/separations",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/workflows/sharepoint-download",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/unit/workflows/work-study",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/workflows",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
+      "path": "tests/workflows/kronos-pay-rule",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    }
+  ]
+}

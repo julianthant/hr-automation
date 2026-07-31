@@ -1,0 +1,230 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "353739ac9e1db01cae9da8a13da53605cd767574",
+  "records": [
+    {
+      "path": "tests/unit/architecture/fail-loud-catch-default.test.ts",
+      "changeKind": "modified",
+      "beforeSha256": "9048531e4eaf96e93986f587469b574c2de2f1b8cc2b9217449ce452fa4e49bd",
+      "afterSha256": "f99bdf9bd78097c7b28c827c329f1c89a202a30b9574e5226c5e55c18aece21d",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/gate-coverage.test.ts",
+      "changeKind": "modified",
+      "beforeSha256": "09bc9f5e896dc2865f753bf8ede99b0dc60498fbfb69caef4432e2ed9a10d016",
+      "afterSha256": "f5bc6665064acd3926eed8841d05a2ee36a7db514d6d57bcffadae5ea5309f34",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/guard-manifest.test.ts",
+      "changeKind": "added",
+      "beforeSha256": null,
+      "afterSha256": "a5aec3bd225a9619a9a873c1afb818efb0a8d6be3ab0492569f6bf7089fe61e4",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/helpers/guard-files.ts",
+      "changeKind": "added",
+      "beforeSha256": null,
+      "afterSha256": "53420adeee3da1a3c5e213b7b82b0c15f4a93b143b4dd56f2f87bf3284e57929",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/helpers/rebuild-ratchet-arms.ts",
+      "changeKind": "added",
+      "beforeSha256": null,
+      "afterSha256": "7a9c3011f66c24b4d517600f840de8d4185ab807f655c6247e7b37bc1b8bbd79",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/helpers/runtime-isolation-audit.ts",
+      "changeKind": "added",
+      "beforeSha256": null,
+      "afterSha256": "fe673bd55a9e1f28515063eff2c4e32c6e44a1cf9f6bada4b6ec8ebed533af0c",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/inline-selectors-workflows.test.ts",
+      "changeKind": "modified",
+      "beforeSha256": "f0626dcc1d3a814e96777784fc32c8a0d00923c5dc4052b61f22563dc65ef7d4",
+      "afterSha256": "923541bbd3393945403e460ddca0aae83ce96fec0dec96d6306454a0488cb1f8",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/legacy-capability-disposition.test.ts",
+      "changeKind": "added",
+      "beforeSha256": null,
+      "afterSha256": "124d4b39aa9ad24dc7cacc911821fc70e8fb88f629f5341c7a1dc3f47545f85a",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/legacy-change-accounting.test.ts",
+      "changeKind": "added",
+      "beforeSha256": null,
+      "afterSha256": "09e87d4dcebe5dc9ab8c1a7841c1025aef6908a966f1b3dd37dbf3d85d6f1393",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/legacy-preservation.test.ts",
+      "changeKind": "added",
+      "beforeSha256": null,
+      "afterSha256": "f0ebd2559153a84dae89fb1cc46348a7c62e7a1366c7278ab44f76613528bb4f",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/legacy-test-disposition.test.ts",
+      "changeKind": "added",
+      "beforeSha256": null,
+      "afterSha256": "675b2523dc28ca2b925023718d2358bd1b6547f820b04e4bbfb7fbd5e133fcd2",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/legacy-test-lint-debt-ratchet.test.ts",
+      "changeKind": "added",
+      "beforeSha256": null,
+      "afterSha256": "d9f6249da11d545d4b54241c570ce39fc273d8e8b33006e0bc092102f1050193",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/nullish-literal-data-fallback.test.ts",
+      "changeKind": "modified",
+      "beforeSha256": "60ca6b0b8644e7367301482a7c9a1cec47f4210d035d262e5b2f219d4805a417",
+      "afterSha256": "e47e31669abcada1e829e79f8bea3b6710c6f1147f49c47e395473bffa3ba203",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/rebuild-gates.test.ts",
+      "changeKind": "added",
+      "beforeSha256": null,
+      "afterSha256": "35086eb59af822973c019ad9f373f7fb712f92e8cc41738616ce1b532f60b860",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/runtime-isolation.test.ts",
+      "changeKind": "added",
+      "beforeSha256": null,
+      "afterSha256": "b8014a3b47d9f31d44a4bcdb26b207eab9711500f207b3b497c40d7d651b936d",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/architecture/wait-for-timeout-allowlist.test.ts",
+      "changeKind": "modified",
+      "beforeSha256": "d0f3949d6e35ef2889bde2db6b68bc842ce33fce34b2a44aacd9353682e83b0f",
+      "afterSha256": "98580dfc139b368651d33915b37b252d74cdab24dd5a36431bab23da74a46088",
+      "capabilityIds": [
+        "legacy-dev-tool-architecture-guards"
+      ],
+      "rebuildRecheckIds": [
+        "npm:lint:legacy-tests-ratchet",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    }
+  ]
+}

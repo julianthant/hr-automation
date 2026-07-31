@@ -1,0 +1,1493 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "353739ac9e1db01cae9da8a13da53605cd767574",
+  "cutoverRequiresZeroOpen": true,
+  "proxyDispositionAllowed": false,
+  "entries": [
+    {
+      "id": "legacy-cli-daemon",
+      "sourcePaths": [
+        "src/cli-daemon.ts"
+      ],
+      "kind": "cli",
+      "knownConsumers": [
+        "daemon-cli"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "1f"
+      },
+      "ownerMilestone": "1f",
+      "verificationEvidence": [
+        "legacy-source-present:src/cli-daemon.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-cli-main",
+      "sourcePaths": [
+        "src/cli.ts"
+      ],
+      "kind": "cli",
+      "knownConsumers": [
+        "operator-cli"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/cli.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-dev-tool-architecture-guards",
+      "sourcePaths": [
+        "tests/unit/architecture"
+      ],
+      "kind": "dev-tool",
+      "knownConsumers": [
+        "architecture-test-gate"
+      ],
+      "disposition": {
+        "kind": "native",
+        "milestone": "1a",
+        "targetIds": [
+          "docs/rebuild/guard-inventory.json"
+        ]
+      },
+      "ownerMilestone": "1a",
+      "verificationEvidence": [
+        "npm run test:architecture"
+      ],
+      "status": "implemented"
+    },
+    {
+      "id": "legacy-dashboard-capture",
+      "sourcePaths": [
+        "src/dashboard/components/capture"
+      ],
+      "kind": "dashboard",
+      "knownConsumers": [
+        "dashboard-family:capture"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/dashboard/components/capture"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-dashboard-dev",
+      "sourcePaths": [
+        "src/dashboard/components/dev"
+      ],
+      "kind": "dashboard",
+      "knownConsumers": [
+        "dashboard-family:dev"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/dashboard/components/dev"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-dashboard-hooks",
+      "sourcePaths": [
+        "src/dashboard/components/hooks"
+      ],
+      "kind": "dashboard",
+      "knownConsumers": [
+        "dashboard-family:hooks"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/dashboard/components/hooks"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-dashboard-log-panel",
+      "sourcePaths": [
+        "src/dashboard/components/log-panel"
+      ],
+      "kind": "dashboard",
+      "knownConsumers": [
+        "dashboard-family:log-panel"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "1i-spine"
+      },
+      "ownerMilestone": "1i-spine",
+      "verificationEvidence": [
+        "legacy-source-present:src/dashboard/components/log-panel"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-dashboard-navigation",
+      "sourcePaths": [
+        "src/dashboard/components/navigation"
+      ],
+      "kind": "dashboard",
+      "knownConsumers": [
+        "dashboard-family:navigation"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/dashboard/components/navigation"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-dashboard-oath-upload",
+      "sourcePaths": [
+        "src/dashboard/components/oath-upload"
+      ],
+      "kind": "dashboard",
+      "knownConsumers": [
+        "dashboard-family:oath-upload"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/dashboard/components/oath-upload"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-dashboard-ocr",
+      "sourcePaths": [
+        "src/dashboard/components/ocr"
+      ],
+      "kind": "dashboard",
+      "knownConsumers": [
+        "dashboard-family:ocr"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/dashboard/components/ocr"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-dashboard-overview",
+      "sourcePaths": [
+        "src/dashboard/components/overview"
+      ],
+      "kind": "dashboard",
+      "knownConsumers": [
+        "dashboard-family:overview"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "1i-spine"
+      },
+      "ownerMilestone": "1i-spine",
+      "verificationEvidence": [
+        "legacy-source-present:src/dashboard/components/overview"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-dashboard-queue-panel",
+      "sourcePaths": [
+        "src/dashboard/components/queue-panel"
+      ],
+      "kind": "dashboard",
+      "knownConsumers": [
+        "dashboard-family:queue-panel"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "1i-spine"
+      },
+      "ownerMilestone": "1i-spine",
+      "verificationEvidence": [
+        "legacy-source-present:src/dashboard/components/queue-panel"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-dashboard-run-modal",
+      "sourcePaths": [
+        "src/dashboard/components/run-modal"
+      ],
+      "kind": "dashboard",
+      "knownConsumers": [
+        "dashboard-family:run-modal"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/dashboard/components/run-modal"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-dashboard-settings",
+      "sourcePaths": [
+        "src/dashboard/components/settings"
+      ],
+      "kind": "dashboard",
+      "knownConsumers": [
+        "dashboard-family:settings"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/dashboard/components/settings"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-dashboard-shared",
+      "sourcePaths": [
+        "src/dashboard/components/shared"
+      ],
+      "kind": "dashboard",
+      "knownConsumers": [
+        "dashboard-family:shared"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/dashboard/components/shared"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-dashboard-terminal-drawer",
+      "sourcePaths": [
+        "src/dashboard/components/terminal-drawer"
+      ],
+      "kind": "dashboard",
+      "knownConsumers": [
+        "dashboard-family:terminal-drawer"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/dashboard/components/terminal-drawer"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-dashboard-ui",
+      "sourcePaths": [
+        "src/dashboard/components/ui"
+      ],
+      "kind": "dashboard",
+      "knownConsumers": [
+        "dashboard-family:ui"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/dashboard/components/ui"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-dashboard-workflow-modifier",
+      "sourcePaths": [
+        "src/dashboard/components/workflow-modifier"
+      ],
+      "kind": "dashboard",
+      "knownConsumers": [
+        "dashboard-family:workflow-modifier"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/dashboard/components/workflow-modifier"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-export-export-excel",
+      "sourcePaths": [
+        "src/tracker/exports/export-excel.ts"
+      ],
+      "kind": "export",
+      "knownConsumers": [
+        "export:export-excel"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/exports/export-excel.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-export-i9-check-tracker",
+      "sourcePaths": [
+        "src/tracker/exports/i9-check-tracker.ts"
+      ],
+      "kind": "export",
+      "knownConsumers": [
+        "export:i9-check-tracker"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/exports/i9-check-tracker.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-export-spreadsheet",
+      "sourcePaths": [
+        "src/tracker/exports/spreadsheet.ts"
+      ],
+      "kind": "export",
+      "knownConsumers": [
+        "export:spreadsheet"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/exports/spreadsheet.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-ai-assist",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/ai-assist.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:ai-assist"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/ai-assist.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-base",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/base.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:base"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/base.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-capture",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/capture.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:capture"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/capture.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-daemon-stop",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/daemon-stop.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:daemon-stop"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/daemon-stop.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-daemon-stop-instance",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/daemon-stop-instance.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:daemon-stop-instance"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/daemon-stop-instance.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-enqueue",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/enqueue.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:enqueue"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/enqueue.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-entries-payload",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/entries-payload.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:entries-payload"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/entries-payload.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-files",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/files.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:files"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/files.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-hub",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/hub.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:hub"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/hub.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-oath-upload",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/oath-upload.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:oath-upload"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/oath-upload.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-ocr",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/ocr.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:ocr"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/ocr.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-ops",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/ops.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:ops"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/ops.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-projection",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/projection.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:projection"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/projection.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-screenshots",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/screenshots.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:screenshots"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/screenshots.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-search",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/search.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:search"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/search.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-settings",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/settings.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:settings"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/settings.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-sharepoint",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/sharepoint.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:sharepoint"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/sharepoint.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-static",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/static.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:static"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/static.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-tasks",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/tasks.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:tasks"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/tasks.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-workflow-design",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/workflow-design.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:workflow-design"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/workflow-design.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-route-workflow-presentation",
+      "sourcePaths": [
+        "src/tracker/dashboard/hono/routes/workflow-presentation.ts"
+      ],
+      "kind": "route",
+      "knownConsumers": [
+        "dashboard-route:workflow-presentation"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/tracker/dashboard/hono/routes/workflow-presentation.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-service-address",
+      "sourcePaths": [
+        "src/services/address"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "service:address"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2h"
+      },
+      "ownerMilestone": "2h",
+      "verificationEvidence": [
+        "legacy-source-present:src/services/address"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-service-capture",
+      "sourcePaths": [
+        "src/services/capture"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "service:capture"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2h"
+      },
+      "ownerMilestone": "2h",
+      "verificationEvidence": [
+        "legacy-source-present:src/services/capture"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-service-llm",
+      "sourcePaths": [
+        "src/services/llm"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "service:llm"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/services/llm"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-service-matching",
+      "sourcePaths": [
+        "src/services/matching"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "service:matching"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2h"
+      },
+      "ownerMilestone": "2h",
+      "verificationEvidence": [
+        "legacy-source-present:src/services/matching"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-service-ocr",
+      "sourcePaths": [
+        "src/services/ocr"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "service:ocr"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2h"
+      },
+      "ownerMilestone": "2h",
+      "verificationEvidence": [
+        "legacy-source-present:src/services/ocr"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-service-timecard",
+      "sourcePaths": [
+        "src/services/timecard"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "service:timecard"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "1d"
+      },
+      "ownerMilestone": "1d",
+      "verificationEvidence": [
+        "legacy-source-present:src/services/timecard"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-tool-codegen-export-schemas",
+      "sourcePaths": [
+        "src/scripts/codegen/export-schemas.ts"
+      ],
+      "kind": "codegen",
+      "knownConsumers": [
+        "tool:src/scripts/codegen/export-schemas.ts"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "1b"
+      },
+      "ownerMilestone": "1b",
+      "verificationEvidence": [
+        "legacy-source-present:src/scripts/codegen/export-schemas.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-tool-debug-kronos",
+      "sourcePaths": [
+        "src/scripts/debug/kronos.ts"
+      ],
+      "kind": "dev-tool",
+      "knownConsumers": [
+        "tool:src/scripts/debug/kronos.ts"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/scripts/debug/kronos.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-tool-main-module",
+      "sourcePaths": [
+        "src/scripts/main-module.ts"
+      ],
+      "kind": "maintenance",
+      "knownConsumers": [
+        "tool:src/scripts/main-module.ts"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/scripts/main-module.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-tool-ops-clean-tracker",
+      "sourcePaths": [
+        "src/scripts/ops/clean-tracker.ts"
+      ],
+      "kind": "maintenance",
+      "knownConsumers": [
+        "tool:src/scripts/ops/clean-tracker.ts"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/scripts/ops/clean-tracker.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-tool-ops-compact-tracker",
+      "sourcePaths": [
+        "src/scripts/ops/compact-tracker.ts"
+      ],
+      "kind": "maintenance",
+      "knownConsumers": [
+        "tool:src/scripts/ops/compact-tracker.ts"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/scripts/ops/compact-tracker.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-tool-ops-duo-webauthn-enroll",
+      "sourcePaths": [
+        "src/scripts/ops/duo-webauthn-enroll.ts"
+      ],
+      "kind": "maintenance",
+      "knownConsumers": [
+        "tool:src/scripts/ops/duo-webauthn-enroll.ts"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/scripts/ops/duo-webauthn-enroll.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-tool-ops-sanity-check-record",
+      "sourcePaths": [
+        "src/scripts/ops/sanity-check-record.ts"
+      ],
+      "kind": "maintenance",
+      "knownConsumers": [
+        "tool:src/scripts/ops/sanity-check-record.ts"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/scripts/ops/sanity-check-record.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-tool-ops-selector-suggest",
+      "sourcePaths": [
+        "src/scripts/ops/selector-suggest.ts"
+      ],
+      "kind": "maintenance",
+      "knownConsumers": [
+        "tool:src/scripts/ops/selector-suggest.ts"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/scripts/ops/selector-suggest.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-tool-ops-setup",
+      "sourcePaths": [
+        "src/scripts/ops/setup.ts"
+      ],
+      "kind": "maintenance",
+      "knownConsumers": [
+        "tool:src/scripts/ops/setup.ts"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/scripts/ops/setup.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-tool-ops-summarize-run",
+      "sourcePaths": [
+        "src/scripts/ops/summarize-run.ts"
+      ],
+      "kind": "maintenance",
+      "knownConsumers": [
+        "tool:src/scripts/ops/summarize-run.ts"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/scripts/ops/summarize-run.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-tool-ops-triage-failure",
+      "sourcePaths": [
+        "src/scripts/ops/triage-failure.ts"
+      ],
+      "kind": "maintenance",
+      "knownConsumers": [
+        "tool:src/scripts/ops/triage-failure.ts"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/scripts/ops/triage-failure.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-tool-selectors-catalog",
+      "sourcePaths": [
+        "src/scripts/selectors/catalog.ts"
+      ],
+      "kind": "codegen",
+      "knownConsumers": [
+        "tool:src/scripts/selectors/catalog.ts"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "1d"
+      },
+      "ownerMilestone": "1d",
+      "verificationEvidence": [
+        "legacy-source-present:src/scripts/selectors/catalog.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-tool-selectors-search",
+      "sourcePaths": [
+        "src/scripts/selectors/search.ts"
+      ],
+      "kind": "codegen",
+      "knownConsumers": [
+        "tool:src/scripts/selectors/search.ts"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "1d"
+      },
+      "ownerMilestone": "1d",
+      "verificationEvidence": [
+        "legacy-source-present:src/scripts/selectors/search.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-tool-selectors-search-lib",
+      "sourcePaths": [
+        "src/scripts/selectors/search-lib.ts"
+      ],
+      "kind": "codegen",
+      "knownConsumers": [
+        "tool:src/scripts/selectors/search-lib.ts"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "1d"
+      },
+      "ownerMilestone": "1d",
+      "verificationEvidence": [
+        "legacy-source-present:src/scripts/selectors/search-lib.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-tool-workflow-design-build-data-bank",
+      "sourcePaths": [
+        "src/scripts/workflow-design/build-data-bank.ts"
+      ],
+      "kind": "codegen",
+      "knownConsumers": [
+        "tool:src/scripts/workflow-design/build-data-bank.ts"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "2i"
+      },
+      "ownerMilestone": "2i",
+      "verificationEvidence": [
+        "legacy-source-present:src/scripts/workflow-design/build-data-bank.ts"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-workflow-crm-doc-download",
+      "sourcePaths": [
+        "src/workflows/crm-doc-download"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "workflow:crm-doc-download"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "phase-3-workflow-migration"
+      },
+      "ownerMilestone": "phase-3-workflow-migration",
+      "verificationEvidence": [
+        "legacy-source-present:src/workflows/crm-doc-download"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-workflow-emergency-contact",
+      "sourcePaths": [
+        "src/workflows/emergency-contact"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "workflow:emergency-contact"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "phase-3-workflow-migration"
+      },
+      "ownerMilestone": "phase-3-workflow-migration",
+      "verificationEvidence": [
+        "legacy-source-present:src/workflows/emergency-contact"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-workflow-i9-check",
+      "sourcePaths": [
+        "src/workflows/i9-check"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "workflow:i9-check"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "phase-3-workflow-migration"
+      },
+      "ownerMilestone": "phase-3-workflow-migration",
+      "verificationEvidence": [
+        "legacy-source-present:src/workflows/i9-check"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-workflow-i9-lookup",
+      "sourcePaths": [
+        "src/workflows/i9-lookup"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "workflow:i9-lookup"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "phase-3-workflow-migration"
+      },
+      "ownerMilestone": "phase-3-workflow-migration",
+      "verificationEvidence": [
+        "legacy-source-present:src/workflows/i9-lookup"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-workflow-kronos-pay-rule",
+      "sourcePaths": [
+        "src/workflows/kronos-pay-rule"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "workflow:kronos-pay-rule"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "phase-3-workflow-migration"
+      },
+      "ownerMilestone": "phase-3-workflow-migration",
+      "verificationEvidence": [
+        "legacy-source-present:src/workflows/kronos-pay-rule"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-workflow-oath-signature",
+      "sourcePaths": [
+        "src/workflows/oath-signature"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "workflow:oath-signature"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "phase-3-workflow-migration"
+      },
+      "ownerMilestone": "phase-3-workflow-migration",
+      "verificationEvidence": [
+        "legacy-source-present:src/workflows/oath-signature"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-workflow-oath-upload",
+      "sourcePaths": [
+        "src/workflows/oath-upload"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "workflow:oath-upload"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "phase-3-workflow-migration"
+      },
+      "ownerMilestone": "phase-3-workflow-migration",
+      "verificationEvidence": [
+        "legacy-source-present:src/workflows/oath-upload"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-workflow-ocr",
+      "sourcePaths": [
+        "src/workflows/ocr"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "workflow:ocr"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "phase-3-workflow-migration"
+      },
+      "ownerMilestone": "phase-3-workflow-migration",
+      "verificationEvidence": [
+        "legacy-source-present:src/workflows/ocr"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-workflow-old-kronos-reports",
+      "sourcePaths": [
+        "src/workflows/old-kronos-reports"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "workflow:old-kronos-reports"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "phase-3-workflow-migration"
+      },
+      "ownerMilestone": "phase-3-workflow-migration",
+      "verificationEvidence": [
+        "legacy-source-present:src/workflows/old-kronos-reports"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-workflow-onbase",
+      "sourcePaths": [
+        "src/workflows/onbase"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "workflow:onbase"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "phase-3-workflow-migration"
+      },
+      "ownerMilestone": "phase-3-workflow-migration",
+      "verificationEvidence": [
+        "legacy-source-present:src/workflows/onbase"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-workflow-onboarding",
+      "sourcePaths": [
+        "src/workflows/onboarding"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "workflow:onboarding"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "phase-3-workflow-migration"
+      },
+      "ownerMilestone": "phase-3-workflow-migration",
+      "verificationEvidence": [
+        "legacy-source-present:src/workflows/onboarding"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-workflow-person-lookup",
+      "sourcePaths": [
+        "src/workflows/person-lookup"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "workflow:person-lookup"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "phase-3-workflow-migration"
+      },
+      "ownerMilestone": "phase-3-workflow-migration",
+      "verificationEvidence": [
+        "legacy-source-present:src/workflows/person-lookup"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-workflow-separations",
+      "sourcePaths": [
+        "src/workflows/separations"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "workflow:separations"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "phase-3-workflow-migration"
+      },
+      "ownerMilestone": "phase-3-workflow-migration",
+      "verificationEvidence": [
+        "legacy-source-present:src/workflows/separations"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-workflow-sharepoint-download",
+      "sourcePaths": [
+        "src/workflows/sharepoint-download"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "workflow:sharepoint-download"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "phase-3-workflow-migration"
+      },
+      "ownerMilestone": "phase-3-workflow-migration",
+      "verificationEvidence": [
+        "legacy-source-present:src/workflows/sharepoint-download"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "legacy-workflow-work-study",
+      "sourcePaths": [
+        "src/workflows/work-study"
+      ],
+      "kind": "service",
+      "knownConsumers": [
+        "workflow:work-study"
+      ],
+      "disposition": {
+        "kind": "open",
+        "milestone": "phase-3-workflow-migration"
+      },
+      "ownerMilestone": "phase-3-workflow-migration",
+      "verificationEvidence": [
+        "legacy-source-present:src/workflows/work-study"
+      ],
+      "status": "open"
+    }
+  ]
+}
