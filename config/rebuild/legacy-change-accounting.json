@@ -31,6 +31,34 @@
       "preservation": "preserved"
     },
     {
+      "path": "src/services/ocr/env-keys.ts",
+      "changeKind": "modified",
+      "beforeSha256": "c9213498098dc6ef99904251deddf4d2e83d65cc6155e59a79a59fd8d29b2a8e",
+      "afterSha256": "a69ff1db9a461e773407bf1924bcd4b2ab2bb5ed54f6b7de35a2f405cb7ebc03",
+      "capabilityIds": [
+        "legacy-service-ocr"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "src/services/ocr/providers/gemini.ts",
+      "changeKind": "modified",
+      "beforeSha256": "3c9911d770894443491c4e2b22fb8e495809bd06128741844c79c4462031b9f0",
+      "afterSha256": "e4021daa23345638a1616cf0f1a42292b74a71f62f420e440b46cacb5605098c",
+      "capabilityIds": [
+        "legacy-service-ocr"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
       "path": "src/systems/new-kronos/LESSONS.md",
       "changeKind": "modified",
       "beforeSha256": "780ab0ff7f3085b1b4570d01b11e1ce63fb6ed7636a5bf31c0da50136d372fe9",
