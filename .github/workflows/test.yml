@@ -16,17 +16,28 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '26'
+          # Single source of truth with local dev — see .nvmrc
+          node-version-file: '.nvmrc'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run typecheck
-        run: npm run typecheck
+      # typecheck:all, NOT typecheck — the root tsconfig excludes src/dashboard,
+      # so `typecheck` alone leaves the entire frontend ungated.
+      - name: Run typecheck (backend + dashboard)
+        run: npm run typecheck:all
 
       - name: Run unit tests
         run: npm run test
 
       - name: Run architecture tests
         run: npm run test:architecture
+
+      # No-new-debt gate over the reviewed legacy diagnostic baseline (D90).
+      # `lint:tests` is deliberately non-zero; this is what actually guards it.
+      - name: Run legacy test-lint ratchet
+        run: npm run lint:legacy-tests-ratchet
+
+      - name: Build dashboard
+        run: npm run build:dashboard
