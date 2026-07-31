@@ -482,6 +482,48 @@ function firstStartableId(label: string): DemoWorkflowId {
   return (byLabel ?? startableWorkflows()[0]).id;
 }
 
+/**
+ * One numbered group in the shared run-control rail. The number is a reading
+ * aid, not state: it gives the operator a stable top-to-bottom path through
+ * settings that otherwise look like one long stack of unrelated fields.
+ */
+function RunControlGroup({
+  step,
+  title,
+  description,
+  children,
+}: {
+  step: string;
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="flex flex-col gap-[var(--ds-space-cozy)] border-b border-[color:var(--ds-border-subtle)] pb-[var(--ds-space-loose)] last:border-b-0 last:pb-0">
+      <div className="flex items-start gap-[var(--ds-space-base)]">
+        <span
+          aria-hidden
+          className={cn(
+            "flex h-[var(--ds-h-sm)] w-[var(--ds-h-sm)] shrink-0 items-center justify-center border",
+            "border-[color:var(--ds-recess-border)] bg-[var(--ds-surface-3)]",
+            dsRadius.sm,
+            dsText.micro,
+            dsText.nums,
+            dsFg.muted,
+          )}
+        >
+          {step}
+        </span>
+        <span className="flex min-w-0 flex-col gap-[var(--ds-space-hair)]">
+          <h4 className={cn(dsText.ui, "font-semibold", dsFg.base)}>{title}</h4>
+          <p className={cn(dsText.meta, dsFg.muted)}>{description}</p>
+        </span>
+      </div>
+      {children}
+    </section>
+  );
+}
+
 export function DemoRunModal({
   open,
   onOpenChange,
@@ -627,14 +669,14 @@ export function DemoRunModal({
         size="xl"
         title="Start a run"
         description="Pick what to run. It declares what it takes, and the plan says exactly what will exist before anything is enqueued."
-        className="h-[min(86vh,700px)]"
+        className="h-[min(88vh,760px)] max-w-[min(96vw,1320px)]"
       >
         <div className="flex min-h-0 flex-1">
           <WorkflowPicker value={workflowId} onChange={selectWorkflow} />
 
           {/* `@container`, not a viewport query: the form column's width is set
-              by the picker beside it, so a two-up grid has to key on the column
-              it actually lives in. */}
+              by the picker AND the shared-control rail beside it, so a two-up
+              grid has to key on the workflow column it actually lives in. */}
           <DialogBody className="@container flex flex-1 flex-col gap-[var(--ds-space-loose)]">
             {result && (
               <EnqueueResultBanner
@@ -652,6 +694,7 @@ export function DemoRunModal({
             {/* What you are starting, and how — the two facts everything below
                 is conditioned on, on one line each. */}
             <section className="flex flex-col gap-[var(--ds-space-snug)]">
+              <SectionLabel>Workflow setup</SectionLabel>
               <div className="flex min-w-0 flex-wrap items-center gap-[var(--ds-space-base)]">
                 <h3 className={cn(dsText.section, "min-w-0 font-semibold", dsFg.base)}>{workflow.label}</h3>
                 <Chip label="group">{workflow.category}</Chip>
@@ -759,55 +802,6 @@ export function DemoRunModal({
               </section>
             )}
 
-            {/* Run settings — the axes every start has, whatever it is */}
-            {!isHandoff && (
-              <section className="flex flex-col gap-[var(--ds-space-cozy)]">
-                <SectionLabel>Run settings</SectionLabel>
-                <div className="grid grid-cols-1 gap-[var(--ds-space-cozy)] @min-[560px]:grid-cols-2">
-                  <Field
-                    label="If one is already running"
-                    description={conflict ? `${conflict.label} — ${conflict.note}.` : "Nothing is running for this subject."}
-                  >
-                    <Select value={policy} onChange={(e) => { setPolicy(e.target.value as EnqueuePolicy); setResult(null); }}>
-                      {(Object.keys(ENQUEUE_POLICY_LABEL) as EnqueuePolicy[]).map((key) => (
-                        <option key={key} value={key}>
-                          {ENQUEUE_POLICY_LABEL[key]}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                  <Field label="Priority" description="bulk work yields the browser lane to anything interactive">
-                    <Select value={priority} onChange={(e) => setPriority(e.target.value as "interactive" | "bulk")}>
-                      <option value="interactive">interactive</option>
-                      <option value="bulk">bulk</option>
-                    </Select>
-                  </Field>
-                </div>
-                {flags.length > 0 && (
-                  <div className="flex flex-col gap-[var(--ds-space-base)]">
-                    {flags.map((flag) => (
-                      <StartFlagControl
-                        key={flag.key}
-                        flag={flag}
-                        checked={flagValues[flag.key] ?? defaultFlagValues(capability, choiceValues)[flag.key]}
-                        onChange={(next) => {
-                          setFlagValues((prev) => ({ ...prev, [flag.key]: next }));
-                          setResult(null);
-                        }}
-                      />
-                    ))}
-                  </div>
-                )}
-              </section>
-            )}
-
-            {!isHandoff && (
-              <section className="flex flex-col gap-[var(--ds-space-snug)]">
-                <SectionLabel>Instance — where this will write</SectionLabel>
-                <InstanceSelector workflow={workflow} value={instances} onChange={(next) => { setInstances(next); setResult(null); }} />
-              </section>
-            )}
-
             {/* The plan */}
             <section className="flex flex-col gap-[var(--ds-space-snug)]">
               <SectionLabel>What this will create</SectionLabel>
@@ -837,6 +831,105 @@ export function DemoRunModal({
               )}
             </section>
           </DialogBody>
+
+          {/* Shared run behavior is deliberately OUTSIDE the workflow form.
+              These controls keep the same meaning when the workflow changes,
+              so the modal gives them a stable third column instead of mixing
+              them into each workflow's unique input and choices. */}
+          <aside
+            aria-label="Run controls"
+            className="flex w-[300px] shrink-0 flex-col border-l border-[color:var(--ds-border)] bg-[var(--ds-recess-bg)]"
+          >
+            <header className="flex shrink-0 items-start gap-[var(--ds-space-base)] border-b border-[color:var(--ds-border)] bg-[var(--ds-surface-1)] px-[var(--ds-space-cozy)] py-[var(--ds-space-base)]">
+              <span
+                className={cn(
+                  "flex h-[var(--ds-h-md)] w-[var(--ds-h-md)] shrink-0 items-center justify-center border",
+                  "border-[color:var(--ds-recess-border)] bg-[var(--ds-surface-3)]",
+                  dsRadius.md,
+                  dsFg.secondary,
+                )}
+              >
+                <SlidersHorizontal aria-hidden className={dsIcon.md} />
+              </span>
+              <span className="flex min-w-0 flex-col gap-[var(--ds-space-hair)]">
+                <SectionLabel>Shared settings</SectionLabel>
+                <h3 className={cn(dsText.title, "font-semibold", dsFg.base)}>Run controls</h3>
+                <p className={cn(dsText.meta, dsFg.muted)}>
+                  These options work the same way for every workflow.
+                </p>
+              </span>
+            </header>
+
+            <div className="flex min-h-0 flex-1 flex-col gap-[var(--ds-space-loose)] overflow-y-auto p-[var(--ds-space-cozy)]">
+              {isHandoff ? (
+                <Well className="flex flex-col gap-[var(--ds-space-tight)]">
+                  <span className={cn(dsText.ui, "font-semibold", dsFg.base)}>Set after the handoff</span>
+                  <span className={cn(dsText.meta, dsFg.muted)}>
+                    The spreadsheet intake collects queue behavior and destination after it validates the sheet.
+                  </span>
+                </Well>
+              ) : (
+                <>
+                  <RunControlGroup
+                    step="01"
+                    title="Queue behavior"
+                    description="Choose how this work enters the browser queue."
+                  >
+                    <div className="flex flex-col gap-[var(--ds-space-cozy)]">
+                      <Field
+                        label="Active-run policy"
+                        description={conflict ? `${conflict.label} — ${conflict.note}.` : "Nothing is running for this subject."}
+                      >
+                        <Select value={policy} onChange={(e) => { setPolicy(e.target.value as EnqueuePolicy); setResult(null); }}>
+                          {(Object.keys(ENQUEUE_POLICY_LABEL) as EnqueuePolicy[]).map((key) => (
+                            <option key={key} value={key}>
+                              {ENQUEUE_POLICY_LABEL[key]}
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                      <Field label="Priority" description="Bulk work yields whenever interactive work needs the browser.">
+                        <Select value={priority} onChange={(e) => setPriority(e.target.value as "interactive" | "bulk")}>
+                          <option value="interactive">Interactive</option>
+                          <option value="bulk">Bulk</option>
+                        </Select>
+                      </Field>
+                    </div>
+                  </RunControlGroup>
+
+                  {flags.length > 0 && (
+                    <RunControlGroup
+                      step="02"
+                      title="Safety & mode"
+                      description="Apply optional limits before the run starts."
+                    >
+                      <div className="flex flex-col gap-[var(--ds-space-base)]">
+                        {flags.map((flag) => (
+                          <StartFlagControl
+                            key={flag.key}
+                            flag={flag}
+                            checked={flagValues[flag.key] ?? defaultFlagValues(capability, choiceValues)[flag.key]}
+                            onChange={(next) => {
+                              setFlagValues((prev) => ({ ...prev, [flag.key]: next }));
+                              setResult(null);
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </RunControlGroup>
+                  )}
+
+                  <RunControlGroup
+                    step={flags.length > 0 ? "03" : "02"}
+                    title="Destination"
+                    description="Confirm the systems this run is allowed to write to."
+                  >
+                    <InstanceSelector workflow={workflow} value={instances} onChange={(next) => { setInstances(next); setResult(null); }} />
+                  </RunControlGroup>
+                </>
+              )}
+            </div>
+          </aside>
         </div>
 
         {/* The footer says either why you cannot start or exactly what starting
