@@ -43,10 +43,10 @@ import { FloatingSurface } from "./primitives-layout";
  * having to know about each other (and without every app having to nest one
  * provider inside the other in the right order).
  *
- * WHY IT EXISTS: the viewport is `fixed bottom-right` at the toast layer, which
- * put it directly on top of a dialog's footer at 1280×720 — and a `danger`
- * toast never auto-dismisses, so it sat there swallowing clicks aimed at the
- * dialog's primary button. See `ToastViewport` for what we do about it.
+ * WHY IT EXISTS: the viewport is `fixed bottom-right` at the toast layer, and a
+ * `danger` toast never auto-dismisses — so while any layer is open the cards go
+ * inert (`pointer-events: none`, controls disabled) rather than swallowing
+ * clicks meant for the dialog underneath. See `ToastViewport`.
  * ====================================================================== */
 
 /**
@@ -90,7 +90,7 @@ function useRegisterModal(kind: "modal" | "layer" = "modal"): void {
 /**
  * Register a modal surface that is NOT one of this file's Dialog/Drawer.
  *
- * The registry above is what moves the toast viewport out of a decision's way,
+ * The registry above is what marks overlay layers open so toast cards go inert,
  * and `ds`'s own overlays opt in automatically. Any OTHER dialog primitive
  * rendered inside this app — notably `@/components/ui/dialog`, which the demo's
  * `ConfirmCommandDialog` and `RenameRunDialog` are built on — is invisible to it,
@@ -667,8 +667,7 @@ export function PopoverContent({
  * toast can sit on top of any dismissable layer below it and eat the click —
  * the exact defect the registry was built for. A popover anchored to a row
  * near the bottom of the queue lands in the same corner, so it opts in on the
- * same terms as Dialog and Drawer: while it is open the viewport steps aside
- * and its cards go inert.
+ * same terms as Dialog and Drawer: while it is open its toast cards go inert.
  */
 function PopoverSurface({
   title,
@@ -920,7 +919,7 @@ export interface DsToast {
   description?: string;
   /** a single recovery action — "Retry", "Undo", "Open the run" */
   action?: { label: string; onAction: () => void };
-  /** ms before auto-dismiss; `danger` never auto-dismisses */
+  /** ms before auto-dismiss; default 3000. `danger` never auto-dismisses. */
   duration?: number;
 }
 
@@ -938,9 +937,8 @@ const ToastContext = createContext<ToastContextValue | null>(null);
  * Rules: a toast reports something that ALREADY happened. It never asks a
  * question, never holds the only copy of information, and a `danger` toast
  * never disappears on its own — a failed write must be dismissed by a human.
- * It does RECEDE to a one-line chip once it has been readable for a while, so
- * "never dismisses" cannot mean "permanently covers the panel underneath" —
- * see `TOAST_COLLAPSE_MS`.
+ * Every toast arrives as a one-line chip; the operator expands via the chevron
+ * when they want the full text.
  */
 export function useToasts(): ToastContextValue {
   const ctx = useContext(ToastContext);
@@ -984,9 +982,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (input: Omit<DsToast, "id">) => {
       const id = `toast-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
       setToasts((current) => [...current, { ...input, id }]);
-      // A failure stays until acknowledged. Everything else clears itself.
+      // A failure stays until acknowledged. Everything else clears itself at 3s.
       if (input.tone !== "danger") {
-        const timer = setTimeout(() => dismiss(id), input.duration ?? 5000);
+        const timer = setTimeout(() => dismiss(id), input.duration ?? 3000);
         timers.current.set(id, timer);
       }
       return id;
@@ -1012,46 +1010,28 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 /**
  * The toast viewport.
  *
- * **While a modal is open it steps aside and goes inert.** Two changes, both
- * only while a Dialog or Drawer is mounted:
+ * **Always bottom-right — app-level chrome that never re-anchors.** A modal,
+ * drawer, or popover opening must not slide the stack to the other side of the
+ * window; the operator learns one corner and the stack stays there.
  *
- *  1. It re-anchors from the bottom-RIGHT to the bottom-LEFT. A dialog's actions
- *     are always right-aligned with the primary last (DESIGN.md, "one primary
- *     and at most one danger action per surface"), so the left gutter is the one
- *     region a decision never occupies.
- *  2. Every card becomes non-interactive and its controls render disabled, so a
- *     toast can never intercept a click meant for the surface underneath it —
- *     whatever the dialog's size or the viewport's height.
+ * **While any dismissable layer is open the cards go inert** (non-interactive,
+ * controls disabled) so a persistent `danger` toast cannot swallow a click meant
+ * for the dialog underneath it — geometry alone is not enough when a wide modal
+ * shares the same corner. Nothing is hidden and nothing is dismissed; cards
+ * become live again the instant the layer closes.
  *
- * Nothing is hidden and nothing is dismissed: the text stays fully legible above
- * the scrim, and the cards become live again the instant the modal closes. A
- * `danger` toast still never auto-dismisses, so it is still there to be
- * acknowledged afterwards.
- *
- * The bug this fixes: at 1280×720 a persistent `danger` toast sat exactly on top
- * of a dialog's footer and swallowed every click on its primary button, with no
- * visible reason — the operator could see the button, press it, and have nothing
- * happen.
- *
- * The viewport aligns its cards to the anchored edge (`items-end` / `items-start`)
- * so a RECEDED card — see `ToastCard` — can hug its own text instead of holding
- * the full 360px column.
+ * The viewport aligns its cards to the right edge (`items-end`) so a collapsed
+ * chip — see `ToastCard` — can hug its own text instead of holding the full
+ * 360px column.
  */
 function ToastViewport({ toasts, onDismiss }: { toasts: DsToast[]; onDismiss: (id: string) => void }) {
-  const modalOpen = useModalOpen();
   const anyOverlay = useAnyOverlayOpen();
-  // THE ONLY reason this viewport ever leaves bottom-right, and it is the
-  // ratified one: a Dialog or Drawer is open, whose footer's action gutter it
-  // would otherwise cover. Nothing else moves it — not a popover, and in
-  // particular not the decision notice, whose existence it does not know and
-  // may never be told.
-  const aside = modalOpen;
   if (toasts.length === 0) return null;
   return (
     <div
       role="region"
       aria-label="Notifications"
-      data-ds-toast-viewport={aside ? "aside" : "default"}
+      data-ds-toast-viewport="default"
       className={cn(
         // `--ds-toast-inset-bottom` rather than a bare space token, and it is a
         // CONSTANT the shell sets once. It clears exactly one thing — the app's
@@ -1059,20 +1039,12 @@ function ToastViewport({ toasts, onDismiss }: { toasts: DsToast[]; onDismiss: (i
         // nothing parked at the bottom does not set it and gets the plain
         // gutter.
         "pointer-events-none fixed bottom-[var(--ds-toast-inset-bottom,var(--ds-space-loose))]",
-        aside ? "left-[var(--ds-space-loose)] items-start" : "right-[var(--ds-space-loose)] items-end",
+        "right-[var(--ds-space-loose)] items-end",
         "flex w-[360px] max-w-[calc(100vw-var(--ds-space-section))] flex-col gap-[var(--ds-space-base)]",
-        // The step aside is a MOVE, not a jump: the viewport is a fixed box
-        // changing which edge it hangs off, and seeing it travel is what tells
-        // the operator the same alert is still there rather than a new one
-        // having appeared on the other side.
-        dsMotion.move,
         dsLayer.toast,
       )}
     >
       {toasts.map((item) => (
-        // INERT for any open layer, MOVED for none but a modal: a popover
-        // anchored near the bottom of the queue must not have its clicks eaten,
-        // and that is what inert cards buy — without the viewport jumping.
         <ToastCard key={item.id} toast={item} onDismiss={onDismiss} inert={anyOverlay} />
       ))}
     </div>
@@ -1080,42 +1052,20 @@ function ToastViewport({ toasts, onDismiss }: { toasts: DsToast[]; onDismiss: (i
 }
 
 /**
- * How long a persistent (`danger`) toast holds its full card before it recedes
- * to a one-line chip.
+ * One toast. Every toast **arrives collapsed** — a one-line chip — and expands
+ * to the full card ONLY when the operator presses the chevron. No timer, no
+ * hover peek, and no layout shift (modal open, overlay inert) may change that
+ * state.
  *
- * WHY IT RECEDES AT ALL: a `danger` toast never auto-dismisses — a failed write
- * is acknowledged by a human, not by a timer — but the viewport is `fixed`
- * bottom-right at a fixed width, so "never dismisses" also meant "permanently
- * covers the lower-right of whatever panel is underneath". The alert was
- * correct and the screen was unreadable, which is a failure of its own: a
- * notification that hides the data you are reading has traded one loss for
- * another. So the ALERT persists and its PRESENTATION recedes. Nothing is lost
- * by making the floating card transient — the durable copy is the notification
- * inbox behind the bell, and the chip itself still names the failure, still
- * carries the danger tint and icon, and is still one hover (or one keypress)
- * from the full text and its action.
- */
-const TOAST_COLLAPSE_MS = 6000;
-
-/**
- * One toast. A `danger` toast is PERSISTENT: it has no dismiss timer, and after
- * `TOAST_COLLAPSE_MS` it collapses to a one-line chip that stays until the
- * operator dismisses it.
- *
- * Three ways back to the full card, so it can never become a dead end:
- *  - **hover** the chip — a peek that recedes again when the pointer leaves;
- *  - **press** the chip — an explicit expand that STAYS until collapsed again
- *    (an operator choice is never undone by a timer);
- *  - the auto-collapse never fires while the pointer is over the card or focus
- *    is inside it, so it cannot close under someone reading or using it.
+ * A `danger` toast is PERSISTENT: it has no dismiss timer and the chip stays
+ * until the operator dismisses it or expands it deliberately.
  *
  * `data-ds-toast-state="full" | "chip"` is the hook a headless check asserts on.
  *
  * A11y: `role="alert"` is unchanged for `danger` and lives on the SAME element
  * across both states (React reuses the node, so the alert is announced once, on
- * arrival). `aria-atomic="false"` overrides the role's implicit `true` so the
- * collapse — which only REMOVES nodes — is silent rather than re-announcing the
- * whole alert six seconds later.
+ * arrival). `aria-atomic="false"` overrides the role's implicit `true` so an
+ * operator-driven expand/collapse is silent rather than re-announcing the alert.
  */
 function ToastCard({
   toast,
@@ -1130,20 +1080,8 @@ function ToastCard({
   const spec = TOAST_TONE[toast.tone];
   const Icon = spec.icon;
 
-  // Only a persistent toast recedes — a self-dismissing one is already gone.
   const persistent = toast.tone === "danger";
-  const [collapsed, setCollapsed] = useState(false);
-  const [hovering, setHovering] = useState(false);
-  const [focusWithin, setFocusWithin] = useState(false);
-  /** The operator has chosen a state; the timer stops second-guessing them. */
-  const [pinned, setPinned] = useState(false);
-
-  const engaged = hovering || focusWithin;
-  useEffect(() => {
-    if (!persistent || collapsed || pinned || engaged) return;
-    const timer = setTimeout(() => setCollapsed(true), TOAST_COLLAPSE_MS);
-    return () => clearTimeout(timer);
-  }, [persistent, collapsed, pinned, engaged]);
+  const [collapsed, setCollapsed] = useState(true);
 
   // Pressing a toggle unmounts it and mounts its counterpart, which would drop
   // a keyboard user on `<body>`. Hand focus to whichever toggle took its place.
@@ -1157,12 +1095,10 @@ function ToastCard({
 
   const setCollapsedByOperator = (next: boolean) => {
     restoreFocus.current = true;
-    setPinned(true);
     setCollapsed(next);
   };
 
-  /** A hover peek expands without un-collapsing — leaving recedes it again. */
-  const expanded = !collapsed || hovering;
+  const expanded = !collapsed;
 
   const shell = cn(
     inert ? "pointer-events-none" : "pointer-events-auto",
@@ -1179,10 +1115,6 @@ function ToastCard({
     role: persistent ? ("alert" as const) : ("status" as const),
     "aria-atomic": false,
     "data-ds-toast-state": expanded ? "full" : "chip",
-    onMouseEnter: () => setHovering(true),
-    onMouseLeave: () => setHovering(false),
-    onFocus: () => setFocusWithin(true),
-    onBlur: () => setFocusWithin(false),
   };
 
   if (!expanded) {
@@ -1273,11 +1205,6 @@ function ToastCard({
         )}
       </div>
       <div className="flex shrink-0 items-center gap-[var(--ds-space-hair)]">
-        {/*
-          Only offered on a genuinely expanded card — while it is a hover PEEK
-          the pointer leaving is already the way back, and a button that could
-          not change the state it names would be a lie.
-        */}
         {persistent && !collapsed && (
           <IconButton
             ref={toggleRef}

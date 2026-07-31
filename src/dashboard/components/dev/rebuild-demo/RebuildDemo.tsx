@@ -1,11 +1,11 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanelRight } from "lucide-react";
 import { DemoLogPanel, tabsFor, type DemoTab } from "./DemoLogPanel";
 import { computeVisibleIds, DemoQueue, type DemoFilter, type DemoQueueState, type DemoView } from "./DemoQueue";
 import { DemoCatalogView } from "./DemoCatalogView";
 import { DemoUiKit } from "./DemoUiKit";
-import { CommandResultFeed, ConfirmCommandDialog, type PendingCommand } from "./DemoActions";
+import { CommandResultFeed, ConfirmCommandDialog, toastAppliedCommandResult, type PendingCommand } from "./DemoActions";
 /* The run-START half: ONE Run Modal for every workflow, plus the spreadsheet
    intake it hands off to. It is mounted at the SHELL ROOT rather than in the
    queue toolbar, because "start any workflow from anywhere" has to hold on the
@@ -66,6 +66,8 @@ import {
   openContextMenuFor,
   useDemoTheme,
   useDsModalOpen,
+  useToasts,
+  type DsToastTone,
 } from "./demo-ui";
 import {
   ATTENTION_STATUSES,
@@ -76,6 +78,15 @@ import {
   LIVE_SEQUENCE,
   memberAttentionIds,
 } from "./demo-data";
+
+type CommandToastFn = (input: { tone: DsToastTone; title: string; description?: string; duration?: number }) => string;
+
+/** Binds `useToasts()` for `dispatchCommand`, which lives above the provider in the tree. */
+function CommandToastBridge({ ref }: { ref: MutableRefObject<CommandToastFn> }) {
+  const { toast } = useToasts();
+  ref.current = toast;
+  return null;
+}
 
 /**
  * DEV-ONLY — `?view=rebuild-demo`. The rebuild's target frontend as a living
@@ -143,6 +154,7 @@ export function RebuildDemo() {
      still fires — so j/k kept moving the queue selection behind an open modal
      and the operator came back to a different row than the one they left. */
   const modalOpen = useDsModalOpen();
+  const commandToastRef = useRef<CommandToastFn>(() => "");
 
   // ---- sort + bulk selection --------------------------------------------
   const [sort, setSort] = useState<DemoSortKey>("attention");
@@ -195,7 +207,11 @@ export function RebuildDemo() {
   const dispatchCommand = useCallback(
     (row: DemoRow, action: ActionDescriptorWire): DemoCommandResult => {
       const result = submitDemoCommand(row, action, { knownVersion: refreshedVersions.get(row.id) ?? action.expectedVersion, tick });
-      setResults((prev) => [result, ...prev].slice(0, 4));
+      if (result.state === "applied") {
+        toastAppliedCommandResult(commandToastRef.current, result);
+      } else {
+        setResults((prev) => [result, ...prev].slice(0, 4));
+      }
       return result;
     },
     [refreshedVersions, tick],
@@ -604,6 +620,7 @@ export function RebuildDemo() {
       className="flex h-screen min-w-0 flex-col overflow-hidden bg-background text-foreground"
     >
       <ToastProvider>
+      <CommandToastBridge ref={commandToastRef} />
       {/* ONE `TooltipProvider` FOR THE WHOLE DEMO, and it is not optional: Radix
           throws `Tooltip must be used within TooltipProvider` and the error
           boundary swallows the entire page. It is a provider rather than a
@@ -704,8 +721,7 @@ export function RebuildDemo() {
               filters={<DemoStatusFilters counts={counts} active={filter} onSelect={setFilter} />}
             />
 
-            {/* applied · conflict · rejected — all three, side by side, never
-                collapsed into a single "Done" */}
+            {/* conflict · rejected — persistent band; applied toasts instead */}
             <CommandResultFeed
               results={results}
               onDismiss={(id) => setResults((prev) => prev.filter((r) => r.id !== id))}
@@ -723,27 +739,13 @@ export function RebuildDemo() {
                 (1180) splits queue | detail. The DETAIL cell splits itself
                 again into shape · detail · context at 1280 (see `PanelRegion`).
 
-                The QUEUE is 400px until 1480 and 470 above it, and 400 is
-                measured, not chosen. Below 1480 the detail cell has to seat the
-                348px context rail AND a centre column wide enough for the
-                review's page-beside-fields layout; at a 470 queue the centre
-                came out 414px, the review stacked, and the extracted fields —
-                the whole reason that surface exists — went below the fold.
-                The review's floor is a 464px centre (a label, a value, its
-                provenance and its confidence on one line), and at 1280 the
-                centre is 884 minus the queue. So 400 is the LARGEST queue that
-                keeps the review side by side, with 20px of headroom: it is the
-                least the queue can give up rather than a width picked for its
-                own sake, and it is why this number is not 380.
-                Stated plainly, because it is a real cost: at 1280 no width
-                satisfies both. A queue that renders `Oath_Packet_Summer.pdf`
-                whole needs ~475px, which puts the centre back under the review's
-                floor. Filenames were already truncating at 470 (164px of the
-                169px they want); at 400 they lose more, and the full name stays
-                in the row's `title`, the footer's trace id, and the panel header.
-                Above 1480 there is room for both and the queue takes it back. */}
+                In the three-panel layout, Queue and Context share one 376px
+                resting width. That is 28px wider than the former Context rail,
+                but narrower than the former 400/470px Queue, so the centre Logs
+                panel stays the largest column. The shared token is the contract:
+                neither side panel grows independently at wider viewports. */}
             <div className="relative min-h-0 flex-1">
-            <div className="grid h-full grid-cols-1 gap-3 p-3 min-[1180px]:grid-cols-[400px_minmax(0,1fr)] min-[1480px]:grid-cols-[470px_minmax(0,1fr)]">
+            <div className="grid h-full grid-cols-1 gap-[var(--ds-shell-inset)] p-[var(--ds-shell-inset)] min-[1180px]:grid-cols-[var(--ds-w-side-panel)_minmax(0,1fr)]">
               <DemoQueue
                 rows={scopedRows}
                 state={state}

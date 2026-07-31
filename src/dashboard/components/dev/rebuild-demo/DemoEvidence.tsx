@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Camera, ChevronDown, ChevronLeft, ChevronRight, Copy, Download, FileJson, FileText, Info } from "lucide-react";
+import { Camera, ChevronDown, ChevronLeft, ChevronRight, Copy, Download, FileJson, FileText, Info, Maximize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
@@ -18,6 +18,7 @@ import {
   MetaLine,
   SectionLabel,
   dsClip,
+  dsElev,
   dsFocus,
   dsIcon,
   dsMotion,
@@ -29,9 +30,11 @@ import { fmtClock, type SystemKey } from "./demo-wire";
 import { SYSTEM_ACCENT, type DemoRow } from "./demo-data";
 import {
   CAPTURE_KIND_LABEL,
+  CAPTURE_STEP_UNSCOPED,
   capturesFor,
   exportRunJson,
   exportRunLogsText,
+  groupCapturesByStep,
   type DemoCapture,
   type DemoCaptureKind,
   type DemoPageExtraction,
@@ -39,9 +42,9 @@ import {
 } from "./demo-evidence-wire";
 
 /**
- * DEV-ONLY — the evidence section and its capture lightbox (D19b: evidence is
- * never a tab of its own), plus the run export the legacy Screenshots tab
- * carried and the operator kept.
+ * DEV-ONLY — the receipt's screenshot-evidence section and its capture
+ * lightbox, plus the run export the legacy Screenshots tab carried and the
+ * operator kept.
  *
  * It is built from the row's own `shots`, so the section and the lightbox can
  * never show different sets, and a failure capture carries a red frame in both.
@@ -296,19 +299,26 @@ function ExtractionRecord({ extraction }: { extraction: DemoPageExtraction }) {
 
 function CaptureFrame({ capture, className }: { capture: DemoCapture; className?: string }) {
   const [ruleOpen, setRuleOpen] = useState(false);
+  const aspect = captureAspectValue(capture);
+  // FIT TO SCALE inside a `container-type: size` parent. `min(cqw, cqh·aspect)`
+  // is the CSS equivalent of `object-fit: contain` for a non-replaced box —
+  // as large as the stage allows, never cropped, never overflowing. The old
+  // sizing locked height to `--ds-h-capture-box` and derived width, which left
+  // letter pages as a small stamp in a wide column (operator: "fit to scale").
+  const fitStyle = {
+    aspectRatio: String(aspect),
+    width: `min(100cqw, calc(100cqh * ${aspect}))`,
+    height: `min(100cqh, calc(100cqw / ${aspect}))`,
+  } as const;
 
   if (capture.facsimile) {
     return (
       <div
         role="img"
         aria-label={`${capture.label} — a synthetic rendering of the ${capture.extraction?.formKind ?? capture.kind} page, drawn from the extraction record beside it. Not a photograph of a real document.`}
-        style={{
-          aspectRatio: captureAspect(capture),
-          maxHeight: "var(--ds-h-capture-box)",
-          width: `min(100%, calc(var(--ds-h-capture-box) * ${captureAspectValue(capture)}))`,
-        }}
+        style={fitStyle}
         className={cn(
-          "mx-auto overflow-hidden border",
+          "overflow-hidden border",
           dsRadius.lg,
           capture.failure
             ? "border-[length:var(--ds-border-w-rail)] border-[color:var(--ds-danger)]"
@@ -325,19 +335,9 @@ function CaptureFrame({ capture, className }: { capture: DemoCapture; className?
     <div
       role="img"
       aria-label={`${capture.label} — ${capture.failure ? "failure capture" : `${capture.kind} capture`}${capture.screen ? ` of ${capture.screen}` : ""}${capture.size ? `, ${capture.size.w} × ${capture.size.h}` : ""}. The demo serves capture metadata for this frame, without a preview.`}
-      // WIDTH IS DERIVED FROM THE HEIGHT BUDGET, never clamped after the fact —
-      // `aspect-ratio` + `width: 100%` + `max-height` is a conflict the browser
-      // resolves by dropping the RATIO, which is how a 612 × 792 page came to
-      // be drawn landscape. `--ds-h-capture-box` is the box the column gives
-      // it; the width falls out of the served ratio, so the SHAPE is never the
-      // thing that gives.
-      style={{
-        aspectRatio: captureAspect(capture),
-        maxHeight: "var(--ds-h-capture-box)",
-        width: `min(100%, calc(var(--ds-h-capture-box) * ${captureAspectValue(capture)}))`,
-      }}
+      style={fitStyle}
       className={cn(
-        "mx-auto flex flex-col items-center justify-center gap-[var(--ds-space-base)] border p-[var(--ds-space-loose)]",
+        "flex flex-col items-center justify-center gap-[var(--ds-space-base)] border p-[var(--ds-space-loose)]",
         "rounded-[var(--ds-radius-lg)] bg-[var(--ds-surface-2)]",
         capture.failure
           ? "border-[length:var(--ds-border-w-rail)] border-[color:var(--ds-danger)]"
@@ -480,84 +480,68 @@ export function CaptureLightbox({
             </Banner>
           )}
 
-          <div className="grid min-h-0 grid-cols-1 gap-[var(--ds-space-cozy)] @min-[52rem]:grid-cols-[minmax(0,1.6fr)_1px_minmax(0,1fr)]">
-            {/* ---- the capture, with its nav in FIXED gutters -------------- */}
+          <div className="grid min-h-0 grid-cols-1 gap-[var(--ds-space-cozy)] @min-[52rem]:grid-cols-[minmax(0,1.75fr)_1px_minmax(16rem,0.85fr)]">
+            {/* ---- the capture: centered stage + filmstrip ----------------- */}
             <div className="flex min-w-0 flex-col gap-[var(--ds-space-snug)]">
-              <div className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
-                {/*
-                  THE ARROWS LIVE IN GUTTERS OF A FIXED WIDTH, flanking a box of
-                  a fixed height. Production shipped the bug this avoids: the
-                  chrome was positioned on a frame that hugged each image, so
-                  the arrows MOVED between two differently-sized captures and
-                  paging through a set became a game of chasing the button. A
-                  gutter is a column; a column does not move.
-                */}
-                <CaptureNavButton
-                  dir="prev"
-                  disabled={captures.length < 2}
-                  onClick={() => step(-1)}
-                />
+              {/*
+                PROFESSIONAL LIGHTBOX STAGE.
+                The capture sits dead-centre in a recessed well. Prev/next live
+                in SIDE GUTTERS — never overlaid on the page (operator: "buttons
+                dont overlap"). The frame itself uses container-query contain
+                sizing so it grows to the well (operator: "fit to scale").
+              */}
+              <div
+                className={cn(
+                  "grid min-w-0 items-center gap-[var(--ds-space-snug)] border",
+                  dsRadius.lg,
+                  "border-[color:var(--ds-border)] bg-[var(--ds-surface-1)]",
+                  "px-[var(--ds-space-snug)]",
+                  captures.length > 1
+                    ? "grid-cols-[var(--ds-h-lg)_minmax(0,1fr)_var(--ds-h-lg)]"
+                    : "grid-cols-1",
+                )}
+                style={{ height: "var(--ds-h-capture-box)" }}
+              >
+                {captures.length > 1 && (
+                  <CaptureNavButton dir="prev" disabled={false} onClick={() => step(-1)} />
+                )}
+                {/* `container-type: size` so the frame can read both axes and
+                    fit contain-style — as large as this cell allows. */}
                 <div
-                  className="flex min-w-0 flex-1 items-center justify-center"
-                  style={{ height: "var(--ds-h-capture-box)" }}
+                  className="flex h-full min-h-0 min-w-0 items-center justify-center"
+                  style={{ containerType: "size" }}
                 >
                   <CaptureFrame capture={capture} />
                 </div>
-                <CaptureNavButton
-                  dir="next"
-                  disabled={captures.length < 2}
-                  onClick={() => step(1)}
-                />
+                {captures.length > 1 && (
+                  <CaptureNavButton dir="next" disabled={false} onClick={() => step(1)} />
+                )}
               </div>
 
               {/*
-                THE THUMBNAIL STRIP, along the bottom of the column it belongs
-                to. It was a wrapping row of labelled chips below the metadata,
-                three bands away from the image it cycles — so the control that
-                changes the capture was nowhere near the capture. Here it is
-                part of the same column, it scrolls sideways rather than
-                wrapping (a second row of thumbnails would change the column's
-                height, and the two columns are supposed to end level), and the
-                current one is marked by a fill and a ring rather than by
-                colour alone.
+                FILMSTRIP OF PREVIEWS, not labelled camera chips. The strip
+                used to say `1 📷 Packet page 1` — which is a caption, not a
+                preview. Each thumb is the capture itself (facsimile when the
+                record serves one), so paging by eye matches paging by arrow.
               */}
               {captures.length > 1 && (
                 <div
                   role="tablist"
                   aria-label="Captures on this run"
                   className={cn(
-                    "flex shrink-0 items-center gap-[var(--ds-space-tight)] overflow-x-auto",
+                    "flex shrink-0 items-center justify-center gap-[var(--ds-space-snug)] overflow-x-auto",
                     "h-[var(--ds-h-capture-thumb)]",
                   )}
                 >
                   {captures.map((c, i) => (
-                    <button
+                    <CaptureThumb
                       key={c.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={i === index}
-                      aria-label={`Show capture ${i + 1} of ${captures.length} — ${c.label}`}
-                      title={c.label}
-                      onClick={() => onIndex(i)}
-                      className={cn(
-                        "flex h-full shrink-0 items-center gap-[var(--ds-space-tight)] border",
-                        "px-[var(--ds-space-base)]",
-                        dsRadius.md,
-                        dsText.meta,
-                        dsClip.token,
-                        dsFocus,
-                        dsMotion.fast,
-                        "active:translate-y-px",
-                        i === index
-                          ? "border-[color:var(--ds-border-loud)] bg-[var(--ds-surface-selected)] text-[color:var(--ds-fg)]"
-                          : "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
-                        c.failure && "border-[color:var(--ds-danger)] text-[color:var(--ds-danger)]",
-                      )}
-                    >
-                      <span className={cn(dsText.nums, "shrink-0")}>{i + 1}</span>
-                      <Camera aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
-                      <span className={dsClip.text}>{c.label}</span>
-                    </button>
+                      capture={c}
+                      index={i}
+                      total={captures.length}
+                      selected={i === index}
+                      onSelect={() => onIndex(i)}
+                    />
                   ))}
                 </div>
               )}
@@ -622,10 +606,24 @@ export function CaptureLightbox({
 }
 
 /**
- * The prev/next control, in a gutter of its own. A fixed width is the whole
- * point — see the note at its call site.
+ * Prev/next in the STAGE GUTTER — beside the image, never on it.
+ *
+ * Overlaying circles on the frame looked like a media player and also ate
+ * the page edge (operator: "buttons dont overlap"). A circle in a reserved
+ * column keeps the hit target still between differently-sized captures and
+ * leaves the fitted page alone.
  */
-function CaptureNavButton({ dir, disabled, onClick }: { dir: "prev" | "next"; disabled: boolean; onClick: () => void }) {
+function CaptureNavButton({
+  dir,
+  disabled,
+  onClick,
+  className,
+}: {
+  dir: "prev" | "next";
+  disabled: boolean;
+  onClick: () => void;
+  className?: string;
+}) {
   const Icon = dir === "prev" ? ChevronLeft : ChevronRight;
   return (
     <button
@@ -634,35 +632,226 @@ function CaptureNavButton({ dir, disabled, onClick }: { dir: "prev" | "next"; di
       onClick={onClick}
       aria-label={dir === "prev" ? "Previous capture" : "Next capture"}
       className={cn(
-        "flex w-[var(--ds-h-lg)] shrink-0 items-center justify-center self-stretch border",
-        "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)]",
-        dsRadius.md,
+        "flex size-[var(--ds-h-lg)] shrink-0 items-center justify-center justify-self-center rounded-full border",
+        "border-[color:var(--ds-border-loud)] bg-[var(--ds-surface-overlay)]",
+        "text-[color:var(--ds-fg)]",
+        dsElev.low,
         dsFocus,
         dsMotion.fast,
-        "cursor-pointer text-[color:var(--ds-fg-secondary)]",
-        "hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]",
+        "cursor-pointer hover:bg-[var(--ds-surface-3)]",
         "active:translate-y-px",
         "disabled:pointer-events-none disabled:opacity-40",
+        className,
       )}
     >
-      <Icon aria-hidden className={dsIcon.lg} />
+      <Icon aria-hidden className={dsIcon.md} />
     </button>
   );
 }
 
 /**
- * The evidence SECTION — D19b's "evidence is not a tab", now given the room it
- * was always short of. It used to be a 52px strip wedged between the timeline
- * and the tabs, where a capture got a 76×40 chip and its label truncated to
- * three characters. In the context rail each capture is a real tile: kind,
- * label, the step it was taken on and the clock, so the operator can tell two
+ * The face of a capture thumbnail — facsimile when the record serves one,
+ * quiet stand-in otherwise. Shared by the lightbox filmstrip and the Evidence
+ * list so the two never disagree about what a capture looks like before open.
+ */
+function CaptureThumbFace({ capture }: { capture: DemoCapture }) {
+  if (capture.facsimile) {
+    return (
+      <div className="pointer-events-none h-full w-full overflow-hidden bg-[var(--ds-paper-bg)]">
+        {/* Scale the full page into the thumb. Origin top-left so the title
+            block stays the recognisable corner of the larger frame. */}
+        <div
+          className="origin-top-left"
+          style={{
+            width: "222%",
+            height: "222%",
+            transform: "scale(0.45)",
+          }}
+        >
+          <PageFacsimile page={capture.facsimile} />
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-[var(--ds-surface-1)]">
+      <Camera
+        aria-hidden
+        className={cn(dsIcon.sm, capture.failure ? "text-[color:var(--ds-danger)]" : "text-[color:var(--ds-fg-faint)]")}
+      />
+    </div>
+  );
+}
+
+/**
+ * One filmstrip cell — the capture itself, shrunk. A labelled camera chip is a
+ * caption; this is a preview. Facsimile pages render a scaled page; metadata-
+ * only captures keep a quiet stand-in so the strip never invents a photograph
+ * of a system that was never captured.
+ */
+function CaptureThumb({
+  capture,
+  index,
+  total,
+  selected,
+  onSelect,
+}: {
+  capture: DemoCapture;
+  index: number;
+  total: number;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const aspect = captureAspectValue(capture);
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      aria-label={`Show capture ${index + 1} of ${total} — ${capture.label}`}
+      title={capture.label}
+      onClick={onSelect}
+      style={{
+        height: "var(--ds-h-capture-thumb)",
+        width: `calc(var(--ds-h-capture-thumb) * ${aspect})`,
+      }}
+      className={cn(
+        "relative shrink-0 overflow-hidden border",
+        dsRadius.md,
+        dsFocus,
+        dsMotion.fast,
+        "active:translate-y-px",
+        selected
+          ? "border-[color:var(--ds-border-loud)] ring-2 ring-[color:var(--ds-ring)]"
+          : "border-[color:var(--ds-border)] opacity-80 hover:opacity-100",
+        capture.failure && "border-[color:var(--ds-danger)]",
+      )}
+    >
+      <CaptureThumbFace capture={capture} />
+      <span
+        className={cn(
+          dsText.nums,
+          dsText.micro,
+          "absolute bottom-[var(--ds-space-hair)] left-[var(--ds-space-hair)]",
+          "rounded-[var(--ds-radius-xs)] bg-[var(--ds-surface-scrim)]",
+          "px-[var(--ds-space-tight)] text-[color:var(--ds-fg)]",
+        )}
+      >
+        {index + 1}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * A receipt capture is evidence, not an attachment row. The preview therefore
+ * gets a real stage and enough area to recognise the page before the operator
+ * opens it. Metadata stays alongside it, rather than competing with the image
+ * in a 44px list row.
+ */
+function ReceiptCaptureCard({ capture, onOpen }: { capture: DemoCapture; onOpen: () => void }) {
+  const secondary =
+    capture.screen ??
+    capture.pageState ??
+    capture.extraction?.sourcePdf ??
+    (capture.size ? `${capture.size.w} × ${capture.size.h}` : undefined);
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={`Open capture — ${capture.label}${capture.failure ? " (failure capture)" : ""}`}
+      className={cn(
+        "group grid min-w-0 overflow-hidden border text-left",
+        "grid-cols-1 @min-[30rem]:grid-cols-[minmax(13rem,0.72fr)_minmax(0,1fr)]",
+        dsRadius.lg,
+        dsFocus,
+        dsMotion.fast,
+        "active:translate-y-px",
+        capture.failure
+          ? "border-[color:var(--ds-danger-border)] bg-[var(--ds-danger-quiet)] hover:brightness-110"
+          : "border-[color:var(--ds-border)] bg-[var(--ds-surface-1)] hover:border-[color:var(--ds-border-loud)] hover:bg-[var(--ds-surface-3)]",
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "flex min-h-[9.5rem] min-w-0 items-center justify-center border-b p-[var(--ds-space-base)]",
+          "bg-[var(--ds-surface-2)] @min-[30rem]:border-r @min-[30rem]:border-b-0",
+          capture.failure ? "border-[color:var(--ds-danger-border)]" : "border-[color:var(--ds-border-subtle)]",
+        )}
+      >
+        <span
+          className={cn(
+            "relative h-[7.5rem] max-w-full overflow-hidden border bg-[var(--ds-surface-1)]",
+            dsRadius.md,
+            dsElev.low,
+            capture.failure ? "border-[color:var(--ds-danger)]" : "border-[color:var(--ds-border)]",
+          )}
+          style={{ aspectRatio: captureAspect(capture) }}
+        >
+          <CaptureThumbFace capture={capture} />
+        </span>
+      </span>
+
+      <span className="flex min-w-0 flex-col gap-[var(--ds-space-base)] p-[var(--ds-space-base)]">
+        <span className="flex min-w-0 items-start gap-[var(--ds-space-snug)]">
+          <span className="flex min-w-0 flex-1 flex-col gap-[var(--ds-space-hair)]">
+            <span
+              className={cn(
+                dsText.ui,
+                "truncate font-semibold",
+                capture.failure ? "text-[color:var(--ds-danger)]" : "text-[color:var(--ds-fg)]",
+              )}
+            >
+              {capture.label}
+            </span>
+            {secondary && (
+              <span className={cn(dsText.meta, "line-clamp-2 text-[color:var(--ds-fg-secondary)]")}>{secondary}</span>
+            )}
+          </span>
+          <Badge tone={capture.failure ? "danger" : "neutral"}>{CAPTURE_KIND_LABEL[capture.kind]}</Badge>
+        </span>
+
+        <MetaLine
+          items={[
+            capture.system?.toUpperCase(),
+            capture.capturedAt ? fmtClock(capture.capturedAt) : undefined,
+            capture.size ? `${capture.size.w} × ${capture.size.h}` : undefined,
+          ]}
+        />
+
+        {capture.note && (
+          <span className={cn(dsText.meta, "line-clamp-2 text-[color:var(--ds-fg-muted)]")}>{capture.note}</span>
+        )}
+
+        <span
+          className={cn(
+            dsText.meta,
+            "mt-auto flex items-center gap-[var(--ds-space-tight)] font-medium text-[color:var(--ds-fg-secondary)]",
+            "group-hover:text-[color:var(--ds-fg)]",
+          )}
+        >
+          <Maximize2 aria-hidden className={dsIcon.sm} />
+          Open full capture
+        </span>
+      </span>
+    </button>
+  );
+}
+
+/**
+ * The receipt's SCREENSHOT EVIDENCE. It used to be a 52px strip wedged between
+ * the timeline and the tabs, then briefly lived in Context. Captures qualify
+ * the outcome recorded by the receipt, so each real tile now lives on that tab:
+ * kind, label, the step it was taken on and the clock let the operator tell two
  * captures apart without opening either.
  *
  * The filter chips and the export menu are the two affordances the legacy
  * Screenshots tab had that the operator kept (`legacy-keep-ditch` §4.20), and
  * both carried over unchanged.
  */
-export function EvidenceSection({ row }: { row: DemoRow }) {
+export function ReceiptCapturesSection({ row }: { row: DemoRow }) {
   const captures = useMemo(() => capturesFor(row), [row]);
   const [kind, setKind] = useState<DemoCaptureKind | "all">("all");
   const [open, setOpen] = useState<number | null>(null);
@@ -676,6 +865,14 @@ export function EvidenceSection({ row }: { row: DemoRow }) {
   const present = KIND_ORDER.filter((k) => captures.some((c) => c.kind === k));
   const active = present.includes(kind as DemoCaptureKind) ? kind : "all";
   const shown = active === "all" ? captures : captures.filter((c) => c.kind === active);
+  const byStep = useMemo(
+    () =>
+      groupCapturesByStep(
+        active === "all" ? captures : captures.filter((c) => c.kind === active),
+        row.steps?.map((s) => s.label),
+      ),
+    [captures, active, row.steps],
+  );
 
   const copyTrace = () => {
     void navigator.clipboard
@@ -691,23 +888,26 @@ export function EvidenceSection({ row }: { row: DemoRow }) {
   };
 
   return (
-    <section aria-label="Evidence" className="flex flex-col gap-[var(--ds-space-snug)]">
-      <div className="flex items-center gap-[var(--ds-space-snug)]">
-        <SectionLabel className="min-w-0 truncate">Evidence</SectionLabel>
-        {/* HOW MANY THERE ARE, at the top. The section used to say only what it
-            was; whether a run carried one capture or nine could be told apart
-            only by counting tiles, and the filter chips that print the counts
-            appear only when a run has more than one KIND. */}
-        {captures.length > 0 && (
-          <Badge tone={captures.some((c) => c.failure) ? "danger" : "neutral"}>{captures.length}</Badge>
-        )}
+    <section aria-label="Screenshot evidence" className="@container flex flex-col gap-[var(--ds-space-base)]">
+      <div className="flex items-start gap-[var(--ds-space-snug)]">
+        <div className="flex min-w-0 flex-1 flex-col gap-[var(--ds-space-hair)]">
+          <div className="flex items-center gap-[var(--ds-space-snug)]">
+            <SectionLabel className="min-w-0 truncate">Screenshots</SectionLabel>
+            {captures.length > 0 && (
+              <Badge tone={captures.some((c) => c.failure) ? "danger" : "neutral"}>{captures.length}</Badge>
+            )}
+          </div>
+          <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+            Frames captured by this run, grouped by the step that produced them.
+          </p>
+        </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
               aria-label="Export this run"
               className={cn(
-                "ml-auto inline-flex shrink-0 items-center gap-[var(--ds-space-tight)] border px-[var(--ds-space-base)]",
+                "inline-flex shrink-0 items-center gap-[var(--ds-space-tight)] border px-[var(--ds-space-base)]",
                 "h-[var(--ds-h-sm)] rounded-[var(--ds-radius-md)] border-[color:var(--ds-border)] bg-[var(--ds-surface-1)]",
                 dsText.meta,
                 dsFocus,
@@ -771,94 +971,56 @@ export function EvidenceSection({ row }: { row: DemoRow }) {
       )}
 
       {shown.length === 0 ? (
-        <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
-          {captures.length === 0
-            ? "No captures — this run has not reached a step that takes one."
-            : "No captures of that kind on this run."}
-        </p>
-      ) : (
-        /* A FULL-WIDTH LIST, not a two-column grid of tall tiles.
-           Operator: *"this needs to be designed better too."* The grid was
-           built for a wall of thumbnails and this rail never has one — the
-           common run carries ONE capture, which took a third of the column and
-           left two thirds empty, and the tile spent its height on a large icon
-           well above a two-line label that then truncated. A row spends the
-           width instead: the shape on the left at a fixed height, the label and
-           its provenance filling the rest, and every row the same height so
-           three of them read as a list rather than as three cards.
-           It scales in the one direction that matters — the well caps at four
-           rows and scrolls, clipping on a whole row (see the token), so a
-           nine-capture run cannot push Data off the rail. */
         <div
           className={cn(
-            "flex flex-col divide-y overflow-hidden overflow-y-auto border",
-            "max-h-[var(--ds-h-evidence-well)]",
-            dsRadius.md,
-            "divide-[color:var(--ds-border-subtle)] border-[color:var(--ds-border)]",
+            "flex min-h-[9rem] flex-col items-center justify-center gap-[var(--ds-space-snug)] border bg-[var(--ds-surface-1)] p-[var(--ds-space-loose)] text-center",
+            dsRadius.lg,
+            "border-[color:var(--ds-border)]",
           )}
         >
-          {shown.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => setOpen(captures.indexOf(c))}
-              aria-label={`Open capture — ${c.label}${c.failure ? " (failure capture)" : ""}`}
-              className={cn(
-                // The recessed plane. A capture row is a thing that sits BACK
-                // from the section, and it was the last one drawing its own
-                // lighter fill inside a surface that had already stepped down.
-                "flex min-w-0 shrink-0 items-center gap-[var(--ds-space-base)] bg-[var(--ds-recess-bg)] text-left",
-                "h-[var(--ds-h-evidence-row)] px-[var(--ds-space-snug)]",
-                dsFocus,
-                dsMotion.fast,
-                // it opens the lightbox — a real command, so it dips like every
-                // other pressable in the system
-                "active:translate-y-px",
-                c.failure
-                  ? "bg-[var(--ds-danger-quiet)] hover:brightness-125"
-                  : "hover:bg-[var(--ds-surface-3)]",
-              )}
-            >
-              {/* The thumbnail is the capture's own SHAPE at a shared height —
-                  a portrait document page and a landscape browser viewport
-                  read as different things before either is opened, which is the
-                  one true thing a byte-less placeholder can offer. Fixed
-                  height, derived width, so the rows still land on one grid. */}
-              <span
-                aria-hidden
-                style={{ aspectRatio: captureAspect(c) }}
-                className={cn(
-                  "flex h-[var(--ds-h-evidence-thumb)] shrink-0 items-center justify-center border bg-[var(--ds-surface-1)] rounded-[var(--ds-radius-sm)]",
-                  c.failure ? "border-[color:var(--ds-danger-border)]" : "border-[color:var(--ds-border-subtle)]",
-                )}
-              >
-                <Camera
-                  className={cn(dsIcon.md, c.failure ? "text-[color:var(--ds-danger)]" : "text-[color:var(--ds-fg-muted)]")}
-                />
-              </span>
-              <span className="flex min-w-0 flex-1 flex-col">
+          <Camera aria-hidden className={cn(dsIcon.lg, "text-[color:var(--ds-fg-faint)]")} />
+          <p className={cn(dsText.body, "font-medium text-[color:var(--ds-fg-secondary)]")}>
+            {captures.length === 0 ? "No screenshots captured yet" : "No screenshots match this filter"}
+          </p>
+          <p className={cn(dsText.meta, "max-w-[44ch] text-[color:var(--ds-fg-muted)]")}>
+            {captures.length === 0
+              ? "This run has not reached a step that records a frame."
+              : "Choose another capture type to see the evidence recorded on this run."}
+          </p>
+        </div>
+      ) : (
+        /* Grouped by the WORKFLOW STEP each frame was taken on — same idea as
+           the Data ledger. Kind chips (All / Errors / Steps) still filter;
+           grouping is layout. A flat list of "Packet page 1" / "Page 7" did not
+           say which pipeline step produced them (operator: categorize by step). */
+        <div className="flex flex-col gap-[var(--ds-space-loose)]">
+          {byStep.map((group) => (
+            <div key={group.step} className="flex flex-col gap-[var(--ds-space-snug)]">
+              <div className="flex items-center gap-[var(--ds-space-snug)]">
                 <span
                   className={cn(
-                    "truncate",
-                    dsText.body,
-                    c.failure
-                      ? "font-semibold text-[color:var(--ds-danger)]"
-                      : "font-medium text-[color:var(--ds-fg)]",
+                    dsText.caps,
+                    "min-w-0 truncate",
+                    group.step === CAPTURE_STEP_UNSCOPED
+                      ? "text-[color:var(--ds-fg-faint)]"
+                      : "text-[color:var(--ds-fg-secondary)]",
                   )}
                 >
-                  {c.label}
+                  {group.step}
                 </span>
-                {/* WHERE IT CAME FROM, and `Steps` is not in it. The kind was
-                    printed here as the plural FILTER label — a capture whose
-                    subtitle read `Steps` was not telling you it came from a
-                    step, it was echoing the name of the chip that would filter
-                    it. The chips above own the kind; the row owns the step it
-                    was taken on and the clock, which is what tells two captures
-                    of the same page apart. */}
-                <MetaLine items={[c.step, c.system?.toUpperCase(), c.capturedAt ? fmtClock(c.capturedAt) : undefined]} />
-              </span>
-              <ChevronRight aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-faint)]")} />
-            </button>
+                <span aria-hidden className="h-px flex-1 bg-[var(--ds-border-subtle)]" />
+                <Badge tone="neutral">{group.captures.length}</Badge>
+              </div>
+              <div className="grid grid-cols-1 gap-[var(--ds-space-snug)] @min-[68rem]:grid-cols-2">
+                {group.captures.map((c) => (
+                  <ReceiptCaptureCard
+                    key={c.id}
+                    capture={c}
+                    onOpen={() => setOpen(captures.indexOf(c))}
+                  />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}

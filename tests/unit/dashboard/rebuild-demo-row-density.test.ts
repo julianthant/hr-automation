@@ -1,6 +1,10 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import {
+  canViewAllMembers,
+  MEMBER_WELL_LINES,
+} from "../../../src/dashboard/components/dev/rebuild-demo/DemoQueue.js";
+import {
   DEMO_ROWS,
   effectiveStatus,
   groupCounts,
@@ -64,7 +68,7 @@ test("a settled ROLLUP over a member that still wants something is not settled",
   assert.equal(isSettledRow(i9), false);
 });
 
-test("a settled group puts NOTHING on screen to walk, at every member count", () => {
+test("a settled group still puts every member on screen to walk", () => {
   const settled = Object.values(DEMO_ROWS).filter((r) => r.rowType === "group" && isSettledRow(r));
   assert.ok(settled.length > 0, "the corpus holds no settled group");
   // The small group and the large group must behave IDENTICALLY — that pair is
@@ -74,12 +78,10 @@ test("a settled group puts NOTHING on screen to walk, at every member count", ()
 
   for (const row of settled) {
     const ids = orderedMemberIds(row.id);
-    // Collapsed (the default): no member lines at all, so the keyboard walks
-    // the rows the eye sees and nothing more.
-    assert.deepEqual(visibleMemberIds(row, new Set()), [], `${row.id} left members on screen while shut`);
-    // Expanded by the operator: EVERY member is back — never a truncated peek,
-    // because the well is what caps the height now.
-    assert.deepEqual(visibleMemberIds(row, new Set([row.id])), ids, `${row.id} truncated its expanded list`);
+    // No more shut collapse: settled groups keep their people in the well.
+    // Height (5 / 20) changes; presence does not.
+    assert.deepEqual(visibleMemberIds(row, new Set()), ids, `${row.id} hid members while settled`);
+    assert.deepEqual(visibleMemberIds(row, new Set([row.id])), ids, `${row.id} changed when expandedGroups was set`);
   }
 });
 
@@ -96,6 +98,20 @@ test("an UNSETTLED group shows every member, whatever its size (the one shape)",
     assert.deepEqual(visibleMemberIds(row, new Set()), ids, `${row.id} truncated its member list`);
     assert.deepEqual(visibleMemberIds(row, new Set([row.id])), ids, `${row.id} changed on expand`);
   }
+});
+
+test("attention changes member order without changing the member set", () => {
+  const all = orderedMemberIds("oath-batch");
+  assert.equal(all[0], "oath-m-2", "Grace's failed signer row must lead the table");
+  assert.equal(all.length, 12);
+  assert.equal(new Set(all).size, all.length, "attention-first sorting must not hide or duplicate a signer");
+  assert.ok(all.slice(1).every((id) => DEMO_ROWS[id].status === "verifiedDone"));
+});
+
+test("every expandable member set keeps the dedicated full-list action", () => {
+  assert.equal(canViewAllMembers(MEMBER_WELL_LINES), false);
+  assert.equal(canViewAllMembers(MEMBER_WELL_LINES + 1), true);
+  assert.equal(canViewAllMembers(orderedMemberIds("oath-batch").length), true);
 });
 
 test("member COUNT is not an input — the smallest and the largest group agree", () => {

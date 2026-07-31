@@ -136,7 +136,7 @@ export function TH({
           type="button"
           onClick={onSort}
           className={cn(
-            "inline-flex cursor-pointer items-center gap-[var(--ds-space-tight)]",
+            "inline-flex cursor-pointer items-center gap-[var(--ds-space-tight)] whitespace-nowrap",
             dsFocus,
             dsMotion.fast,
             "hover:text-[color:var(--ds-fg)]",

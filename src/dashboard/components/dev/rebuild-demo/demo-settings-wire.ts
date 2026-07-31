@@ -404,60 +404,6 @@ export const DEMO_SYSTEM_URLS: SystemUrlReferenceWire[] = (
 }));
 
 // ---------------------------------------------------------------------------
-// Performance budgets — caps the executor is held to
-// ---------------------------------------------------------------------------
-
-export interface BudgetCapWire {
-  system: SystemKey;
-  label: string;
-  /** how many concurrent leases this system allows */
-  cap: number;
-  /** in use at the instant this payload was projected */
-  inUse: number;
-  /** `single` = one browser, ever. Read-only: it is a property of the system. */
-  poolMode: "single" | "pooled";
-  reason: string;
-}
-
-export const DEMO_BUDGETS: BudgetCapWire[] = [
-  {
-    system: "ucpath",
-    label: "UCPath",
-    cap: 1,
-    inUse: 1,
-    poolMode: "single",
-    reason: "PeopleSoft invalidates the older session when a second one authenticates. One browser is not a tuning choice.",
-  },
-  {
-    system: "kuali",
-    label: "Kuali",
-    cap: 2,
-    inUse: 1,
-    poolMode: "pooled",
-    reason: "Two concurrent sessions verified stable.",
-  },
-  { system: "kronos", label: "Kronos", cap: 2, inUse: 0, poolMode: "pooled", reason: "Two concurrent sessions verified stable." },
-  { system: "crm", label: "CRM", cap: 2, inUse: 1, poolMode: "pooled", reason: "Two concurrent sessions verified stable." },
-  { system: "i9", label: "I-9", cap: 1, inUse: 1, poolMode: "single", reason: "Single-session by the same rule as UCPath." },
-  { system: "onbase", label: "OnBase", cap: 1, inUse: 0, poolMode: "single", reason: "Single-session; verified 2026-06-30." },
-  {
-    system: "servicenow",
-    label: "ServiceNow",
-    cap: 2,
-    inUse: 0,
-    poolMode: "pooled",
-    reason: "Ticket filing is short and stateless.",
-  },
-];
-
-/** executor lanes — the global ceiling every per-system cap sits under */
-export const DEMO_LANE_BUDGET = {
-  cap: 4,
-  inUse: 3,
-  note: "A lane is one item in flight. A workflow can hold several system leases inside one lane.",
-} as const;
-
-// ---------------------------------------------------------------------------
 // Preflight / doctor — advisory only, never a gate
 // ---------------------------------------------------------------------------
 

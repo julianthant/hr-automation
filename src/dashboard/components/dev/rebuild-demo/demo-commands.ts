@@ -179,8 +179,8 @@ const APPLIED_COPY: Record<DemoCommandKey, (row: DemoRow) => { headline: string;
     detail: `Your corrections were written to ${label(row)}'s checkpoint at a new generation and the SAME run was released from the step it stopped at. It keeps its run id, its attempt history and its receipt — no second run was created, so nothing it already did will happen twice.`,
   }),
   "rerun-with-existing-data": (row) => ({
-    headline: "New run from this data",
-    detail: `A fresh ${row.workflow.label} run was enqueued on the current workflow version from these values. Reused values are marked as reused in its receipt — a replay is never labelled as newly observed.`,
+    headline: "Custom run started from this data",
+    detail: `A fresh custom ${row.workflow.label} run was enqueued on the current workflow version from the complete data set, including your corrections. Reused values are marked as reused in its receipt — a replay is never labelled as newly observed.`,
   }),
 };
 

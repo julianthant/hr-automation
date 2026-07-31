@@ -156,8 +156,7 @@ export const ROW_VARIANTS: RowVariantSpec[] = [
     titleRule: "Title = the PDF filename. Subtitle = the trace id. Always a Group, even with one person.",
     carries: [
       "Before approval: the extracted count (6 people) — there are no member rows yet",
-      "Bulk approve on the row itself (Approve 5 of 6) plus a link to the review; editing a value is only offered inside the review",
-      "A prominent link to its Review Run Row",
+      "A prominent link to its Review Run Row; approval exists only after the operator works through that review",
       "After approval: member rows inline, with per-member status counts and progress",
     ],
     gotcha:
@@ -272,7 +271,7 @@ const PANEL_KIND_SPECS: Omit<PanelKindSpec, "tabs">[] = [
     specifics: [
       "No Review tab — this row has no records to review.",
       "There is no gate banner. A decision renders inline in the log stream at the line that produced it, and a dismissable notice appears in the corner only while that decision is scrolled out of reach.",
-      "Data and Evidence are not tabs. Both are sections of the context rail beside the panel, so what the run read can be read WHILE the stream is still running.",
+      "Data is a context-rail section, so what the run read can be read WHILE the stream is still running. Screenshot evidence lives inside Receipt beside the outcome it qualifies.",
       "The Data ledger corrects read values in place; a write is shown and never editable.",
     ],
     exampleId: "sep-maria",
@@ -427,13 +426,6 @@ const PANEL_EXPLANATION: Record<PanelKindKey, string> = {
 const STANDALONE_REVIEW_WHY =
   "Nobody delegated it, so approving would release no work — this is a read of a document, not a gate in front of one.";
 
-/**
- * D8, in one sentence. It is the same sentence on every packet in the product,
- * which is exactly why it does not belong on the row.
- */
-const BULK_APPROVE_CONSTRAINT =
-  "Approving is a decision about a list, so it can be made from here. Changing an extracted value is a claim about paper, so it opens the review — a value may only be edited with its scanned page on screen.";
-
 export function rowExplanationOf(row: DemoRow): RowExplanation {
   const variant = rowVariantOf(row);
   const base = VARIANT_EXPLANATION[variant];
@@ -442,10 +434,6 @@ export function rowExplanationOf(row: DemoRow): RowExplanation {
     doing: base.doing,
     panel: PANEL_EXPLANATION[panelKind(row)],
     why: standaloneReview ? STANDALONE_REVIEW_WHY : base.why,
-    // Spread rather than `constraint: … : undefined`, so a row with no rule to
-    // state carries no key at all — a present-but-undefined field is a field
-    // every consumer has to guard, and this one is iterated.
-    ...(row.bulkApprove ? { constraint: BULK_APPROVE_CONSTRAINT } : {}),
   };
 }
 

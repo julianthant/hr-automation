@@ -22,8 +22,11 @@ import { dsClip, dsFocus, dsIcon, dsMotion, dsRadius, dsText } from "./tokens";
  * ====================================================================== */
 
 /**
- * Six variants, and the choice is semantic, not decorative:
+ * Seven variants, and the choice is semantic, not decorative:
  *   primary   — the ONE affirmative action on a surface (Approve, Run, Save)
+ *   brand     — the product-level launch CTA (`Start a run`). Info solid on
+ *               Graphite Warm so the queue toolbar CTA is not the same near-
+ *               white fill as every dialog primary; Paper Ink uses the swatch.
  *   secondary — a real alternative to primary (Cancel, Back, Skip)
  *   outline   — a peer action in a group of equals (toolbar, filters)
  *   ghost     — a tertiary action that must not compete (Details, Copy)
@@ -48,6 +51,14 @@ const buttonVariants = cva(
         primary: cn(
           "bg-[var(--ds-accent)] text-[color:var(--ds-accent-fg)] border-transparent",
           "hover:bg-[var(--ds-accent-hover)]",
+        ),
+        brand: cn(
+          // Same edge weight as the Workflow Panel toggle beside it
+          // (`--ds-border-strong`). Transparent / 8% borders disappeared on
+          // Graphite Warm next to outlined toolbar peers.
+          "bg-[var(--ds-info-solid-bg)] text-[color:var(--ds-info-solid-fg)] font-semibold",
+          "border-[color:var(--ds-border-strong)]",
+          "hover:bg-[var(--ds-info-solid-hover)]",
         ),
         secondary: cn(
           "bg-[var(--ds-control-bg)] text-[color:var(--ds-control-fg)]",
@@ -74,9 +85,12 @@ const buttonVariants = cva(
         ),
       },
       size: {
-        sm: cn("h-[var(--ds-h-sm)] px-[var(--ds-space-snug)] gap-[var(--ds-space-tight)]", dsText.meta),
-        md: cn("h-[var(--ds-h-md)] px-[var(--ds-space-cozy)] gap-[var(--ds-space-snug)]", dsText.ui),
-        lg: cn("h-[var(--ds-h-lg)] px-[var(--ds-space-loose)] gap-[var(--ds-space-snug)]", dsText.ui),
+        // `flush` on every size: buttons carry an icon beside a label, and the
+        // size class's padded line box would sit the glyphs a hair below the
+        // glyph. Collapse to the em so `items-center` centers text to logo.
+        sm: cn("h-[var(--ds-h-sm)] px-[var(--ds-space-snug)] gap-[var(--ds-space-tight)]", dsText.meta, dsText.flush),
+        md: cn("h-[var(--ds-h-md)] px-[var(--ds-space-cozy)] gap-[var(--ds-space-snug)]", dsText.ui, dsText.flush),
+        lg: cn("h-[var(--ds-h-lg)] px-[var(--ds-space-loose)] gap-[var(--ds-space-snug)]", dsText.ui, dsText.flush),
         /**
          * A control in an ACTION BAR. Identical box to `toolbarControl()` in
          * DemoBulkBar — same height token, same inset, same gap, same type —
@@ -89,6 +103,7 @@ const buttonVariants = cva(
         toolbar: cn(
           "h-[var(--ds-h-toolbar)] px-[var(--ds-space-base)] gap-[var(--ds-space-snug)]",
           dsText.meta,
+          dsText.flush,
         ),
       },
       block: { true: "w-full", false: "" },
@@ -235,6 +250,7 @@ const badgeVariants = cva(
     dsClip.token,
     dsRadius.sm,
     dsText.micro,
+    dsText.flush,
     "h-[var(--ds-h-xs)] px-[var(--ds-space-snug)] gap-[var(--ds-space-tight)] font-medium",
   ),
   {
@@ -404,6 +420,7 @@ export function Chip({
     dsClip.token,
     dsRadius.sm,
     dsText.meta,
+    dsText.flush,
     "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
     CHIP_TONE[tone],
     selected && "bg-[var(--ds-surface-selected)] text-[color:var(--ds-fg)]",

@@ -63,15 +63,11 @@
      toward the FOREGROUND instead of toward the accent keeps it hueless and
      keeps it one step, on either theme.
 
-     ONE STEP MEANS ONE STEP. At 5% the selected card still read as a pale plate
-     laid over the panel — operator: *"the color the row changes when
-     highlighted is too light. we need a shade close to the original color."*
-     The fill is not what finds the row: the 2px rail down its left edge, the
-     stronger border and the weight change are, and every one of those is a
-     non-luminance cue that survives at any tint. So the fill drops to the
-     smallest delta that is still a delta, and the cues beside it carry the
-     rest. */
-  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 3%, var(--ds-surface-1));
+     Selection lifts the card BODY only (not the recessed footer) and lightens
+     the card's own perimeter border. No inset rail — that light-gray left edge
+     was a second border the operator asked to remove. The fill stays a small
+     step so the body reads selected without becoming a pale plate. */
+  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 4%, var(--ds-surface-1));
   --ds-surface-disabled: color-mix(in srgb, var(--muted) 60%, transparent);
 
   /* THE RECESSED PLANE — the ONE treatment for "this sits back from the card".
@@ -195,7 +191,7 @@
 
      Color is never the only signal. Each status also owns a distinct ICON,
      a distinct EMPHASIS TIER (solid / tinted / outline / ghost) and, for two
-     of them, a distinct SHAPE cue (dashed border, strikethrough label).
+     of them, a distinct SHAPE cue (dashed border, solid gray Cancelled pill).
      See ds/primitives-status.tsx for the icon + tier bindings, and DESIGN.md
      for the full mapping table.
 
@@ -263,24 +259,37 @@
   --ds-status-queued-bg: transparent;
   --ds-status-queued-border: color-mix(in srgb, var(--muted-foreground) 45%, transparent);
 
-  /* 7 — Cancelled (neutral + struck-through label; NOT amber, NOT red —
+  /* 7 — Cancelled (solid gray pill like Done; NOT amber, NOT red —
          a deliberate stop is neither a warning nor a failure) */
   --ds-status-cancelled-fg: var(--ds-fg-muted);
   --ds-status-cancelled-mark: var(--ds-fg-muted);
-  --ds-status-cancelled-bg: transparent;
-  --ds-status-cancelled-border: transparent;
+  --ds-status-cancelled-bg: color-mix(in srgb, var(--muted-foreground) 14%, transparent);
+  --ds-status-cancelled-border: color-mix(in srgb, var(--muted-foreground) 40%, transparent);
+  --ds-status-cancelled-solid-bg: #737373;
+  --ds-status-cancelled-solid-fg: #fafafa;
 
   /* 8 — Verified done (ghost: green icon, muted label, no chrome at all) */
+  /* 8 — Done (solid green fill, dark ink — same shape as Waiting on you /
+         Failed, quieter hue. Operator 2026-07-29: a bare green word + shield
+         read as unfinished chrome; the word belongs in a filled pill.) */
   --ds-status-verified-done-fg: var(--success);
   --ds-status-verified-done-mark: var(--success);
-  --ds-status-verified-done-bg: transparent;
-  --ds-status-verified-done-border: transparent;
+  --ds-status-verified-done-bg: color-mix(in srgb, var(--success) 14%, transparent);
+  --ds-status-verified-done-border: color-mix(in srgb, var(--success) 40%, transparent);
+  --ds-status-verified-done-solid-bg: var(--success);
+  --ds-status-verified-done-solid-fg: hsl(152 55% 8%);
 
   /* Neutral/informational accents reused by Banner, Chip and the log surfaces */
   --ds-info-fg: var(--info);
   --ds-info-mark: var(--info);
   --ds-info-bg: color-mix(in srgb, var(--info) 12%, transparent);
   --ds-info-border: color-mix(in srgb, var(--info) 40%, transparent);
+  /* Solid info fill — the product-level launch CTA (queue `Start a run`). Info
+     blue is the interactive hue on Graphite Warm; amber `--ds-accent-mark` stays
+     off verbs because it shares warning's family. */
+  --ds-info-solid-bg: var(--info);
+  --ds-info-solid-fg: var(--info-foreground);
+  --ds-info-solid-hover: color-mix(in srgb, var(--info) 88%, hsl(0 0% 100%));
   --ds-success-fg: var(--success);
   --ds-success-mark: var(--success);
   --ds-success-bg: color-mix(in srgb, var(--success) 12%, transparent);
@@ -364,6 +373,12 @@
   --ds-space-loose: 16px;
   --ds-space-section: 24px;
   --ds-space-page: 32px;
+  /* THE SHELL'S LEFT AND RIGHT EDGE — Top Bar, Queue Toolbar, and the panel
+     region all hang off this one inset. It used to be three different numbers
+     (`cozy` / `base` / bare `p-3`), so the three bands' content started on
+     three different verticals (operator: "these 3 panels does not have the
+     same left and right alignment"). One token, one edge. */
+  --ds-shell-inset: var(--ds-space-cozy);
 
   /* ---------------------------------------------------------------------
      SIZE — control + chrome heights. A dense operations tool lives or dies
@@ -402,15 +417,14 @@
      a shape. The whole point of the outlined state is that a queued run shows
      you how many steps it has and how it is laid out before it starts. */
   --ds-h-timeline-bar: 10px;
-  /* The evidence lightbox's capture box. The viewer is TWO COLUMNS of equal
-     height — the capture on the left, its metadata on the right — so this is
-     the height BOTH columns are cut to, and the capture's width falls out of
-     its own served aspect ratio inside it. It is a viewport fraction because
-     the dialog itself is (`max-h-[86vh]`), minus the header, the thumbnail
-     strip and the footer the box shares the dialog with. */
-  --ds-h-capture-box: 46vh;
-  /* the thumbnail strip along the capture column's bottom */
-  --ds-h-capture-thumb: 44px;
+  /* The evidence lightbox's capture STAGE. Tall enough that a letter page,
+     fitted contain-style into the column, reads as the subject — not a stamp
+     floating in a dark well. Shared as the height budget for the metadata
+     column so the two end on one line. */
+  --ds-h-capture-box: 58vh;
+  /* the thumbnail strip along the capture column's bottom — tall enough that
+     a page facsimile reads as a preview, not a labelled chip with a camera */
+  --ds-h-capture-thumb: 72px;
   /* The source-page stage when Review stacks below its extracted fields. At
      the side-by-side rung the grid gives it the full remaining panel height;
      at the narrow rung it still needs enough paper to inspect rather than a
@@ -430,14 +444,14 @@
      the N-1 hairlines `divide-y` puts between them, which is exactly where the
      container's edge lands.
 
-       collapsed  6 lines — the resting shape, the same at 6 members and at 50
+       collapsed  5 lines — the resting shape, the same at 5 members and at 50
        open      20 lines — the operator's own number, scrolling to everyone
 
      Scale is still presentational: the RESTING height does not vary with the
      count. What changed is that expanding is now in the row instead of only
      through `Open all N`. */
-  --ds-h-member-line: 26px;
-  --ds-h-member-well: calc(6 * var(--ds-h-member-line) + 5 * var(--ds-border-w));
+  --ds-h-member-line: 28px;
+  --ds-h-member-well: calc(5 * var(--ds-h-member-line) + 4 * var(--ds-border-w));
   --ds-h-member-well-open: calc(20 * var(--ds-h-member-line) + 19 * var(--ds-border-w));
   /* NO TOKEN FOR THE DECISION NOTICE'S BAND. There was one — the toast
      viewport's floor was built partly out of it — and deleting it is the point:
@@ -461,14 +475,14 @@
      `when` and `count` tracks — so a sweep's date sits over the dates of the
      runs it swept, and the section heads line up down the page instead of each
      one ending wherever its sentence stopped. */
-  --ds-w-archive-status: 124px;
-  --ds-w-archive-trace: 132px;
-  --ds-w-archive-workflow: 168px;
-  /* 124px because the stored clock runs to `Jun 17, 12:22 PM` — the widest the
-     corpus produces. At 104 every date in the table cut to `Jun 17, 12:…`, and
-     a truncated timestamp is the one column nothing else on the row recovers. */
-  --ds-w-archive-when: 124px;
-  --ds-w-archive-duration: 76px;
+  --ds-w-archive-status: 132px;
+  --ds-w-archive-trace: 148px;
+  /* Wide enough for `Jul 20, 9:02 AM` plus cell padding — 124 used to cut the
+     meridian to `A…` and made 24h-looking bulk clocks look like a second format. */
+  --ds-w-archive-when: 152px;
+  /* `RAN FOR` (caps) + sort glyph + count badge — 76 forced the header onto two
+     lines. */
+  --ds-w-archive-duration: 104px;
   /* The bump header used to own two tracks of its own here — a version pair and
      a kind. They are GONE, and that is the fix rather than a tidy-up: a second
      set of tracks inside the archive table is what put a sweep's date 42px left
@@ -480,26 +494,18 @@
      `ml-5` on each of the six things that can appear under a title. 14px icon +
      the 4px that binds the tick to the name it belongs to. */
   --ds-w-row-indent: 18px;
-  /* THE ROW'S CENTRE BELONGS TO THE ROW.
-     A queue row is one big select target with smaller targets nested in it, and
-     a nested target that LEAVES the panel — a delegation chip, a back link —
-     must never sit under the row's middle: `elementFromPoint` at a row's centre
-     was returning `Oath Upload · Signed_Oaths_0724.pdf`, so a click in the
-     middle of a queued row opened a different workflow instead of selecting it.
-     This is the widest such chip may be, and it is EXACT rather than guessed.
-     Used on a band inside the row's content column, `50%` resolves to half that
-     column; the row's own centre sits half an indent to the LEFT of that (the
-     leading track is inside the row but outside the column), so the indent term
-     is what makes the two agree at any queue width. The last term is clearance,
-     so the edge is never ON the centre. */
+  /* Retired width cap for queue redirect chips. Kept so old references do not
+     go missing mid-refactor — chips now fill/wrap in the band instead of
+     truncating at half the title column. */
   --ds-w-row-link-max: calc(50% - var(--ds-w-row-indent) / 2 - var(--ds-space-cozy));
   --ds-w-rail: 200px; /* the workflow rail */
-  /* The run's CONTEXT RAIL — the third column of the detail region, where the
-     Data ledger, the evidence and the run's provenance live so the log stream
-     keeps its height. `spine` is the collapsed width: a label and a chevron,
-     never zero, so the operator can always see where it went. */
-  --ds-w-context-rail: 348px;
-  /* The rail while the Data surface is being EDITED in it. 348px reads a
+  /* The queue and the run's CONTEXT RAIL are equal resting side panels. 376px
+     is slightly wider than the former 348px context rail while leaving the
+     centre log panel as the largest column at every three-panel breakpoint.
+     One shared token keeps the two edges from drifting apart again. */
+  --ds-w-side-panel: 376px;
+  --ds-w-context-rail: var(--ds-w-side-panel);
+  /* The rail while the Data surface is being EDITED in it. 376px reads a
      ledger fine but is tight to type a date into once the row carries a label,
      a value, its badges and its system; 520 puts the clock back on the line and
      still leaves the centre column enough to keep the stream readable at 1280.
@@ -541,11 +547,12 @@
      SERVES its own dimensions uses those instead — a 1600 × 1000 browser
      viewport is not a page and must not be drawn as one. */
   --ds-aspect-page: 612 / 792;
-  /* The height every evidence thumbnail is drawn at, so a row of them lands on
-     one baseline while each keeps its OWN width — a page and a viewport are
-     different shapes, and that difference is the tile's only cheap way to say
-     which of the two you are about to open. */
+  /* The evidence list thumbnail SLOT. Fixed width + fixed height so every
+     row's label starts on the same x — a portrait page and a landscape
+     viewport keep their own shape INSIDE the slot (letterboxed), never by
+     pushing the text around. */
   --ds-h-evidence-thumb: 44px;
+  --ds-w-evidence-thumb: 72px;
   /* ONE EVIDENCE ROW, and the well built out of it — the same construction as
      the member well, and for the same reason: a list that CLIPS must clip on a
      whole row boundary, or the cut edge reads as a rendering fault rather than
@@ -740,7 +747,8 @@ body[data-demo-theme="dark"] {
   --ds-surface-3: var(--accent);
   --ds-surface-overlay: var(--popover);
   --ds-surface-scrim: rgba(0, 0, 0, 0.66);
-  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 3%, var(--ds-surface-1));
+  /* Body-only lift — see :root. Footer stays on --ds-recess-bg. */
+  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 4%, var(--ds-surface-1));
   --ds-surface-disabled: color-mix(in srgb, var(--muted) 60%, transparent);
 
   /* --- border ----------------------------------------------------------- */
@@ -813,18 +821,25 @@ body[data-demo-theme="dark"] {
 
   --ds-status-cancelled-fg: var(--ds-fg-muted);
   --ds-status-cancelled-mark: var(--ds-fg-muted);
-  --ds-status-cancelled-bg: transparent;
-  --ds-status-cancelled-border: transparent;
+  --ds-status-cancelled-bg: color-mix(in srgb, #a3a3a3 14%, transparent);
+  --ds-status-cancelled-border: color-mix(in srgb, #a3a3a3 40%, transparent);
+  --ds-status-cancelled-solid-bg: #737373;
+  --ds-status-cancelled-solid-fg: #fafafa;
 
   --ds-status-verified-done-fg: #12b76a;
   --ds-status-verified-done-mark: #12b76a;
-  --ds-status-verified-done-bg: transparent;
-  --ds-status-verified-done-border: transparent;
+  --ds-status-verified-done-bg: color-mix(in srgb, #12b76a 14%, transparent);
+  --ds-status-verified-done-border: color-mix(in srgb, #12b76a 40%, transparent);
+  --ds-status-verified-done-solid-bg: #12b76a;
+  --ds-status-verified-done-solid-fg: #052e1c;
 
   --ds-info-fg: #4ea1f3;
   --ds-info-mark: #4ea1f3;
   --ds-info-bg: color-mix(in srgb, #4ea1f3 12%, transparent);
   --ds-info-border: color-mix(in srgb, #4ea1f3 40%, transparent);
+  --ds-info-solid-bg: #4ea1f3;
+  --ds-info-solid-fg: #06182b;
+  --ds-info-solid-hover: #6eb4f5;
   --ds-success-fg: #12b76a;
   --ds-success-mark: #12b76a;
   --ds-success-bg: color-mix(in srgb, #12b76a 12%, transparent);
@@ -921,9 +936,8 @@ body[data-demo-theme="light"] {
   --ds-surface-3: var(--accent);
   --ds-surface-overlay: var(--popover);
   --ds-surface-scrim: rgba(16, 24, 40, 0.45);
-  /* A hair more than the dark theme's 3%: paper starts at pure white, so the
-     same ratio lands a smaller absolute step. Measured, not matched. */
-  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 4%, var(--ds-surface-1));
+  /* Paper needs a hair more mix than Graphite Warm's 4% for the same read. */
+  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 5%, var(--ds-surface-1));
   --ds-surface-disabled: color-mix(in srgb, var(--muted) 70%, transparent);
 
   /* --- border ----------------------------------------------------------- */
@@ -999,18 +1013,25 @@ body[data-demo-theme="light"] {
 
   --ds-status-cancelled-fg: var(--ds-fg-muted);
   --ds-status-cancelled-mark: var(--ds-fg-muted);
-  --ds-status-cancelled-bg: transparent;
-  --ds-status-cancelled-border: transparent;
+  --ds-status-cancelled-bg: color-mix(in srgb, #737373 12%, transparent);
+  --ds-status-cancelled-border: color-mix(in srgb, #737373 28%, transparent);
+  --ds-status-cancelled-solid-bg: #a3a3a3;
+  --ds-status-cancelled-solid-fg: #171717;
 
   --ds-status-verified-done-fg: #065f46;
   --ds-status-verified-done-mark: #059669;
-  --ds-status-verified-done-bg: transparent;
-  --ds-status-verified-done-border: transparent;
+  --ds-status-verified-done-bg: color-mix(in srgb, #059669 12%, transparent);
+  --ds-status-verified-done-border: color-mix(in srgb, #065f46 28%, transparent);
+  --ds-status-verified-done-solid-bg: #059669;
+  --ds-status-verified-done-solid-fg: #ffffff;
 
   --ds-info-fg: #0369a1;
   --ds-info-mark: #0ba5ec;
   --ds-info-bg: color-mix(in srgb, #0ba5ec 12%, transparent);
   --ds-info-border: color-mix(in srgb, #0369a1 40%, transparent);
+  --ds-info-solid-bg: #0ba5ec;
+  --ds-info-solid-fg: #ffffff;
+  --ds-info-solid-hover: #0284c7;
   --ds-success-fg: #065f46;
   --ds-success-mark: #059669;
   --ds-success-bg: color-mix(in srgb, #059669 12%, transparent);
@@ -1097,6 +1118,14 @@ body[data-demo-theme="light"] {
   text-transform: uppercase;
   letter-spacing: var(--ds-tracking-caps);
   font-weight: 600;
+}
+/* Collapse the line box to the em. Compose AFTER a `ds-text-*` size class on a
+   single-line label that shares a flex/grid row with an icon or a taller
+   control (ⓘ, chip): the flex mid then is the glyph mid, not a padded line
+   box. Multi-line copy keeps the size class's own line-height. Unlayered so
+   it can beat the size class (same origin, later in this file). */
+.ds-leading-flush {
+  line-height: 1;
 }
 
 /* Elevation */

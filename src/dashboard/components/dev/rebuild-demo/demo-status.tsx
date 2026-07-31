@@ -31,6 +31,12 @@ interface ProposedStatusSpec {
   label: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
   /**
+   * Color alone — for a parent that wraps icon + text. Never put `iconClass`
+   * on that parent: it includes Running's rotation utility and would orbit the
+   * digit around the glyph.
+   */
+  soloTone: string;
+  /**
    * The icon's class when it is rendered ALONE on a panel surface (a row's
    * leading glyph), spin included. Not the in-chip tone — see `soloTone`.
    */
@@ -47,6 +53,7 @@ export const PROPOSED_STATUS: Record<ProposedStatus, ProposedStatusSpec> = Objec
       {
         label: spec.label,
         icon: spec.icon,
+        soloTone: spec.soloTone,
         iconClass: cn(spec.soloTone, spec.spin && "animate-spin motion-reduce:animate-none"),
         meaning: spec.meaning,
       },

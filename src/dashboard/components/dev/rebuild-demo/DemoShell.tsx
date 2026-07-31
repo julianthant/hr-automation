@@ -11,7 +11,6 @@ import {
   CircleHelp,
   Eye,
   FlaskConical,
-  Gauge,
   Hourglass,
   ListChecks,
   LayoutDashboard,
@@ -54,13 +53,10 @@ import {
 } from "./demo-settings-wire";
 import { DEMO_DAY, topLevelRowsForDay } from "./demo-days";
 import {
-  DEMO_LANE_BUDGET,
   DEMO_SESSIONS,
   MAX_WORKER_SPAWN,
   WORKER_SPAWN_WORKFLOWS,
-  leaseScopeOf,
   planWorkerSpawn,
-  workerSpawnCapacity,
   type BrowserHealth,
   type DemoBrowser,
   type DemoSession,
@@ -78,7 +74,6 @@ import { toolbarControl } from "./DemoBulkBar";
 import {
   Badge,
   Button,
-  ChipRow,
   DEMO_THEME_LABEL,
   DS_STATUS,
   Dialog,
@@ -90,7 +85,6 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-  SectionLabel,
   Select,
   type DemoTheme,
   dsBorder,
@@ -226,23 +220,18 @@ export function railEntryCounts(counts: Record<StatusBucket, number> | undefined
 }
 
 /**
- * The whole day, as the pair the launcher renders: `needs you` of `all`.
+ * The whole day, as the pair the launcher renders: `active` of `all`.
  *
- * The launcher used to carry ONE number with the word `elsewhere` beside it —
- * the day's attention minus the panel on screen. That scoping was correct and
- * it cost a word to say so, and the word was the only thing standing between
- * this control and the Status Bar's `Needs you N` two controls away.
- *
- * A PAIR needs no word. `3 | 5` is not the same shape as `Needs you 1`, so the
- * two cannot be read as one quantity rendered twice however close they sit, and
- * the launcher can go back to spanning every workflow — which is the whole
- * point of a control that survives the rail being minimised. It is exactly the
- * rail's own two badges summed down its length, off the same counting path, so
- * the rail and the launcher cannot disagree.
+ * The launcher used to carry the day's `Needs you` count — a different
+ * quantity from the rail's `active │ all` column (queued + running). The
+ * collapsed control then read amber `6` while the open rail's orange actives
+ * summed to `12`, so nothing on screen added up. Both now read the same pair:
+ * what is moving (queued + running), over everything today. Attention stays on
+ * the Status Bar's `Needs you` pill — a different shape, a different question.
  */
-export function attentionAcrossWorkflows(rows: DemoRow[]): { needsYou: number; all: number } {
+export function attentionAcrossWorkflows(rows: DemoRow[]): { active: number; all: number } {
   const totals = countRows(rows);
-  return { needsYou: totals.needsYou, all: totals.all };
+  return { active: totals.queued + totals.running, all: totals.all };
 }
 
 export function countRows(rows: DemoRow[]): Record<StatusBucket, number> {
@@ -274,17 +263,10 @@ export function countRows(rows: DemoRow[]): Record<StatusBucket, number> {
 /**
  * The demo's top-level views.
  *
- * The switcher used to hold `Dashboard · Row & panel catalog · Design system` —
- * one product page and two pieces of demo scaffolding — while the Archive, the
- * Explorer and the activity report were launched from a "Full-page views" group
- * inside **Settings**. That put three destinations behind a gear, which is how
- * Settings ended up being where you go to archive production runs.
- *
- * They are separated now: the switcher is the PRODUCT's page switcher, and the
- * demo's own surfaces (the catalog, the design-system kit, and the storage
- * fixture switch) live behind the "rebuild demo" badge that already declares
- * this is synthetic. `settings` stays a takeover behind the gear, because it is
- * a place you go and come back from rather than one you toggle between.
+ * The switcher is the PRODUCT's page switcher (Dashboard · Archive · Explorer ·
+ * Activity). Demo scaffolding (catalog, design-system kit, storage fixture)
+ * lives behind a quiet flask icon in the right chrome — not a loud "rebuild
+ * demo" pill beside the title. `settings` stays a takeover behind the gear.
  */
 export type DemoShellView = "queue" | "catalog" | "kit" | "settings" | "archive" | "explorer" | "report";
 
@@ -377,11 +359,10 @@ const PREFLIGHT_TONE: Record<PreflightVerdict, "success" | "warning" | "danger">
 };
 
 /**
- * The demo's own scaffolding, behind the badge that already says this is
- * synthetic. The storage fixture switch was shipped in the Settings page footer
- * labelled "Demo control", where it sat one keystroke from real settings — a
- * demo switch inside a product surface is a demo switch somebody will one day
- * mistake for a product one.
+ * Demo scaffolding (catalog, kit, storage fixture), behind a quiet flask icon.
+ * It used to be a loud "rebuild demo · synthetic data" pill beside the title —
+ * that slot now holds the product view switcher. The storage fixture switch
+ * must not live in Settings (a demo control inside a product surface).
  */
 function DemoSurfacesPopover({
   view,
@@ -394,26 +375,19 @@ function DemoSurfacesPopover({
   storage: StorageMode;
   onStorage: (mode: StorageMode) => void;
 }) {
+  const onScaffold = view === "catalog" || view === "kit";
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            "inline-flex shrink-0 cursor-pointer items-center gap-[var(--ds-space-tight)] border px-[var(--ds-space-base)]",
-            "h-[var(--ds-h-sm)] border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)]",
-            dsRadius.pill,
-            dsText.caps,
-            dsFocus,
-            dsMotion.fast,
-            "text-[color:var(--ds-info-fg)]",
-          )}
-        >
-          <FlaskConical aria-hidden className={dsIcon.sm} />
-          rebuild demo · synthetic data
-        </button>
+        <IconButton
+          size="sm"
+          label="Demo surfaces — synthetic data"
+          aria-pressed={onScaffold}
+          icon={<FlaskConical aria-hidden className={dsIcon.md} />}
+          className={cn(onScaffold && "bg-[var(--ds-surface-3)] text-[color:var(--ds-fg)]")}
+        />
       </PopoverTrigger>
-      <PopoverContent title="Demo surfaces" width="md" side="bottom" align="start">
+      <PopoverContent title="Demo surfaces" description="Synthetic scaffolding — not product chrome." width="md" side="bottom" align="end">
         <div className="flex flex-col gap-[var(--ds-space-base)]">
           <div className="flex flex-col gap-[var(--ds-space-hair)]">
             {DEMO_SURFACES.map((surface) => (
@@ -540,7 +514,7 @@ export function DemoTopBar({
   /** the demo's theme pair — see `ds/theme.ts` */
   theme: DemoTheme;
   onToggleTheme: () => void;
-  /** the demo's own fixture switch, behind the demo badge — never a product control */
+  /** fixture switch behind the quiet flask icon — never a product control */
   storage: StorageMode;
   onStorage: (mode: StorageMode) => void;
   /** where the operator has been — see `demo-nav-history.ts` */
@@ -553,7 +527,7 @@ export function DemoTopBar({
         dsSize.hTopbar,
         dsBorder.base,
         dsSurface.card,
-        "gap-[var(--ds-space-cozy)] px-[var(--ds-space-cozy)]",
+        "gap-[var(--ds-space-cozy)] px-[var(--ds-shell-inset)]",
       )}
     >
       {/* The app's name is the page's ONE h1. It reads at `dsText.ui` like the
@@ -567,15 +541,12 @@ export function DemoTopBar({
         >
           <ShieldCheck className={cn(dsIcon.md, "text-[color:var(--ds-accent-mark)]")} />
         </span>
-        <h1 className={cn(dsText.ui, "font-semibold text-[color:var(--ds-fg)]")}>HR Automation</h1>
+        <h1 className={cn(dsText.ui, dsText.flush, "font-semibold text-[color:var(--ds-fg)]")}>HR Automation</h1>
       </div>
-      {/* A standing environment marker, not news. It has to be unmissable when
-          you look at it and invisible when you are not — the loud tier belongs
-          to `Waiting on you` and `Failed`, and nothing else may take it. It is
-          also the door to the demo's own scaffolding, so nothing that only
-          exists because this is a demo sits inside a product surface. */}
-      <DemoSurfacesPopover view={view} onView={onView} storage={storage} onStorage={onStorage} />
 
+      {/* Product navigation sits where the synthetic badge used to shout —
+          history + the Dashboard / Archive / Explorer / Activity switcher.
+          Operator: remove the rebuild-demo pill; put this chrome in its place. */}
       <DemoNavHistoryControls nav={nav} />
 
       <div
@@ -641,6 +612,9 @@ export function DemoTopBar({
             )
           }
         />
+        {/* Quiet door to catalog / kit / storage fixture — demoted from the
+            loud synthetic pill that used to sit beside the title. */}
+        <DemoSurfacesPopover view={view} onView={onView} storage={storage} onStorage={onStorage} />
         {/* The gear opens Settings — eight editable leaves and the read-only
             Status group. It is no longer a door to anywhere else. */}
         <IconButton
@@ -846,13 +820,15 @@ export function DemoWorkflowPanelToggle({
   /** the day's corpus — every panel's rows, not the active panel's */
   rows: DemoRow[];
 }) {
-  const { needsYou, all } = useMemo(() => attentionAcrossWorkflows(rows), [rows]);
+  const { active: dayActive, all } = useMemo(() => attentionAcrossWorkflows(rows), [rows]);
   const showing = mode !== "icon";
   const code = WORKFLOW_CODE[active] ?? "";
   // The scope has to survive somewhere, and with the word gone it lives here.
   // Both numbers, both nouns, and the span they cover — an operator who hovers
   // or listens gets the full sentence; the face of the control gets the pair.
-  const scope = `${needsYou} of ${plural(all, "row")} across every workflow need you today`;
+  // Same quantity as the rail's orange `active` column, summed — so the
+  // collapsed badge and the open list cannot disagree.
+  const scope = `${dayActive} of ${plural(all, "row")} across every workflow are queued or running today`;
   return (
     <button
       id={WORKFLOW_PANEL_TOGGLE_ID}
@@ -863,7 +839,7 @@ export function DemoWorkflowPanelToggle({
       // replaces a button's contents outright, so the numbers were being
       // announced to nobody — the thing this control exists to carry.
       aria-label={`Workflow Panel — ${active}${showing ? `, ${WORKFLOW_PANEL_MODE_LABEL[mode]}` : ", minimised"}. ${scope}`}
-      title={`Workflow Panel — ${active} (${code})\n${scope}\nThe Needs you pill counts this panel only\nw cycles floating · icon · sidebar`}
+      title={`Workflow Panel — ${active} (${code})\n${scope}\nThe Status Bar's Needs you pill is attention, not this count\nw cycles floating · icon · sidebar`}
       onClick={() => onMode(showing ? "icon" : "floating")}
       className={cn(
         toolbarControl(),
@@ -871,7 +847,10 @@ export function DemoWorkflowPanelToggle({
         "active:translate-y-px",
         showing
           ? cn(dsBorder.loud, "bg-[var(--ds-surface-selected)] font-semibold text-[color:var(--ds-fg)]")
-          : cn(dsBorder.base, dsSurface.card, "text-[color:var(--ds-fg-muted)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]"),
+          // Resting edge was `--ds-border` (8% white) — invisible next to the
+          // blue Start a run. Strong (16%) reads as a real outline; selected
+          // still steps up to loud.
+          : cn(dsBorder.strong, dsSurface.card, "text-[color:var(--ds-fg-muted)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]"),
       )}
     >
       {showing ? (
@@ -884,20 +863,21 @@ export function DemoWorkflowPanelToggle({
           the whole day. It sits on the control's OWN surface, where
           `--ds-border` against a white card is not a line anybody sees. */}
       <span aria-hidden className={cn("mx-[var(--ds-space-hair)] h-4 w-px shrink-0", "bg-[var(--ds-border-loud)]")} />
-      {/* THE DEMAND, and only the demand. Amber while it is one; at zero it
-          steps down to a neutral rather than vanishing, because a badge that
-          disappears reflows the whole action bar every time the count crosses
-          zero — and a standing amber 0 is the definition of an alarm nobody
-          reads. */}
+      {/* ACTIVE (queued + running) across every workflow — same orange as the
+          rail's left column, and the same total when you add that column down.
+          At zero it dims rather than vanishing so the action bar does not
+          reflow every time the day goes idle. */}
       <span
         className={cn(
           dsText.nums,
           "shrink-0 tabular-nums",
           dsMotion.base,
-          needsYou > 0 ? "font-semibold text-[color:var(--ds-status-waiting-fg)]" : "text-[color:var(--ds-fg-faint)]",
+          dayActive > 0
+            ? "font-semibold text-[color:var(--ds-status-waiting-fg)]"
+            : "text-[color:var(--ds-fg-faint)]",
         )}
       >
-        {needsYou}
+        {dayActive}
       </span>
     </button>
   );
@@ -965,14 +945,21 @@ function WorkflowEntryList({
           a run starts. `active` is queued + running, so the column says what
           the panel is doing rather than what it has not begun.
 
-          A count that hits zero DIMS, it does not disappear — the eye must not
-          have to re-scan the rail to find out a panel is idle. */}
+          Active (left) wears the same amber as the launcher badge — operator:
+          mark queued and running in orange — and at zero it DIMS rather than
+          disappearing so the eye does not have to re-scan an idle panel. */}
       <span
         title={`${label}: ${active} active (queued or running) of ${total} row${total === 1 ? "" : "s"} today`}
         aria-label={`${active} active of ${total} in ${label}`}
         className={cn(dsText.meta, dsText.nums, "flex shrink-0 items-center justify-end gap-[var(--ds-space-hair)]")}
       >
-        <span className={active === 0 ? "text-[color:var(--ds-fg-faint)]" : "text-[color:var(--ds-fg-secondary)]"}>
+        <span
+          className={
+            active === 0
+              ? "text-[color:var(--ds-fg-faint)]"
+              : "font-semibold text-[color:var(--ds-status-waiting-fg)]"
+          }
+        >
           {active}
         </span>
         <span aria-hidden className="text-[color:var(--ds-fg-faint)]">│</span>
@@ -1240,7 +1227,7 @@ const statusPillTone = (s: ProposedStatus): string => DS_STATUS[s].soloTone;
  *    label, down to an icon and a `0` at `--ds-fg-faint`. It is still there, it
  *    is still clickable, it still carries its full name to a screen reader, and
  *    it stops spending the width of a word on a status that is not happening.
- *    (`Done with warnings` is 130px of bar at rest; at zero it is 34px.)
+ *    (A long status word used to cost ~130px at rest; at zero it is ~34px.)
  */
 export function DemoStatusFilters({
   counts,
@@ -1252,7 +1239,14 @@ export function DemoStatusFilters({
   onSelect: (b: StatusBucket) => void;
 }) {
   /** the two composites — one control, two segments */
-  const scope = (key: StatusBucket, label: string, Icon: ComponentType<SVGProps<SVGSVGElement>>, tone: string, title: string) => {
+  const scope = (
+    key: StatusBucket,
+    label: string,
+    Icon: ComponentType<SVGProps<SVGSVGElement>>,
+    tone: string,
+    title: string,
+    edge: "start" | "end",
+  ) => {
     const on = active === key;
     return (
       <button
@@ -1262,19 +1256,21 @@ export function DemoStatusFilters({
         title={title}
         onClick={() => onSelect(on ? "all" : key)}
         className={cn(
-          // `h-full`, not a height of its own: the composite's CONTAINER owns
-          // the bar's height and this fills it, so the segment cannot be taller
-          // than the box it is in — which is how that box became 30px in a row
-          // of 24 in the first place.
-          "inline-flex h-full shrink-0 cursor-pointer items-center",
+          // Same OUTER height as `Start a run` and every status pill
+          // (`--ds-h-toolbar`). Nesting these inside a padded/bordered shell
+          // left them 22–26px beside a 28px primary, so the primary looked
+          // taller than the rest of the bar.
+          "inline-flex h-[var(--ds-h-toolbar)] shrink-0 cursor-pointer items-center border",
           "gap-[var(--ds-space-tight)] px-[var(--ds-space-base)]",
-          dsRadius.sm,
+          edge === "start" ? "rounded-l-[var(--ds-radius-md)] border-r-0" : "rounded-r-[var(--ds-radius-md)]",
+          dsBorder.base,
           dsText.meta,
+          dsText.flush,
           dsFocus,
           dsMotion.fast,
           on
             ? "bg-[var(--ds-surface-3)] font-semibold text-[color:var(--ds-fg)]"
-            : "font-medium text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
+            : cn("bg-[var(--ds-surface-2)] font-medium text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]"),
         )}
       >
         <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0", tone)} />
@@ -1312,6 +1308,7 @@ export function DemoStatusFilters({
           empty && "border-transparent",
           dsRadius.md,
           dsText.meta,
+          dsText.flush,
           dsFocus,
           dsMotion.fast,
           on
@@ -1347,24 +1344,18 @@ export function DemoStatusFilters({
       className="flex min-w-0 items-center gap-[var(--ds-space-tight)] overflow-x-auto"
     >
       <div
-        className={cn(
-          // The composites' box owns the bar's height and its two segments fill it
-          // (`h-full`). It was 30px in a row of 24 — the one outlier the
-          // operator was pointing at — because the segments carried a height of
-          // their own and the box grew to hold them plus its padding and border.
-          "inline-flex h-[var(--ds-h-toolbar)] shrink-0 border p-[var(--ds-space-hair)]",
-          dsRadius.md,
-          dsBorder.base,
-          "bg-[var(--ds-surface-2)]",
-        )}
+        className="inline-flex h-[var(--ds-h-toolbar)] shrink-0"
+        role="group"
+        aria-label="Scope the queue"
       >
-        {scope("all", "All", LayoutDashboard, "text-[color:var(--ds-fg-muted)]", "Every row in this view")}
+        {scope("all", "All", LayoutDashboard, "text-[color:var(--ds-fg-muted)]", "Every row in this view", "start")}
         {scope(
           "needsYou",
           "Needs you",
           Eye,
           "text-[color:var(--ds-status-waiting-fg)]",
           "Waiting on you + Write parked — the two states that are stuck on a decision from you",
+          "end",
         )}
       </div>
       {STATUS_PILL_ORDER.map(statusPill)}
@@ -1377,11 +1368,10 @@ export function DemoStatusFilters({
 // ---------------------------------------------------------------------------
 
 /**
- * The executor fixture, its lane budget and the spawn command all moved to
+ * The worker/session fixture and spawn command moved to
  * `demo-workers-wire.ts` when the Session Panel's `+` became real. The dialog
- * has to answer "can I start five more" from the SAME array these cards render,
- * or the refusal it prints and the capacity the panel shows are two derivations
- * of one fact.
+ * numbers new worker ids from the SAME array these cards render, so the spawn
+ * result and the Session Panel cannot disagree about the live worker count.
  */
 
 /**
@@ -1526,12 +1516,9 @@ function BrowserTile({ b, span }: { b: DemoBrowser; span?: boolean }) {
   );
 }
 
-/** at cap = this worker cannot take another item; that is the number that
-    explains a queue that is not moving, so it is the one that goes amber */
-const atCap = (slot: { inUse: number; cap: number }): boolean => slot.inUse >= slot.cap;
-
 /**
- * One capacity chip shape for lanes AND for every system budget. They were two
+ * One compact chip shape for the collapsed Session bar's wait and browser
+ * health summaries. They were two
  * near-identical hand-rolled spans at 9.5px, which is below the type floor and
  * made the row wrap ragged whenever a card carried three systems.
  *
@@ -1618,36 +1605,6 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
         {s.subline}
       </span>
 
-      {/* Capacity, before the browsers. "1/1 lanes · ucpath 1/1" is the answer
-          to "can this worker take another item", and it has to be readable
-          without opening anything. A slot at its cap is amber — that is the
-          number that explains a stalled queue. */}
-      {(s.lanes || s.budgets) && (
-        <ChipRow cell="var(--ds-w-capacity-cell)">
-          {s.lanes && (
-            <span title={`${s.lanes.inUse} of ${s.lanes.cap} lanes in use — a lane is one item in flight`} className={capacityChip(atCap(s.lanes))}>
-              <Gauge aria-hidden className="size-2.5 shrink-0" />
-              <span className={dsText.nums}>
-                {s.lanes.inUse}/{s.lanes.cap}
-              </span>
-              lanes
-            </span>
-          )}
-          {s.budgets?.map((b) => (
-            <span
-              key={b.system}
-              title={`${b.system}: ${b.inUse} of ${b.cap} concurrent sessions in use by this worker`}
-              className={capacityChip(atCap(b))}
-            >
-              {b.system}
-              <span className={dsText.nums}>
-                {b.inUse}/{b.cap}
-              </span>
-            </span>
-          ))}
-        </ChipRow>
-      )}
-
       {/* WHY nothing is progressing. Named lease, named holder, ticking age —
           an executor that is alive, healthy and stuck must say so, or the panel
           is decorative. */}
@@ -1680,8 +1637,7 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
       {/*
         THE BASE — pipeline then footer, pinned to the bottom as one block.
 
-        Everything above this varies by card: a lane row wraps to two lines on a
-        three-system worker, a lease-wait note appears on exactly one card, and
+        Everything above this varies by card: a lease-wait note may appear, and
         a tile grid is one row or two. Anchoring the base (rather than only the
         footer, which is what `mt-auto` used to do) is what puts every card's
         progress bar on ONE baseline instead of wherever its own content
@@ -1757,30 +1713,17 @@ function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
 }
 
 /**
- * ADD WORKERS — one press, N executors, and an honest answer for each of them.
+ * ADD WORKERS — workflow + count. No capacity gate.
  *
- * Operator: *"make this plus icon work in the session panel and it should have
- * the functionality to spawn n amount of parallel workflows. not one at a
- * time."* So the count is part of the ASK, not something you arrive at by
- * pressing a button five times: a repeat-click affordance would fire five
- * independent commands, five results and five chances for the third one to be
- * refused while the operator was still clicking.
- *
- * THE PART THAT MATTERS IS THE PARTIAL. Capacity is nearly always short here —
- * UCPath allows exactly one concurrent session, so a second Separations worker
- * is refused by the SYSTEM rather than by a policy — and `3 of 5 started ·
- * 2 refused` is the ordinary outcome, not the error case. It is never rounded
- * up to success, the refused workers are listed individually with the
- * constraint that stopped each one, and both the preview and the result walk
- * the same budget so the dialog cannot promise a count the command then
- * refuses.
+ * Operator: *"make this plus icon work … spawn n amount of parallel workflows."*
+ * Follow-up: UCPath's `1/1` is **per worker / per browser session**, not a
+ * global singleton — and the dialog must not invent hardcaps. Pick a workflow,
+ * pick how many, start them. Every requested worker starts.
  */
 function AddWorkersDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [workflowId, setWorkflowId] = useState<DemoWorkflowId>(WORKER_SPAWN_WORKFLOWS[0].id);
   const [count, setCount] = useState(1);
   const [result, setResult] = useState<WorkerSpawnResult | null>(null);
-  const capacity = useMemo(() => workerSpawnCapacity(workflowId), [workflowId]);
-  const workflow = DEMO_WORKFLOWS[workflowId];
 
   // A fresh open is a fresh ask. Leaving the previous vector on screen would
   // put an answer above a question that has not been asked yet.
@@ -1793,7 +1736,7 @@ function AddWorkersDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="md" title="Add workers" description={`Start parallel executors for one workflow`}>
+      <DialogContent size="md" title="Add workers" description="Start parallel executors for one workflow">
         <DialogBody>
           <div className="flex flex-col gap-[var(--ds-space-loose)]">
             <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-[var(--ds-space-base)]">
@@ -1838,76 +1781,6 @@ function AddWorkersDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
               </div>
             </div>
 
-            {/* WHAT THE MACHINE CAN ACTUALLY TAKE, before the press. Same walk
-                as the command, so the two cannot disagree. */}
-            <div
-              className={cn(
-                "flex flex-col gap-[var(--ds-space-snug)] border p-[var(--ds-space-cozy)]",
-                dsRadius.md,
-                dsBorder.base,
-                "bg-[var(--ds-recess-bg)]",
-              )}
-            >
-              <span className={cn(dsText.meta, "flex items-center gap-[var(--ds-space-snug)]")}>
-                <Gauge aria-hidden className={cn(dsIcon.sm, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
-                <span className={cn(dsText.nums, "font-semibold text-[color:var(--ds-fg)]")}>
-                  {DEMO_LANE_BUDGET.executorInUse}/{DEMO_LANE_BUDGET.executorCap}
-                </span>
-                <span className="text-[color:var(--ds-fg-muted)]">workers up</span>
-                <span aria-hidden className="h-3 w-px bg-[var(--ds-border)]" />
-                <span className={cn(dsText.nums, "font-semibold text-[color:var(--ds-fg)]")}>{capacity.canStart}</span>
-                <span className="text-[color:var(--ds-fg-muted)]">
-                  more {workflow.label} {capacity.canStart === 1 ? "worker" : "workers"} can start now
-                </span>
-              </span>
-              {/* Per-system leases, because that is what refuses a worker —
-                  and now SPLIT BY WHOSE BUDGET THEY ARE.
-
-                  Operator: *"uc path 1/1 does not make any sense. uc path 1/1
-                  should mean that for each session there can only be 1 ucpath
-                  window. not for each workflow."* Read inside a dialog scoped
-                  to one workflow, an undifferentiated `ucpath 1/1` says
-                  "Onboarding has spent its UCPath allowance" — when what is
-                  true is that the app gets ONE UCPath window and Separations is
-                  in it. Two bands, each labelled with whose count it is, and
-                  the label does the work the chip cannot: a chip never wraps,
-                  so the scope could not have gone inside one. */}
-              {(["session", "workflow"] as const).map((scope) => {
-                const systems = workflow.systems.filter((s) => leaseScopeOf(s) === scope);
-                if (systems.length === 0) return null;
-                return (
-                  <div key={scope} className="flex flex-col gap-[var(--ds-space-tight)]">
-                    <SectionLabel>
-                      {scope === "session" ? "This session — shared by every workflow" : `${workflow.label} — its own pool`}
-                    </SectionLabel>
-                    <ChipRow>
-                      {systems.map((s) => {
-                        const lease = DEMO_LANE_BUDGET.systems.find((l) => l.system === s);
-                        const full = lease !== undefined && lease.inUse >= lease.cap;
-                        return (
-                          <span
-                            key={s}
-                            title={
-                              lease
-                                ? scope === "session"
-                                  ? `${s}: this session gets ${lease.cap} window${lease.cap === 1 ? "" : "s"} in total, shared by every workflow — ${lease.inUse} in use${lease.heldBy.length > 0 ? ` by ${lease.heldBy.join(", ")}` : ""}. Authenticating another one would invalidate the open session.`
-                                  : `${s}: ${lease.inUse} of ${lease.cap} concurrent sessions in use${lease.heldBy.length > 0 ? ` · held by ${lease.heldBy.join(", ")}` : ""}`
-                                : `${s}: no lease recorded — nothing is holding it`
-                            }
-                            className={capacityChip(full)}
-                          >
-                            <span className={dsClip.text}>{s}</span>
-                            <span className={dsText.nums}>{lease ? `${lease.inUse}/${lease.cap}` : "0/—"}</span>
-                          </span>
-                        );
-                      })}
-                    </ChipRow>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* THE VECTOR. Every worker answers for itself; nothing is folded. */}
             {result && (
               <div className="flex flex-col gap-[var(--ds-space-snug)]" aria-live="polite" data-demo-spawn-result="">
                 <span className={cn(dsText.ui, "font-semibold text-[color:var(--ds-fg)]")}>{result.headline}</span>
@@ -1922,38 +1795,13 @@ function AddWorkersDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
                         dsText.meta,
                       )}
                     >
-                      <span
-                        aria-hidden
-                        className={cn(
-                          "size-1.5 shrink-0 rounded-full",
-                          o.state === "started" ? "bg-[var(--ds-success-fg)]" : "bg-[var(--ds-status-waiting-fg)]",
-                        )}
-                      />
-                      <span className={cn(dsText.nums, "w-12 shrink-0 text-[color:var(--ds-fg-muted)]")}>
-                        #{o.index}
+                      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--ds-success-fg)]" />
+                      <span className={cn(dsText.nums, "w-12 shrink-0 text-[color:var(--ds-fg-muted)]")}>#{o.index}</span>
+                      <span className={cn(dsText.caps, "w-16 shrink-0 text-[color:var(--ds-success-fg)]")}>started</span>
+                      <span className="min-w-0 flex-1 truncate text-[color:var(--ds-fg-muted)]">
+                        opens {o.claimed.join(" · ")}
                       </span>
-                      <span
-                        className={cn(
-                          dsText.caps,
-                          "w-16 shrink-0",
-                          o.state === "started"
-                            ? "text-[color:var(--ds-success-fg)]"
-                            : "text-[color:var(--ds-status-waiting-fg)]",
-                        )}
-                      >
-                        {o.state}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-[color:var(--ds-fg-muted)]" title={o.reason}>
-                        {o.state === "started" ? `holds ${o.claimed?.join(" · ")}` : o.reason}
-                      </span>
-                      {o.instance && (
-                        <span className={cn(dsText.nums, "shrink-0 text-[color:var(--ds-fg-secondary)]")}>{o.instance}</span>
-                      )}
-                      {o.code && (
-                        <span className={cn(dsText.micro, dsText.nums, "shrink-0 text-[color:var(--ds-fg-faint)]")}>
-                          {o.code}
-                        </span>
-                      )}
+                      <span className={cn(dsText.nums, "shrink-0 text-[color:var(--ds-fg-secondary)]")}>{o.instance}</span>
                     </span>
                   ))}
                 </div>
@@ -1961,14 +1809,7 @@ function AddWorkersDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
             )}
           </div>
         </DialogBody>
-        {/* NO PRE-PRESS REFUSAL COUNT. Operator: *"we dont need the bottom
-            part."* `2 of these will be refused` was the well's own numbers
-            arithmetic'd into a warning — the well one band up already says how
-            many can start and which lease is the reason, so the footer added a
-            prediction and no information, in the loudest slot on the dialog.
-            After the press the meta carries the REPORT, which is a fact rather
-            than a forecast, and that stays. */}
-        <DialogFooter meta={result ? `${result.started} started · ${result.refused} refused` : undefined}>
+        <DialogFooter meta={result ? `${result.started} started` : undefined}>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>
             Close
           </Button>
@@ -1989,15 +1830,13 @@ export function DemoSessionPanel({ tick }: { tick: number }) {
   const idle = DEMO_SESSIONS.filter((s) => s.phase === "idle" || s.phase === "keepalive").length;
   const failed = DEMO_SESSIONS.filter((s) => s.phase === "failed").length;
   const sickBrowsers = DEMO_SESSIONS.flatMap((s) => s.browsers).filter((b) => b.health !== "healthy").length;
-  // Capacity at a glance. `blocked` is the headline the operator actually needs:
-  // three cards can say "Running" while the queue does not move.
-  const lanesInUse = DEMO_SESSIONS.reduce((n, s) => n + (s.lanes?.inUse ?? 0), 0);
-  const lanesCap = DEMO_SESSIONS.reduce((n, s) => n + (s.lanes?.cap ?? 0), 0);
+  // `blocked` is the headline the operator actually needs: three cards can say
+  // "Running" while one is waiting for a concrete browser session.
   const blocked = DEMO_SESSIONS.filter((s) => s.waiting);
 
   return (
     <section aria-label="Session Panel" className={cn("shrink-0 border-t", dsBorder.base, dsSurface.card)}>
-      <div className={cn("flex items-center", dsSize.hBar, "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)]")}>
+      <div className={cn("flex items-center", dsSize.hBar, "gap-[var(--ds-space-base)] px-[var(--ds-shell-inset)]")}>
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -2041,13 +1880,6 @@ export function DemoSessionPanel({ tick }: { tick: number }) {
                 {failed} failed
               </span>
             )}
-          </span>
-          <span title={`${lanesInUse} of ${lanesCap} lanes in use across every worker`} className={capacityChip(false)}>
-            <Gauge aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
-            <span className={dsText.nums}>
-              {lanesInUse}/{lanesCap}
-            </span>
-            lanes
           </span>
           {blocked.length > 0 && (
             <span
@@ -2111,7 +1943,7 @@ export function DemoSessionPanel({ tick }: { tick: number }) {
             // empty (see the footer note in `SessionCard`) rather than filled.
             "flex items-stretch overflow-x-auto border-t",
             dsBorder.subtle,
-            "gap-[var(--ds-space-base)] px-[var(--ds-space-cozy)] py-[var(--ds-space-cozy)]",
+            "gap-[var(--ds-space-base)] px-[var(--ds-shell-inset)] py-[var(--ds-space-cozy)]",
           )}
         >
           {DEMO_SESSIONS.map((s) => (

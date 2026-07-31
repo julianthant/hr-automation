@@ -5,20 +5,15 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
-  Camera,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   CircleAlert,
-  ClipboardList,
   FileText,
-  GitBranch,
   Info,
-  RotateCcw,
   ScanText,
   Search,
   SearchX,
-  ShieldCheck,
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -32,9 +27,7 @@ import {
 } from "./demo-status";
 import { panelKindSpec, rowExplanationOf, rowVariantSpec } from "./demo-catalog";
 import {
-  Button,
   Chip,
-  ChipRow,
   IconButton,
   MetaLine,
   Popover,
@@ -54,7 +47,7 @@ import {
 import { FooterActions, OutcomeActionButton, RowContextMenu, type DemoActionHandler } from "./DemoActions";
 import { rowInBucket, type StatusBucket } from "./DemoShell";
 import { DEMO_DAY, dayLabel } from "./demo-days";
-import { demoNowMs, fmtDayLabel, fmtVersionTag, plural, workflowVersionTag } from "./demo-wire";
+import { demoNowMs, fmtDayLabel, plural } from "./demo-wire";
 import {
   bandsFor,
   DEMO_ROWS,
@@ -62,9 +55,10 @@ import {
   fmtElapsed,
   gateAge,
   groupCounts,
+  recordCountsFromStream,
+  recordStream,
   isSettledRow,
   linkedGroupSummary,
-  recordStream,
   visibleMemberIds,
   orderedMemberIds,
   sortDemoRows,
@@ -171,20 +165,44 @@ export function computeVisibleIds(
  * arrow, and it renders as part of the value so the cut, when it comes, takes
  * the tail of the new value rather than the arrow that explains it.
  */
-function FactChipView({ label, value, arrowTo, warn }: NonNullable<DemoRow["facts"]>[number]) {
+function FactChipView({
+  label,
+  value,
+  arrowTo,
+  warn,
+  fullRow,
+  className,
+  grow = 1,
+}: NonNullable<DemoRow["facts"]>[number] & { className?: string; grow?: number }) {
   const full = [label, value, arrowTo && `→ ${arrowTo}`].filter(Boolean).join(" ");
+  // `grow > 0` — start at the chip's FULL content width, refuse to shrink, and
+  // share only genuine leftover space. Flex wrapping therefore makes a greedy
+  // row: another fact joins only when both facts remain readable; otherwise it
+  // moves intact to the next line. Beside a redirect we pass `grow={0}` so the
+  // fact stays at its natural width and the redirect owns the spare space.
   return (
-    <Chip label={label} tone={warn ? "warning" : "neutral"} title={full} className="w-full">
-      {arrowTo ? (
-        <span className="inline-flex min-w-0 items-center gap-[var(--ds-space-tight)]">
-          <span className="min-w-0 truncate">{value}</span>
-          <ArrowRight aria-hidden className="size-2.5 shrink-0 text-[color:var(--ds-fg-muted)]" />
-          <span className="truncate text-[color:var(--ds-fg)]">{arrowTo}</span>
-        </span>
-      ) : (
-        value
-      )}
-    </Chip>
+    <span
+      className={cn(fullRow ? "w-full" : grow > 0 ? "max-w-full" : "shrink-0", className)}
+      style={
+        fullRow
+          ? { flexGrow: 1, flexShrink: 0, flexBasis: "100%" }
+          : grow > 0
+            ? { flexGrow: 1, flexShrink: 0, flexBasis: "max-content" }
+            : undefined
+      }
+    >
+      <Chip label={label} tone={warn ? "warning" : "neutral"} title={full} className="w-full max-w-full">
+        {arrowTo ? (
+          <span className="inline-flex min-w-0 items-center gap-[var(--ds-space-tight)]">
+            <span className="min-w-0 truncate">{value}</span>
+            <ArrowRight aria-hidden className="size-2.5 shrink-0 text-[color:var(--ds-fg-muted)]" />
+            <span className="truncate text-[color:var(--ds-fg)]">{arrowTo}</span>
+          </span>
+        ) : (
+          value
+        )}
+      </Chip>
+    </span>
   );
 }
 
@@ -212,9 +230,10 @@ function DemoStatusCounts({ counts }: { counts: ReturnType<typeof groupCounts> }
   return (
     <>
       {tallies.map(({ key, n }) => {
-        // The three that are always true of a group are always shown, so the
-        // strip does not reflow every time one crosses zero; the three that are
-        // exceptions appear only when they happen.
+        // Match the existing dashboard's stable composition strip: Done,
+        // Running and Queued keep their icon slot at zero; attention statuses
+        // appear only when they exist. The stable three let the operator read
+        // a group's pipeline state without the strip reflowing between ticks.
         const always = key === "verifiedDone" || key === "running" || key === "queued";
         if (!always && n <= 0) return null;
         const spec = PROPOSED_STATUS[key];
@@ -226,14 +245,18 @@ function DemoStatusCounts({ counts }: { counts: ReturnType<typeof groupCounts> }
             title={spec.label}
             className={cn(
               "inline-flex shrink-0 items-center gap-[var(--ds-space-tight)] whitespace-nowrap",
-              n === 0 ? "text-[color:var(--ds-fg-faint)]" : spec.iconClass,
+              dsText.flush,
+              // `soloTone` on the chip (colors the digit); `iconClass` only on
+              // the Icon. Putting `iconClass` here spun the whole tally — the
+              // digit orbited under the glyph (operator: "spinning wrong").
+              n === 0 ? "text-[color:var(--ds-fg-faint)]" : spec.soloTone,
             )}
           >
             <Icon
               aria-hidden
-              className={cn(dsIcon.sm, key === "running" && n > 0 && "animate-spin motion-reduce:animate-none")}
+              className={cn(dsIcon.sm, "shrink-0", n === 0 ? "text-[color:var(--ds-fg-faint)]" : spec.iconClass)}
             />
-            <span className={dsText.nums}>{n}</span>
+            <span className={cn(dsText.nums, "font-medium")}>{n}</span>
           </span>
         );
       })}
@@ -244,15 +267,18 @@ function DemoStatusCounts({ counts }: { counts: ReturnType<typeof groupCounts> }
 function MicroSteps({ row }: { row: DemoRow }) {
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-[3px]"
+      // Same height as StatusBadge `sm` / the title row — centres the 4px dots
+      // on the name instead of leaving them top-aligned in a taller chip stack.
+      className="inline-flex h-[var(--ds-h-xs)] shrink-0 items-center gap-[3px]"
       title={row.steps.map((s) => `${s.label}${s.durationSec ? ` ${fmtElapsed(s.durationSec)}` : ""} (${s.state})`).join(" · ")}
+      aria-label={`Steps: ${row.steps.map((s) => `${s.label} ${s.state}`).join(", ")}`}
     >
       {row.steps.map((s, i) => (
         <span
           key={i}
           aria-hidden
           className={cn(
-            "h-1 w-2.5 rounded-full",
+            "h-1.5 w-2.5 rounded-full",
             s.state === "done" && "bg-success",
             s.state === "current" && "bg-primary animate-pulse motion-reduce:animate-none",
             s.state === "pending" && "bg-border",
@@ -289,6 +315,9 @@ function MicroSteps({ row }: { row: DemoRow }) {
 */
 const MEMBER_GRID =
   "grid grid-cols-[var(--ds-w-row-indent)_minmax(0,1fr)_var(--ds-w-member-detail)_var(--ds-w-member-eid)]";
+
+/** Shared horizontal inset for every row inside the member mini-table. */
+const MEMBER_WELL_PAD = "px-[var(--ds-space-snug)]";
 
 /**
  * What the detail column is CALLED for this group — `Outcome` when its workflow
@@ -379,39 +408,19 @@ const rowChip = (tone: RowChipTone, extra?: string): string =>
     "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
     dsRadius.sm,
     dsText.micro,
+    dsText.flush,
     ROW_CHIP_TONE[tone],
     extra,
   );
 
-function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): ReactNode {
+function headerChips(
+  row: DemoRow,
+  checked: ReadonlySet<string>,
+  tick: number,
+): ReactNode {
   const status = effectiveStatus(row);
-  // Only when the delegated runs have no row of their own to point at. Once
-  // they do, the linked-set button in the body carries the count — two counts
-  // of the same thing is exactly the divergence this rebuild exists to kill.
-  const stream = recordStream(row, tick);
-  const lookups = row.linkedGroup ? 0 : (stream.read ?? []).filter((r) => r.lookup).length;
   return (
     <>
-      {/* Depth 2 lives here and nowhere else. The packet that delegated this
-          run deliberately does not repeat it — two levels of run in a queue row
-          is already the limit of what stays readable.
-
-          While the document is still being READ the chip counts what has
-          arrived against what the run says is there, because a bare `12` on a
-          run that has reported five people is a number nobody can act on. */}
-      {lookups > 0 && (
-        <span
-          title={
-            stream.streaming
-              ? `${plural(lookups, "delegated person lookup")} so far — one per person read. The rest arrive as the extraction reports them.`
-              : `${plural(lookups, "delegated person lookup")} — one per record. Reachable only from this review row; the packet never lists them.`
-          }
-          className={rowChip("neutral")}
-        >
-          <GitBranch aria-hidden className={dsIcon.sm} />
-          {stream.streaming ? `${lookups} of ${plural(stream.total, "lookup")}` : plural(lookups, "lookup")}
-        </span>
-      )}
       {/* a run started against a TEST instance can never be mistaken for a
           real filing, and a rehearsal says so before you read its receipt */}
       {Object.entries(row.resolvedInstance).some(([, v]) => v === "test") && (
@@ -433,59 +442,54 @@ function headerChips(row: DemoRow, checked: ReadonlySet<string>, tick: number): 
           dry run
         </span>
       )}
-      {/* MAJOR only: a run one MINOR behind renders identically, so flagging it
-          would be a chip that never means anything. */}
-      {row.workflowVersion !== row.workflow.version && (
-        <span
-          title={`Ran under ${row.workflow.label} ${fmtVersionTag({ major: row.workflowVersion, minor: row.workflowMinorVersion })}; runs are served by ${workflowVersionTag(row.workflow)} now. Its shape moved, so it is not comparable with today's.`}
-          className={rowChip("neutral", dsText.nums)}
-        >
-          {fmtVersionTag({ major: row.workflowVersion, minor: row.workflowMinorVersion })}
-        </span>
-      )}
-      {row.attemptHistory && (
-        <span title={row.attemptHistory.prior} className={rowChip("warning")}>
-          <RotateCcw aria-hidden className={dsIcon.sm} />
-          attempt {row.attemptHistory.n}
-        </span>
-      )}
-      {/* NOT `font-semibold`. Three weights were stacked in two rows of this
-          header — an emphasised warning chip, the filled status pill and a
-          bordered action — and only ONE of them is allowed to be loud. The
-          status is the loud thing; the count of warnings is a fact that
-          recedes, on the same matte chip every other fact on the row wears. */}
-      {row.warnings && (
-        <span title={row.warnings.first} className={rowChip("warning")}>
-          <AlertTriangle aria-hidden className={dsIcon.sm} />
-          {row.warnings.count}
-        </span>
-      )}
-      {row.failShots && (
-        <span
-          title={`${row.failShots} failure screenshots`}
-          className={rowChip("neutral")}
-        >
-          <Camera aria-hidden className={dsIcon.sm} />
-          {row.failShots}
-        </span>
-      )}
-      {row.receiptShield && (
-        <span title={row.receiptShield} className="inline-flex shrink-0 items-center text-[color:var(--ds-success-fg)]">
-          <ShieldCheck aria-hidden className={dsIcon.md} />
-          <span className="sr-only">{row.receiptShield}</span>
-        </span>
-      )}
+      {/* Triangle + N whenever this row (or its members) finished with
+          warnings. Authored `row.warnings` wins; otherwise a group's member
+          rollup supplies the count so a Done card like a linked lookup group with one
+          separated person still wears △ 1 beside the status pill — operator:
+          "if there is warning add the triangle with the n number of warnings." */}
+      {(() => {
+        const authored = row.warnings;
+        const fromMembers =
+          !authored && row.rowType === "group"
+            ? (() => {
+                const n = groupCounts(row.id).warnings;
+                return n > 0
+                  ? {
+                      count: n,
+                      first: `${n} ${n === 1 ? "member finished with a warning" : "members finished with warnings"}`,
+                    }
+                  : undefined;
+              })()
+            : undefined;
+        const fromStatus =
+          !authored && !fromMembers && status === "doneWarnings"
+            ? { count: 1, first: row.outcome.text || "Finished with warnings" }
+            : undefined;
+        const warn = authored ?? fromMembers ?? fromStatus;
+        if (!warn) return null;
+        return (
+          <span title={warn.first} className={rowChip("warning")}>
+            <AlertTriangle aria-hidden className={dsIcon.sm} />
+            {warn.count}
+          </span>
+        );
+      })()}
+      {/* No separate shield glyph beside Done. The status IS the green solid
+          `Done` pill (same shape as Waiting on you); the receipt string stays
+          on the pill's title via StatusBadge / meaning, and in the Receipt tab.
+          Operator: shield + Done → just a green Done pill. */}
       {row.rowType === "member" && checked.has(row.id) && (
         <span title="Marked checked by you" className="inline-flex shrink-0 items-center text-[color:var(--ds-success-fg)]">
           <CheckCircle2 aria-hidden className={dsIcon.md} />
           <span className="sr-only">checked</span>
         </span>
       )}
+      {/* Progress dots then the status pill — both live on the TITLE row's
+          right edge (operator: always put the status on the other side of the
+          title). The dots sit in the same `--ds-h-xs` box as the StatusBadge
+          so they centre on the name rather than hugging the top of the chip
+          line. */}
       {status === "running" && row.rowType !== "group" && <MicroSteps row={row} />}
-      {/* A collapsed row says how OLD the decision is, not only that there is
-          one. Age is the whole triage signal. The icon is dropped here alone:
-          the row already opens with this exact glyph beside the title, and one
-          status wearing its icon twice on one line is noise, not a channel. */}
       <StatusBadge status={status} age={gateAge(row, tick)} hideIcon />
     </>
   );
@@ -576,7 +580,7 @@ function RowInfo({ row }: { row: DemoRow }) {
 function sublineFor(row: DemoRow): { tone: string; text: string } | null {
   const status = effectiveStatus(row);
   if (status === "failed" && row.error) return { tone: "text-[color:var(--ds-status-failed-fg)]", text: row.error };
-  if (status === "waiting" && row.gate)
+  if (status === "waiting" && row.gate) {
     return {
       tone: "text-[color:var(--ds-status-waiting-fg)]",
       // NO PREFIX STRIP HERE ANY MORE. This branch used to do
@@ -592,6 +596,7 @@ function sublineFor(row: DemoRow): { tone: string; text: string } | null {
           ? `${row.gate.title} — ${row.gate.candidates[0].name} vs ${row.gate.candidates[1].name}`
           : row.gate.title,
     };
+  }
   // Parked is an UNKNOWN outcome, never a hold you resume.
   if (status === "parked") return { tone: "text-[color:var(--ds-status-parked-fg)]", text: row.outcome.text };
   if (status === "cancelled") return { tone: "text-[color:var(--ds-fg-muted)]", text: "Cancelled by you — nothing written" };
@@ -649,12 +654,13 @@ function groupSublineSuppressed(row: DemoRow, membersVisible: boolean): boolean 
  * (`bg-secondary/20`, `text-[11px] font-mono`), which is a large part of why the
  * operator said the queue row "doesn't look like the rest of the ui".
  *
- * The rule here: **facts wrap, they never truncate.** The meta zone is one
- * wrapping provenance line at the row's own indent, and the controls are a
- * sibling pinned to the top-right — so when a run carries a queue note as well
- * as an id, the note takes a second line instead of eating the id, and the
- * buttons stay exactly where they were. A row with little to say stays one line
- * high; density is spent where there is something to be dense about.
+ * The rule here: the meta zone is one wrapping provenance line at the row's
+ * own indent, and the controls are a sibling pinned to the top-right — so when
+ * a run carries both a trace and an elapsed, both stay readable, and the
+ * buttons stay exactly where they were. Queued rows never show wait/ahead
+ * copy or an elapsed timer — nothing has started. A row with little to say
+ * stays one line high; density is spent where there is something to be dense
+ * about.
  */
 function RowFooterLine({
   row,
@@ -711,7 +717,6 @@ function RowFooterLine({
           </span>
         )}
         {timing && <span className="whitespace-nowrap">{timing}</span>}
-        {row.queueNote && <span className="whitespace-nowrap">{row.queueNote}</span>}
       </div>
       {/* The frequent commands, inline. The full set is one right-click away —
           there is no `⋯`, because a button whose only job is to admit there are
@@ -786,12 +791,13 @@ export function DemoRowCard({
   const memberCount = row.memberIds?.length ?? 0;
   const StatusIcon = PROPOSED_STATUS[status].icon;
   const linked = linkedGroupSummary(row);
-  const settled = isSettledRow(row);
-  // Whether the member LINES are on screen right now — the same condition
-  // `GroupMemberList` uses to decide whether to draw the well. A settled group
-  // shut by the operator draws none, so its name preview is still the only
-  // place its composition appears.
-  const membersVisible = isGroup && memberCount > 0 && !(settled && !state.expandedGroups.has(row.id));
+  // Members are always drawn now — settled groups no longer collapse to a
+  // "Show all N people" link. The well height (5 / 20) is what changes.
+  const membersVisible = isGroup && memberCount > 0;
+  // Packet-before-fanout used to own a bordered Approve well; that block is
+  // gone (operator: no orange box, no Approve pill on the card). The exclusion
+  // fact now rides the subline as ordinary muted text — same weight as the
+  // footer log line — and the gray ↗ opens the decision.
   const sub = groupSublineSuppressed(row, membersVisible) ? null : subline;
 
   return (
@@ -816,35 +822,15 @@ export function DemoRowCard({
             dsMotion.base,
             dsSurface.card,
             dsFocus,
-            selected ? dsBorder.strong : dsBorder.base,
-            "hover:border-[color:var(--ds-border-strong)]",
-            // Selection is a FILL plus a rail, never a glow: a shadow means
-            // floating, and a selected row is not floating.
-            //
-            // The rail reads `--ds-ring`, not `--ds-accent`. On the dark theme
-            // the accent is near-white, so a 2px accent rail down the selected
-            // row was the brightest thing on the panel — louder than the amber
-            // `Waiting on you` fill beside it. Selection is the lowest-stakes
-            // state on screen; it belongs BELOW the two states allowed to
-            // shout, and it now shares its ink with the focus ring because
-            // "the system is pointing at this" is one statement, not two.
-            selected && "bg-[var(--ds-surface-selected)] shadow-[inset_2px_0_0_var(--ds-ring)]",
-            status === "running" && !selected && "border-[color:var(--ds-status-running-border)]",
-            // THE ANNOUNCE. A single settle on the edge into an attention
-            // status: the row lifts by the one travel distance and its border
-            // takes the status ink, then it is still. Transform and opacity
-            // only, interruptible like everything else (it is a transition, so
-            // grabbing the row mid-settle re-targets rather than finishing),
-            // and both the travel and the clock are tokens the reduced-motion
-            // preference already zeroes.
-            announcing &&
-              cn(
-                dsMotion.move,
-                "-translate-y-[var(--ds-travel-sm)]",
-                status === "failed"
-                  ? "border-[color:var(--ds-status-failed-fg)]"
-                  : "border-[color:var(--ds-status-waiting-border)]",
-              ),
+            // ONE resting border for every card. Status used to recolor the
+            // perimeter (running blue, announce amber/red) and hover bumped it
+            // to strong — so a queued row and a running row never matched.
+            // Operator: unless selected, every card shares the same dark gray.
+            // Selection is the lighter perimeter only — no fill change.
+            selected ? dsBorder.loud : dsBorder.base,
+            // THE ANNOUNCE. Lift only — the border stays the shared resting
+            // ink so a settling card does not flash a different outline.
+            announcing && cn(dsMotion.move, "-translate-y-[var(--ds-travel-sm)]"),
           )}
         >
           {/*
@@ -868,12 +854,23 @@ export function DemoRowCard({
               "gap-y-[var(--ds-space-snug)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
             )}
           >
-            <StatusIcon
-              aria-hidden
-              className={cn(dsIcon.md, "col-start-1 row-start-1 mt-px shrink-0", PROPOSED_STATUS[status].iconClass)}
-            />
-            <div className="col-start-2 row-start-1 flex min-w-0 items-center justify-between gap-[var(--ds-space-base)]">
-              <div className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
+            {/* The icon, title and status pill share one cross-axis centre —
+                operator: top bar must align icon · name · Done. The icon box
+                matches the StatusBadge (`sm` = `--ds-h-xs`) so a taller title
+                line cannot leave the glyph floating above the pill. */}
+            <div className="col-start-1 row-start-1 flex h-[var(--ds-h-xs)] items-center">
+              <StatusIcon
+                aria-hidden
+                className={cn(dsIcon.md, "shrink-0", PROPOSED_STATUS[status].iconClass)}
+              />
+            </div>
+            {/* One responsive header for every run, group and member card.
+                The subject keeps a usable track and wraps. Status chrome sits
+                here only when there is NO decision subline — otherwise the
+                pill shares the gate/Review line so a long name cannot park it
+                alone between the title and the action. */}
+            <div className="col-start-2 row-start-1 flex min-w-0 flex-nowrap items-center gap-x-[var(--ds-space-base)]">
+              <div className="flex min-w-0 flex-1 items-center gap-[var(--ds-space-snug)]">
                 {/* Bulk selection is a TOP-LEVEL act: a member is acted on
                     through its group or on its own row, never half-selected
                     inside one. */}
@@ -888,10 +885,14 @@ export function DemoRowCard({
                   />
                 )}
                 <span
+                  data-demo-row-title
                   title={row.displayName ? `Named by you — subject is ${row.title}` : undefined}
                   className={cn(
                     dsText.title,
-                    "truncate font-semibold text-[color:var(--ds-fg)]",
+                    // Truncate rather than wrap — wrapping shoved the status
+                    // pill / micro-step dots onto a second line under the name
+                    // (operator: status always on the other side of the title).
+                    "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]",
                     row.containment === "rejected" && "italic font-normal text-[color:var(--ds-fg-muted)]",
                   )}
                 >
@@ -908,7 +909,10 @@ export function DemoRowCard({
                     a row costs the queue no vertical space at all. */}
                 <RowInfo row={row} />
               </div>
-              <div className="flex shrink-0 items-center gap-[var(--ds-space-snug)]">
+              <div className="ml-auto flex shrink-0 flex-nowrap items-center justify-end gap-[var(--ds-space-snug)]">
+                {/* Status ALWAYS sits on the title row's right — never on the
+                    gate/running subline. Operator: put the status on the other
+                    side of the title. */}
                 {headerChips(row, state.checkedIds, state.tick)}
               </div>
             </div>
@@ -931,82 +935,29 @@ export function DemoRowCard({
               <div
                 className={cn(
                   dsText.meta,
-                  "col-start-2 flex min-w-0 items-center gap-[var(--ds-space-base)]",
+                  "col-start-2 flex min-w-0 flex-wrap items-center gap-x-[var(--ds-space-base)] gap-y-[var(--ds-space-tight)]",
                   sub.tone,
                 )}
               >
-                <span className="min-w-0 truncate">{sub.text}</span>
-                <OutcomeActionButton row={row} onAction={handlers.onAction} className="ml-auto" />
+                {/* Status pill lives on the title row now. This line is the
+                    sentence only (gate / running step / error), plus any
+                    outcome CTA that is not already covered in-card. */}
+                <span className="min-w-0 flex-1 truncate">{sub.text}</span>
+                <OutcomeActionButton
+                  row={row}
+                  onAction={handlers.onAction}
+                  className="ml-auto shrink-0"
+                  omitKeys={
+                    status === "failed"
+                      ? ["open-failure", "reupload"]
+                      : status === "parked"
+                        ? ["open-park"]
+                        : status === "waiting"
+                          ? ["open-gate"]
+                          : undefined
+                  }
+                />
               </div>
-            )}
-
-            {/* A SET of linked children — Oath Upload's signers. Still a chip,
-                not a member list: each signer is an Oath Signature run with its
-                own row in that panel, counted there exactly once. */}
-            {linked && (
-              <div className={ROW_LINK_BAND}>
-                <button
-                  type="button"
-                  data-demo-row-link
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handlers.onOpenPanel(linked.panel, linked.targetId);
-                  }}
-                  title={`Open the ${linked.panel} panel — ${linked.total === 1 ? "this run lives" : "these runs live"} there, not under this row`}
-                  className={linkChip("info")}
-                >
-                  <Users aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
-                  <span className="min-w-0 truncate">{linked.label}</span>
-                  <ArrowUpRight aria-hidden className="size-3 shrink-0" />
-                </button>
-              </div>
-            )}
-
-            {/* THE BACK ROUTE, on the DESTINATION. One level, never a
-                breadcrumb trail: maximum real depth is 2, so there is only ever
-                one parent worth returning to.
-
-                The `!row.reviewOf` guard is GONE. It existed because a review
-                row drew its parent as a "Delegated by …" chip in the forward
-                chip's slot and tone — a link that pointed backwards while
-                looking like every link that points forwards. Following
-                `OCR review ↗` from a packet therefore landed the operator on a
-                row with no way back to the one they came from. Now the two
-                delegated paths share ONE back chip: an arrow that points left,
-                naming the panel and the row it returns to. */}
-            {row.linkedParentId && DEMO_ROWS[row.linkedParentId] && (
-              <div className={ROW_LINK_BAND}>
-                <button
-                  type="button"
-                  data-demo-row-link
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const parent = DEMO_ROWS[row.linkedParentId as string];
-                    handlers.onOpenPanel(parent.wfLabel, parent.id);
-                  }}
-                  /* The chip names the PANEL it returns to; the run it returns
-                     to is on the title, because every row in this panel shares
-                     that parent and the filename is what the cap would eat. */
-                  title={`Back to ${DEMO_ROWS[row.linkedParentId].wfLabel} · ${DEMO_ROWS[row.linkedParentId].title} — the run that delegated this one`}
-                  aria-label={`Back to ${DEMO_ROWS[row.linkedParentId].wfLabel} · ${DEMO_ROWS[row.linkedParentId].title}`}
-                  className={linkChip("neutral")}
-                >
-                  <ArrowLeft aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
-                  <span className="min-w-0 truncate">{DEMO_ROWS[row.linkedParentId].wfLabel}</span>
-                </button>
-              </div>
-            )}
-
-            {/* The fact chips. A GRID, not a wrap: four facts of four different
-                lengths on a flex row leave three on line one and `txn …`
-                orphaned on line two, so the set reads as three-plus-one rather
-                than as one block. */}
-            {row.facts && (
-              <ChipRow className="col-start-2">
-                {row.facts.map((f, i) => (
-                  <FactChipView key={i} {...f} />
-                ))}
-              </ChipRow>
             )}
 
             {/* FULL WIDTH, both tracks. The group's own grid supplies the
@@ -1014,92 +965,86 @@ export function DemoRowCard({
                 and its text under the card's title — one left edge for the
                 whole card rather than a well indented inside column two. */}
             {isGroup && counts && (memberCount > 0 ? (
-              <div className="col-span-2 flex flex-col gap-[var(--ds-space-snug)]">
-                {/* THE COUNTS STRIP IS THE MEMBER LIST'S HEADER ROW, and it is
-                    laid on the member list's OWN column tracks.
-
-                    It used to be a free flex row with an `ml-auto` on the last
-                    item, so the tallies sat wherever they stopped and
-                    `0/12 checked` right-aligned to the CARD while the EIDs
-                    below right-aligned to the WELL — two right edges a few
-                    pixels apart, which reads as a mistake rather than as two
-                    things. On `MEMBER_GRID` with the well's own horizontal
-                    padding, the tallies sit over the names and the checked
-                    counter sits over the EIDs. One grid, top to bottom. */}
-                <div
-                  className={cn(
-                    MEMBER_GRID,
-                    dsText.meta,
-                    // No `px` compensation any more. It existed to line this
-                    // strip up with the well's INNER padding; the well has none
-                    // now, so both simply sit on the card's own tracks.
-                    "items-center gap-x-[var(--ds-space-base)]",
-                  )}
-                >
-                  <span aria-hidden className="col-start-1" />
-                  <span className="col-start-2 flex min-w-0 items-center gap-[var(--ds-space-cozy)]">
-                    <DemoStatusCounts counts={counts} />
-                  </span>
-                  {/* Rejected is its own tally. Folding it into done is how a
-                      packet with an unreadable page comes to read as clean. */}
-                  {counts.rejected > 0 && (
-                    <span
-                      className="col-start-3 inline-flex min-w-0 items-center gap-[var(--ds-space-tight)] truncate text-[color:var(--ds-fg-muted)]"
-                      title={`${counts.rejected} rejected — never became work and excluded from the rollup`}
-                    >
-                      <SearchX aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
-                      <span className={dsText.nums}>{counts.rejected}</span> rejected
-                    </span>
-                  )}
-                  {/* The checked counter is a PLACE-KEEPER for walking a list
-                      that still needs walking. On a settled group it counts
-                      progress through a job that is over, and invites a mark
-                      that changes nothing — so it goes. */}
-                  {!settled && (
-                    <span
-                      className="col-start-4 inline-flex items-center justify-end gap-[var(--ds-space-tight)] text-[color:var(--ds-success-fg)]"
-                      aria-label={`${[...(row.memberIds ?? [])].filter((id) => state.checkedIds.has(id)).length} of ${memberCount} checked by you`}
-                      title="How many of these you have marked checked"
-                    >
-                      <CheckCircle2 aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
-                      <span className={dsText.nums}>
-                        {[...(row.memberIds ?? [])].filter((id) => state.checkedIds.has(id)).length}/{memberCount}
-                      </span>
-                    </span>
-                  )}
-                </div>
+              <div className="col-span-2 flex flex-col gap-[var(--ds-space-base)]">
                 <GroupMemberList row={row} state={state} handlers={handlers} />
               </div>
-            ) : (
-              <div className="col-start-2">
-                <PacketBeforeFanout row={row} handlers={handlers} />
-              </div>
-            ))}
+            ) : null)}
 
             {/* THE PEOPLE THIS RUN HAS READ. Same shape as a group's member
                 lines, because it is the same thing — a person the row is
                 accounting for — and it fills in as the extraction reports
                 them, from the queue panel and from the OCR panel alike. */}
             {row.records && row.records.length > 0 && (
-              <div className="col-start-2">
-                <RecordStreamList row={row} tick={state.tick} />
+              <div className="col-span-2 flex flex-col gap-[var(--ds-space-base)]">
+                <RecordStreamList row={row} state={state} handlers={handlers} />
               </div>
             )}
 
-            {/* THE POINTER TO RELATED WORK, demoted and LAST.
-                It used to sit high in the card on its own `ml-5` indent — so it
-                broke the left edge every other line hangs off — and it wore the
-                info tint, which made a pointer to somewhere else the loudest
-                thing on a card whose job is "approve these people". It is
-                necessary and it stays; it is now in the card's own grid, below
-                the actions in the hierarchy, and quiet. Still obviously
-                clickable: a bordered chip with a hover lift and the ↗ that
-                means "this changes panel". */}
-            {row.reviewRunId && (
-              <div className={ROW_LINK_BAND}>
-                <LinkedReviewChip row={row} handlers={handlers} />
-              </div>
-            )}
+            {/* Redirect + fact chips — ONE band BELOW the well.
+                Default: title-aligned (`col-start-2`), same left edge as the
+                filename. EXCEPTION — group/OCR rows that draw a member or
+                record table: hang the chip off the table's left edge
+                (`col-span-2` + the well's own pad) so OCR Review lines up
+                with the status icons / Name header, not the title indent.
+                Operator: "aligned with the left table" for these types only. */}
+            {(() => {
+              const parent = row.linkedParentId ? DEMO_ROWS[row.linkedParentId] : undefined;
+              const review = row.reviewRunId ? DEMO_ROWS[row.reviewRunId] : undefined;
+              const hasRedirect = Boolean(linked || parent || review);
+              const hasFacts = Boolean(row.facts && row.facts.length > 0);
+              const hasPeople = row.extractedCount !== undefined;
+              if (!hasRedirect && !hasFacts && !hasPeople) return null;
+
+              const linkedStatus =
+                linked &&
+                (() => {
+                  const target = DEMO_ROWS[linked.targetId];
+                  if (linked.total === 1 && target) return redirectStatusWord(target);
+                  return linked.done === linked.total ? "done" : `${linked.done} done`;
+                })();
+
+              const tableAligned =
+                membersVisible || Boolean(row.records && row.records.length > 0);
+
+              return (
+                <div
+                  className={cn(
+                    // Wrap band: primary redirect `flex-1` fills; a small
+                    // sibling sits beside it; if they cannot share a line the
+                    // sibling drops under at its natural length.
+                    "flex w-full min-w-0 flex-wrap items-center",
+                    "gap-x-[var(--ds-space-snug)] gap-y-[var(--ds-space-tight)]",
+                    tableAligned ? cn("col-span-2", MEMBER_WELL_PAD) : "col-start-2",
+                  )}
+                >
+                  {linked && linkedStatus && (
+                    <PanelRedirectChip
+                      label={linked.panel}
+                      status={linkedStatus}
+                      title={`Open the ${linked.panel} panel — ${linked.total === 1 ? "this run lives" : "these runs live"} there, not under this row`}
+                      onOpen={() => handlers.onOpenPanel(linked.panel, linked.targetId)}
+                    />
+                  )}
+                  {parent && <ParentBackChip row={row} handlers={handlers} />}
+                  {!parent && review && <LinkedReviewChip row={row} handlers={handlers} />}
+                  {hasPeople && (
+                    <span className={cn(rowChip("neutral", "font-medium"), "shrink-0")}>
+                      <Users aria-hidden className={cn(dsIcon.sm, "text-[color:var(--ds-fg-muted)]")} />
+                      {plural(row.extractedCount!, "person", "people")}
+                    </span>
+                  )}
+                  {row.facts?.map((f, i) => {
+                    return (
+                      <FactChipView
+                        key={i}
+                        {...f}
+                        grow={hasRedirect ? 0 : 1}
+                      />
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
 
           <RowFooterLine row={row} handlers={handlers} elapsed={elapsed} />
@@ -1110,196 +1055,133 @@ export function DemoRowCard({
 }
 
 /**
- * THE BAND A CROSS-PANEL CHIP LIVES IN — capped to the left of the row's centre.
+ * THE BAND A CROSS-PANEL CHIP LIVES IN.
  *
- * A queue row is one large select target with smaller targets nested inside it,
- * and the nested ones were winning the middle: `elementFromPoint` at the centre
- * of every queued Oath Signature row returned the `Oath Upload ·
- * Signed_Oaths_0724.pdf` back chip, 226px wide and straddling the row's axis,
- * so a click in the middle of a row OPENED A DIFFERENT WORKFLOW rather than
- * selecting the row it landed on.
- *
- * Two things fix it together, and neither is enough alone. The band is capped
- * by `--ds-w-row-link-max`, which is derived from the row's own geometry rather
- * than picked, so the cap holds at 400px and at 470px and at any width after.
- * And the chip says less: the PANEL it returns to, with the run's full identity
- * on the `title`, because a chip narrow enough to clear the centre and still
- * carrying a filename would only truncate the filename.
- *
- * `data-demo-row-link` marks it as a target that LEAVES this row. That is what
- * makes the rule checkable instead of eyeballed: no element carrying it may
- * contain its row's centre point, at any row variant. A row's own commands are
- * deliberately not marked — Approve acts on the row you are pointing at, and a
- * member line selects one of that row's own people.
+ * A queue row is one large select target with smaller targets nested inside it.
+ * Redirect chips carry `data-demo-row-link` so tests can still find them. They
+ * used to be capped at half the title column (`--ds-w-row-link-max`) so a click
+ * in the middle of a row selected the row instead of jumping panel — that also
+ * chopped `Oath Upload · running` mid-word. The band now fills the title
+ * column; the footer and title remain the row-select targets.
  */
-const ROW_LINK_BAND = "col-start-2 flex min-w-0 max-w-[var(--ds-w-row-link-max)]";
 
 /**
- * A chip that CHANGES PANEL. Three of these existed as three copies of the same
- * span; the delegation links and the parent back-link now share one shape, so
- * "this points somewhere else" always looks the same in a row.
+ * A chip that CHANGES PANEL. One shape everywhere: gray matte + hairline,
+ * `Name · status`, arrow on the RIGHT (↗). Never a leading ←, never info-blue —
+ * operator: every redirect must match.
+ *
+ * WIDTH — the primary chip in its band. It grows to fill leftover space
+ * (`flex-1`), never truncates the label (`min-w-max` + nowrap), and when a
+ * smaller sibling cannot fit beside it the wrap drops that sibling under at
+ * its natural length while this chip takes the full first line.
  */
-const linkChip = (tone: "info" | "neutral"): string =>
+const linkChip = (): string =>
   cn(
     "inline-flex cursor-pointer items-center border",
     dsClip.token,
     "h-[var(--ds-h-xs)] gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
     dsRadius.sm,
     dsText.meta,
+    dsText.flush,
     dsFocus,
     dsMotion.fast,
-    // MATTE FILL *AND* A HAIRLINE — the object rule from `tokens.css`, which
-    // this chip was the last hold-out from. It used to draw the fill alone, on
-    // the reasoning that "recessed" is a plane and a plane needs no edge; the
-    // operator looked at the `← Oath Upload` chip and said *"all these like
-    // buttons/labels needs a border and a matte black background."* They are
-    // right, and the token comment already said why: a plane is a REGION, but
-    // this is an OBJECT you point at and click, and an object without an edge
-    // dissolves into the card it sits on. Same border tokens `Chip` reads, so
-    // there is one answer to "where does a chip's edge come from".
-    tone === "info"
-      ? "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)] hover:brightness-125"
-      : "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
+    "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
   );
+
+/** Lowercase status word for redirect chips — `done`, `review`, `running`, … */
+function redirectStatusWord(row: DemoRow): string {
+  return statusText(effectiveStatus(row)).toLowerCase();
+}
+
+/**
+ * THE shared panel jump. Text then ↗; label is the workflow name (or
+ * `OCR Review`), then `· status`.
+ */
+function PanelRedirectChip({
+  label,
+  status,
+  title,
+  onOpen,
+  fill,
+}: {
+  label: string;
+  status: string;
+  title: string;
+  onOpen: () => void;
+  fill?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      data-demo-row-link
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpen();
+      }}
+      title={title}
+      aria-label={title}
+      className={cn(
+        linkChip(),
+        "min-w-max justify-start",
+        // `fill` = hard full row (rare). Otherwise grow inside the wrap band.
+        fill ? "w-full" : "flex-1",
+      )}
+    >
+      <span className="whitespace-nowrap">
+        {label} · {status}
+      </span>
+      <ArrowUpRight aria-hidden className="size-3 shrink-0" />
+    </button>
+  );
+}
+
+/**
+ * Route to the parent that delegated this run. Same chip as every other panel
+ * jump — `Oath Upload · done ↗`, not `← Oath Upload`.
+ */
+function ParentBackChip({ row, handlers }: { row: DemoRow; handlers: DemoQueueHandlers }) {
+  const parent = row.linkedParentId ? DEMO_ROWS[row.linkedParentId] : undefined;
+  if (!parent) return null;
+  return (
+    <PanelRedirectChip
+      label={parent.wfLabel}
+      status={redirectStatusWord(parent)}
+      title={`${parent.wfLabel} · ${parent.title} — the run that delegated this one`}
+      onOpen={() => handlers.onOpenPanel(parent.wfLabel, parent.id)}
+    />
+  );
+}
 
 /**
  * A packet's pointer to the OCR review row that holds its records.
- *
- * FORWARD ONLY. It used to serve both directions — the same chip, the same info
- * tint, the same corner-arrow glyph, whether it pointed at the review a packet
- * delegated or back at the packet that delegated a review. A link that points
- * backwards while looking like every link that points forwards is how following
- * one leaves the operator stranded: the destination's chip read as another step
- * away, not as the way home. The return trip is the neutral `←` chip in the
- * card body, which both delegated paths now share.
+ * Named `OCR Review · {status}` — the one label that is not a bare workflow name.
  */
-function LinkedReviewChip({ row, handlers }: { row: DemoRow; handlers: DemoQueueHandlers }) {
+function LinkedReviewChip({
+  row,
+  handlers,
+  fill,
+}: {
+  row: DemoRow;
+  handlers: DemoQueueHandlers;
+  fill?: boolean;
+}) {
   const target = row.reviewRunId ? DEMO_ROWS[row.reviewRunId] : undefined;
   if (!target) return null;
   return (
-    <div className="flex min-w-0">
-      <button
-        type="button"
-        data-demo-row-link
-        onClick={(e) => {
-          e.stopPropagation();
-          handlers.onOpenPanel(target.wfLabel, target.id);
-        }}
-        title="Open the OCR panel and select this packet's review row — the records live there, not here"
-        className={linkChip("neutral")}
-      >
-        <ClipboardList aria-hidden className="size-3 shrink-0" />
-        <span className="min-w-0 truncate">OCR review · {statusText(effectiveStatus(target)).toLowerCase()}</span>
-        <ArrowUpRight aria-hidden className="size-3 shrink-0" />
-      </button>
-    </div>
+    <PanelRedirectChip
+      label="OCR Review"
+      status={redirectStatusWord(target)}
+      title="Open the OCR panel and select this packet's review row — the records live there, not here"
+      onOpen={() => handlers.onOpenPanel(target.wfLabel, target.id)}
+      fill={fill}
+    />
   );
 }
 
 /**
- * A packet parked at review has NO members: member rows are created by the
- * fan-out, and the fan-out is exactly what approval releases. So the row shows
- * the extracted count — the thing it genuinely knows — and offers the bulk
- * approval right here. Editing a value is deliberately NOT offered: a value may
- * only change with its scanned page on screen.
- *
- * **The block is an ACTION plus ONE line.** It used to carry a full paragraph —
- * who was excluded and why, then the whole editing policy — wrapped into four
- * lines inside a 400px column, where it was taller than the two buttons it was
- * explaining and dwarfed the row it sat in. What stayed is the fact this packet
- * alone has (`1 excluded — Diego Diaz is inactive in UCPath`); the reasoning
- * moved to the two surfaces that exist for it: the panel's decision, which
- * already renders the gate's own note in full, and the row's ⓘ, which carries
- * the editing rule because that rule is the same on every packet in the product.
- */
-function PacketBeforeFanout({ row, handlers }: { row: DemoRow; handlers: DemoQueueHandlers }) {
-  const bulk = row.bulkApprove;
-  if (row.extractedCount === undefined) return null;
-  return (
-    <div className="flex flex-col gap-[var(--ds-space-snug)]">
-      <div className={cn(dsText.meta, "flex flex-wrap items-center gap-[var(--ds-space-base)]")}>
-        <span className={rowChip("neutral", "font-medium")}>
-          <Users aria-hidden className={cn(dsIcon.sm, "text-[color:var(--ds-fg-muted)]")} />
-          {plural(row.extractedCount, "person", "people")}
-        </span>
-        {/* `member rows appear when you approve` was here. It described what
-            the button beside it does, which the row's ⓘ already says once, for
-            every packet in the product ("Approving fans out one real run per
-            person"). */}
-      </div>
-      {bulk && (
-        <div
-          className={cn(
-            "flex min-w-0 flex-col border",
-            "gap-[var(--ds-space-snug)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)]",
-            dsRadius.md,
-            "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]",
-          )}
-        >
-          <div className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
-            <Button
-              size="sm"
-              variant="primary"
-              onClick={(e) => e.stopPropagation()}
-              icon={<CheckCircle2 aria-hidden className={dsIcon.sm} />}
-              className="shrink-0"
-            >
-              Approve {bulk.approvable} of {bulk.total}
-            </Button>
-            {/* GROUPED BY WHAT IT DOES, and that grouping is also the hit-area
-                fix: `Approve` acts on this row, `Open review` leaves for
-                another panel, so they are pushed to opposite ends and the row's
-                own centre falls in the gap between them. It used to sit a gap
-                from Approve, directly under the row's axis, where a click meant
-                to select the packet navigated away from it. */}
-            <Button
-              size="sm"
-              variant="secondary"
-              data-demo-row-link
-              onClick={(e) => {
-                e.stopPropagation();
-                if (row.reviewRunId) handlers.onOpenPanel(DEMO_ROWS[row.reviewRunId].wfLabel, row.reviewRunId);
-              }}
-              iconAfter={<ArrowUpRight aria-hidden className={dsIcon.sm} />}
-              className="ml-auto shrink-0"
-            >
-              Open review
-            </Button>
-          </div>
-          {bulk.excluded && (
-            // Its OWN line, because the leftover gutter beside two buttons in a
-            // 400px column is ~110px and cut the one fact this line carries to
-            // `1 excluded — Die…`. One line at full width holds it whole.
-            <span className={cn(dsText.meta, "min-w-0 truncate text-[color:var(--ds-status-waiting-fg)]")}>
-              <span className={dsText.nums}>{bulk.excluded.count}</span> excluded — {bulk.excluded.reason}
-            </span>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// ONE member shape, at every count: count strip → compact member lines in a
-// scroll well → drill-in.
-//
-// There is no ladder. Shown a 2-member group drawn as full inline row cards
-// beside a 6-member group drawn as compact lines, the operator asked *"why are
-// some like this and some like that? keep the design like above. ditch the
-// bottom design completely."* — which is the third and last time a rung has
-// been cut for the same reason: a change of SHAPE reads as a change of KIND,
-// and the same object must not appear to be two objects depending on how many
-// people are in it.
-//
-// Scale now changes the container's OVERFLOW and nothing else. Three lines do
-// not fill the well; fifty scroll inside it; the row is the same height either
-// way, and `Open all N` is where a set that size is actually worked.
-// ---------------------------------------------------------------------------
-
-/**
- * A group's disclosure link — one shape for `Show all N` and `Open all N`, so
- * "there is more of this behind here" always looks the same in a row.
+ * A group's disclosure link — one shape for `Expand` / `Collapse` and
+ * `Open full list`, so "there is more of this behind here" always looks the
+ * same in a row.
  */
 const disclosureLink = cn(
   dsText.meta,
@@ -1319,12 +1201,18 @@ function filterWord(filter: DemoFilter): string {
  * The two well shapes, as LINE COUNTS.
  *
  * `--ds-h-member-well` / `--ds-h-member-well-open` are these same two numbers
- * expressed as pixels, and the disclosure has to say them in words ("Expand to
- * 20"). Exported so the pure test can pin the two against each other rather
- * than against a hand-typed literal in a string.
+ * expressed as pixels. Labels stay word-only ("Expand" / "Collapse") — never
+ * "Expand to 12" — so the disclosure does not restate a count the chrome
+ * already carries. Exported so the pure test can pin the two against each
+ * other rather than against a hand-typed literal in a string.
  */
-export const MEMBER_WELL_LINES = 6;
+export const MEMBER_WELL_LINES = 5;
 export const MEMBER_WELL_OPEN_LINES = 20;
+
+/** A dedicated roster view accompanies every member set that can expand. */
+export function canViewAllMembers(memberCount: number): boolean {
+  return memberCount > MEMBER_WELL_LINES;
+}
 
 /**
  * THE WELL. One container for every list of people a row can hold, so a group's
@@ -1340,27 +1228,43 @@ export const MEMBER_WELL_OPEN_LINES = 20;
  * clipping. The rows inside it are the content; the container is a frame around
  * them, not a second surface underneath them.
  *
- * IT CLIPS ON A LINE, NEVER THROUGH ONE. Both heights are `N × line + (N−1)
- * hairlines`, so the bottom edge always lands on a divider — the half-painted
- * row that used to sit there read as a rendering defect, and the scrollbar
- * already says "there is more" without inventing half a person to say it with.
+ * A GROUP'S WELL IS A MINI-TABLE. Counts and the OCR route share a surface-2
+ * summary strip; Expand / Open all split a two-column action row below the
+ * table. Only the person lines scroll, and that scroll region clips on a LINE,
+ * never through one — both heights are `N × line + (N−1) hairlines`.
  */
-function PersonWell({ children, open }: { children: ReactNode; open?: boolean }) {
+function PersonWell({
+  children,
+  open,
+  header,
+  footer,
+  embedded,
+}: {
+  children: ReactNode;
+  open?: boolean;
+  header?: ReactNode;
+  footer?: ReactNode;
+  embedded?: boolean;
+}) {
   return (
     <div
       className={cn(
-        // NO HORIZONTAL PADDING. The well's own inset was one of the card's
-        // four competing left edges; with the padding gone its lines inherit
-        // the card's grid tracks exactly, so a member name starts where the
-        // title starts and the EID column ends where the header badges end.
-        "divide-y overflow-hidden overflow-y-auto border bg-[var(--ds-surface-1)]",
-        dsBorder.strong,
-        dsRadius.md,
-        "divide-[color:var(--ds-border-subtle)]",
-        open ? "max-h-[var(--ds-h-member-well-open)]" : "max-h-[var(--ds-h-member-well)]",
+        "flex flex-col overflow-hidden border bg-[var(--ds-surface-1)]",
+        embedded ? "border-x-0 border-[color:var(--ds-border)]" : dsBorder.strong,
+        !embedded && dsRadius.md,
       )}
     >
-      {children}
+      {header}
+      <div
+        className={cn(
+          "min-h-0 divide-y overflow-y-auto",
+          "divide-[color:var(--ds-border-subtle)]",
+          open ? "max-h-[var(--ds-h-member-well-open)]" : "max-h-[var(--ds-h-member-well)]",
+        )}
+      >
+        {children}
+      </div>
+      {footer}
     </div>
   );
 }
@@ -1412,6 +1316,7 @@ function PersonLine({
   );
   const shape = cn(
     MEMBER_GRID,
+    MEMBER_WELL_PAD,
     "w-full items-center text-left",
     // The line's own rhythm token, and the well's height is a multiple of it —
     // that is the whole mechanism that stops the container clipping through a
@@ -1453,82 +1358,135 @@ function PersonLine({
 }
 
 /**
- * THE PEOPLE AN OCR RUN HAS READ, filling in as it reads them.
+ * THE PEOPLE AN OCR RUN HAS READ — same mini-table chrome as a group's member
+ * list, because it is the same object on screen: a person this row accounts for.
  *
- * The row used to carry a count and nothing else — `12 lookups` — which only
- * became information once the whole document was through. The operator:
- * *"the 12 should also appear like [a member list] as they get read. so i can
- * see in the queue panel as well in the ocr."*
- *
- * It is the SAME shape as a group's member lines, because it is the same thing:
- * a person this row is accounting for. The people the run has not reported are
- * a NUMBER, never a placeholder line — the extraction may yet find that a page
- * carries nobody, and a row that has already drawn them would have to take one
- * away.
+ * The old shape was a rogue bordered checklist (`12 of 12 read` + check · name ·
+ * page · EID) that read as a different KIND of list from the group member table
+ * (status strip · Name/Detail/EID · Expand). This renders through the shared
+ * `PersonWell` + `PersonLine` + `DemoStatusCounts` path instead.
  */
-function RecordStreamList({ row, tick }: { row: DemoRow; tick: number }) {
-  const stream = recordStream(row, tick);
+function RecordStreamList({
+  row,
+  state,
+  handlers,
+}: {
+  row: DemoRow;
+  state: DemoQueueState;
+  handlers: DemoQueueHandlers;
+}) {
+  const stream = recordStream(row, state.tick);
   if (stream.total === 0) return null;
-  const pending = stream.total - stream.read.length;
-  /*
-    WHICH RECORDS ANNOUNCE THEMSELVES, and why it is a fact and not a trick.
 
-    "New work arriving" is the one place in this product where motion carries
-    MEANING rather than continuity: these people appeared one at a time because
-    the run read them one at a time, and a list that simply grows longer while
-    you look away has not told you that. So a line ARRIVES.
+  const counts = recordCountsFromStream(stream);
+  const readIds = stream.read.map((r) => r.id);
+  const wellOpen = state.openWells.has(row.id);
+  const canExpand = readIds.length > MEMBER_WELL_LINES;
+  const nowMs = demoNowMs(state.tick);
 
-    The gate is `readAt`, straight off the wire — a record read within the last
-    few seconds of demo time is one that arrived while you were watching. That
-    is what stops the whole list animating on first paint (DESIGN.md: nothing
-    animates on load): open a row twelve minutes into a run and every `readAt`
-    is old, so twelve records simply are there, which is the truth. Open it
-    while the run is reading and each new one slides in as it lands.
+  const disclosures =
+    canExpand ? (
+      <button
+        type="button"
+        aria-expanded={wellOpen}
+        onClick={(e) => {
+          e.stopPropagation();
+          handlers.onToggleWell(row.id);
+        }}
+        className={disclosureLink}
+      >
+        {wellOpen ? <ChevronUp aria-hidden className={dsIcon.sm} /> : <ChevronDown aria-hidden className={dsIcon.sm} />}
+        {wellOpen ? "Collapse" : "Expand"}
+      </button>
+    ) : null;
 
-    Derived, never bookkept: no "ids I have already rendered" ref, so the
-    animation cannot get out of step with the data by a re-render.
-  */
-  const nowMs = demoNowMs(tick);
   return (
-    <div className="flex flex-col gap-[var(--ds-space-snug)]">
-      <div className={cn(dsText.meta, "flex items-center gap-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]")}>
-        <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
-          <ScanText aria-hidden className={dsIcon.sm} />
-          <span className={dsText.nums}>
-            {stream.read.length} of {stream.total}
-          </span>{" "}
-          read
-        </span>
-      </div>
-      {stream.read.length > 0 && (
-        <PersonWell>
-          {stream.read.map((rec) => (
-            <PersonLine
-              key={rec.id}
-              arriving={
-                stream.streaming &&
-                rec.readAt !== undefined &&
-                nowMs - Date.parse(rec.readAt) < RECORD_ARRIVAL_WINDOW_MS
-              }
-              icon={RECORD_STATE_ICON[rec.state].icon}
-              iconClass={RECORD_STATE_ICON[rec.state].cls}
-              name={rec.name}
-              title={`${rec.name} — ${rec.pageNote}`}
-              detail={
-                <span className={cn(dsText.meta, "min-w-0 truncate text-[color:var(--ds-fg-muted)]")}>page {rec.page}</span>
-              }
-              eid={rec.eid}
-            />
-          ))}
-        </PersonWell>
-      )}
-      {pending > 0 && (
-        <span className={cn(dsText.meta, "text-[color:var(--ds-fg-faint)]")}>
-          <span className={dsText.nums}>{pending}</span> more page{pending === 1 ? "" : "s"} to read — each person appears here
-          as the run reports them.
-        </span>
-      )}
-    </div>
+    <PersonWell
+      embedded
+      open={wellOpen && canExpand}
+      header={
+        <div className="shrink-0 border-b border-[color:var(--ds-border-subtle)] bg-[var(--ds-surface-2)]">
+          <div
+            className={cn(
+              MEMBER_GRID,
+              MEMBER_WELL_PAD,
+              "min-h-[var(--ds-h-member-line)] items-center gap-x-[var(--ds-space-base)] py-[var(--ds-space-tight)]",
+              dsText.meta,
+            )}
+          >
+            <div className="col-span-4 flex min-w-0 flex-wrap items-center gap-[var(--ds-space-cozy)]">
+              <DemoStatusCounts counts={counts} />
+              {counts.rejected > 0 && (
+                <span
+                  className="inline-flex min-w-0 items-center gap-[var(--ds-space-tight)] truncate text-[color:var(--ds-fg-muted)]"
+                  title={`${counts.rejected} blocked — excluded from approve`}
+                >
+                  <SearchX aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
+                  <span className={dsText.nums}>{counts.rejected}</span> blocked
+                </span>
+              )}
+              <span
+                className="inline-flex min-w-0 items-center gap-[var(--ds-space-tight)] truncate text-[color:var(--ds-fg-muted)]"
+                title={`${stream.read.length} of ${stream.total} people reported by the extraction`}
+              >
+                <ScanText aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
+                <span className={dsText.nums}>
+                  {stream.read.length} of {stream.total}
+                </span>{" "}
+                read
+              </span>
+            </div>
+          </div>
+          <div
+            className={cn(
+              MEMBER_GRID,
+              MEMBER_WELL_PAD,
+              "h-[var(--ds-h-member-line)] items-center gap-x-[var(--ds-space-base)]",
+              dsText.meta,
+              "text-[color:var(--ds-fg-faint)]",
+            )}
+          >
+            <span className="col-span-2 col-start-1 truncate">Name</span>
+            <span className="col-start-3 truncate">Detail</span>
+            <span className="col-start-4 truncate text-right">EID</span>
+          </div>
+        </div>
+      }
+      footer={
+        canExpand ? (
+          <div
+            className={cn(
+              "grid shrink-0 border-t border-[color:var(--ds-border-subtle)] bg-[var(--ds-surface-2)]",
+              "grid-cols-1",
+              "[&>button]:h-[var(--ds-h-member-line)] [&>button]:w-full [&>button]:justify-center",
+            )}
+          >
+            {disclosures}
+          </div>
+        ) : undefined
+      }
+    >
+      {stream.read.map((rec) => (
+        <PersonLine
+          key={rec.id}
+          arriving={
+            stream.streaming &&
+            rec.readAt !== undefined &&
+            nowMs - Date.parse(rec.readAt) < RECORD_ARRIVAL_WINDOW_MS
+          }
+          icon={RECORD_STATE_ICON[rec.state].icon}
+          iconClass={RECORD_STATE_ICON[rec.state].cls}
+          name={rec.name}
+          title={`${rec.name} — ${rec.pageNote}`}
+          detail={
+            <span className={cn(dsText.meta, "min-w-0 truncate text-[color:var(--ds-fg-muted)]")}>
+              {rec.pageNote ?? `page ${rec.page}`}
+            </span>
+          }
+          eid={rec.eid}
+        />
+      ))}
+    </PersonWell>
   );
 }
 
@@ -1554,113 +1512,155 @@ const RECORD_STATE_ICON: Record<DemoRecord["state"], { icon: typeof CheckCircle2
 
 function GroupMemberList({ row, state, handlers }: { row: DemoRow; state: DemoQueueState; handlers: DemoQueueHandlers }) {
   const ids = orderedMemberIds(row.id);
-  const expanded = state.expandedGroups.has(row.id);
-  // A SETTLED group is collapsed shut. This is ratified D5 read literally
-  // ("groups default collapsed, auto-expand on a member `Waiting on you` or
-  // `Failed`") — on a finished packet the member lines re-explain a composition
-  // the count strip above has already reported. It is the ONLY branch left in
-  // this component, and it turns on the run's STATE, never on its size.
-  const settled = isSettledRow(row);
-  const shut = settled && !expanded;
-  const visible = shut ? [] : ids;
-  const noun = row.wfLabel === "Oath Signature" ? "signers" : "people";
-  // The well only has a second shape when there is something below the fold to
-  // grow into — a 4-person group offering "Show 20" is offering nothing.
+  // Every group keeps its people on screen. Settled cards used to collapse to
+  // "Show all N people" — operator: no collapsing like that; always show the
+  // well at 5, Expand to 20, and keep the dedicated roster view beside Expand.
   const wellOpen = state.openWells.has(row.id);
-  const canOpenWell = visible.length > MEMBER_WELL_LINES;
-  return (
-    <div>
-      {/* The well, at EVERY count. Its RESTING cap is what makes scale
-          presentational: three lines sit inside it without scrolling, fifty
-          scroll, and the row occupies the same space either way. What it no
-          longer does is clip through a person — both caps are a whole number of
-          lines, and reaching everyone is a press rather than a different
-          surface. */}
-      {visible.length > 0 && (
-        <PersonWell open={wellOpen && canOpenWell}>
-          {visible.map((id) => {
-            const m = DEMO_ROWS[id];
-            const spec = MEMBER_STATUS_ICON[m.status];
-            return (
-              <PersonLine
-                key={id}
-                icon={m.containment === "rejected" ? SearchX : spec.icon}
-                iconClass={m.containment === "rejected" ? "text-[color:var(--ds-fg-muted)]" : spec.cls}
-                name={m.title}
-                nameClass={m.containment === "rejected" ? "italic text-[color:var(--ds-fg-muted)]" : undefined}
-                detail={<MemberDetailCell row={m} />}
-                eid={m.eid}
-                selected={state.selectedId === id}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handlers.onSelect(id);
-                }}
-              />
-            );
-          })}
-        </PersonWell>
+  const canExpand = ids.length > MEMBER_WELL_LINES;
+  const canOpenFullList = canViewAllMembers(ids.length);
+  const counts = groupCounts(row.id);
+  const checkedCount = ids.filter((id) => state.checkedIds.has(id)).length;
+  const memberCount = ids.length;
+
+  const disclosures = (
+    <>
+      {canExpand && (
+        <button
+          type="button"
+          aria-expanded={wellOpen}
+          onClick={(e) => {
+            e.stopPropagation();
+            handlers.onToggleWell(row.id);
+          }}
+          className={disclosureLink}
+        >
+          {wellOpen ? <ChevronUp aria-hidden className={dsIcon.sm} /> : <ChevronDown aria-hidden className={dsIcon.sm} />}
+          {wellOpen ? "Collapse" : "Expand"}
+        </button>
       )}
-      {/* The disclosures, at every count. A settled group carries the toggle —
-          it is the only way back to its members once it is shut — and the
-          drill-in is always offered, because it is the same route into the same
-          list whether that list is three people or fifty. */}
-      {/* The links sit in the TEXT column — the same x as every member name
-          above them and the card title above that. They are about the list,
-          not entries in it, so they take no leading glyph. */}
-      <div
-        className={cn(
-          visible.length > 0 && "mt-[var(--ds-space-snug)]",
-          "flex items-center gap-[var(--ds-space-cozy)] pl-[var(--ds-w-row-indent)]",
-        )}
-      >
-        {settled && (
-          <button
-            type="button"
+      {/* A stable route to the dedicated roster. It stays beside Expand even
+          when the expanded well can fit everyone, because the two actions do
+          different jobs: inspect inline vs work in the full-list surface. */}
+      {canOpenFullList && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            handlers.onDrillIn(row.id);
+          }}
+          className={disclosureLink}
+        >
+          <ArrowRight aria-hidden className={dsIcon.sm} />
+          {row.workflowId === "oath-signature" ? "View all signers" : "View full list"}
+        </button>
+      )}
+    </>
+  );
+
+  if (ids.length === 0) {
+    return null;
+  }
+
+  return (
+    <PersonWell
+      embedded
+      open={wellOpen && canExpand}
+      header={
+        <div className="shrink-0 border-b border-[color:var(--ds-border-subtle)] bg-[var(--ds-surface-2)]">
+              {/* Composition chrome — tallies live HERE, not as a floating strip
+              above the frame. Checked only appears once the operator has
+              marked someone; a green `0/12` next to `✓ 11` was a second number
+              that looked like composition and meant nothing.
+
+              OCR / parent redirects live in the card body band BELOW this
+              well (after Expand / View all), so every panel jump shares one
+              place on every row type. */}
+          <div
+            className={cn(
+              MEMBER_GRID,
+              MEMBER_WELL_PAD,
+              "min-h-[var(--ds-h-member-line)] items-center gap-x-[var(--ds-space-base)] py-[var(--ds-space-tight)]",
+              dsText.meta,
+            )}
+          >
+            <div className="col-span-4 flex min-w-0 items-center gap-[var(--ds-space-cozy)]">
+              <div className="flex min-w-0 flex-wrap items-center gap-[var(--ds-space-cozy)]">
+                <DemoStatusCounts counts={counts} />
+                {counts.rejected > 0 && (
+                  <span
+                    className="inline-flex min-w-0 items-center gap-[var(--ds-space-tight)] truncate text-[color:var(--ds-fg-muted)]"
+                    title={`${counts.rejected} rejected — never became work and excluded from the rollup`}
+                  >
+                    <SearchX aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
+                    <span className={dsText.nums}>{counts.rejected}</span> rejected
+                  </span>
+                )}
+                {checkedCount > 0 && (
+                  <span
+                    className="inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-success-fg)]"
+                    aria-label={`${checkedCount} of ${memberCount} checked by you`}
+                    title="How many of these you have marked checked"
+                  >
+                    <CheckCircle2 aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
+                    <span className={dsText.nums}>
+                      {checkedCount}/{memberCount}
+                    </span>
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div
+            className={cn(
+              MEMBER_GRID,
+              MEMBER_WELL_PAD,
+              "h-[var(--ds-h-member-line)] items-center gap-x-[var(--ds-space-base)]",
+              dsText.meta,
+              "text-[color:var(--ds-fg-faint)]",
+            )}
+          >
+            <span className="col-span-2 col-start-1 truncate">Name</span>
+            <span className="col-start-3 truncate">{memberDetailHeading(row)}</span>
+            <span className="col-start-4 truncate text-right">EID</span>
+          </div>
+        </div>
+      }
+      footer={
+        (canExpand || canOpenFullList) ? (
+          <div
+            className={cn(
+              "grid shrink-0 border-t border-[color:var(--ds-border-subtle)] bg-[var(--ds-surface-2)]",
+              canExpand && canOpenFullList ? "grid-cols-2" : "grid-cols-1",
+              "[&>button]:h-[var(--ds-h-member-line)] [&>button]:w-full [&>button]:justify-center",
+              "[&>button+button]:border-l [&>button+button]:border-[color:var(--ds-border-subtle)]",
+            )}
+          >
+            {disclosures}
+          </div>
+        ) : undefined
+      }
+    >
+      {ids.map((id) => {
+        const m = DEMO_ROWS[id];
+        const spec = MEMBER_STATUS_ICON[m.status];
+        return (
+          <PersonLine
+            key={id}
+            icon={m.containment === "rejected" ? SearchX : spec.icon}
+            iconClass={m.containment === "rejected" ? "text-[color:var(--ds-fg-muted)]" : spec.cls}
+            name={m.title}
+            nameClass={m.containment === "rejected" ? "italic text-[color:var(--ds-fg-muted)]" : undefined}
+            detail={<MemberDetailCell row={m} />}
+            eid={m.eid}
+            selected={state.selectedId === id}
             onClick={(e) => {
               e.stopPropagation();
-              handlers.onToggleGroup(row.id);
+              handlers.onSelect(id);
             }}
-            className={disclosureLink}
-          >
-            {expanded ? <ChevronUp aria-hidden className={dsIcon.sm} /> : <ChevronDown aria-hidden className={dsIcon.sm} />}
-            {expanded ? "Collapse" : `Show all ${ids.length} ${noun}`}
-          </button>
-        )}
-        {/* GROW THE WELL, in place. It is offered before `Open all N` because
-            it is the cheaper of the two answers to the same question, and the
-            operator asked for it in exactly those terms: *"this should also
-            allow expanding to like 20 people and scrolling everyone from
-            there."* `Open all N` stays as the escape hatch to the surface where
-            a set that size is actually WORKED. */}
-        {!shut && canOpenWell && (
-          <button
-            type="button"
-            aria-expanded={wellOpen}
-            onClick={(e) => {
-              e.stopPropagation();
-              handlers.onToggleWell(row.id);
-            }}
-            className={disclosureLink}
-          >
-            {wellOpen ? <ChevronUp aria-hidden className={dsIcon.sm} /> : <ChevronDown aria-hidden className={dsIcon.sm} />}
-            {wellOpen ? `Show ${MEMBER_WELL_LINES}` : `Expand to ${Math.min(ids.length, MEMBER_WELL_OPEN_LINES)}`}
-          </button>
-        )}
-        {!shut && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              handlers.onDrillIn(row.id);
-            }}
-            className={disclosureLink}
-          >
-            <ArrowRight aria-hidden className={dsIcon.sm} />
-            Open all {ids.length} {noun}
-          </button>
-        )}
-      </div>
-    </div>
+          />
+        );
+      })}
+    </PersonWell>
   );
 }
 
@@ -1677,32 +1677,14 @@ function GroupMemberList({ row, state, handlers }: { row: DemoRow; state: DemoQu
 // right edge, which is how a table ends up saying `41` where it means `41s`.
 const DRILL_GRID = "grid grid-cols-[1rem_minmax(0,1fr)_var(--ds-w-member-eid)_var(--ds-w-member-detail)_2.5rem]";
 
-/**
- * The drill-in header's three summary chips — one shape, two loudness levels,
- * and (item 3) the same matte-fill-plus-hairline every other chip carries.
- */
-const drillChip = (warn: boolean): string =>
-  cn(
-    "inline-flex shrink-0 items-center border text-ellipsis",
-    dsClip.token,
-    "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-base)]",
-    dsRadius.sm,
-    dsText.meta,
-    warn
-      ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] font-medium text-[color:var(--ds-status-waiting-fg)]"
-      : "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
-  );
-
 function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQueueState; handlers: DemoQueueHandlers }) {
   const group = DEMO_ROWS[groupId];
   const ids = orderedMemberIds(groupId);
-  const counts = groupCounts(groupId);
-  const attentionN = counts.failed + counts.waiting + counts.warnings + counts.parked;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div
         className={cn(
-          "flex shrink-0 flex-wrap items-center border-b",
+          "flex shrink-0 items-start border-b",
           dsBorder.subtle,
           "gap-[var(--ds-space-snug)] px-[var(--ds-space-cozy)] py-[var(--ds-space-snug)]",
         )}
@@ -1713,20 +1695,14 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
           onClick={handlers.onBack}
           icon={<ArrowLeft aria-hidden className={dsIcon.md} />}
         />
-        <span className={cn(dsText.title, "mr-[var(--ds-space-tight)] truncate font-semibold text-[color:var(--ds-fg)]")}>
+        <span className={cn(dsText.title, "min-w-0 flex-1 [overflow-wrap:anywhere] font-semibold text-[color:var(--ds-fg)]")}>
           {group.title}
         </span>
-        {/* `13+ members · opened in place` USED TO BE HERE, and it was the UI
-            describing itself to the operator standing in it. The density rung
-            is a fact about the product, not about this group — it belongs to
-            the row's ⓘ and to the catalog, both of which still carry it. */}
-        <span className={cn(drillChip(true), dsRadius.pill)}>
-          Attention <span className={dsText.nums}>{attentionN}</span>
-        </span>
-        <span className={cn(drillChip(false), dsRadius.pill)}>
-          All <span className={dsText.nums}>{ids.length}</span>
-        </span>
-        <span className="relative ml-auto">
+        {/* The roster is already attention-first and already contains the full
+            group, so Attention / All chips repeated facts without filtering.
+            Search is the one useful header control and stays in the first row,
+            with the title wrapping before the input can be pushed downward. */}
+        <span className="relative ml-auto w-32 shrink-0">
           <Search
             aria-hidden
             className={cn(dsIcon.sm, "pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[color:var(--ds-fg-muted)]")}
@@ -1735,7 +1711,7 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
             aria-label="Search members"
             placeholder="name / EID…"
             className={cn(
-              "w-32 border pl-6 pr-[var(--ds-space-base)]",
+              "w-full border pl-6 pr-[var(--ds-space-base)]",
               "h-[var(--ds-h-sm)]",
               dsRadius.md,
               dsText.meta,
@@ -1795,7 +1771,7 @@ function DrillIn({ groupId, state, handlers }: { groupId: string; state: DemoQue
                 dsFocus,
                 dsMotion.fast,
                 "hover:bg-[var(--ds-surface-3)]",
-                isSel && "bg-[var(--ds-surface-selected)] shadow-[inset_2px_0_0_var(--ds-ring)]",
+                isSel && "bg-[var(--ds-surface-selected)]",
               )}
             >
               <Icon aria-hidden className={cn(dsIcon.md, rejected ? "text-[color:var(--ds-fg-muted)]" : spec.cls)} />
@@ -1931,7 +1907,9 @@ export function DemoQueue({
                   said it was an empty Saturday one. */}
               {state.filter === "all"
                 ? `No ${workflowLabel} runs on ${fmtDayLabel(`${day}T12:00:00`)}`
-                : `No ${workflowLabel} runs are ${filterWord(state.filter)}`}
+                : state.filter === "needsYou"
+                  ? `No ${workflowLabel} runs need your attention`
+                  : `No ${workflowLabel} runs are ${filterWord(state.filter)}`}
             </span>
             {/* An empty state still owes the operator three things — what would
                 be here, why it is not, and what to do — and no more. The two
@@ -1942,12 +1920,12 @@ export function DemoQueue({
             <p className={cn(dsText.body, "max-w-[52ch] leading-relaxed text-[color:var(--ds-fg-muted)]")}>
               {state.filter === "all"
                 ? "It is registered and can be run — there is simply nothing on this day."
-                : "There are rows in this workflow, none in this status."}
+                : "Nothing matches this filter."}
             </p>
             <p className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
               {state.filter === "all"
                 ? "Start one with Start a run, or pick another workflow."
-                : "Clear the status pill to see everything here."}
+                : "Clear the filter to see all runs."}
             </p>
           </div>
         )}

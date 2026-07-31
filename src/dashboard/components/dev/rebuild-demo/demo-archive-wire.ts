@@ -293,6 +293,19 @@ export function bumpTargetLabel(record: ChangeRecordWire): { text: string; appUp
   };
 }
 
+/**
+ * The Name cell for a bump section after the Workflow column was folded in —
+ * operator: `ob vx → vy`. App updates keep the `app a → app b` pair as-is;
+ * workflow bumps lead with the workflow code(s).
+ */
+export function bumpNameLabel(record: ChangeRecordWire): string {
+  const arrow = `${record.fromVersion} → ${record.toVersion}`;
+  if (record.scope === "dashboard") return arrow;
+  const codes = record.workflowIds.map((id) => DEMO_WORKFLOWS[id].code);
+  if (codes.length === 0) return arrow;
+  return `${codes.join("+")} ${arrow}`;
+}
+
 // ---------------------------------------------------------------------------
 // The stored snapshot
 // ---------------------------------------------------------------------------
@@ -430,6 +443,8 @@ export interface ArchivedRunWire {
   subtitle: string;
   displayName?: string;
   finalStatus: ProposedStatus;
+  /** Present when finalStatus is doneWarnings — drives the △ N chip beside Done. */
+  warnings?: { count: number; first: string };
   enqueuedAt: string;
   endedAt: string;
   durationLabel: string;
@@ -576,6 +591,7 @@ export const DEMO_ARCHIVE: ArchivedRunWire[] = [
     title: "Noor Haddad",
     subtitle: "EID 10502774",
     finalStatus: "doneWarnings",
+    warnings: { count: 1, first: "Relationship defaulted to “Other” — the paper said Spouse" },
     enqueuedAt: "Jul 22, 8:11 AM",
     endedAt: "Jul 22, 8:14 AM",
     durationLabel: "2m 51s",
@@ -989,6 +1005,7 @@ export const DEMO_ARCHIVE: ArchivedRunWire[] = [
     title: "14 work-study updates",
     subtitle: "ws-090015-31c8",
     finalStatus: "doneWarnings",
+    warnings: { count: 1, first: "1 of 14 not found in UCPath — Rae Lindqvist" },
     enqueuedAt: "Jul 19, 9:00 AM",
     endedAt: "Jul 19, 9:52 AM",
     durationLabel: "51m 30s",
@@ -1311,10 +1328,13 @@ function bulkRun(index: number, rand: () => number): ArchivedRunWire {
   const durationLabel = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
   const month = BULK_MONTHS[index % BULK_MONTHS.length];
   const day = 1 + (index % 27);
-  const hour = 7 + (index % 10);
+  // 7…16 on a 24h clock — convert so the table never mixes "16:29" with "9:02 AM".
+  const hour24 = 7 + (index % 10);
   const minute = index % 60;
-  const clock = `${month} ${day}, ${hour}:${String(minute).padStart(2, "0")} AM`;
-  const trace = `${workflow.code}-${String(hour).padStart(2, "0")}${String(minute).padStart(2, "0")}${String(index % 60).padStart(2, "0")}-${(0x1000 + index).toString(16)}`;
+  const period = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  const clock = `${month} ${day}, ${hour12}:${String(minute).padStart(2, "0")} ${period}`;
+  const trace = `${workflow.code}-${String(hour24).padStart(2, "0")}${String(minute).padStart(2, "0")}${String(index % 60).padStart(2, "0")}-${(0x1000 + index).toString(16)}`;
   const failed = status === "failed";
   const wroteToTest = index % 23 === 0;
   const dryRun = index % 31 === 0;
@@ -1331,6 +1351,10 @@ function bulkRun(index: number, rand: () => number): ArchivedRunWire {
     title: name,
     subtitle: eid,
     finalStatus: status,
+    warnings:
+      status === "doneWarnings"
+        ? { count: 1 + (index % 3), first: "Finished with a warning the operator still owes a look" }
+        : undefined,
     enqueuedAt: clock,
     endedAt: clock,
     durationLabel,
@@ -1441,14 +1465,13 @@ export const ARCHIVE_RETENTION_NOTE =
  * column the table shows but cannot sort is a column the operator will try to
  * click. One vocabulary, so the header IS the control.
  */
-export type ArchiveSortKey = "status" | "name" | "trace" | "workflow" | "when" | "duration";
+export type ArchiveSortKey = "status" | "name" | "trace" | "when" | "duration";
 export type ArchiveSortDir = "asc" | "desc";
 
 export const ARCHIVE_SORT_LABEL: Record<ArchiveSortKey, string> = {
   status: "Outcome",
   name: "Name",
   trace: "Trace",
-  workflow: "Workflow",
   when: "When",
   duration: "Ran for",
 };
@@ -1542,9 +1565,11 @@ const STATUS_RANK: ProposedStatus[] = [
  */
 const COMPARATORS: Record<ArchiveSortKey, (a: ArchivedRunWire, b: ArchivedRunWire) => number> = {
   status: (a, b) => STATUS_RANK.indexOf(a.finalStatus) - STATUS_RANK.indexOf(b.finalStatus),
-  name: (a, b) => (a.displayName ?? a.title).localeCompare(b.displayName ?? b.title),
+  name: (a, b) =>
+    (a.displayName ?? a.title).localeCompare(b.displayName ?? b.title) ||
+    a.workflowCode.localeCompare(b.workflowCode) ||
+    a.workflowVersion - b.workflowVersion,
   trace: (a, b) => a.traceId.localeCompare(b.traceId),
-  workflow: (a, b) => a.workflowLabel.localeCompare(b.workflowLabel) || a.workflowVersion - b.workflowVersion,
   when: (a, b) => (SORT_INDEX.get(a.runId) ?? 0) - (SORT_INDEX.get(b.runId) ?? 0),
   duration: (a, b) => durationSeconds(a.durationLabel) - durationSeconds(b.durationLabel),
 };

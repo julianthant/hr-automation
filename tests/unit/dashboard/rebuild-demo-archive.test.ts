@@ -133,7 +133,7 @@ test("the generated runs keep the authored ones the interesting ones", () => {
 
 test("every sortable column is a column the table shows, and every sort is total", () => {
   const keys = Object.keys(ARCHIVE_SORT_LABEL) as ArchiveSortKey[];
-  assert.deepEqual(keys, ["status", "name", "trace", "workflow", "when", "duration"]);
+  assert.deepEqual(keys, ["status", "name", "trace", "when", "duration"]);
   for (const key of keys) {
     for (const dir of ["asc", "desc"] as const) {
       const sorted = queryArchive(DEMO_ARCHIVE, q({ sort: key, dir }));

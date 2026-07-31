@@ -36,6 +36,12 @@ export const dsText = {
   caps: "ds-text-caps",
   /** tabular monospace — every number that can change while you look at it */
   nums: "ds-nums",
+  /**
+   * Collapse the line box to the em. Compose AFTER a size class on a
+   * single-line label beside an icon / taller control — see tokens.css.
+   * Tailwind `leading-none` cannot do this; `ds-text-*` are unlayered and win.
+   */
+  flush: "ds-leading-flush",
 } as const;
 
 /* -------------------------------------------------------------------------
@@ -229,6 +235,15 @@ export const dsPad = {
 /**
  * The one icon size language. Icons never scale independently of the text
  * they sit beside — 12px icon with meta text, 14px with UI text.
+ *
+ * Alignment beside a label:
+ *   - Same flex/grid row with `items-center` → size class only; the row centers.
+ *   - Leading column beside a single-line title row → add `self-center` (never
+ *     `mt-px`; that parks a smaller glyph above the title's midpoint).
+ *   - Beside multi-line copy under `items-start` → `mt-px` is the first-line
+ *     optical nudge, and only then.
+ *   - Single-line label next to a taller control (ⓘ, chip) → compose
+ *     `dsText.flush` so the flex mid is the glyph mid, not a padded line box.
  */
 export const dsIcon = {
   /** 12px — beside micro/meta text */

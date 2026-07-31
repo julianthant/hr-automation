@@ -4,15 +4,16 @@ import {
   DEMO_ROWS,
   effectiveStatus,
   isTerminal,
+  recordCountsFromStream,
   recordStream,
 } from "../../../src/dashboard/components/dev/rebuild-demo/demo-data.js";
 
 /**
  * DEV-ONLY (`?view=rebuild-demo`) — RECORDS ARRIVE ONE AT A TIME.
  *
- * The OCR review row carried a count and nothing else — `12 lookups` — which is
- * a summary that only means something once the extraction has finished. On a
- * fifteen-minute read that is fifteen minutes of a number nobody can act on.
+ * The OCR review row once carried only a `12 lookups` summary, which meant
+ * nothing actionable until extraction finished. The redundant header badge is
+ * now gone; the member list itself streams as extraction reports each person.
  * The operator: *"the 12 should also appear like [a member list] as they get
  * read. so i can see in the queue panel as well in the ocr."*
  *
@@ -124,4 +125,16 @@ test("the remainder is a NUMBER — the stream never invents a record", () => {
   // …and the pending count is exactly what is missing, so the row's "N more
   // pages to read" cannot drift from the list above it.
   assert.equal(stream.total - stream.read.length, authored.size - stream.read.length);
+});
+
+test("record counts map onto the same tally buckets as group members", () => {
+  const mid = recordCountsFromStream(recordStream(READING, 0));
+  assert.equal(mid.done, 5);
+  assert.equal(mid.running, 4);
+  assert.equal(mid.rejected, 0);
+
+  const done = recordCountsFromStream(recordStream(FINISHED, 0));
+  assert.equal(done.done, 12);
+  assert.equal(done.running, 0);
+  assert.equal(done.warnings, 0);
 });

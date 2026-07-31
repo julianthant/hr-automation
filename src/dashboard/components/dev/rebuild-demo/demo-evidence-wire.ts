@@ -1,6 +1,6 @@
 /**
  * DEV-ONLY — the TRUST half of the wire contract: `RunEvidenceReceipt`,
- * `FailureRecord` and the evidence captures behind the evidence bar.
+ * `FailureRecord` and the evidence captures rendered inside Receipt.
  *
  * `docs/rebuild/12-operator-trust-and-authoring.md` §2.1–2.4 owns these shapes;
  * `docs/rebuild/reviews/demo-feature-plan-2026-07-25.md` §1.2 says they are
@@ -1560,6 +1560,55 @@ const CAPTURE_META: Record<string, DemoCaptureMeta> = {
   },
   "sep-maria::Kronos search": { step: "Kronos search", system: "kronos", capturedAt: at("14:05:44"), ref: "sha256:2091…ff3c", screen: "kronos.employee.search", pageState: "results", size: VIEWPORT },
   "sep-maria::Paused at gate": { step: "Identity check", system: "ucpath", capturedAt: at("14:08:02"), ref: "sha256:cc70…5518", screen: "ucpath.person.search", pageState: "results-multiple", size: VIEWPORT, note: "Two candidates on screen — the frame the identity gate is asking about." },
+  "sep-maria::Kuali doc 4-VMPHRW": {
+    step: "Kuali extraction",
+    system: "kuali",
+    capturedAt: at("14:01:12"),
+    ref: "sha256:a91c…44e2",
+    screen: "kuali.separation.doc",
+    pageState: "loaded",
+    size: VIEWPORT,
+  },
+  "sep-maria::Identity check": {
+    step: "Identity check",
+    system: "ucpath",
+    capturedAt: at("14:07:40"),
+    ref: "sha256:11f0…c3a8",
+    screen: "ucpath.person.search",
+    pageState: "results-multiple",
+    size: VIEWPORT,
+  },
+  "sep-maria::Job summary": {
+    step: "Job summary",
+    system: "ucpath",
+    capturedAt: at("14:03:18"),
+    ref: "sha256:6b2e…91d0",
+    screen: "ucpath.person.jobsummary",
+    pageState: "loaded",
+    size: VIEWPORT,
+  },
+
+  // EC packet — both frames from OCR extraction; the rejected page never left that step.
+  "ec-packet::Packet page 1": {
+    step: "OCR extraction",
+    system: "i9",
+    capturedAt: at("11:28:18"),
+    ref: "sha256:e4c0…7b19",
+    screen: "packet.page",
+    pageState: "extracted",
+    size: { w: 612, h: 792 },
+    note: "Cover page of EC_Forms_0722.pdf — the batch header before contact blocks are read.",
+  },
+  "ec-packet::Page 7 (rejected)": {
+    step: "OCR extraction",
+    system: "i9",
+    capturedAt: at("11:29:44"),
+    ref: "sha256:91aa…2c0f",
+    screen: "packet.page",
+    pageState: "rejected",
+    size: { w: 612, h: 792 },
+    note: "No contact block on this page — rejected member emitted; delete-only until acknowledged.",
+  },
 };
 
 // ===========================================================================
@@ -1689,9 +1738,9 @@ export function failureFor(row: DemoRow): DemoFailureRecord | null {
 }
 
 /**
- * The evidence bar's model. Built from the row's OWN `shots` so the bar and the
- * lightbox can never show different sets, enriched with whatever the capture
- * store serves for that row and label.
+ * The receipt capture gallery's model. Built from the row's OWN `shots` so the
+ * gallery and lightbox can never show different sets, enriched with whatever
+ * the capture store serves for that row and label.
  */
 export function capturesFor(row: DemoRow): DemoCapture[] {
   return row.shots.map((shot, i) => {
@@ -1702,8 +1751,54 @@ export function capturesFor(row: DemoRow): DemoCapture[] {
       kind: shot.kind,
       failure: shot.kind === "error",
       ...meta,
+      // Fixture `step` wins when meta is absent; meta wins when both exist
+      // (richer CAPTURE_META stays authoritative for authored captures).
+      step: meta?.step ?? shot.step,
     };
   });
+}
+
+/** Captures with no authored workflow step — kept last, never invent a fake name. */
+export const CAPTURE_STEP_UNSCOPED = "Unscoped";
+
+/**
+ * Group captures by the workflow step they were taken on — same order idea as
+ * the Data ledger: the run's own `steps[]` first, then any leftover step names
+ * in first-seen order, with unscoped frames last.
+ *
+ * Kind filters (All / Errors / Steps) stay orthogonal — call this on the
+ * already-filtered list.
+ */
+export function groupCapturesByStep(
+  captures: readonly DemoCapture[],
+  stepOrder?: readonly string[],
+): { step: string; captures: DemoCapture[] }[] {
+  const buckets = new Map<string, DemoCapture[]>();
+  for (const capture of captures) {
+    const key = capture.step?.trim() || CAPTURE_STEP_UNSCOPED;
+    const list = buckets.get(key);
+    if (list) list.push(capture);
+    else buckets.set(key, [capture]);
+  }
+
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const step of stepOrder ?? []) {
+    if (buckets.has(step) && !seen.has(step)) {
+      ordered.push(step);
+      seen.add(step);
+    }
+  }
+  for (const key of buckets.keys()) {
+    if (key === CAPTURE_STEP_UNSCOPED || seen.has(key)) continue;
+    ordered.push(key);
+    seen.add(key);
+  }
+  if (buckets.has(CAPTURE_STEP_UNSCOPED) && !seen.has(CAPTURE_STEP_UNSCOPED)) {
+    ordered.push(CAPTURE_STEP_UNSCOPED);
+  }
+
+  return ordered.map((step) => ({ step, captures: buckets.get(step)! }));
 }
 
 export const CAPTURE_KIND_LABEL: Record<DemoCaptureKind, string> = {

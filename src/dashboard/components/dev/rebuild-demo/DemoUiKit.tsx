@@ -12,6 +12,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Trash2,
+  TriangleAlert,
   Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -228,7 +229,7 @@ function StatusSection() {
     <Section
       id="status"
       title="The eight statuses"
-      note="Four separating channels per status: hue, emphasis tier, icon and label. Waiting on you and Failed are the only solid fills — the two loudest things the product can show. Done has no chip at all."
+      note="Four separating channels per status: hue, emphasis tier, icon and label. Review and Failed are the loudest solids. Done is solid green — word only. Cancelled is the same solid pill in gray. Yellow Done carries a △ count chip beside it."
     >
       <div className="grid grid-cols-2 gap-[var(--ds-space-base)]">
         {DS_STATUS_ORDER.map((status) => (
@@ -236,7 +237,24 @@ function StatusSection() {
             key={status}
             className="flex items-start gap-[var(--ds-space-cozy)] rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border-subtle)] p-[var(--ds-space-base)]"
           >
-            <StatusPill status={status} age={status === "waiting" ? "12m" : undefined} />
+            <span className="inline-flex items-center gap-[var(--ds-space-snug)]">
+              <StatusPill status={status} age={status === "waiting" ? "12m" : undefined} />
+              {status === "doneWarnings" && (
+                <span
+                  title="Finished with warnings"
+                  className={cn(
+                    "inline-flex h-[var(--ds-h-xs)] shrink-0 items-center gap-[var(--ds-space-tight)] rounded-[var(--ds-radius-sm)] border px-[var(--ds-space-snug)]",
+                    "border-[color:var(--ds-status-done-warnings-border)] bg-[var(--ds-status-done-warnings-bg)] text-[color:var(--ds-status-done-warnings-fg)]",
+                    dsText.meta,
+                    dsText.nums,
+                    dsText.flush,
+                  )}
+                >
+                  <TriangleAlert aria-hidden className={dsIcon.sm} />
+                  2
+                </span>
+              )}
+            </span>
             <span className={cn(dsText.meta, "min-w-0 flex-1 text-[color:var(--ds-fg-muted)]")}>
               {DS_STATUS[status].meaning}
             </span>
@@ -289,6 +307,9 @@ function ActionsSection() {
       note="One primary per surface, one danger per surface. Variant is semantic, not decorative — outline for peers in a toolbar, ghost for anything that must not compete."
     >
       <Row label="Variants">
+        <Button variant="brand" size="toolbar" icon={<Play aria-hidden className="size-3.5" />}>
+          Start a run
+        </Button>
         <Button variant="primary" icon={<Play aria-hidden className="size-3.5" />}>
           Run
         </Button>
