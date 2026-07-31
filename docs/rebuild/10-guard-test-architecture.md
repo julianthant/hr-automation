@@ -1,7 +1,10 @@
 # 10 — Guard & Test Architecture SSOT (`temp_src`)
 
-Status: **revised 2026-07-22 after the whole-plan/legacy-code review; amended 2026-07-31
-(Round 10).** No `temp_src` guard implementation currently exists; this document now covers strict
+Status: **Phase 1a pre-tree scaffold implemented 2026-07-31; revised 2026-07-22 after the
+whole-plan/legacy-code review; amended 2026-07-31 (Round 10).** `temp_src` remains absent by design,
+but the reviewed guard inventory, D58/D90/preservation/disposition manifests, semantic legacy-lint
+ratchet, exact runtime-isolation contract, and planned-state rebuild lint/test/coverage launchers
+now exist. Source-scanning guard arms activate atomically with the first `temp_src` file. This document covers strict
 schemas, semantic UI/driver boundaries, subject binding, queue commands/delegation,
 evidence/scenarios, notifications, and authority-store recovery in addition to the existing rebuild
 safety promises. **Round 10 amends §3.13** to replace frozen-tree enforcement with strict runtime
