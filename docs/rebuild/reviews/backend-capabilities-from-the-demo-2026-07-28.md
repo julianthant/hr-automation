@@ -100,8 +100,10 @@ matrix must expose.
   **fail-loud**: an undeclared key throws at projection rather than rendering blank
   (`memberOutcomeSpec` in `demo-wire.ts`). A member still looking sends **no** outcome, and the
   backend must not default one. Declared today: **i9-check** (Found · Not found · Unsure ·
-  Incomplete · Not searchable) and **person-lookup** (Resolved · **Separated** · Not found).
-  `separated` is its own key, not a qualifier on a successful `resolved` — UCPath *found* the
+  Incomplete · Not searchable) and **person-lookup** (Search: Resolved · **Separated** · Not found;
+  Match: Found · Not found). The selected mode determines which declared subset is valid;
+  projection fails loud if a Match row reports a Search-only answer or vice versa. `separated`
+  is its own key, not a qualifier on a successful `resolved` — UCPath *found* the
   person, and what it reports is that they no longer work here, which is a different answer and
   the one that stops an oath packet signing them.
 - **What breaks otherwise:** "done" swallows "found nothing", free-text detail strings drift per
