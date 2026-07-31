@@ -1,15 +1,16 @@
-# Reconciliation memo — binding cross-doc decisions (2026-07-17 through 2026-07-26)
+# Reconciliation memo — binding cross-doc decisions (2026-07-17 through 2026-07-30)
 
-Status: **binding revision 2026-07-26 (Round 8).** Earlier rounds remain as decision history;
+Status: **binding revision 2026-07-30 (Round 9).** Earlier rounds remain as decision history;
 Round 7 supersedes incompatible typing, UI-access, control, delegation, recovery, trust,
-knowledge, and workflow-editor claims, and Round 8 supersedes the migration/coexistence model.
+knowledge, and workflow-editor claims; Round 8 supersedes the migration/coexistence model; Round 9
+supersedes the proposed executor-lane/session-pool capacity model.
 
-> **What this doc is, as of Round 8: a decision CHANGELOG, not a specification.** Its job is to
+> **What this doc is, as of Round 9: a decision CHANGELOG, not a specification.** Its job is to
 > record *what was decided, when, and which doc owns it* — so a reader can reconstruct why a
 > contract has its current shape. It is **not** where you read the current contract. The owning
 > doc (D1 matrix below) is the only readable current truth, and every ratified decision must be
 > folded into that doc **in the same commit that records it** (charter standing rule, added
-> 2026-07-26). Round 8 entries are therefore deliberately one-liners with a pointer: the normative
+> 2026-07-26). Round 8–9 entries are therefore deliberately one-liners with a pointer: the normative
 > text lives in the owner. Rounds 1–7 predate that rule and still carry normative prose; treat
 > the owning doc as authoritative wherever they differ.
 
@@ -20,7 +21,7 @@ Amendment agents rewrite each doc to comply; a doc may reference another doc's o
 must never redefine it.
 
 > **Implementation rule:** don't implement from this file. D1–D25 are historical rationale, not
-> copyable current API/DDL; D26–D72 amend each other in round order (later wins); D73–D86 are
+> copyable current API/DDL; D26–D72 amend each other in round order (later wins); D73–D87 are
 > pointers only. **Read the owning doc.** If an owning doc contradicts a decision here, the doc is
 > either correct (it was folded) or stale (it wasn't) — check the doc's amendment date against the
 > round date and fix the doc, never work from this memo. Current contract shapes live in owning
@@ -33,7 +34,7 @@ must never redefine it.
 | Task contract (`defineTask`), id grammar, error taxonomy, effect/dry-run mechanics, retry policy, decoration, stores, session providers, shared leaf-code homes | **Doc 01** |
 | Workflow builder API (single API), descriptor shape, RunEnvelope, run-state machine incl. gates/parks, checkpoint/resume model | **Doc 02** |
 | Span/event wire schema, notes stream, storage layout, lift adapter, SSE wire shapes, completion (fan-out/approval) union | **Doc 03** |
-| Executor lanes, resource budgets, page/driver leases, fairness/backpressure, page isolation | **Doc 05** |
+| One-item workers, explicit browser-session boundaries, driver leases, queue dispatch/backpressure, page isolation | **Doc 05** |
 | Canonical-field intake mapping, normalization outcomes, admission manifests, durable capture, roster/local projections, Edit Data | **Doc 06** |
 | Write intents, proof/completion union, subject proof, recovery sequence, immutable ledger | **Doc 09** |
 | Guard/test inventory, scenario execution lanes, non-vacuity/meta-guard | **Doc 10** |
@@ -336,7 +337,8 @@ override/amend D2–D3/D5–D8/D12–D15/D17–D25 wherever they conflict.
   `resolveConfigWithProvenance()` returns config+source map+fingerprint. Nested schema parents have
   valid defaults and no `.url().default("")`. Production and sparse test endpoints are separate;
   settings/env test overrides cannot silently replace production. Enqueue stamps a complete resolved
-  instance/config snapshot; browser pools partition by it and tasks never re-resolve mutable config.
+  instance/config snapshot; worker-owned browser sessions are keyed by it and tasks never
+  re-resolve mutable config.
 - **D41 — The old spike is not ratification.** D23–D25 are historical observations about a smaller
   two-effect, three-step prototype. The new Phase-1 proof must cover three effects, transaction
   pairing, output branches, fork/join, typed child runs, typed gates/completion, and realistic graph
@@ -588,7 +590,13 @@ records them and the same commit folds each into its owner. **One line each — 
 | **D85** | **Testing standard:** scenario corpus as the everyday lane + structural dry-run + a typed `TestTargetRegistry` (test employees/files/sacrificial docs with usage rules) + `cli test workflow <id> --dry-run` through the real kernel + **positive no-write proof from an empty per-run write-intent ledger** (replaces screenshot-absence heuristics). Keepers from the old e2e ritual: "a workaround is a finding", double-entry ground truth, issue ledger — as kernel behavior. | doc 10 §7 |
 | **D86** | **Notifications/retention/knowledge/demos:** failed·gate·parked·repeating·storage → Ping, verified-done → Inbox, pings silent; retention notes 30d / spans 30d / ledger forever / artifacts+checkpoints until purge; knowledge audits operator-triggered with a dated audit record; demos = activity report + live dry-run lane (synthetic demo mode removed). | docs 03/12 |
 
-**Two separate D-series exist — do not confuse them.** This memo's `D1–D86` are cross-doc
-reconciliation decisions. Doc 03 §9 carries a **row-model series** (`row-model D1–D20`: three row
+## Reconciliation round 9 (2026-07-30) — worker/session model, folded
+
+| # | Decision | Owner (normative text) |
+|---|---|---|
+| **D87** | **ONE ITEM PER WORKER; PARALLELISM IS WORKER COUNT.** Executor lanes, static per-system capacity math, cross-workflow browser pools, and their UI chips are retired. Each workflow-scoped worker owns at most one active run plus its own browser sessions; session reuse is normal and a fresh-session boundary is authored on the exact workflow node that needs it. | doc 05; production UI wiring in doc 13 §§2/5/6.7; operator-feedback review |
+
+**Two separate D-series exist — do not confuse them.** This memo's `D1–D87` are cross-doc
+reconciliation decisions. Doc 03 §9 carries a **row-model series** (`row-model D1–D24`: three row
 types, eight statuses, containment, delegation shapes) ratified 2026-07-24/25. Doc 03 states the
 distinction at its §9 header; always cite the row-model series with the `row-model` prefix.

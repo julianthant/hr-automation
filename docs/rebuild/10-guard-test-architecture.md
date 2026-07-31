@@ -8,6 +8,8 @@ safety promises. **Round 8 adds §3.13** (one-projection counts, identity-gate-b
 archive invariants, frozen-legacy-tree) **and §3.14** (the ratified testing standard), and
 **deletes two guard families** — the continuous lift replay and the legacy wire-schema snapshot —
 which existed only to protect the coexistence layer D73 removed.
+**Amended 2026-07-30 (Round 9):** executor-lane overlap/capacity guards are replaced by the
+one-active-item-per-worker, N-worker overlap, and authored fresh-session-boundary guards (D87).
 
 Owns gap-audit (`08`) BLOCKER #2: ratchet port map, safety guards, descriptor projection coverage,
 guard inventory, TDD topology, and stub/live lanes.
@@ -103,7 +105,7 @@ Before activation, a missing `temp_src` is an explicit planned state—not a swa
 | `import-cycles` | **EXTEND** | SCC over `temp_src/`; `ALLOWED_CYCLES` starts empty for the new tree. |
 | `control-layering` | **EXTEND → matrix** | absorb gap-audit `08` #9: enforce the full `domain → infra/services/systems → core → control/workflows` direction over `temp_src` (today only the `control` edge is guarded). |
 | `code-conventions` | **EXTEND + FIX MATCHING** | same rules over `temp_src` (no default exports, kebab/Pascal filenames, no `.tsx` outside dashboard, console guard). Replace `path.includes(prefix)` exemptions with normalized repo-relative exact roots/segments: today's `/scripts/` exemption must not pre-authorize a future `temp_src/**/scripts/**`. |
-| `cancel-mechanism` | **RE-DERIVE** | the one-mechanism invariant re-expressed against doc 05's executor + `runRegistry` successor; still a structural ban on a second cancel path. |
+| `cancel-mechanism` | **RE-DERIVE** | the one-mechanism invariant re-expressed against doc 05's worker runtime + `runRegistry` successor; still a structural ban on a second cancel path. |
 | `delegate-to-usage` / `delegate-to-all-impl-callers` | **RE-DERIVE** | delegation is now workflow-composition (docs 01/02). Re-expressed as "child runs enqueue only via the kernel composition API," but note: peer-to-peer store reuse is now *allowed* (charter §1), so the old "no cross-workflow internal import" shape loosens — see `workflow-boundaries`. |
 | `workflow-boundaries` | **RE-DERIVE (loosened)** | charter §1 makes tasks peer-reusable, so importing another workflow's *task contract* is legal. New rule: a workflow may import another's **contracts** and store tasks, never its `descriptor.ts` internals or non-task private helpers. |
 | `tracker-row-emission` | **RE-DERIVE** | archetype-stamping is gone; the new invariant is doc 03's: writes go only through the typed span-emit path, `appendFileSync` to event JSONL banned outside `temp_src/tracker/`. |
@@ -352,7 +354,7 @@ read while still permitting replay-safe browser downloads.
   are allowed only in registered `infra/providers/**` adapters. Every capability has timeout/abort,
   concurrency/rate admission, config/secret preflight, redaction, evidence, and unavailable/invalid
   scenarios; every adapter has a consuming contract. Scheduler fixtures prove an exhausted provider
-  cannot bypass its global budget or occupy a lane indefinitely.
+  cannot bypass its provider budget or occupy a worker indefinitely.
 - **`runtime-dependency-coverage.test.ts`.** D68 compares the closed BrowserSystemId/provider sets,
   endpoint route schemas, secret/config registries, preflight checks, and legacy env/capability
   inventory in both directions. A missing ServiceNow/SharePoint/Old-Kronos endpoint or provider key,
@@ -571,8 +573,8 @@ contracts; the manifest owns that they exist and stay wired. The set (contract-o
   conflict parks without overwrite, and blocking projection ack before terminal done.
 - **Parallelism guards (doc 05):** driver-lease/raw-Page boundary, subject observation ordering,
   per-contract sleep budget, single-flight
-  login, onbase-`exclusive` lease, `newPage(` ratchet, fan-out-starvation, pool-size `// verified` config,
-  bounded task/transaction deadline, executor teardown soak, lane-overlap.
+  login, onbase-`exclusive` lease, `newPage(` ratchet, fan-out-starvation, authored fresh-session-boundary coverage,
+  bounded task/transaction deadline, worker teardown soak, multi-worker overlap.
 - **Meta (this doc):** `gate-coverage`, `guard-manifest`, and `legacy-test-lint-debt-ratchet`.
 
 A guard added to any doc that never lands in the inventory fails the manifest — so a doc's §guards
@@ -625,8 +627,8 @@ gates** (`E2EScriptedFailError` → terminal `failed` + Retry). Migration:
   cancel, subject mismatch, proof unknown, gate, delegation, retry, and parallel overlap are strict
   `ScenarioManifest`s with deterministic fixture drivers and timed control events. The existing
   file-based hold/fail-gate mechanism (`e2e-gates/`) remains an implementation primitive, not an
-  unindexed parallel list. Doc 05 §7 #1's lane-overlap scenario holds two workflows simultaneously
-  and asserts span overlap (`maxConcurrentLanes ≥ 2`).
+  unindexed parallel list. Doc 05 §7's multi-worker scenario holds two workers simultaneously
+  and asserts distinct worker ids plus span overlap (`maxConcurrentWorkers ≥ 2`).
 - **Span-emitting workflows**: the stub daemon emits the same span/note events (doc 03) a real run
   would, so the dashboard parity gate (D13) and lift-free new-server projections are exercised
   without a browser. `oath-upload`-style real-handler-with-stubbed-legs cases port as test seams.

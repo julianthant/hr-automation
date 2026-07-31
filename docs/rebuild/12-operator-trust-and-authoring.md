@@ -9,6 +9,8 @@ that make a later multi-user migration configuration rather than a second rebuil
 from day one and may never be trimmed. It retains correctness controls, PII/secret redaction,
 local-only network defaults, durable recovery, and evidence because this tool reads and writes real
 HR records. **Round 8 also trims the DSL graph-authoring mode entirely (§5.4, D79a).**
+**Amended 2026-07-30 (Round 9):** the base-capability inventory names explicit per-workflow worker
+counts and authored fresh-browser-session boundaries instead of executor lanes/capacity math (D87).
 
 ## Ownership (D1)
 
@@ -680,7 +682,7 @@ what the **base** implements before workflow-specific leaf behavior is migrated:
 10. Field-level provenance, freshness checks, and safe Edit Data patches.
 11. Server-authoritative enqueue/coalesce/supersede policies and versioned command engine.
 12. Standard queue operations: cancel, retry, bump, hide/restore; destructive purge is separate.
-13. Parallel executor lanes, fair scheduling, backpressure, and pooled authenticated sessions.
+13. Explicit per-workflow worker counts, one active item per worker, visible backpressure, and authored fresh-browser-session boundaries.
 14. Page reset/poison isolation and context-exclusive write transactions.
 15. Automated Duo login for every authenticated browser session, including production; service-only
     runs do not acquire a browser or invoke Duo.

@@ -1,518 +1,233 @@
-# 05 — Execution Kernel: Parallelism & Speed
+# 05 — Execution Kernel: Workers & Browser Sessions
 
-Status: **revised 2026-07-22 after the whole-plan/legacy-code review.** Concurrency now composes
-with the semantic driver boundary, fresh subject binding, the standard command protocol, and
-authority-store degraded mode rather than exposing Playwright pages to tasks.
+Status: **revised 2026-07-30 after operator review.** The executor-lane and static per-system
+capacity design is retired. One worker handles one item at a time; parallelism comes from starting
+more workers; workflows explicitly declare steps that require a fresh browser session.
 
 ## Ownership (D1)
 
 | This doc **OWNS** (siblings reference, never redefine) |
 |---|
-| The scheduler: lanes, claim policy, fairness, backpressure, per-system budgets |
-| The **session pool**: page leases, pool sizing, release/reset discipline, single-flight login, health-ladder integration |
-| The **executor process model** (successor of per-workflow daemons): spawn, registry, heartbeat/lease porting, blast-radius policy |
-| The speed contract: sleep-tax elimination plan, readiness-wait rules, pipelining, the per-span sleep-budget metric |
-| The page-isolation invariant (§6.1) |
+| Worker claim/heartbeat/recovery behavior and the one-item-in-flight invariant |
+| Browser-session ownership, reuse, reset/close discipline, and explicit fresh-session boundaries |
+| Worker spawning and queue dispatch/backpressure |
+| The speed contract: condition waits, sleep-tax removal, and bounded operations |
+| The page/subject-isolation invariant (§6.1) |
 
 | This doc **references** (owner) |
 |---|
-| Task contract, `SessionNeed` (one system per task), exclusive leases, session providers, retry policy → **doc 01** |
-| Run-state machine, gates/parks (D5), checkpoints, navigation-ownership rule (§3.1 there), RunEnvelope → **doc 02** |
-| Worker/run/task span wire schema, session-card projections, notes stream → **doc 03** |
+| Task contract, `SessionNeed`, exclusive driver use, retry policy → **doc 01** |
+| Run state machine, gates/parks, checkpoints, RunEnvelope → **doc 02** |
+| Worker/run/task span wire schema, Session Panel projections, notes → **doc 03** |
 | Command/claim authority, degraded storage mode, notifications → **doc 03** |
-| Semantic UI ids, typed system drivers, action evidence, scenario manifests → **doc 12** |
-| OnBase cross-process SQLite lease → **D15** (mechanics here in §3.4; contract in doc 01 §2.1) |
+| Semantic UI ids, typed drivers, action evidence, scenarios → **doc 12** |
+| OnBase cross-process identity lease → **D15** |
 
-Grounding (read, not imagined): `src/core/daemon/daemon.ts` (claim loop: ONE
-`state.activeRun: RunHandle | null` per daemon — one item in flight per process),
-`daemon-types.ts`, `src/core/kernel/shared-context-pool.ts` + `src/workflows/person-lookup/CLAUDE.md`
-(the proven one-Duo/4-tab UCPath+CRM pool), `src/services/ocr/per-page-pool.ts` + `usage-tracker`
-(the one real intra-run parallel engine), `tests/unit/architecture/wait-for-timeout-allowlist.test.ts`
-(the fixed-sleep inventory), `src/systems/ucpath/CLAUDE.md`/`LESSONS.md`,
-`src/systems/onbase/LESSONS.md` (one app session per identity), `src/core/e2e/stub-workflows.ts`
-(the cancel/parallel matrix already under deterministic test).
+Grounding: today's daemon already has one `state.activeRun` per process. The rebuild keeps that
+understandable ownership model and removes the proposed scheduler inside each process.
 
 ---
 
-## 0. Why today is slow (measured, not vibes)
+## 0. Settled decision
 
-1. **One item in flight per daemon process.** The claim loop holds a single
-   `activeRun` (`daemon-types.ts:79`); N-way parallelism costs N OS processes × N chromium sets ×
-   N full Duo chains. `spawnDaemon` at least parallelizes the N auths (2026-06-24 lesson), but the
-   marginal worker still costs a full browser + login.
-2. **The fixed-sleep tax.** The `waitForTimeout` allowlist counts **47 sleeps in
-   `src/systems/ucpath/` alone** (transaction.ts 18, person-org-summary 8 — mostly 3s each,
-   personal-data 7, navigate 6, ss-smart-hr 5, job-summary 3). The 2026-07-04 improvement audit
-   measured **~33s of pure sleep per UCPath item**. A person-org lookup spends more time in
-   `waitForTimeout(3_000)` than in actual page interaction.
-3. **Per-item serialization even where reads dominate.** i9-check runs a dedicated
-   single-UCPath-browser daemon, strictly sequential with a reset-URL between items — for a
-   workflow that mutates nothing.
-4. **Idle latency.** Claim wake-ups race (`wakePending` latch, ISS-008), backstopped by a 30s
-   re-poll — a fan-out's members trickle in on poll cadence when a wake is lost.
-5. **The one counterexample proves the ceiling is soft:** the OCR per-page pool fans ~100 pages
-   across every provider key concurrently with real admission control (RPM/TPM/RPD windows,
-   tier-1 patience), and person-lookup's shared-context pool runs **4 workers as 4 tabs on ONE
-   authenticated UCPath+CRM context** — live-verified for months. Parallel tabs on one Duo'd
-   PeopleSoft session work; today's kernel just doesn't offer that shape to daemons.
+1. **No executor lanes.** There is no global `lanes` number, lane reservation, capacity chip, or
+   per-workflow lane cap.
+2. **No static per-system capacity math.** There is no `ucpath 1/1` or `crm 1/2` budget contract.
+   Concrete browser health tiles show the sessions that actually exist.
+3. **One worker, one active item.** A worker does not claim a second run until its active run parks
+   or reaches a terminal state.
+4. **Parallelism is worker count.** Starting N workers for a workflow creates N independent workers.
+   The Add-workers UI does not invent a hidden lease calculation or global cap.
+5. **Browser sessions belong to a worker.** Distinct workers own independent system sessions.
+6. **Workflows declare fresh-session boundaries.** Reuse is normal. If a particular step must run
+   in a new browser session, the workflow descriptor says so explicitly. The kernel never infers a
+   boundary from a counter, step name, or queue state.
+7. **No cross-workflow browser pool.** Authenticated pages are not shared between unrelated
+   workflows.
+
+“Lane” remains valid terminology for test suites (`stub lane`, `live lane`) and visual workflow
+graph branches. Those uses do not describe executor capacity and are unaffected.
 
 ---
 
-## 1. The concurrency model
+## 1. Units, named precisely
 
-### 1.1 Units, named precisely
-
-- **Run** — one item's execution of a workflow (doc 02's state machine). Lightweight: a state
-  record in SQLite + checkpoints. Runs are cheap; hundreds may be queued.
-- **Graph-node execution** — one bounded read, transaction, branch, fork/join, child-run, or gate
-  node (doc 02). **This is the scheduler unit.** A browser node needs at most one system; a
-  transaction contains prepare+commit tasks but retains one page/context lease across both.
-  `SessionNeed.system` is its store's system — cross-system work is workflow composition). This
-  single-system property is load-bearing: no multi-lock acquisition, **no lock-ordering deadlock
-  is constructible** at the task grain.
-- **Lane** — a scheduler slot inside an executor: "up to L runs may be in flight here." A lane
-  holds a claimed run while its current node is executable. If the next node's resource is not
-  immediately admissible, it persists/yields the run and claims other work rather than occupying a
-  lane waiting behind a saturated system.
-- **Page lease** — exclusive checkout of one Playwright `Page` from a system's pooled,
-  authenticated `BrowserContext` (§3).
-
-### 1.2 Where the scheduler sits relative to doc 02
-
-Doc 02's run-state machine defines **what** transitions exist (queued → claimed → validating →
-running(node i) → parked/terminal). The scheduler is the engine that decides **when and where**:
-
-```
-             SQLite (cross-process truth: queue, claims, leases, budgets)
-                                │  claim / renew / requeue  (ported: claim_generation,
-                                │   renewClaim, recoverClaimsForDeadWorkers, terminalization fencing)
-   ┌────────────────────────────┴─────────────────────────────┐
-   │ EXECUTOR process                                          │
-   │  scheduler loop ── lane 1: run A ── task ── page lease ──┐│
-   │       │            lane 2: run B ── task ── page lease ──┼┼── SessionPool
-   │       │            lane 3: run C ── (validating, no page)││   ucpath ctx: pages ×3
-   │       └─ park/resume, retry backoff, fairness             │   crm ctx:    pages ×2
-   │  SessionPool: one authenticated context per system        │   onbase ctx: page ×1 (+ D15 lease)
-   └───────────────────────────────────────────────────────────┘
-```
-
-- **Within one run, the declared DAG may fork/join.** Ready branches schedule as child node
-  executions under the same run budget; parallelism also occurs across runs. While run A awaits a PeopleSoft roundtrip on tab 1,
-  run B's task drives tab 2. That IS the pipelining; no intra-run DAG machinery needed for it.
-- **Tasks from different workflows share the same pool.** The scheduler claims runs across ALL
-  workflows (fairness, §5); an oath-signature member and a person-lookup run interleave on the
-  same UCPath context's tabs. Login happens once per system per executor, not once per workflow
-  per worker.
-- Service-store tasks (`ocr`, `extraction`, `normalization`, `roster` — D4) take no page lease.
-  Pure local work consumes a bounded CPU/file lane. Remote provider work declares doc 01's D63
-  capability and must win the matching provider admission token; OCR's proven page/key limiter
-  ports behind that common capability surface rather than remaining an invisible exception.
-- Gates (D5): a lane hitting a gate node parks the run, **returns all page leases to the pool**,
-  and frees the lane immediately. Parked runs cost zero capacity.
-
-### 1.3 Claim protocol (ported, widened)
-
-The SQLite claim machinery ports nearly verbatim — it is already correct under contention
-(claim_generation lease, heartbeat `renewClaim`, `returnTaskToQueued`, the fenced terminalization
-state machine, the `wakePending` latch + bounded re-poll). Two changes:
-
-1. **Claims are per-lane, not per-process** — an executor claims up to `lanes` runs concurrently.
-   `workers.last_heartbeat_at` renews every held claim (same 5s cadence, N claims per tick).
-2. **The claim query is workflow-agnostic** with a fairness ORDER BY (§5.2), filtered by "can I
-   serve this run's systems within current budgets" — an executor with a saturated UCPath pool
-   skips UCPath-bound runs and may still claim a kuali-only run.
+- **Run** — one item's execution of a workflow.
+- **Worker** — one long-lived process/instance assigned to one workflow. It owns at most one active
+  run and its browser sessions.
+- **Browser session** — one authenticated `BrowserContext` and controlled page/window set for one
+  system inside one worker.
+- **Driver lease** — exclusive task-length access to a system driver backed by the worker's current
+  browser session. A transaction may retain it across prepare → fence → commit → proof.
+- **Fresh-session boundary** — an authored workflow instruction that closes the current session for
+  a named system before the next node and authenticates a new one.
 
 ---
 
-## 2. Executor process model — decision
+## 2. Workflow session contract
 
-**Decision: replace per-workflow daemons with a small pool of workflow-agnostic EXECUTOR
-processes. Default ONE executor; more are an operator choice for isolation, never a requirement
-for parallelism.** Parallelism comes from lanes × pooled tabs inside an executor, not from
-process count.
-
-Why not keep per-workflow daemons (status quo, multi-lane'd):
-
-- Sessions could never be shared across workflows — oath-signature, person-lookup, i9-check each
-  keep paying their own UCPath login and holding their own chromium set. The operator's #1 cost
-  (browser + login per unit of parallelism) survives.
-- The ~10-registry problem returns operationally: per-workflow spawn maps, per-workflow stop
-  scripts, per-workflow idle daemons burning memory.
-
-Why not one session-broker process per system (browser-server + `connect()` from many clients):
-
-- Playwright page ownership across process boundaries is a new, unproven layer ON the hot path;
-  a broker crash takes down every workflow at once anyway — same blast radius as one executor,
-  more moving parts. Rejected as speculative complexity.
-
-What **ports** into the executor (charter: port, don't rewrite, proven machinery): lockfile +
-registry + `/whoami` + heartbeat, claim-generation lease + renew, teardown transition table +
-`in-flight-shutdown` emit dedup, terminalization fencing (2026-07-15), the wake latch + bounded
-re-poll, orphan recovery. All of it is already workflow-agnostic except the claim filter — the
-"per-workflow" in today's daemon is one WHERE clause, not deep structure.
-
-**Doc 03 alignment (resolves its open question 2):** worker spans become **per-executor** —
-one `worker` span per executor process, one `browser` child span per pooled system session.
-Session cards become executor cards: the same card shape (system tiles + health rings), with the
-subtitle cycling the in-flight runs' trace ids (`run.claimed.workerId` links each run to the
-card, as doc 03 already specifies). A run's workflow is on its run span; the card does not need
-daemon:workflow 1:1.
-
-**Blast radius, honestly:** one executor crash interrupts every in-flight run (they re-pend via
-lease recovery; transaction crashes enter doc 09 recovery before any replay). Mitigations: (a) a
-browser/system failure is contained to that system's lanes — a wedged Kuali context no longer
-kills UCPath work-in-flight (today a browser disconnect tears the whole daemon down); (b) the
-operator can pin a workflow to a dedicated executor (`executorGroup` on the RunEnvelope claim
-filter) when isolation matters more than sharing — e.g. a risky live batch.
+The descriptor compiler resolves every browser-backed node to an explicit policy:
 
 ```ts
-// temp_src/exec/executor.ts — the shape (machinery ports; loop is new)
-export interface ExecutorConfig {
-  lanes: number;                        // max concurrent runs (default 4)
-  systems: Partial<Record<BrowserSystemId, SystemPoolConfig>>;  // §3.2 sizing
-  providers: Partial<Record<ProviderCapabilityId, ProviderBudgetConfig>>; // D63
-  group?: string;                       // optional isolation pin
+export interface SessionNeed<S extends BrowserSystemId> {
+  system: S;
+  access: "read" | "transaction";
+  session: "reuse-worker" | "fresh";
 }
-export async function runExecutor(cfg: ExecutorConfig): Promise<void> {
-  const pool = await SessionPool.create(cfg.systems);       // lazy per-system login (§3.3)
-  const lanes = new LaneSet(cfg.lanes);
+```
+
+- `reuse-worker` uses the worker's current healthy authenticated session for that system, creating
+  one lazily if none exists.
+- `fresh` first performs the bounded close protocol, then creates and authenticates a new session
+  before the node begins.
+- Authoring may omit `session` only where the descriptor schema supplies the literal, test-pinned
+  default `reuse-worker`. Runtime code never guesses.
+- A session boundary is visible in the Explorer and worker/run spans as
+  `browser_session:close` followed by `browser_session:start`, including system and reason.
+- A workflow that needs several sessions states boundaries at the exact nodes. It does not raise a
+  worker-wide number or create a second item slot.
+
+### 2.1 Gates and parks
+
+A parked run owns no browser resources. Before parking, the worker resets/closes active sessions
+according to the provider policy and releases identity leases. Resume is a fresh claim. An overnight
+approval holds neither a browser nor an execution slot.
+
+---
+
+## 3. Worker lifecycle and claiming
+
+Each worker is workflow-scoped and runs the proven claim-generation protocol:
+
+```ts
+export async function runWorker(config: WorkerConfig): Promise<void> {
+  const sessions = new WorkerSessions(config.workflow);
   while (!state.shuttingDown) {
-    const run = await claimNextRun({ fairness: FAIR_SHARE, budgets: pool.budgets() });
-    if (!run) { await parkUntilWakeOr(IDLE_REPOLL_MS); continue; }   // ported latch + re-poll
-    lanes.dispatch(run, (r) => driveRunStateMachine(r, pool));       // doc 02's engine, per lane
+    const run = await claimNextRun({ workflow: config.workflow });
+    if (!run) {
+      await parkUntilWakeOr(IDLE_REPOLL_MS);
+      continue;
+    }
+    await driveRunStateMachine(run, sessions); // one awaited run
   }
 }
 ```
 
----
+- Claim authority remains SQLite with owner, attempt, claim generation, heartbeat renewal, fenced
+  terminalization, dead-worker recovery, and bounded re-poll.
+- A worker renews exactly its one active claim.
+- A gate parks the run and frees the worker to claim another item.
+- Retry backoff rides `not_before`; a worker never sleeps while owning a run merely to wait for a
+  retry time.
+- `+ Add workers` chooses a workflow and a count. Starting 5 creates 5 independently owned workers
+  and browser-session sets.
 
-## 3. The session pool
+### 3.1 Dispatch and fairness
 
-### 3.1 Driver leases (Playwright page remains internal)
-
-```ts
-// temp_src/exec/session-pool.ts — exported task-facing view
-export interface DriverLease<S extends BrowserSystemId> {
-  driver: SystemDriver<S>;    // semantic operations + observation APIs (docs 01/12)
-  system: S;
-  kind: "read" | "transaction";
-  release(disposition: "clean" | "poisoned"): Promise<void>;
-}
-export interface SessionPool {
-  /** Blocks until a lease is available within budget; single-flight login on first use (§3.3). */
-  acquire<S extends BrowserSystemId>(system: S, kind: "read"|"transaction",
-    signal: AbortSignal): Promise<DriverLease<S>>;
-  budgets(): BudgetSnapshot;  // feeds the claim filter (§1.3) and the dashboard
-}
-
-export type PoolMode =
-  | { kind: "serial" } // one total lease of either kind
-  | { kind: "parallel-reads-exclusive-transaction"; maxReads: number };
-// No numeric combination can express mixed read+transaction or multiple transactions.
-```
-
-An internal `PageLease` exists only under `exec/session-pool` and `stores/<system>/driver`; it owns
-the abort-racing Playwright proxy and constructs the typed driver. Task implementations cannot
-import `Page`, `Locator`, `BrowserContext`, `PageLease`, selector strings, or `newPage`. This is how
-semantic element identity, page-state assertions, subject observations, action evidence, and
-selector fixes remain centralized (doc 12).
-
-- **Exclusive while held.** `ctx.driver` resolves to the lease's typed driver and nothing else;
-  the pool never hands one internal page to two drivers/tasks. Kernel-owned—a task cannot opt out.
-- **Checked out per node, not per run.** A read gets one task-length lease. A transaction's live
-  prewrite probe first gets an ordinary read lease and releases it; the transaction lease then spans
-  prepare, fence, commit, and verification with no reset/checkpoint between arms. The probe can
-  navigate without touching staged state, and UCPath/CRM read leases are fully drained before the
-  transaction lease is acquired. Between
-  nodes (and at any gate) the run holds no page.
-  This is what makes D5's "parking is free" true and what returns capacity to siblings.
-- **The fence follows a fresh identity observation, not just a clean lease.** After prepare has
-  staged the form, the transaction driver executes the contract's `subject.observe` operation on
-  that exact page. The kernel records expected/observed evidence and allows the doc 09 CAS fence
-  only on `match`; `mismatch` and `unknown` never degrade to a warning or selector alternative.
-- **Release discipline (the §6.1 invariant's mechanical half):** `release("clean")` navigates the
-  page to the system's `resetUrl` (bounded, e.g. 5s) before returning it to the pool; if the
-  reset fails or the disposition is `"poisoned"` (aborted mid-Playwright-call — ports
-  `poisonPage`), the page is closed and a fresh one is opened lazily. A page with a half-filled
-  form can therefore never reach the next task.
-- Doc 02 §3.1 (standalone reads and transaction prepare own navigation) is the other half. The ISS-B02 lesson (URL says right page, search box
-  gone) is exactly why both exist.
-
-### 3.2 Pool sizing per system — honest defaults
-
-| System | read tabs | write tabs | Evidence / constraint |
-|---|---|---|---|
-| ucpath | **3 when no transaction is active** | **1 context-exclusive transaction** | shared-context read/read is proven; read/write and write/write are not. Acquiring a transaction drains/blocks sibling read leases for the entire context until verification and cleanup complete. |
-| crm | **2 when no transaction is active** | **1 context-exclusive transaction** | CRM read/read is proven by person-lookup; mixed read/write is not, so it uses the same drain/block mode. |
-| onbase | **1 total** | **1 total, cross-process** | `serial` for probes and transactions alike. SQLite identity lease is acquired before context open, retained for that authenticated context's lifetime, and released only after context close. |
-| kuali, servicenow, i9, new/old-kronos, sharepoint | 1 total | 1 total | `serial` mode: no multi-tab evidence. A settings number cannot enable overlap; widening requires a reviewed mode + live-verification note (§7 guard 5). |
-
-Budgets are **per session** (per executor) here; §5.1 adds the cross-executor per-system cap.
-Modes and their safe parameters live in Settings → Performance beside today's worker/OCR knobs—
-operator-visible, sparse override (empty = these defaults). Settings may lower limits; it cannot
-invent a mode absent from the closed union.
-
-### 3.3 Login: once per system per executor, single-flight, fully automated
-
-- The pool logs into a system **lazily on first acquire** (or eagerly at executor start for
-  systems named by the first claimed runs — same eager/on-first-use policy the workflow `auth()`
-  override selects, doc 01 §6.1). One `login()` per system per executor lifetime, serving every
-  workflow — the per-worker Duo chain is gone.
-- **Single-flight:** N lanes racing to acquire a not-yet-authenticated system all await the same
-  in-flight login promise. Pinned by test (§7 guard 6).
-- Duo is cleared hands-off by Duo Autopilot inside the store's `login` for ALL runs, production
-  included (charter §9): login is a bounded operation (~20–40s), never a park, never a phone.
-- **Health:** the browser-health verdict ladder ports as pool behavior — per-system verdicts
-  (`ok/soft/wedged/expired/closed/dead`), refresh rung → reopen rung → surface `failed`; the
-  idle-refresh cadence keeps warm sessions alive between claims (both keyed by the store
-  `SessionProvider`'s `idleRefresh`/`resetUrl`, doc 01). A system going `failed` drains that
-  system's leases and fails/requeues only tasks ON it; other systems' lanes keep running.
-
-### 3.4 OnBase (D15) — how the one deliberate serialization point plugs in
-
-`acquire("onbase", …)` first takes the cross-process identity lease. Lease scope is the authenticated
-BrowserContext lifetime, not the task. Before release the executor closes every OnBase page and the
-context, confirms close, then releases the DB lease; crash expiry permits another owner only after
-the old process/context is proven dead. Contention is visible: a lane waiting reports a
-`waiting` note on its task span, not silence.
-
-### 3.5 Gates return capacity (D5, restated as pool behavior)
-
-Park ⇒ pages reset/close; identity-exclusive contexts close before their DB leases release; lane frees. Resume
-is a fresh claim: sessions reacquired through the pool (already-authenticated fast path, else
-idempotent re-login). An overnight approval holds **zero** browser resources.
+Within a workflow queue, claim order is priority then FIFO. Interactive work may be server-stamped
+ahead of bulk members, but there is no reserved interactive lane. Across workflows, the operator
+chooses worker counts per workflow, and each worker claims only its workflow's rows. A large fan-out
+cannot consume another workflow's workers.
 
 ---
 
-## 4. Speed engineering
+## 4. Browser-session behavior
 
-### 4.1 Killing the sleep tax (the ~33s/item)
+- Driver use is exclusive while held.
+- `release("clean")` navigates to the system's verified neutral reset state before reuse.
+- A failed reset, aborted Playwright call, subject mismatch, or `release("poisoned")` closes the page
+  and session; the next need creates a fresh one.
+- A `session:"fresh"` boundary uses the same close proof before replacing the session.
+- OnBase releases its identity lease only after every page/context close is proven.
+- Login is bounded and single-flight within that worker/system session creation. There is no
+  cross-worker login promise or shared context.
 
-The leaf drivers port **verbatim in commit 1** (charter). Sleep elimination is a deliberate,
-per-store **commit-2+ hardening pass** with the discipline the 2026-06-22 job-summary regression
-taught (a naive spinner-wait is WORSE than the sleep it replaced — it returns early and
-un-synchronized):
+An individual workflow may declare internally proven parallel work, such as OCR provider page
+concurrency. That is workflow-owned behavior with its own tests, not a generic executor capacity
+model.
 
-1. **`stores/common/waits.ts`** is **driver/session-internal only** and provides condition waits
-   that poll the *actual* readiness
-   predicate: `settle(frame, { until: Locator|predicate, quietMs })` — target-element presence /
-   value, plus a short DOM-mutation quiet window for PeopleSoft fragment refreshes; the
-   `pollForJobInfoScan` pattern (poll the data you need, injected sleep, unit-testable)
-   generalized. Never "wait for spinner" alone — spinners are unreliable (2026-06-22).
-2. **Each replaced sleep is individually live-verified** (headless selector session, standing
-   pre-authorization) — the replacement names the condition it waits on, gets a `// verified`
-   date, and lands per-file so a regression bisects to one wait.
-3. **The wait-for-timeout ratchet extends to `temp_src` with a ZERO allowlist for new code**;
-   ported files inherit their current counts as shrink-only entries. The genuinely-fixed delays
-   (old-kronos 80ms JQX debounce) stay allowlisted with reasons, as today.
-4. **Sleep is measured, not guessed:** the page proxy records cumulative `waitForTimeout` ms per
-   task execution → a `sleepMs` field on the task span's end note (doc 03 notes stream). The
-   dashboard can show sleep-per-task; a ratchet pins per-contract sleep budgets and only shrinks.
-   What gets measured gets deleted.
-
-The shared timecard path is the required worked migration for this rule (D61). Pure month/day/year
-resolution uses the injected Clock in domain code. `stores/common/timecard.ts` orchestrates
-current→previous checks over semantic driver methods such as `waitForTimecardReady`,
-`observeVisiblePeriod`, `switchToPreviousPeriod`, and `readLastPunchOutcome`; it receives neither
-`Page` nor a sleep method. Old/New Kronos drivers own their page implementations and positively
-verify the period label/grid changed. The result is discriminated (`found | verified-empty |
-navigation-failed | period-switch-unverified | parse-failed`) so the old `null` cannot mean both
-“no punches” and “the page never loaded.” Shared scenarios pin Dec→Jan, leap day, blank period
-label, unchanged label, empty current/non-empty previous, and driver failure once for both systems.
-
-Expected recovery: person-org lookup drops from ~24s sleep to <5s of condition-wait residue;
-Smart HR transaction from ~30s+ toward the real PeopleSoft roundtrip time. Combined with 3-tab
-reads this is where the order-of-magnitude lives — sleeps don't just cost their own duration,
-they cost it **while holding a lease**.
-
-### 4.2 What parallelism UCPath actually tolerates — stated honestly
-
-- **Proven:** 4 concurrent tabs on ONE logged-in PeopleSoft session doing person-org/CRM reads
-  (person-lookup shared-context pool, months of live operation). One Duo serves them all.
-- **Unproven and prohibited by default:** any sibling-tab activity while a Smart HR transaction is
-  staged. PeopleSoft server component state may cross windows. A UCPath transaction lease is
-  exclusive over the whole BrowserContext: it waits for reads to drain, blocks new reads, executes
-  prepare→verify, then resets/closes before releasing. Mixed read/write or multiple write tabs require
-  an explicit live proof and new reviewed pool mode; changing only a numeric tab count cannot enable it.
-- Multiple *sessions* (2 executors, 2 Duo logins, same operator account): PeopleSoft allows
-  concurrent sessions per user; this is today's N-daemon model and remains available as the
-  scale-out path for write-heavy batches — now a choice, not the only shape.
-
-### 4.3 Pipelining, concretely
-
-With four lanes, UCPath reads share up to three tabs until a transaction reaches admission. New
-reads stop, active reads drain, then the transaction owns the context. Other-system and service
-nodes continue concurrently. Doc 02 fork/join branches appear as ready node executions and obey the
-same budgets; verify's child fan-outs no longer hide inside one task.
+The Session Panel shows worker phase, queued count, trace id, current step, browser health tiles,
+wait reasons, and failure state. It does not show lane or per-system capacity counters. Settings has
+no lane/budget reference page.
 
 ---
 
-## 5. Backpressure and fairness
+## 5. Speed engineering
 
-### 5.1 Budgets (three nested caps, all operator-visible)
+Removing lanes does not preserve the fixed-sleep tax:
 
-1. **Per-system/provider, per-executor:** the §3.2 browser tab counts plus closed provider
-   concurrency/rate/token budgets — the hard physical/admission cap.
-2. **Per-system, global:** SQLite-registered cap across executors (e.g. `ucpath: 6`) so two
-   executors can't jointly hammer one backend; OnBase's global cap is structurally 1 (D15).
-3. **Per-workflow lane cap:** max runs of one workflow in flight per executor (default = lanes),
-   so one workflow cannot monopolize even when it owns the queue.
+1. Replace `waitForTimeout` calls with waits on actual readiness predicates plus a bounded quiet
+   window where PeopleSoft fragment refreshes require it.
+2. Live-verify each replacement and record the selector/state proof.
+3. Extend the wait-for-timeout ratchet to rebuild code with a zero allowlist for new files and a
+   shrink-only allowance for ported files.
+4. Record cumulative fixed-sleep time and real wait time on task spans.
+5. Keep tasks and transactions under immutable, abortable deadlines. A service that ignores abort
+   cannot occupy a worker indefinitely.
 
-All three land in Settings → Performance beside the existing knobs (default workers, OCR
-concurrency, nav timeouts), sparse-override style.
-
-**Time is also bounded, not a fourth capacity dial.** Every task runs under `timeouts.taskMs`; every
-transaction under `timeouts.transactionMs`, both from the immutable run config snapshot. The kernel
-races the Promise with the AbortSignal, poisons a browser lease if cancellation cannot prove a clean
-page, and treats a post-fence deadline as write recovery. A service impl that ignores abort and
-outlives the deadline fails the executor soak/teardown test; no unbounded SDK call may occupy a lane.
-
-### 5.2 Fairness — a 100-member fan-out never starves the interactive run
-
-Claim order is **fair-share, then FIFO**: group queued runs by workflow; pick from the workflow
-with the fewest currently-running claims (tie → oldest `enqueued_at`). Plus one reservation:
-**at least one lane is reserved for `RunEnvelope.priority:"interactive"` runs** whenever any exist
-— a fresh person-lookup typed into the dashboard claims within one scheduler tick even mid-fan-out.
-Priority is server-stamped from the run surface, not inferred from `parentRunId`; an interactive
-child inherits interactive priority and an uploaded bulk root remains bulk. Bulk members fill the
-remaining lanes. Retry backoff rides a `not_before` timestamp on the queue row — a backing-off run is
-simply not claimable yet and blocks nothing (no head-of-line: the claim query skips it).
-
-```sql
--- claim sketch: fairness folded into the ported indexed claim
-SELECT ... FROM runs WHERE state='queued' AND not_before <= @now
-  AND (@interactiveLaneFree = 0 OR priority = 'interactive')
-ORDER BY running_count_for_workflow ASC, enqueued_at ASC LIMIT 1;
-```
-
-### 5.3 Backpressure signals
-
-- Pool exhaustion is **visible**: lanes waiting on a lease emit `waiting` notes (span-addressed);
-  the executor card shows per-system `in-use / cap`.
-- Lane saturation never blocks enqueue; admission to execution happens at claim time. Storage is
-  still a correctness dependency: enqueue first checks doc 03's authority health and configured
-  free-disk floor. A degraded DB, failed backup invariant, or exhausted disk rejects the enqueue
-  loudly with a durable health notification instead of accepting work that cannot be recorded.
-  Queue depth has no arbitrary per-workflow cap by default, but an operator-set global cap rejects
-  new bulk work explicitly while preserving interactive capacity. Rail badges remain backend-
-  authoritative (doc 03 `wfCounts`).
+For batch speed, start more workers. A warm worker amortizes login across sequential items unless a
+workflow-authored fresh boundary or failed reset requires replacement.
 
 ---
 
 ## 6. Failure isolation
 
-### 6.1 THE page-isolation invariant (the real HR-data hazard, stated precisely)
+### 6.1 Page/subject-isolation invariant
 
-> **A `Page` is referenced by at most one task execution at any instant. A page that hosted a
-> task is returned to the pool only after a successful bounded navigation to the system's
-> neutral `resetUrl` — otherwise it is closed. A page that hosted an aborted/poisoned task is
-> ALWAYS closed, never reused. Identity of lease-holder is checked on every driver operation.
-> Before a write fence, the driver freshly observes the declared doc 01 subject on the staged
-> page and the kernel matches it to the expected normalized subject; mismatch or unknown closes
-> the lease and parks/fails before any commit action.**
+> A page belongs to at most one task execution at any instant. It is reusable only after a
+> successful bounded reset to the system's neutral state; otherwise it is closed. Before a write
+> fence, the driver freshly observes the declared subject on the staged page and the kernel requires
+> an exact normalized match. Mismatch or unknown prevents commit and closes the session.
 
-Two items sharing a page mid-form — task B typing into the Smart HR wizard task A half-filled —
-is the one failure mode that silently writes person A's data into person B's transaction. The
-invariant kills it four ways: exclusivity (no concurrent reference), reset-or-close (no residual
-form state), poison-close (no reuse after an indeterminate abort), and fresh subject binding (a
-valid-looking page for the prior employee cannot cross the write fence). Mechanical guards: §7
-#2 and #11.
+One worker never shares its page with another worker. One workflow never borrows another workflow's
+authenticated context.
 
-### 6.2 Crash/failure matrix
+### 6.2 Failure matrix
 
 | Failure | Blast radius | Mechanism |
 |---|---|---|
-| One task throws (business or transient) | Its run only | Lane frees; retry policy (doc 01) in-run or cross-run per doc 02; lease released clean or poisoned |
-| Task aborted (cancel) mid-Playwright call | Its run + its page | Ported abort-racing proxy + poison-close; sibling tabs on the same context untouched (proven shape: person-lookup workers already fail independently on a shared context) |
-| One system's browser wedges/dies | That system's lanes | Health ladder refresh→reopen→failed; tasks on it fail/requeue; **other systems' lanes keep running** (better than today: a daemon dies whole) |
-| Session expired (SSO bounce) | That system | Surface `failed` + re-login on next acquire (idempotent login); no auto-Duo-loop hiding it |
-| Executor crash | Its in-flight runs | reads re-pend; a transaction with an intent runs doc 09 recovery before any prepare/commit replay |
-| Retry storm | None (no HOL) | `not_before` backoff — backing-off runs are invisible to claims |
-| Stale/wrong subject remains on an otherwise valid page | Its transaction only | semantic observation after prepare returns mismatch/unknown; kernel emits subject evidence + structured failure, closes the lease, and never acquires the commit fence |
-| Authority DB degraded/corrupt | All mutations stop; dashboard remains diagnostic | doc 03 boot/runtime health gate blocks claims, commands, enqueue, and commits until verified recovery |
-
-### 6.3 Retries schedule like everything else
-
-A retry (in-run attempt or cross-run `retryOf`) is just a claimable run with a `not_before`; it
-competes under fair-share like any run. No lane ever sleeps waiting for a backoff to elapse.
+| Task throws | Its run/worker | Release clean or poisoned; apply retry policy; worker claims next eligible row |
+| Cancel during Playwright | Its page/session | Abort-racing proxy + poison-close |
+| One system session wedges | That worker's system session | health ladder → close/re-auth or structured failure |
+| Worker crashes | Its one active run | claim-generation recovery; transaction recovery before replay |
+| Retry storm | No head-of-line block | `not_before`; idle workers claim other eligible rows |
+| Authority DB degraded | All mutation stops | doc 03 storage-health gate; dashboard remains diagnostic |
 
 ---
 
-## 7. Adversarial self-review — how this rots, and the guard for each
+## 7. Mechanical guards
 
-| # | Rot vector | Mechanical guard |
-|---|---|---|
-| 1 | **Hidden serialization returns** — a well-meaning mutex/`await` chain quietly makes lanes run one-at-a-time | The e2e stub parallel matrix (already deterministic via hold gates) gains a lane-overlap scenario: two held runs of different workflows must be simultaneously `running` on one executor; asserted on span timestamps. A scheduler metric (`maxConcurrentLanes`) is asserted ≥2 in that lane |
-| 2 | **Page cross-contamination** — pool hands a dirty or shared page | Unit-pinned: `release("clean")` must navigate-or-close before re-checkout; poisoned ⇒ closed (test constructs the half-filled-form case). Runtime: lease records `(runId, spanPath)` and every driver call checks it. Ratchet: Playwright types/page APIs exist only in driver/session internals, never tasks or workflow modules |
-| 3 | **Sleep tax re-accretes** | wait-for-timeout ratchet extended to `temp_src` with zero-allowlist for new files, shrink-only for ported ones; `sleepMs` recorded per task span + budget ratchet (§4.1) |
-| 4 | **Fan-out starves interactive runs** | Unit test seeds 100 members + 1 root run, asserts the root claims within one tick (interactive lane reservation); fair-share ORDER BY pinned by query test |
-| 5 | **Pool mode creeps past evidence** — someone enables mixed read/write or multiple transactions | modes are a closed safe union, not numeric overrides; any widened mode requires an adjacent live-proof record and dedicated interference test |
-| 6 | **Login stampede** — N lanes trigger N concurrent Duo logins for one system | Single-flight pinned: N concurrent `acquire`s on a cold system produce exactly one `login()` call (spy test) |
-| 7 | **OnBase lease bypass/early release** | every OnBase session is identity-exclusive; test proves context close happens-before DB lease release and crash takeover waits for dead-owner proof |
-| 8 | **Executor becomes a new god-process nobody can restart** | Parked-runs-are-free (D5) + lease recovery mean restart cost is bounded; a soak test (ports `daemon-teardown-soak`) kills an executor mid-lanes and asserts every run reaches re-pend/park/terminal with zero orphans |
-| 9 | **Budgets silently ignored** (a direct `context.newPage()` beside the pool) | Import/AST ratchet: `newPage(` and raw Playwright imports are allowlisted only inside session/driver internals; all task interaction flows through `ctx.driver` → lease |
-| 10 | **Fairness math starves the fan-out instead** (inverse of #4) | Same seeded test asserts members drain at ≥ (lanes−1) concurrency while the interactive lane is idle |
-| 11 | **A clean-looking pooled page still contains the previous employee** | registered scenario alternates two EIDs on one pool slot, injects stale displayed identity after prepare, and asserts `subject.observed:mismatch`, zero fence acquisition, zero commit call, poisoned-close, and a diagnostic bundle |
-| 12 | **Driver abstraction becomes a thin locator passthrough** | public driver signatures may use domain inputs/outputs + semantic ids only; signatures accepting selector strings/Locator/Page fail the architecture guard; contract scenarios assert page-state transitions and action evidence |
-| 13 | **Provider calls bypass admission/evidence** | service contracts declare D63 capabilities; direct SDK/fetch imports are infra-only; scheduler fixtures prove provider concurrency/rate/timeout/abort budgets and an exhausted optional provider returns typed unavailable without occupying a lane forever |
-
-Honest residuals: (a) PeopleSoft mixed read/write and multi-write behavior remain unknown until
-live proof — the design defaults to context-exclusive transactions and treats widening as an experiment, not
-an assumption; (b) one-executor-default concentrates failure — mitigated by containment (§6.2)
-and the `executorGroup` pin, but a chromium-wide OS failure still interrupts everything in
-flight at once.
+| Risk | Required guard |
+|---|---|
+| A worker starts two items concurrently | worker-soak test asserts max active claims per worker is exactly 1 |
+| UI/config reintroduces capacity fields | unit guard rejects worker/session fixtures containing `lanes` or `budgets`; dashboard verification asserts capacity copy is absent |
+| Parallelism silently serializes | spawn test starts N workers and proves N distinct worker ids/browser owners |
+| Fresh-session request is ignored | descriptor scenario asserts close proof precedes new-session start and node execution |
+| Session boundary is inferred | descriptor projection test proves only authored `session:"fresh"` produces a boundary |
+| Dirty page crosses people | alternating-subject scenario proves reset-or-close + subject observation before write fence |
+| Raw page APIs bypass ownership | imports/newPage are restricted to driver/session internals |
+| Fixed sleeps return | wait-for-timeout ratchet + span sleep budget |
+| OnBase overlap | identity-lease test proves close-before-release and dead-owner takeover |
 
 ---
 
-## 8. Worked example — a 10-person i9-check batch
+## 8. Worked example — 10-person I-9 Check
 
-Phase 1 (OCR) is unchanged — the per-page pool already parallelizes extraction. This schedules
-**Phase 2**: 10 member runs, each `person-lookup` in **Match** mode (UCPath HR-Tasks read) →
-`person-lookup` in **Search** mode (UCPath Person Org read, conditional — assume 4 of 10 need it)
-→ `roster-match` (pure local compute). These are two questions carried by one workflow identity,
-not a return of the retired `person-match` workflow. The checkpoint
-atomically enqueues one stable-keyed retention-workbook projection; a single sink projector performs
-the idempotent xlsx upsert under a local exclusive lease (~1s, docs 03/06). The append is not hidden
-inside an `effect:"read"` task.
+Choosing **3 workers** creates three independently authenticated UCPath/I-9 session sets. Each
+worker claims one member, runs it to park/terminal, resets its sessions, and claims the next. No
+worker has a second in-flight item and no capacity counter participates.
 
-**Today** (dedicated single-browser i9-check daemon, strictly sequential, reset-URL between
-items): spawn + Duo ≈ 45s; per member ≈ 60–90s, of which ~25–30s is fixed sleep
-(person-org-summary's 3s×8 + navigate settles). **Total ≈ 11–15 min.**
-
-**New kernel** — one executor, `lanes: 4`, ucpath `{read: 3}` (all external-system tasks are reads —
-the write tab is never touched); the independent workbook projector serializes only the ~1s upserts:
-
-```
-t=0        claim R1..R4 (lane cap 4); ucpath cold → single-flight login (~35s); R4 waits for a tab
-t=35s      tab1: R1 lookup(match)  tab2: R2 lookup(match)  tab3: R3 lookup(match)
-t≈55s      matches resolve (~20s with condition waits, not 3s-sleep chains)
-           tab1: R4 lookup(match)  tab2: R5 …   tab3: R6 …      R1 → roster-match → outbox
-t≈75s      R7..R9 on tabs; R2,R3 roster-match; R1 waits for/gets projection ack, then done
-t≈95s      R10 + 4 lookup(search) runs (needed-lookup members) start their second UCPath task
-t≈115–140s stragglers: lookup(search) (~25s each, 3-wide) + serialized appends drain
-```
-
-**Wall clock ≈ 2.5 min cold (≈2 min on a warm executor) vs ≈ 12 min today — roughly 5×**, from
-three multiplicative sources: 3-wide read tabs (÷3 on the browser-bound path), sleep-tax removal
-(~30s → ~5s per member), and no per-batch spawn+auth when the executor is warm. The only
-serialization points are honest ones: the single Duo login (amortized) and the 1s-per-member
-spreadsheet projector (a real single-writer file with stable-key dedupe and head-hash conflict
-detection).
+If a specific step needs a clean UCPath context, the I-9 Check descriptor marks that node
+`session:"fresh"`; other steps reuse their worker-local session.
 
 ---
 
-## 9. Settled execution defaults
+## 9. Settled defaults
 
-1. ~~Default lane count~~ — **resolved 2026-07-21:** 4 per executor. Per-system modes remain the real
-   safety limits; raising global lanes cannot widen a store mode.
-2. ~~UCPath write-tab widening~~ — **resolved:** defer. Context-exclusive transaction mode is the
-   supported design; widening is a separately approved live experiment, never a Phase-1 dependency.
-3. ~~Executor spawn ownership~~ — **resolved:** the backend supervisor starts/adopts one default
-   executor at boot and restarts it on failure. Browser sessions remain lazy, so an idle executor
-   does not imply idle Chromium. Additional executors are explicit operator configuration.
-4. ~~Interactive-lane definition~~ — **resolved:** `RunEnvelope.priority` is a trusted server-stamped
-   `interactive|bulk` value derived from the run surface (typed single start vs upload/fan-out).
-   Children inherit their root's class; fair-share caps still prevent bulk starvation.
-5. ~~Cross-executor session budget store~~ — **resolved:** dedicated SQLite lease/counter rows with
-   owner+expiry, sharing the same transaction/clock discipline as OnBase—not overloaded heartbeat
-   columns whose lifecycle has different meaning.
+1. One active item per worker.
+2. Parallelism is explicit worker count, chosen per workflow.
+3. Session reuse is the descriptor default; fresh boundaries are explicit and observable.
+4. No global executor lane budget, lane chip, per-system capacity chip, pool-mode table, or
+   lane-based fairness math.
+5. Queue admission is blocked only by authority/storage correctness; worker availability affects
+   when work starts, not whether it may be enqueued.
