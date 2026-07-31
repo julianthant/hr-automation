@@ -4,19 +4,20 @@ Status: **revised 2026-07-22 after the whole-plan/legacy-code review.** The span
 owns a closed control-command protocol, durable notifications, strict boundary schemas, and an
 explicit backup/restore contract for the non-rebuildable SQLite state. **Amended 2026-07-25:** §9
 carries the operator-ratified delegation and presentation decisions (row-model series D6–D20).
-**Amended 2026-07-26 (Round 8):** §5's live coexistence layer is superseded by pause-until-done
-(D73) and §10 adds the four surviving Round-8 obligations this doc owns — the one projection every
+**Amended 2026-07-26 (Round 8):** §10 adds the four surviving Round-8 obligations this doc owns — the one projection every
 count reads (D81), run versioning + archive-on-version-bump (D80), operator-assigned run display
 names (D83), and the slimmed notification model (D79b).
 **Amended 2026-07-30:** row-model D8 makes OCR approval Review-only; D19 places screenshot
 evidence inside Receipt and run data in Context. Reconciliation D87 removes executor-capacity
 projections and chips in favor of concrete worker/browser-session state.
+**Amended 2026-07-31 (Round 10):** §5 now owns the isolated-runtime boundary and all-at-once
+cutover contract (D88/D89), superseding D73 and the historical live-lift/scoped-flip design.
 
 ## Ownership (D1)
 
 | | Concept | Where |
 |---|---|---|
-| **This doc OWNS** | Span/event wire schema (§1, amended per D10), notes, storage layout, SQLite authority and recovery, enqueue/action/queue command semantics, durable notifications, local artifact outboxes/projectors, SSE wire shapes, the completion union, the ratified delegation/presentation decisions, **the ONE run/queue projection (D81)**, **run versioning + archive-on-bump (D80)**, **run display names (D83)**; the lift adapter survives only as an optional one-time import (§5) | §§1–5, §9–10 |
+| **This doc OWNS** | Span/event wire schema (§1, amended per D10), notes, storage layout, SQLite authority and recovery, enqueue/action/queue command semantics, durable notifications, local artifact outboxes/projectors, SSE wire shapes, the completion union, the isolated-runtime/import boundary and one-time historical-import rules (D88/D89), the ratified delegation/presentation decisions, **the ONE run/queue projection (D81)**, **run versioning + archive-on-bump (D80)**, **run display names (D83)** | §§1–5, §9–10 |
 | **Imports from doc 01** | Task contract + `defineTask`, task id grammar (`<system>/<verb-object>` slash ids, per D2), the closed `SystemId` union — real `src/systems/` dir names (`new-kronos`, `old-kronos`) plus the D4 service systems (`extraction`, `normalization`, `ocr`, `roster` — charter §11), error taxonomy | referenced, never redefined |
 | **Imports from doc 02** | Workflow descriptor shape + builder, RunEnvelope (`dryRun` home per D6), run-state machine incl. gates/parks (D5), checkpoint store schema, the readable span-path id grammar (`pl-104233-9f3e/searching#2`) | referenced, never redefined |
 | **Exports doc 02 adopts** | Verdict/detail semantics, completion program semantics, and wire projections; doc 02's descriptor now carries every consumed field | §3–4 |
@@ -75,8 +76,8 @@ export type SpanKind = "worker" | "run" | "task";
 export type RunOutcome =
   | "done" | "failed" | "cancelled" | "discarded" | "skipped" | "interrupted" | "superseded";
 // cancelled / discarded / interrupted / superseded are FIRST-CLASS outcomes.
-// The `failed + step:"cancelled"` sentinel family does not exist in temp_src —
-// it is decoded exactly once, in the lift adapter (§5).
+// The `failed + step:"cancelled"` sentinel family does not exist in temp_src.
+// An optional versioned one-time historical import may decode it (§5); runtime never does.
 
 /**
  * Span identity = (runId, attempt, spanPath)  — D10.
@@ -255,7 +256,8 @@ The four row shapes (`single | preview | operation | operation-member`) and the 
 - **Never re-stamped.** Span identity attrs are written once and immutable; patches can't clobber
   them because projections fold `patch` over identity, not the reverse. The entire re-stamp bug
   class (ISS-006 etc.) is unrepresentable.
-- No legacy normalization (`batch`→`operation`) in temp_src — that stays in the lift adapter (§5).
+- No legacy normalization (`batch`→`operation`) in the `temp_src` runtime. An optional versioned
+  one-time historical import owns that translation (§5).
 
 Derived statuses stop being per-workflow code where a universal mechanism exists:
 - `needsReview` ⇒ any run with an open `approval` gate (universal projection rule; OCR just declares
@@ -341,8 +343,8 @@ no second path a badge could take.
 ├── ledger/  <system>-<date>.jsonl     immutable write receipts (D21; shape owned by doc 09 §6) —
 │                                      hash-chained (seq + prevHash), append-only, per-SYSTEM+day,
 │                                      NEVER pruned (the audit floor)
-├── rows/ logs/ sessions/ …            LEGACY dirs — untouched, still written by old src,
-│                                      read via the lift adapter (§5) until deleted
+├── rows/ logs/ sessions/ …            LEGACY dirs — still written/read only by production `src`;
+│                                      `temp_src` has no runtime access (§5)
 ├── backups/state/                     checksummed online backups + restore manifests (§2.5)
 └── state.db                           SQLite — claims/checkpoints/intents/outboxes/ledger heads,
                                        commands/dependencies/notifications are system-of-record;
@@ -929,38 +931,40 @@ model them as completion. i9 is §4.1's post-completion enqueue; verify is mid-r
 
 ---
 
-## 5. COEXISTENCE — SUPERSEDED by pause-until-done (D73, 2026-07-26)
+## 5. Isolated runtime coexistence and one cutover (D88/D89, 2026-07-31)
 
-> **Read this box before anything below it.** This entire section designed a *live* coexistence
-> layer for a world where old `src` and new `temp_src` ran side by side for the length of the
-> program. **That world no longer exists.** Under D73 (operator ratification 2026-07-24) automation
-> is paused for the rebuild, HR work is manual, and `src` is frozen from the day Phase 1 starts —
-> it emits nothing, enqueues nothing, and is never edited. Doc 07 §4 enumerates the deletions; the
-> ones this section owned are:
->
-> - **§5.1/§5.2 lift adapter** — survives ONLY as an optional **one-time historical import** of
->   existing `.tracker` data, run by hand if the operator wants old runs browsable. No version
->   dispatch map, no per-version adapters, no zero-quarantine gate on every commit, no
->   `LegacyEmitSchemaVersion` stamping in the frozen tree (a frozen tree emits no new shapes). If it
->   is built at all it is a script that runs once and leaves no runtime surface; if it is never
->   built, nothing breaks.
-> - **§5.3 source authority** — deleted. Per-run `(engine, cutoverGeneration)` stamping existed to
->   keep native and legacy runs from claiming the same run. There is no mixed-engine period.
-> - **§5.4 scoped flip + golden-payload parity gate** — deleted. There is no running legacy
->   dashboard to be byte-parity with. The four surfaces are validated by their own fixtures plus
->   Phase 1's live person-lookup exit test (doc 07 §2), which is the better test anyway: parity
->   with the legacy surface would have pinned the new dashboard to bugs the rebuild exists to
->   remove — most pointedly the count divergence that D81's one-projection rule fixes.
-> - The **one-week legacy-SPA fallback** and its compatibility API — deleted. Nothing to fall back
->   to.
->
-> **What is kept from this section:** the *quarantine-never-throw* discipline (§5.2) and the
-> enumerated legacy terminal-contract mapping, because a one-time import still must not silently
-> mis-read an old row — it must quarantine it loudly. Everything about versioning, dual authority,
-> flip scoping, and parity is dead.
->
-> The text below is retained as **design history** for whoever builds the optional one-time import.
-> Do not implement it as a live layer.
+The legacy and rebuilt event worlds coexist only as **two fully isolated runtimes**:
+
+- Production `src` continues to own its existing `.tracker`, state, processes, ports, locks, and
+  browser profiles/sessions. It remains live and maintainable for the whole rebuild.
+- `temp_src` uses distinct commands/entrypoints, state and artifact roots, ports, process locks,
+  and browser profiles/sessions. The rebuild cannot import or invoke legacy runtime modules, read
+  or mutate legacy live state, or attach to legacy browsers. The same bans apply legacy→rebuild.
+- Live-verified selectors, parsers, and behavioral knowledge may be copied/ported into `temp_src`
+  only with source/provenance evidence and rebuild tests. This is knowledge transfer, not a runtime
+  dependency.
+- Legacy tracker rows never enter the rebuilt BFF during development. There is no continuous lift,
+  compatibility API, legacy proxy, dual projection, per-run engine/generation authority, or
+  workflow-scoped dashboard flip.
+- A historical import is optional and **one-time only**. If built, it accepts an explicit source
+  schema version, reads a backed-up immutable legacy snapshot (never the live legacy root), writes
+  self-contained archive records into a fresh/import transaction, records source digest + importer
+  version + result counts, quarantines unknown rows visibly, and is idempotent by import manifest.
+  It leaves no runtime adapter or cross-tree import behind.
+
+Production authority changes exactly once, after the entire rebuild is ready. Cutover stops new
+legacy enqueues, enumerates and drains/parks/reconciles active or uncertain legacy runs, backs up
+both runtimes' state/config, runs any approved one-time import, then atomically switches the normal
+launcher to `temp_src`. `src` and its commands/tests remain rollback code. After native writes,
+rollback requires explicit ledger/intent reconciliation and dedupe proof before the launcher can
+switch back. At no point may both runtimes accept production work.
+
+<details>
+<summary>Historical D12/D13 coexistence design — superseded by D88/D89; do not implement</summary>
+
+The following subsections are preserved only to explain why continuous lift, engine generations,
+and a scoped dashboard flip were rejected. They are not current requirements and may not be used
+as an implementation contract.
 
 ### 5.1 The seam: one direction, one place
 
@@ -1090,6 +1094,8 @@ pipeline math, session attribution, counts) — but it is bounded by the lift ma
 plus four wire shapes, not by 122 components; the proxied long tail migrates per-surface behind
 its own milestones with no parity deadline coupling.
 
+</details>
+
 ---
 
 ## 6. Adversarial self-review — how this rots, and the guard for each
@@ -1101,12 +1107,12 @@ its own milestones with no parity deadline coupling.
 | 3 | Silent projection fallbacks (`?? "running"`, catch→default) violating fail-loud | The existing `fail-loud-catch-default` + `nullish-literal-data-fallback` ratchets extended to `temp_src/` from day one (charter: same quality umbrella). Projection code has zero allowlist entries |
 | 4 | Re-stamp culture returns via `span.patched` clobbering identity | Projector folds patches into a `details` namespace only; identity attrs (`shape`, `subjectKind`, `parentRunId`, `traceId`, `itemId`) are read exclusively from `run.queued`. A patch carrying an identity key OR an undeclared detail key **throws at emit**. Unit-pinned |
 | 5 | Undeclared vocabulary (ad-hoc gate names, step keys, verdicts, patch keys) | Emit-time validation against the descriptor (task name ∈ steps, gate ∈ gates, verdict ∈ verdicts, patch key ∈ details) — throws. Coverage test walks every descriptor and asserts the sets are non-empty where capabilities require them |
-| 6 | Double-source counting during migration | per-run engine/generation authority; wrong-engine events for one run quarantine, while authorized legacy drain events remain valid |
+| 6 | A runtime crosses the isolation boundary and creates two sources of authority | import/runtime/state-path guards reject every `src`↔`temp_src` edge; state roots, ports, locks, and browser profiles are distinct; cutover tests prove only one launcher accepts production work |
 | 7 | Open spans leak on crash and show "running" forever | Projection derives `interrupted` for an open run span whose worker pid is dead AND a newer run for the same itemId started (mirrors `readRunsForId` exactly — pending/running only, non-newest only); worker liveness rides SQLite heartbeats as today. No fabricated durations |
 | 8 | The completion union grows a fourth ad-hoc arm as an object literal side-channel | Programs constructible only via `defineFormSpec` (sealed brand, §4.2); spec-to-spec imports banned by guard; `extendFormSpec` is the sole composition path and re-validates. The two declared non-arms (oath-upload, verify — §4.5/§4.6) are pinned by tests asserting they have NO CompletionProgram |
-| 9 | The lift adapter becomes load-bearing forever | ratchet fails when no workflow has legacy-authorized generations but compat remains; reverse check requires lift coverage for every legacy generation |
+| 9 | A one-time historical importer becomes a runtime compatibility adapter | dependency guards ban the importer from production composition roots; it accepts only an immutable backup + explicit version, records an idempotent import manifest, and leaves no route/proxy/reader registered |
 | 10 | Notes stream abused as a data channel (parsing log text for state — today's forbidden pattern) | Notes are render-only in projections; any projection reading `note.message` content (vs. structured `fields`/`action`) fails a grep guard. Data that drives state must be a span event |
-| 11 | Quarantine becomes a silent bit-bucket (rows rot there unnoticed) | Quarantine is a VISIBLE queue card + SSE `quarantine` count + notification; the real-day replay fixture asserts **zero** quarantines on known-good days, so any new legacy shape fails CI when its day joins the corpus |
+| 11 | A historical import silently drops unknown legacy records | One-time importer fixtures require source/result/quarantine counts to reconcile and render quarantines in the imported archive; import commits only with a signed-off manifest, never against live state |
 | 12 | Resolved member trees creep back onto the wire (the 5-8k-field re-serialization) | `QueueSurfaceWire` has `memberRunIds: string[]` only — no recursive member field exists to populate; a type-level test pins that the wire type is non-recursive; the SSE tick test asserts a 100-member operation patch serializes one surface |
 | 13 | Attempt discipline erodes (a re-pend reuses attempt 1 and re-opens closed spans) | The replay fixture asserts open/close-once per `(runId, attempt, spanPath)` across days containing real reassign/bump traffic; `run.requeued.nextAttempt` is emit-validated as monotonic |
 | 14 | The `ledger/` dir gets pruned, or `write_intents` treated as a rebuildable projection (D21) | `ledger/` is exempt from `clean-tracker` (a retention-floor ratchet — owned by doc 09 §8 — fails if any prune path reaches it); `write_intents` is enumerated in §2.3's system-of-record set (amends D14), so the "rebuildable ⇒ projection tables only" rule (§2.3) keeps it undeletable. Base retention (`notes/` 7d, `spans/` 30d) is a fixed §2.1 decision, so the never-pruned floor sits above a settled number, not a guess |
@@ -1207,14 +1213,13 @@ returns its log/action detail (§2.1 — two greps, by design).
 3. ~~Descriptor `verdicts` expressiveness~~ — **resolved 2026-07-21:** use a closed serializable
    `tag: { fromDetail, map }` rule interpreted exhaustively on the server/client projection. No
    pure-function escape is sent to the browser and no workflow-id switch is introduced.
-4. ~~Quarantine operations~~ — **resolved 2026-07-22:** visible redacted raw/reason, Hide, and Re-lift.
-   Re-lift reruns the now-registered version adapter and replaces only projection state; there is no
-   “mark valid/done” shortcut. Adapter deployment also schedules all quarantines of that version.
+4. ~~Historical-import quarantine operations~~ — **amended 2026-07-31:** an optional one-time
+   importer emits visible redacted raw/reason records and reconciled counts; there is no Re-lift
+   runtime action or “mark valid/done” shortcut.
 
-*(Resolved since the first draft: SQLite's role — D14, §2.3; the flip fallback window — one week,
-D13, §5.4. End of the design body; §9 carries the ratified presentation decisions. Review order
-suggestion: §1.1 span identity → §4 completion union → §5.2 lift mapping table → §5.4 scoped flip →
-§6 guards → §9 ratified decisions.)*
+*(Resolved since the first draft: SQLite's role — D14, §2.3; isolated coexistence + one cutover —
+D88/D89, §5. End of the design body; §9 carries the ratified presentation decisions. Review order:
+§1.1 span identity → §4 completion union → §5 isolation/cutover → §6 guards → §9 decisions.)*
 
 ---
 

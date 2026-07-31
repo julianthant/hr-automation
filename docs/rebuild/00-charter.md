@@ -1,8 +1,8 @@
 # Rebuild Program Charter — `temp_src`
 
 Started 2026-07-17. Reset 2026-07-21 after external review. Expanded 2026-07-22 after the
-whole-plan/legacy-code review. **Amended 2026-07-26 to carry the operator ratifications of
-2026-07-23/24 (Round 8).** Status: **Phase 0 — revised foundation design; no rebuild
+whole-plan/legacy-code review. **Amended 2026-07-31 to carry the operator's isolated-coexistence,
+single-cutover, and testing ratifications (Round 10).** Status: **Phase 0 — revised foundation design; no rebuild
 implementation exists**.
 This is the single source of truth for the rebuild's vision and constraints. Every design doc in
 `docs/rebuild/` must conform to it. The operator reviews each accepted part in plain language before
@@ -282,8 +282,7 @@ only readable current truth. (Added 2026-07-26 after the 07-23/24 ratifications 
   doc 06's short-lived token-scoped mobile-capture ingress is the sole exception. Secret/SSN/
   HR-data redaction, reliable backups, strict validation, and fail-closed write/identity behavior
   remain mandatory because the tool handles real employee data and transactions.
-- **Build speed is the top optimization target (2026-07-24).** Under pause-until-done (below),
-  every week of build is a week of manual HR work for the operator. Where two designs are both
+- **Build speed is the top optimization target (2026-07-24).** Where two designs are both
   correct and both safe, the one that ships sooner wins. This is the tie-breaker behind the
   Phase-1 restructure and the ratified ceremony trims (doc 07 §2.1/§3.7). It never overrides a
   write-safety, identity, or fail-loud requirement — those are what the program is for.
@@ -292,19 +291,33 @@ only readable current truth. (Added 2026-07-26 after the 07-23/24 ratifications 
   tests have explicit non-vacuous zero-warning lint gates; known legacy test-lint debt is
   fingerprinted and shrink-only, never silently inherited or used to exempt a new diagnostic
   (D70). No ungated parallel tree.
+- **Testing policy is ratified (2026-07-31; D91).** Rebuild lines/statements/functions gate at
+  60% globally and 80% for the named safety-critical set. Branches are report-only through Phase 1
+  and gate at 50%/70% at Phase-2 exit. Suite size is reported and reviewed at phase exits rather
+  than hard-failed. Legacy tests/projects remain in place and runnable through cutover; retirement
+  or deletion requires a later explicit operator authorization.
 - **No implementation before the corrected dependency graph is accepted.** The abandoned Phase-1a
   skeleton and spike were removed on 2026-07-21. The next implementation starts from an empty
   `temp_src`; no type shell may forward-declare a contract owned by a later phase.
-- **PAUSE-UNTIL-DONE — the old system is a frozen reference, not a running system (operator
-  ratification 2026-07-24; REVERSES the prior "old system keeps working throughout").** Automation
-  is paused for the duration of the rebuild; the operator does the HR work manually until the new
-  system is ready. `src` is frozen on the day Phase 1 starts: no feature work, no dual maintenance,
-  no legacy enqueues. **Go-live, testing, and old-copy deletion are operator commands, not calendar
-  machinery** — "I will let you know when to go live, when to test, when to delete." Whether
-  workflows resume one at a time as they land or all at once is a runtime choice the operator
-  makes; the plan builds no machinery for either. What this deletes is enumerated once, in doc 07
-  §4 (the lift adapter as live compatibility, the golden-payload parity gate, per-run engine+
-  generation authority, dual-maintenance windows, and the calendar stop-loss all go).
+- **ISOLATED COEXISTENCE — the existing automation remains production-authoritative throughout
+  the rebuild (operator ratification 2026-07-31; D88, SUPERSEDES D73).** `src`, its commands, and
+  its legacy tests remain live, runnable, maintainable, and eligible for ordinary production fixes.
+  The replacement is built only under the already-planned `temp_src/` root and must use distinct
+  entrypoints/commands, state roots, ports, process locks, and browser profiles/sessions. Imports,
+  runtime calls, and state access are forbidden in both directions between the legacy runtime and
+  `temp_src`; verified leaf knowledge is copied/ported with provenance, never runtime-imported.
+  Legacy maintenance changes are allowed but accounted for so the corresponding rebuild capability
+  is rechecked. There is no workflow-by-workflow production flip, live lift/proxy, or mixed-engine
+  authority during development.
+- **ONE ALL-AT-ONCE CUTOVER, WITH ROLLBACK CODE PRESERVED (operator ratification 2026-07-31;
+  D89).** Cutover occurs only after the complete rebuild passes its whole-program readiness gate.
+  The operator stops new legacy enqueues; active and uncertain legacy runs are drained, parked, or
+  reconciled; both runtimes' state/config are backed up; any import is an explicit versioned one-time
+  operation; and the normal launcher is atomically switched to `temp_src`. `src`, its commands, and
+  its tests are preserved as rollback code at initial cutover. Neither source nor tests are deleted
+  without a later, separate operator authorization plus capability proof. After the new runtime has
+  performed native writes, rollback requires the reconciliation/dedupe bridge named in doc 07;
+  the two engines never run concurrently as production authority.
 
 ## One master plan (operator directive 2026-07-17)
 
@@ -348,15 +361,16 @@ The foundation's documentation is part of the foundation.
     dry-run boundary (which submit tasks to split), and any workflow-specific data/gate quirks. The
     operator explicitly wants these questions asked at migration time — "cover everything for each
     workflow as we migrate." This questionnaire is part of every workflow's migration plan doc.
-  - **Cutover is a go-live, not a drain (2026-07-24).** Under pause-until-done there is no legacy
-    run to reconcile with: `src` is frozen and enqueues nothing. A workflow becomes available when
-    the operator says go-live. The prior per-run `(engine, cutoverGeneration)` authority stamp,
-    the legacy drain set, and the mixed-engine period are **deleted** — see doc 07 §4.
-  - **Migration order optimizes TOTAL time to resume all automation** (operator 2026-07-26: every
-    workflow costs real manual time, none dominates). So the order is chosen for reuse leverage —
-    each migration must make the next cheaper — not for per-workflow priority. The consequence is
-    explicit and accepted: onboarding and separations migrate last, so they stay manual longest.
-    Doc 07 §3.3 states that trade and the operator may resume workflows individually as they land.
+  - **Workflow completion is not production cutover (2026-07-31).** Each migrated workflow is
+    proved inside the isolated `temp_src` runtime, but the legacy workflow remains the production
+    authority. There is one all-at-once cutover only after every workflow and shared capability is
+    ready. The cutover drains/parks/reconciles legacy work, backs up both worlds, runs only explicit
+    versioned one-time imports, and atomically switches the normal launcher. There is no per-run
+    engine stamp, workflow-scoped flip, live proxy, or mixed-engine production period.
+  - **Migration order optimizes total rebuild delivery time.** The order is chosen for reuse
+    leverage—each migration must make the next cheaper—not for staged production availability.
+    Onboarding and separations migrate last because they are the highest-stakes proofs and reuse
+    the most. The existing automation continues serving every workflow until the single cutover.
 
 ## Process
 

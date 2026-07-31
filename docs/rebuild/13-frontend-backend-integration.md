@@ -1,6 +1,6 @@
 # 13 — Production frontend/backend integration contract
 
-Status: **integration design complete 2026-07-30; implementation remains gated by Phase 0 approval.**
+Status: **integration design ratified through Round 10 on 2026-07-31; Phase 1a is next.**
 
 This document is the production-wiring companion for the rebuild demo. It answers one question:
 **how do we make the rebuilt product render the approved frontend exactly, while ensuring every
@@ -30,9 +30,10 @@ deleted when every production surface has replaced them.
 
 ## 0. Outcome and non-negotiable decisions
 
-The optimal foundation is a **typed dashboard backend-for-frontend (BFF) inside the existing Hono
-process**, backed by the authoritative SQLite state and server-side projections already designed in
-doc 03. It is not a separate service and it is not a second source of truth.
+The optimal foundation is a **typed dashboard backend-for-frontend (BFF) inside the `temp_src`
+runtime's own Hono process**, backed by rebuilt authoritative SQLite state and server-side
+projections (doc 03). It is not a separate rebuild service and never shares the legacy Hono
+process, routes, middleware, state, port, lock, or browser sessions.
 
 ```mermaid
 flowchart LR
@@ -83,6 +84,11 @@ The following are settled:
 8. **The product does not explain itself.** General teaching copy lives in an accessible ⓘ
    popover; only a refusal, a genuine hazard, or a fact about the selected run may consume standing
    surface space (doc 03 D24).
+9. **Isolated coexistence and one cutover (D88/D89).** The legacy dashboard remains the production
+   UI throughout construction. `temp_src` runs on distinct commands, ports, roots, locks, and
+   browser profiles/sessions; neither side proxies, imports, invokes, or reads the other's live
+   state. No workflow or surface flips individually. After the complete integration matrix passes,
+   the normal launcher switches once; the legacy app remains rollback code.
 
 ---
 
@@ -112,7 +118,7 @@ They become fixture routes or Storybook-like test pages, not product navigation.
 
 ### 1.2 The existing frontend shows why the rebuild needs a BFF boundary
 
-The frozen dashboard currently has **271 frontend files, 30 hook modules, 59 direct `fetch(` call
+The existing legacy dashboard currently has **271 frontend files, 30 hook modules, 59 direct `fetch(` call
 sites, and 21 Hono route modules**. Those numbers are not defects by themselves; the coupling is:
 
 - components and hooks know route paths and response quirks;
@@ -639,7 +645,7 @@ Use the same production components with two **test-only** data sources:
 
 The dev demo itself remains independent visual reference; production never imports it. For each
 ported state, both production adapters must produce the same DOM/a11y contract and screenshot.
-This catches wire gaps without creating a legacy-runtime compatibility layer forbidden by D73.
+This catches wire gaps while preserving the strict runtime isolation required by D88.
 
 ### 7.3 Required test layers
 
@@ -740,4 +746,7 @@ Frontend/backend integration is complete only when:
 9. the complete reference route matrix passes a11y, keyboard, reduced-motion, responsive, and
    screenshot comparison in both themes;
 10. the dev demo/mock wire modules can be deleted without removing any production capability or
-    design-system primitive.
+   design-system primitive; and
+11. cutover rehearsal proves the legacy and rebuild servers cannot share a port/root/lock/browser
+   profile, every normal launch target switches atomically as one unit, rollback assets remain
+   intact, and no production route proxies/remounts the other runtime.

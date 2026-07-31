@@ -1,16 +1,17 @@
-# Reconciliation memo — binding cross-doc decisions (2026-07-17 through 2026-07-30)
+# Reconciliation memo — binding cross-doc decisions (2026-07-17 through 2026-07-31)
 
-Status: **binding revision 2026-07-30 (Round 9).** Earlier rounds remain as decision history;
+Status: **binding revision 2026-07-31 (Round 10).** Earlier rounds remain as decision history;
 Round 7 supersedes incompatible typing, UI-access, control, delegation, recovery, trust,
-knowledge, and workflow-editor claims; Round 8 supersedes the migration/coexistence model; Round 9
-supersedes the proposed executor-lane/session-pool capacity model.
+knowledge, and workflow-editor claims; Round 9 supersedes the proposed executor-lane/session-pool
+capacity model; Round 10 supersedes D73 and ratifies isolated coexistence, one all-at-once cutover,
+legacy preservation/change accounting, coverage floors, and deferred probe milestones.
 
-> **What this doc is, as of Round 9: a decision CHANGELOG, not a specification.** Its job is to
+> **What this doc is, as of Round 10: a decision CHANGELOG, not a specification.** Its job is to
 > record *what was decided, when, and which doc owns it* — so a reader can reconstruct why a
 > contract has its current shape. It is **not** where you read the current contract. The owning
 > doc (D1 matrix below) is the only readable current truth, and every ratified decision must be
 > folded into that doc **in the same commit that records it** (charter standing rule, added
-> 2026-07-26). Round 8–9 entries are therefore deliberately one-liners with a pointer: the normative
+> 2026-07-26). Round 8–10 entries are therefore deliberately one-liners with a pointer: the normative
 > text lives in the owner. Rounds 1–7 predate that rule and still carry normative prose; treat
 > the owning doc as authoritative wherever they differ.
 
@@ -21,7 +22,7 @@ Amendment agents rewrite each doc to comply; a doc may reference another doc's o
 must never redefine it.
 
 > **Implementation rule:** don't implement from this file. D1–D25 are historical rationale, not
-> copyable current API/DDL; D26–D72 amend each other in round order (later wins); D73–D87 are
+> copyable current API/DDL; D26–D72 amend each other in round order (later wins); D73–D92 are
 > pointers only. **Read the owning doc.** If an owning doc contradicts a decision here, the doc is
 > either correct (it was folded) or stale (it wasn't) — check the doc's amendment date against the
 > round date and fix the doc, never work from this memo. Current contract shapes live in owning
@@ -33,7 +34,7 @@ must never redefine it.
 |---|---|
 | Task contract (`defineTask`), id grammar, error taxonomy, effect/dry-run mechanics, retry policy, decoration, stores, session providers, shared leaf-code homes | **Doc 01** |
 | Workflow builder API (single API), descriptor shape, RunEnvelope, run-state machine incl. gates/parks, checkpoint/resume model | **Doc 02** |
-| Span/event wire schema, notes stream, storage layout, lift adapter, SSE wire shapes, completion (fan-out/approval) union | **Doc 03** |
+| Span/event wire schema, notes stream, storage layout, isolated-runtime/import boundary, SSE wire shapes, completion (fan-out/approval) union | **Doc 03** |
 | One-item workers, explicit browser-session boundaries, driver leases, queue dispatch/backpressure, page isolation | **Doc 05** |
 | Canonical-field intake mapping, normalization outcomes, admission manifests, durable capture, roster/local projections, Edit Data | **Doc 06** |
 | Write intents, proof/completion union, subject proof, recovery sequence, immutable ledger | **Doc 09** |
@@ -542,9 +543,10 @@ implementation plan to what the tools proved and close the failures the experime
   suppressions. New code/tests use non-vacuous `lint:rebuild`/`lint:rebuild-tests` commands with
   zero warnings from their first file. Pre-existing test lint diagnostics enter a reviewed,
   machine-generated shrink-only manifest keyed by file/rule/message/start+end-column/source-line
-  hash; a new or
-  replaced diagnostic fails even if the total count is unchanged. The manifest must reach zero as
-  legacy tests are retired or corrected and is deleted before final cutover.
+  hash; a new or replaced diagnostic fails even if the total count is unchanged. Untouched debt may
+  remain or shrink through cutover. A touched legacy test file must not retain newly introduced or
+  changed diagnostics; the manifest is deleted only in a separately authorized legacy-test
+  retirement after it reaches zero.
 - **D71 — Phase-0 spikes prove feasibility, not correctness, and must become Phase-1 tests.** The
   disposable experiment compiled a 40-node typed chain plus effect overloads/provider narrowing/
   child-result negatives in 0.68s (`tsc --extendedDiagnostics`, about 212 MB), and runtime-tested
@@ -596,7 +598,17 @@ records them and the same commit folds each into its owner. **One line each — 
 |---|---|---|
 | **D87** | **ONE ITEM PER WORKER; PARALLELISM IS WORKER COUNT.** Executor lanes, static per-system capacity math, cross-workflow browser pools, and their UI chips are retired. Each workflow-scoped worker owns at most one active run plus its own browser sessions; session reuse is normal and a fresh-session boundary is authored on the exact workflow node that needs it. | doc 05; production UI wiring in doc 13 §§2/5/6.7; operator-feedback review |
 
-**Two separate D-series exist — do not confuse them.** This memo's `D1–D87` are cross-doc
+## Reconciliation round 10 (2026-07-31) — isolated coexistence, cutover, and testing, folded
+
+| # | Decision | Owner (normative text) |
+|---|---|---|
+| **D88** | **ISOLATED LEGACY COEXISTENCE; D73 IS SUPERSEDED.** Existing `src` automation remains live, runnable, maintainable, and production-authoritative throughout the rebuild. The rebuild stays in `temp_src/` with distinct commands, state, ports, locks, and browser profiles/sessions; cross-runtime imports, calls, and state access are forbidden. Verified knowledge is ported with provenance. | charter §Non-negotiables; docs 03 §5, 07 §4, 10 §3.13, 13 §0 |
+| **D89** | **ONE ALL-AT-ONCE CUTOVER.** Workflow migrations prove `temp_src` capabilities but never flip production individually. At full readiness: stop legacy enqueues, drain/park/reconcile active and uncertain runs, back up both worlds, run only explicit versioned one-time imports, then atomically switch the normal launcher. Preserve `src` and legacy commands/tests as rollback code; later retirement/deletion requires separate operator authorization and capability proof. After native writes, rollback requires reconciliation/dedupe; both engines never share production authority. | charter §Migration strategy; doc 07 §§3–6; doc 13 §0 |
+| **D90** | **LEGACY CHANGE ACCOUNTING, NOT A FREEZE.** Production fixes and matching legacy tests remain allowed. A Phase-1 manifest fingerprints the legacy baseline and maps every maintenance change to affected capabilities/rebuild evidence. Untouched test-lint debt may remain or shrink; new or changed diagnostics in new/touched legacy test files fail. `temp_src` source/tests are zero-debt from their first file. Legacy source/tests/projects are retained through initial cutover. | docs 07 §3.6/§4; 10 §§1.1/3.13; testing-system plan §6 |
+| **D91** | **TESTING POLICY RATIFIED.** Lines/statements/functions gate at 60% globally and 80% for safety-critical rebuild code. Branches report through Phase 1 and gate at 50%/70% at Phase-2 exit. Suite size is a soft report plus phase-exit review. Legacy tests remain until a separately authorized retirement. | docs 07 Phase gates; 10 §3.14; testing-system plan §§3–8 |
+| **D92** | **LIVE PROBES ARE MANDATORY AT THEIR NAMED LATER GATES, NOT PHASE-1 BLOCKERS.** UCPath receipt proof precedes the Phase-2 controlled commit that uses it; ServiceNow receipt proof and OnBase upload verification precede their order-7 migration/cutover evidence. | doc 07 §§3.8 and Phase 2; doc 09 owns proof contracts |
+
+**Two separate D-series exist — do not confuse them.** This memo's `D1–D92` are cross-doc
 reconciliation decisions. Doc 03 §9 carries a **row-model series** (`row-model D1–D24`: three row
 types, eight statuses, containment, delegation shapes) ratified 2026-07-24/25. Doc 03 states the
 distinction at its §9 header; always cite the row-model series with the `row-model` prefix.

@@ -1,13 +1,13 @@
 # 10 — Guard & Test Architecture SSOT (`temp_src`)
 
-Status: **revised 2026-07-22 after the whole-plan/legacy-code review; amended 2026-07-26
-(Round 8).** No `temp_src` guard implementation currently exists; this document now covers strict
+Status: **revised 2026-07-22 after the whole-plan/legacy-code review; amended 2026-07-31
+(Round 10).** No `temp_src` guard implementation currently exists; this document now covers strict
 schemas, semantic UI/driver boundaries, subject binding, queue commands/delegation,
 evidence/scenarios, notifications, and authority-store recovery in addition to the existing rebuild
-safety promises. **Round 8 adds §3.13** (one-projection counts, identity-gate-before-commit,
-archive invariants, frozen-legacy-tree) **and §3.14** (the ratified testing standard), and
-**deletes two guard families** — the continuous lift replay and the legacy wire-schema snapshot —
-which existed only to protect the coexistence layer D73 removed.
+safety promises. **Round 10 amends §3.13** to replace frozen-tree enforcement with strict runtime
+isolation + legacy-change accounting (D88/D90), and **§3.14** now carries the ratified coverage,
+branch, suite-size, and legacy-preservation policy (D91). Continuous lift/scoped-flip guard
+families remain rejected; an optional versioned one-time importer has its own offline fixture.
 **Amended 2026-07-30 (Round 9):** executor-lane overlap/capacity guards are replaced by the
 one-active-item-per-worker, N-worker overlap, and authored fresh-session-boundary guards (D87).
 
@@ -19,7 +19,7 @@ guard inventory, TDD topology, and stub/live lanes.
 | | |
 |---|---|
 | **This doc OWNS** | The test/guard suite: ratchet inventory, strict-boundary/driver/subject/control/delegation/storage guards, transaction/write/outbox/provenance/artifact safety guards, descriptor projection coverage, accidental-shrink meta-test, TDD tiers, scenario/stub/live lanes. |
-| **Imports (never redefines)** | Task contract / `effect` / `example` / `fakeCtx` / mutation primitive / dry-run overloads — **doc 01**. Descriptor shape + `descriptor-coverage.test.ts` §1.4 + run-state/checkpoint/delegation — **doc 02**. Span/event schema + command protocol + storage recovery + notifications + completion/lift/dashboard flip — **doc 03**. Pool/lease/sleep-budget guards — **doc 05**. Receipt/idempotency/fence/subject contract — **doc 09**. Clock/config/secrets single-source — **doc 11**. Semantic UI registry, scenarios, evidence, knowledge/fix records, editor projections — **doc 12**. |
+| **Imports (never redefines)** | Task contract / `effect` / `example` / `fakeCtx` / mutation primitive / dry-run overloads — **doc 01**. Descriptor shape + `descriptor-coverage.test.ts` §1.4 + run-state/checkpoint/delegation — **doc 02**. Span/event schema + command protocol + storage recovery + notifications + completion and isolated-runtime/cutover boundary — **doc 03**. Worker/session/sleep-budget guards — **doc 05**. Receipt/idempotency/fence/subject contract — **doc 09**. Clock/config/secrets single-source — **doc 11**. Semantic UI registry, scenarios, evidence, knowledge/fix records, editor projections — **doc 12**. |
 | **Charter bindings** | "Same quality umbrella from day one" (every ratchet covers `temp_src` from the first line); "fail loud"; §1a fill/submit split is the dry-run safety model this doc makes a static invariant; §5 descriptor SSOT retires the parity guards. |
 
 **One-sentence thesis.** The umbrella is only real if ONE place owns *how* every doc's per-§ guard
@@ -56,34 +56,37 @@ in four mechanism families:
 Allowlist discipline (verbatim, ported): every survivor is read-in-context with a one-line reason;
 a new occurrence fails immediately and needs the same review, never a silent add.
 
-### 1.1 Measured pre-rebuild gate baseline (2026-07-22)
+### 1.1 Measured pre-rebuild gate baseline (refreshed 2026-07-31)
 
 This baseline was executed after the full plan reread, with a clean worktree and no `temp_src`:
 
 | Command | Result | Meaning for the plan |
 |---|---|---|
 | `npm run typecheck:all` | **PASS** | both existing TypeScript programs are a sound starting toolchain |
-| `npm run test` | **PASS** | existing unit + serial behavior is green; this does not test proposed rebuild contracts |
-| `npm run test:architecture` | **PASS — 23 files / 137 tests** | current guard harness works and can host the new manifest |
+| `npm run test` | **PASS — 479 unit files / 4,619 tests; 11 serial files / 20 tests** | existing behavior is green; this does not test proposed rebuild contracts |
+| `npm run test:architecture` | **PASS — 23 files / 129 tests** | current guard harness works and can host the new manifest |
 | `npm run build:dashboard` | **PASS** | the existing dashboard build toolchain is healthy |
-| `npm run lint` | **FAIL — 2 errors / 1 warning** | repair these source diagnostics before the first rebuild production leaf; no suppression/baseline exception |
-| `npm run lint:tests` | **FAIL — 1,325 errors / 2 warnings** | pre-existing test debt must be fingerprinted/shrink-only; new rebuild tests remain zero-debt |
+| `npm run lint` | **PASS** | ordinary production source is a green coexistence baseline |
+| `npm run lint:tests` | **FAIL — 1,344 errors / 2 warnings** | pre-existing test debt must be fingerprinted/no-new-debt; new rebuild tests remain zero-debt |
 
-The last two results forbid two dishonest shortcuts: Phase 1 cannot claim the whole repository was
-green, and it cannot weaken ESLint or dump 1,327 broad exceptions into a new-code allowlist. Item
+The last result forbids two dishonest shortcuts: Phase 1 cannot claim the whole repository was
+green, and it cannot weaken ESLint or dump broad exceptions into a new-code allowlist. Item
 1a creates a machine baseline for **legacy test files only**, keyed by normalized repo-relative file,
 rule id, message id/text, start/end column, and SHA-256 of the diagnostic source line. The ratchet fails on any new
 fingerprint even if another diagnostic disappears, while removals are accepted and shrink the
-manifest. Any edit to a baselined line must remove/fix its entry or receive explicit review; a
-count-only “one out, one in” swap cannot pass.
+manifest. A touched legacy test file may preserve pre-existing fingerprints on untouched lines but
+may not add or replace a diagnostic; a count-only “one out, one in” swap cannot pass. Every legacy
+maintenance change is also mapped to the capability and rebuild evidence it may invalidate (D90).
 
 `lint:rebuild` and `lint:rebuild-tests` target `temp_src/**` and the dedicated rebuild test roots,
 resolve to non-empty file sets after activation, and run with `--max-warnings 0` plus **no debt
 manifest**. Before activation, an absent tree is an explicit Phase-0 state; after the first file,
 absence/unmatched globs fail. The small existing `src` lint failure is repaired before 1b, so the
 ordinary `npm run lint` also returns green during coexistence. The legacy-test manifest must be zero
-and deleted before final old-tree removal; until then `lint:legacy-tests-ratchet` is the truthful
-coexistence gate, not a false claim that `npm run lint:tests` passes.
+and its projects remain runnable through initial cutover. The manifest may remain non-zero; it is
+deleted only in a separately authorized retirement after reaching zero. Until then
+`lint:legacy-tests-ratchet` is the truthful coexistence gate, not a false claim that
+`npm run lint:tests` passes.
 
 ---
 
@@ -110,7 +113,7 @@ Before activation, a missing `temp_src` is an explicit planned state—not a swa
 | `workflow-boundaries` | **RE-DERIVE (loosened)** | charter §1 makes tasks peer-reusable, so importing another workflow's *task contract* is legal. New rule: a workflow may import another's **contracts** and store tasks, never its `descriptor.ts` internals or non-task private helpers. |
 | `tracker-row-emission` | **RE-DERIVE** | archetype-stamping is gone; the new invariant is doc 03's: writes go only through the typed span-emit path, `appendFileSync` to event JSONL banned outside `temp_src/tracker/`. |
 | `deletion-tombstones` | **RE-DERIVE** | UI exposes reversible `hide/unhide`, never ambiguous Delete. No physical delete of authority/audit tables in runtime code; the exact-id offline purge command requires a verified backup and emits a purge receipt (doc 03 §2.4). Legacy tombstones remain lift-only. |
-| `dashboard-security-boundary` | **RE-DERIVE FOR LOCAL SCOPE** | Native server binds loopback only, accepts same-origin UI requests, and never grows a LAN/multi-user/auth surface accidentally. During scoped flip, any retained legacy middleware stays correctly ordered behind the native loopback boundary; native Phase 1 does not build a user/account system (docs 11/12). |
+| `dashboard-security-boundary` | **RE-DERIVE FOR LOCAL SCOPE + ISOLATION** | Both servers bind distinct configured loopback ports and accept only their own same-origin UI. No shared middleware, proxy/remount, route forwarding, state root, process lock, or browser profile/session is allowed; Phase 1 does not build a user/account system (docs 03/11/12/13). |
 | `frontend-tailwind-compliance` | **EXTEND** | over `temp_src/dashboard`. |
 | `i9-check-import-guard` | **GENERALIZE** | a descriptor with no transaction/commit contract is structurally read-only; graph coverage proves it cannot reach a mutation capability. |
 | `origin-workflow-banned` | **DROP-OR-PORT** | the lineage field it bans does not exist in `temp_src`; keep a banned-term guard only if the concept resurfaces. Decide at Phase 1. |
@@ -391,17 +394,21 @@ Four ratified decisions are worthless as prose. Each gets a guard, and each guar
   is non-terminal, and the refusal lists them — the write-safety carve-out that stops an unresolved
   possible-submit being buried; (3) archiving never touches the write ledger.
 
-- **`frozen-legacy-tree.test.ts` (D73 — charter).** Once `src` is frozen at 1a, no commit may add
-  or modify a file under `src/` (deletions during migration are allowed and expected). Cheap,
-  and it is what makes "no dual maintenance" true rather than aspirational. Ships with the freeze,
-  not before it.
+- **`runtime-isolation.test.ts` + `legacy-change-accounting.test.ts` (D88/D90 — charter/doc 03).**
+  Source scans ban imports/invocation across `src`↔`temp_src`; configuration fixtures require
+  distinct commands/entrypoints, state/artifact roots, ports, process locks, and browser
+  profiles/sessions. Production composition roots may register only their own engine. The legacy
+  tree remains editable: every touched legacy production/test path must map to affected capability
+  ids and a rebuild recheck/disposition; deletion fails through initial cutover. The diagnostic
+  ratchet rejects new/replaced lint fingerprints in legacy tests while rebuild source/tests retain
+  zero-debt gates.
 
-**Two guard families are DELETED, not ported (D73).** The `real-tracker-day zero-quarantine` lift
-replay and the legacy wire-schema snapshot guard (version bump + adapter + goldens in one commit)
-both existed to protect a live coexistence layer. A frozen tree emits no new shapes and there is no
-continuous lift. If the optional one-time historical import is ever built, it carries its own
-one-off fixture; it is not a standing gate. Removing them is an explicit decision recorded here,
-per D39 — not a silent shrink, and the guard-of-guards manifest is updated in the same commit.
+**Two live-compatibility guard families remain rejected (D88).** Continuous real-tracker replay
+and a runtime legacy wire-schema adapter would legitimize the forbidden live lift/proxy. If an
+optional one-time historical importer is built, a dedicated offline fixture proves explicit source
+version, immutable-backup-only input, idempotent import manifest, reconciled source/result/
+quarantine counts, and no importer dependency from a production composition root. This is an
+explicit replacement in the guard inventory, not a silent shrink.
 
 ### 3.14 Testing standard (D85) — what replaces the e2e ritual
 
@@ -423,6 +430,15 @@ answer has four parts, and they are *kernel behavior*, not a skill:
 Three habits from the old ritual are kept and promoted into kernel behavior: **"a workaround is a
 finding"** (a step that needed manual help is recorded, not smoothed over), **double-entry ground
 truth** (a UI assertion is paired with an independent source), and the **append-only issue ledger**.
+
+**D91 coverage/sizing/preservation policy (ratified 2026-07-31).** `test:coverage` measures
+authored `temp_src` code with the reviewed exclusions in the testing-system plan. Lines,
+statements, and functions gate at **60 global / 80 safety-critical** from activation. Branches are
+reported through Phase 1 and become hard **50 global / 70 safety-critical** gates at Phase-2 exit.
+The suite-size report is reviewed at every phase exit but is not a hard file-count gate. Legacy
+tests and Vitest projects remain runnable through initial cutover; neither test paths nor their
+projects may be removed without a later explicit operator-ratified retirement. New/touched legacy
+diagnostics are governed by §1.1; rebuild tests are zero-debt from their first file.
 
 ### 3.12 D71 executable contract/type-budget suite
 
@@ -508,7 +524,7 @@ a second inline name set. The test asserts:
 4. every active `temp_src` scan resolves at least one file; a family is activated in the same commit
    as its first file, and `ENOENT`/an unmatched glob is never converted to green;
 5. the `temp_src`-scoped ratchets (the extend-set in §2) each still include a `temp_src` glob token,
-   so nobody can quietly narrow a ratchet back to `src/` only during the dual-maintenance window;
+   so nobody can quietly narrow a ratchet back to legacy `src/` only during coexistence;
 6. `gate-coverage`'s existing assertions (both `tsc` programs, `--max-warnings 0`) are kept inline;
 7. ESLint's CLI target and the matching `eslint.config.js` typed rule block both include `temp_src`;
 8. D70's four lint scripts exist with exact scopes: new source/tests use zero-debt strict lint,
@@ -563,7 +579,7 @@ contracts; the manifest owns that they exist and stay wired. The set (contract-o
 - **Event/dashboard guards (doc 03):** dashboard-component purity (no `workflow ===`), client
   re-projection import-boundary, identity-on-patch throw, undeclared-vocabulary emit-validation,
   sealed-completion (`defineFormSpec`, + oath-upload & verify pinned to NO `CompletionProgram`),
-  lift-adapter deletion ratchet, legacy-schema-version bump+adapter+fixture coverage,
+  runtime-isolation, one-time-import offline/idempotency coverage,
   notes-not-a-data-channel, non-recursive wire type-test,
   real-tracker-day zero-quarantine replay fixture, command CAS/idempotency/enqueue policies,
   authority target fail-closed behavior, durable notification delivery, SQLite backup/restore
@@ -575,7 +591,8 @@ contracts; the manifest owns that they exist and stay wired. The set (contract-o
   per-contract sleep budget, single-flight
   login, onbase-`exclusive` lease, `newPage(` ratchet, fan-out-starvation, authored fresh-session-boundary coverage,
   bounded task/transaction deadline, worker teardown soak, multi-worker overlap.
-- **Meta (this doc):** `gate-coverage`, `guard-manifest`, and `legacy-test-lint-debt-ratchet`.
+- **Meta (this doc):** `gate-coverage`, `guard-manifest`, `runtime-isolation`,
+  `legacy-change-accounting`, `legacy-preservation`, and `legacy-test-lint-debt-ratchet`.
 
 A guard added to any doc that never lands in the inventory fails the manifest — so a doc's §guards
 promise cannot quietly stay a promise.
@@ -650,7 +667,7 @@ a synthetic tracker dir → boot the real new-server dashboard → drive + asser
 |---|---|---|
 | 1 | **Allowlists grow unchecked** — every failure "fixed" by an allowlist add | Each entry needs a one-line `reason` (ported discipline); the fail-both-ways ratchet fails on a *stale over-count* too, so a shrunk violation forces the entry down; periodic review is a lesson, not a guard — honest residual risk, mitigated by zero-allowlist for *new* `temp_src` code. |
 | 2 | **A guard is deleted or dropped from the glob** | inventory catches accidental deletion/orphaning; coordinated removal requires a checked decision record and review—honest non-mechanical boundary (§5) |
-| 3 | **A ratchet quietly narrows back to `src/` only** during dual-maintenance | Manifest check #5: the extend-set must keep a `temp_src` glob token. |
+| 3 | **A ratchet quietly narrows back to `src/` only** during coexistence | Manifest check #5: the extend-set must keep a `temp_src` glob token. |
 | 4 | **`temp_src` escapes coverage or a missing tree passes vacuously** | Each target family activates atomically with its first file; every active arm asserts a non-empty file set. Missing paths/unmatched ESLint patterns fail rather than skip, and CLI+config coverage are both pinned. |
 | 5 | **A new parity/hand-list registry reappears** | explicit projection inventory/coverage is primary; ≥3-id heuristic is secondary only |
 | 6 | **The composition/pairing guard false-positives on prose** | both key off closed unions and graph nodes; one-click writes use a no-op prepare, not an escape hatch |
