@@ -3711,6 +3711,236 @@ const ocrVerify: DemoRowSpec = {
   ],
 };
 
+interface CompactRunArgs {
+  id: string;
+  workflowId: DemoWorkflowId;
+  title: string;
+  runId4: string;
+  status: ProposedStatus;
+  clock: string;
+  step: string;
+  system?: SystemKey;
+  outcome: string;
+  receipt: string;
+  error?: string;
+  dryRun?: boolean;
+  workflowVersion?: number;
+  linkedParentId?: string;
+  data?: DemoDataPoint[];
+  gate?: DemoGate;
+}
+
+/** Compact but complete run fixtures used to broaden state/outcome coverage. */
+function compactRun(args: CompactRunArgs): DemoRowSpec {
+  const failed = args.status === "failed";
+  const cancelled = args.status === "cancelled";
+  const live = ["queued", "running", "waiting", "parked"].includes(args.status);
+  const startedAt = args.status === "queued" ? undefined : at(args.clock);
+  const endedAt = live ? undefined : plusSeconds(at(args.clock), 38);
+  const stepState: StepState = failed ? "failed" : cancelled ? "cancelled" : live ? "current" : "done";
+  return {
+    id: args.id,
+    rowType: "run",
+    workflowId: args.workflowId,
+    title: args.title,
+    runId4: args.runId4,
+    status: args.status,
+    run: 1,
+    version: 2,
+    dryRun: args.dryRun,
+    workflowVersion: args.workflowVersion,
+    enqueuedAt: plusSeconds(at(args.clock), -8),
+    startedAt,
+    endedAt,
+    evidence: { confidence: failed || live ? "unknown" : "verified" },
+    outcome: {
+      tone: failed ? "destructive" : cancelled ? "muted" : args.status === "doneWarnings" ? "warning" : "success",
+      text: args.outcome,
+    },
+    steps: [{ label: args.step, state: stepState, system: args.system, durationSec: live ? undefined : 38 }],
+    lines: [
+      {
+        ts: fmtClockSec(at(args.clock)),
+        kind: failed ? "error" : cancelled ? "event" : "ok",
+        system: args.system,
+        text: failed ? args.error : args.outcome,
+        step: args.step,
+        ...(failed ? { card: "failure" as const } : {}),
+      },
+    ],
+    data: args.data ?? [],
+    receipt: {
+      tone: failed ? "destructive" : args.status === "doneWarnings" ? "warning" : cancelled ? "muted" : "success",
+      headline: args.receipt,
+    },
+    gate: args.gate,
+    shots: args.system ? [{ label: args.step, kind: failed ? "error" : "step" }] : [],
+    ...(failed
+      ? {
+          error: args.error,
+          failCard: { title: `${args.step} failed`, meta: args.error ?? "The run stopped." },
+        }
+      : {}),
+    ...(args.linkedParentId
+      ? { containment: "linked" as const, linkedParentId: args.linkedParentId }
+      : {}),
+  };
+}
+
+const i9LookupRuns: DemoRowSpec[] = [
+  compactRun({
+    id: "i9l-signed",
+    workflowId: "i9-lookup",
+    title: "Avery Stone",
+    runId4: "19a1",
+    status: "verifiedDone",
+    clock: "10:31:02",
+    step: "Lookup",
+    system: "i9",
+    outcome: "Profile found · signed · representative Elena Cruz",
+    receipt: "Done · signed profile found",
+    linkedParentId: "i9-batch",
+    data: [
+      { step: "Lookup", dir: "read", field: "Profile", value: "Found", system: "i9", ts: "10:31:22" },
+      { step: "Lookup", dir: "read", field: "Signed", value: "Yes", system: "i9", ts: "10:31:22" },
+      { step: "Lookup", dir: "read", field: "Representative", value: "Elena Cruz", system: "i9", ts: "10:31:22" },
+    ],
+  }),
+  compactRun({
+    id: "i9l-unsigned",
+    workflowId: "i9-lookup",
+    title: "Nadia Cole",
+    runId4: "29b2",
+    status: "doneWarnings",
+    clock: "10:32:02",
+    step: "Lookup",
+    system: "i9",
+    outcome: "Profile found · employee signature still missing",
+    receipt: "Done with warnings · unsigned profile",
+    linkedParentId: "i9-batch",
+    data: [
+      { step: "Lookup", dir: "read", field: "Profile", value: "Found", system: "i9", ts: "10:32:22" },
+      { step: "Lookup", dir: "read", field: "Signed", value: "No", system: "i9", ts: "10:32:22" },
+    ],
+  }),
+  compactRun({
+    id: "i9l-no-profile",
+    workflowId: "i9-lookup",
+    title: "Owen Price",
+    runId4: "39c3",
+    status: "verifiedDone",
+    clock: "10:33:02",
+    step: "Lookup",
+    system: "i9",
+    outcome: "No I-9 profile · lookup completed normally",
+    receipt: "Done · no profile found",
+    linkedParentId: "i9-batch",
+    data: [{ step: "Lookup", dir: "read", field: "Profile", value: "Not found", system: "i9", ts: "10:33:22" }],
+  }),
+  compactRun({
+    id: "i9l-unreachable",
+    workflowId: "i9-lookup",
+    title: "Priya Shah",
+    runId4: "49d4",
+    status: "failed",
+    clock: "10:34:02",
+    step: "Lookup",
+    system: "i9",
+    outcome: "I-9 portal unreachable · retry available",
+    receipt: "Failed · portal could not be read",
+    error: "I-9 portal returned 503 after three attempts — no profile answer was recorded.",
+    linkedParentId: "i9-batch",
+  }),
+];
+
+const personLookupMatchRuns: DemoRowSpec[] = [
+  compactRun({
+    id: "pl-match-found",
+    workflowId: "person-lookup",
+    title: "Marta Reyes",
+    runId4: "5ae1",
+    status: "verifiedDone",
+    clock: "09:41:02",
+    step: "Search",
+    system: "ucpath",
+    outcome: "Matched · existing UCPath identity 10844121",
+    receipt: "Done · Match found one identity",
+    data: [
+      { step: "Search", dir: "read", field: "Found", value: "Yes", system: "ucpath", ts: "9:41:22" },
+      { step: "Search", dir: "read", field: "Matched EID", value: "10844121", system: "ucpath", ts: "9:41:22" },
+      { step: "Search", dir: "read", field: "Matched name", value: "Marta Reyes", system: "ucpath", ts: "9:41:22" },
+      { step: "Search", dir: "read", field: "Candidates", value: "1", system: "ucpath", ts: "9:41:22" },
+    ],
+  }),
+  compactRun({
+    id: "pl-match-none",
+    workflowId: "person-lookup",
+    title: "Rina Patel",
+    runId4: "6bf2",
+    status: "verifiedDone",
+    clock: "09:42:02",
+    step: "Search",
+    system: "ucpath",
+    outcome: "No match · HR-Tasks returned nobody (a normal negative answer)",
+    receipt: "Done · no existing identity",
+    data: [
+      { step: "Search", dir: "read", field: "Found", value: "No", system: "ucpath", ts: "9:42:22" },
+      { step: "Search", dir: "read", field: "Candidates", value: "0", system: "ucpath", ts: "9:42:22" },
+    ],
+  }),
+  compactRun({
+    id: "pl-match-ambiguous",
+    workflowId: "person-lookup",
+    title: "Alex Kim",
+    runId4: "7cg3",
+    status: "doneWarnings",
+    clock: "09:43:02",
+    step: "Search",
+    system: "ucpath",
+    outcome: "Ambiguous · duplicate-results dialog returned two candidates",
+    receipt: "Done with warnings · identity is ambiguous",
+    data: [
+      { step: "Search", dir: "read", field: "Found", value: "Ambiguous", system: "ucpath", ts: "9:43:22" },
+      { step: "Search", dir: "read", field: "Candidates", value: "2", system: "ucpath", ts: "9:43:22" },
+    ],
+  }),
+];
+
+const thinCoverageRuns: DemoRowSpec[] = [
+  compactRun({ id: "onb-dry", workflowId: "onboarding", title: "Taylor Reed", runId4: "81a1", status: "verifiedDone", clock: "08:11:02", step: "SmartHR transaction", system: "ucpath", outcome: "Dry run complete · final submit skipped", receipt: "Dry run · nothing written", dryRun: true }),
+  compactRun({ id: "onb-failed", workflowId: "onboarding", title: "Morgan Lee", runId4: "82a2", status: "failed", clock: "08:12:02", step: "Person search", system: "ucpath", outcome: "Person search failed · retry available", receipt: "Failed · no hire submitted", error: "UCPath person results never reached a definitive found/not-found state." }),
+  compactRun({
+    id: "ou-parked",
+    workflowId: "oath-upload",
+    title: "Oath_Packet_Parked.pdf",
+    runId4: "83a3",
+    status: "parked",
+    clock: "08:13:02",
+    step: "Submit",
+    system: "servicenow",
+    outcome: "Write attempted · ticket outcome unknown · resolve checkpoint",
+    receipt: "No receipt · write must be resolved",
+    gate: {
+      kind: "parked",
+      title: "Did ServiceNow create this ticket?",
+      openedAt: at("08:13:40"),
+      staged: [{ field: "Oath packet ticket", value: "Oath_Packet_Parked.pdf", system: "servicenow", unconfirmed: true }],
+      options: [
+        { key: "present", label: "Ticket exists", intent: "success", command: "resolve-write-present" },
+        { key: "absent", label: "No ticket exists", intent: "destructive", command: "resolve-write-absent" },
+      ],
+      note: "The browser disconnected after submit. Inspect ServiceNow before choosing; the run never guesses whether the write landed.",
+    },
+  }),
+  compactRun({ id: "ou-cancelled", workflowId: "oath-upload", title: "Oath_Packet_Cancelled.pdf", runId4: "84a4", status: "cancelled", clock: "08:14:02", step: "Wait signatures", outcome: "Cancelled before ServiceNow filing", receipt: "Cancelled · nothing filed" }),
+  compactRun({ id: "kp-no-change", workflowId: "kronos-pay-rule", title: "Jamie Park", runId4: "85a5", status: "verifiedDone", clock: "08:15:02", step: "Determine action", system: "kronos", outcome: "Already on SDCMP-WS · no change needed", receipt: "Done · pay rule already correct" }),
+  compactRun({ id: "kp-failed", workflowId: "kronos-pay-rule", title: "Casey Ford", runId4: "86a6", status: "failed", clock: "08:16:02", step: "Update pay rule", system: "kronos", outcome: "Save verification failed · retry available", receipt: "Failed · pay rule not verified", error: "Kronos saved but the pay-rule read-back did not match SDCMP-WS." }),
+  compactRun({ id: "cd-none", workflowId: "crm-doc-download", title: "no-record@ucsd.edu", runId4: "87a7", status: "verifiedDone", clock: "08:17:02", step: "Search record", system: "crm", outcome: "No CRM record · normal not-found answer", receipt: "Done · no record found" }),
+  compactRun({ id: "cd-failed", workflowId: "crm-doc-download", title: "archive@ucsd.edu", runId4: "88a8", status: "failed", clock: "08:18:02", step: "Download", system: "crm", outcome: "Document download failed · retry available", receipt: "Failed · no file archived", error: "CRM attachment stream ended before the PDF checksum could be verified." }),
+  compactRun({ id: "kr-cancelled", workflowId: "old-kronos-reports", title: "Cancelled report set", runId4: "89a9", status: "cancelled", clock: "08:19:02", step: "Report run", system: "kronos", outcome: "Cancelled while reports were still queued", receipt: "Cancelled · no archive written" }),
+  compactRun({ id: "kr-vnext", workflowId: "old-kronos-reports", title: "Payroll audit bundle", runId4: "90b0", status: "doneWarnings", clock: "08:20:02", step: "Download", system: "kronos", outcome: "3 reports downloaded · one optional report empty", receipt: "Done with warnings · 3 files", workflowVersion: Math.max(1, DEMO_WORKFLOWS["old-kronos-reports"].version - 1) }),
+];
+
 // ===========================================================================
 // Assembly + ordering helpers
 // ===========================================================================
@@ -3758,6 +3988,9 @@ const RAW_ROWS: DemoRowSpec[] = [
     ocrVerify,
     plSummer,
     plVerify,
+    ...i9LookupRuns,
+    ...personLookupMatchRuns,
+    ...thinCoverageRuns,
     // members + linked children
     ...i9MemberIds.map((_, i) => i9Member(i)),
     ...oathMemberIds.map((_, i) => oathMember(i)),
