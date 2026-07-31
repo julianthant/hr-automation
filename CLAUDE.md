@@ -194,6 +194,35 @@ pkill -f seed-session-fixture; pkill -f 'dashboard --prod --port 3939'
 
 Principles: `HRAUTO_TRACKER_DIR` points the dashboard (and the e2e stub lane) at an isolated root — NEVER seed into the real `.tracker/`. The session panel only shows a card whose `workflow_start.pid` is a LIVE process, which is why the seeder hangs (kill it when done). The seeder uses the **production emitters** (`emitBrowserHealth`, …) so the fixture can't drift from the event schema — extend it (or write a sibling seeder) when you add a surface. The a11y `snapshot` is more reliable to assert on than a screenshot (text/labels/`[pressed]`/aria); `Read` the PNG only for the visual gestalt. `:3838` is usually the user's own dashboard — use a fallback port and never kill it. Screenshots land in `.screenshots/` (gitignored). **ALWAYS surface the screenshots back to the user after a verification — `Read` the PNG(s) into your reply (they render inline in the conversation) and cite the saved `.screenshots/<area>/` path(s).** The user can't always re-run your verification, so showing the actual rendered result (not just asserting "it works") is mandatory: every dashboard/UI verification ends with the operator SEEING the before/after, the same images you judged from. What this CANNOT verify: behavior that needs a real browser daemon (refresh/reopen/peek *acting*, real auth) — that's the opt-in live lane (see "Live verification — standing pre-authorization" above + `tests/live/`).
 
+## The rebuild lives in another repository (D93, 2026-07-31)
+
+**This repo is production and stays production.** The ground-up rebuild now lives at
+`/Users/julianhein/Projects/hr-automation-rebuild` — its own git repo, seeded from
+`feature/rebuild-phase1b` (that branch stays here as the pre-split record). The rebuild's plan SSOT
+moved with it: **read `docs/rebuild/` in the rebuild repo, not here.** The `docs/rebuild/` copy on
+this branch is frozen at the pre-split state and is kept only as a rollback asset.
+
+Nothing here was deleted and nothing here is deprecated. This repo remains live-runnable,
+maintainable, and the sole production authority until a single all-at-once cutover.
+
+**Standing duty — every legacy maintenance change must be recorded in the rebuild repo.** When you
+change anything under `src/` or `tests/` here, add or update its record in the rebuild repo's
+`config/legacy-change-accounting.json`: the path, its before/after content hashes, the **affected**
+capability ids (not merely the owning path — a `src/core/daemon` fix affects every workflow that
+runs through the daemon), and the rebuild evidence the change may invalidate. Records are keyed by
+**this repo's** commit hashes.
+
+Why it matters: D93 retired the same-tree scan that used to notice a legacy edit incidentally, so
+this accounting is now the program's *only* drift detector — load-bearing, not corroborating. The
+rebuild repo's `legacy-change-accounting.test.ts` reads this working tree directly (via
+`../hr-automation`, override `HRAUTO_LEGACY_REPO`) and goes red when the manifest and this repo
+disagree. A legacy change committed here without its record turns the rebuild repo's guard suite
+red, which is the intended alarm.
+
+Also unchanged by the split: the two runtimes share one machine, so distinct ports, state/artifact
+roots, process locks, browser profiles, and launch-command names remain required and remain gated
+(`config/runtime-isolation.json` in the rebuild repo).
+
 ## Docs
 
-What’s canonical vs ephemeral: `docs/README.md`. Full reference docs in `docs/engineering/`. Workflow behavior and delegation docs live in `docs/workflow/`. Session handoffs/plans in `docs/superpowers/` (ephemeral). Frozen snapshots in `docs/historical/`.
+What’s canonical vs ephemeral: `docs/README.md`. Full reference docs in `docs/engineering/`. Workflow behavior and delegation docs live in `docs/workflow/`. Session handoffs/plans in `docs/superpowers/` (ephemeral). Frozen snapshots in `docs/historical/`. **The rebuild program's docs are no longer maintained here — see the section above.**
