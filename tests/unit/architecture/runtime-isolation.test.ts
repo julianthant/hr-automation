@@ -1,26 +1,100 @@
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
-import isolation from "../../../config/rebuild/runtime-isolation.json" with { type: "json" };
-import { REPO_ROOT, repoRelative, walkFiles } from "./helpers/guard-files.js";
+import isolationJson from "../../../config/rebuild/runtime-isolation.json" with { type: "json" };
+import { REPO_ROOT } from "./helpers/guard-files.js";
+import {
+  auditRuntimeIsolation,
+  SUPPORTED_FORBIDDEN_BRIDGE_CLASSES,
+  type ForbiddenBridgeClass,
+  type RuntimeIsolationContract,
+} from "./helpers/runtime-isolation-audit.js";
 
+const isolation = isolationJson as RuntimeIsolationContract;
 const packageJson = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {
   scripts: Record<string, string>;
 };
 
-function importSpecs(source: string): string[] {
-  return [...source.matchAll(/(?:import|export)\s+(?:type\s+)?[^"']*?from\s*["']([^"']+)["']|import\s*["']([^"']+)["']/g)]
-    .map((match) => match[1] ?? match[2])
-    .filter((specifier): specifier is string => specifier !== undefined);
+function write(root: string, path: string, content: string): void {
+  const target = join(root, path);
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, content);
+}
+
+function activeContract(): RuntimeIsolationContract {
+  return { ...isolation, phase: "active" };
+}
+
+function activeScripts(contract: RuntimeIsolationContract): Record<string, string> {
+  return { ...contract.legacy.commands, ...contract.rebuild.commands };
+}
+
+function seedValidActiveRuntime(root: string, contract: RuntimeIsolationContract): void {
+  write(root, "src/cli.ts", "export const legacy = true;\n");
+  write(
+    root,
+    contract.rebuild.runtimeConfig?.module ?? "missing",
+    `function defineRuntimeIsolation<T>(value: T): T { return value; }
+export const rebuildRuntimeIsolation = defineRuntimeIsolation({
+  stateRoot: ".tracker-rebuild",
+  artifactRoot: ".tracker-rebuild/artifacts",
+  backendPort: 3938,
+  frontendPort: 5174,
+  processLockRoot: ".tracker-rebuild/locks",
+  browserProfileRoot: ".auth-rebuild",
+  browserSessionNamespace: "hrauto-rebuild",
+});
+`,
+  );
+  write(
+    root,
+    "temp_src/cli.ts",
+    `import { rebuildRuntimeIsolation } from "./config/runtime-isolation.js";
+declare function startRebuildRuntime(value: unknown): void;
+startRebuildRuntime({ isolation: rebuildRuntimeIsolation });
+`,
+  );
+  write(
+    root,
+    "temp_src/core/workflow-registry.ts",
+    `import { rebuildRuntimeIsolation } from "../config/runtime-isolation.js";
+declare function composeRebuildRuntime(value: unknown): void;
+composeRebuildRuntime({ isolation: rebuildRuntimeIsolation });
+`,
+  );
+}
+
+function withActiveFixture(
+  callback: (root: string, contract: RuntimeIsolationContract, scripts: Record<string, string>) => void,
+): void {
+  const root = join(tmpdir(), `hrauto-isolation-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const contract = activeContract();
+  try {
+    seedValidActiveRuntime(root, contract);
+    callback(root, contract, activeScripts(contract));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function bridgeClasses(root: string, contract: RuntimeIsolationContract, scripts: Record<string, string>): ForbiddenBridgeClass[] {
+  return auditRuntimeIsolation(root, contract, scripts)
+    .map(({ bridgeClass }) => bridgeClass)
+    .filter((bridgeClass): bridgeClass is ForbiddenBridgeClass => bridgeClass !== "runtime-binding");
 }
 
 describe("D88 runtime isolation", () => {
-  it("pins distinct exact runtime resources", () => {
+  it("pins distinct exact runtime resources and consumes every forbidden bridge class", () => {
     assert.deepEqual(isolation.legacy, {
       sourceRoot: "src",
       entrypoint: "src/cli.ts",
-      commands: ["dashboard", "dashboard:prod", "dashboard:watch"],
+      commands: {
+        dashboard: "tsx --env-file=.env src/cli.ts dashboard --capture-ngrok",
+        "dashboard:prod": "tsx --env-file=.env src/cli.ts dashboard --prod",
+        "dashboard:watch": "tsx watch --env-file=.env src/cli.ts dashboard --capture-ngrok",
+      },
       stateRoot: ".tracker",
       artifactRoot: ".tracker",
       backendPort: 3838,
@@ -32,7 +106,11 @@ describe("D88 runtime isolation", () => {
     assert.deepEqual(isolation.rebuild, {
       sourceRoot: "temp_src",
       entrypoint: "temp_src/cli.ts",
-      commands: ["rebuild:dashboard", "rebuild:dashboard:prod", "rebuild:cli"],
+      commands: {
+        "rebuild:dashboard": "tsx --env-file=.env temp_src/cli.ts dashboard",
+        "rebuild:dashboard:prod": "tsx --env-file=.env temp_src/cli.ts dashboard --prod",
+        "rebuild:cli": "tsx --env-file=.env temp_src/cli.ts",
+      },
       stateRoot: ".tracker-rebuild",
       artifactRoot: ".tracker-rebuild/artifacts",
       backendPort: 3938,
@@ -40,52 +118,108 @@ describe("D88 runtime isolation", () => {
       processLockRoot: ".tracker-rebuild/locks",
       browserProfileRoot: ".auth-rebuild",
       browserSessionNamespace: "hrauto-rebuild",
+      runtimeConfig: {
+        module: "temp_src/config/runtime-isolation.ts",
+        factory: "defineRuntimeIsolation",
+        exportName: "rebuildRuntimeIsolation",
+      },
+      compositionRoots: [
+        { path: "temp_src/cli.ts", factory: "startRebuildRuntime" },
+        { path: "temp_src/core/workflow-registry.ts", factory: "composeRebuildRuntime" },
+      ],
     });
+    assert.deepEqual(
+      [...isolation.forbiddenBridgeClasses].sort(),
+      [...SUPPORTED_FORBIDDEN_BRIDGE_CLASSES].sort(),
+    );
 
     for (const key of ["stateRoot", "artifactRoot", "processLockRoot", "browserProfileRoot", "browserSessionNamespace"] as const) {
       assert.notEqual(isolation.legacy[key], isolation.rebuild[key], `${key} must differ`);
     }
     assert.notEqual(isolation.legacy.backendPort, isolation.rebuild.backendPort);
     assert.notEqual(isolation.legacy.frontendPort, isolation.rebuild.frontendPort);
-    assert.deepEqual(
-      isolation.legacy.commands.filter((command) => isolation.rebuild.commands.includes(command)),
-      [],
-    );
   });
 
-  it("keeps cross-tree runtime imports absent in both directions", () => {
-    for (const file of walkFiles(join(REPO_ROOT, isolation.legacy.sourceRoot))) {
-      const specs = importSpecs(readFileSync(file, "utf8"));
-      assert.deepEqual(
-        specs.filter((specifier) => specifier.includes("temp_src")),
-        [],
-        `${repoRelative(file)} imports the rebuild tree`,
+  it("audits the real pre-tree checkout and exact legacy commands", () => {
+    assert.deepEqual(auditRuntimeIsolation(REPO_ROOT, isolation, packageJson.scripts), []);
+  });
+
+  it("accepts only executable exact runtime config consumed by every composition root", () => {
+    withActiveFixture((root, contract, scripts) => {
+      assert.deepEqual(auditRuntimeIsolation(root, contract, scripts), []);
+
+      scripts["rebuild:cli"] += " --proxy-legacy";
+      assert.ok(auditRuntimeIsolation(root, contract, scripts).some(({ bridgeClass }) => bridgeClass === "runtime-binding"));
+      scripts["rebuild:cli"] = contract.rebuild.commands["rebuild:cli"] ?? "";
+      scripts["rebuild:legacy-proxy"] = "tsx temp_src/proxy.ts";
+      assert.ok(auditRuntimeIsolation(root, contract, scripts).some(({ detail }) => detail.includes("command set")));
+      delete scripts["rebuild:legacy-proxy"];
+
+      write(root, "temp_src/config/runtime-isolation.ts", "export const rebuildRuntimeIsolation = { backendPort: 3838 };\n");
+      assert.ok(auditRuntimeIsolation(root, contract, scripts).some(({ detail }) => detail.includes("defineRuntimeIsolation")));
+
+      seedValidActiveRuntime(root, contract);
+      write(
+        root,
+        "temp_src/core/workflow-registry.ts",
+        "import { rebuildRuntimeIsolation } from \"../config/runtime-isolation.js\";\nexport const declaredOnly = rebuildRuntimeIsolation;\n",
       );
-    }
-
-    const rebuildRoot = join(REPO_ROOT, isolation.rebuild.sourceRoot);
-    if (!existsSync(rebuildRoot)) return;
-    for (const file of walkFiles(rebuildRoot)) {
-      const crossings = importSpecs(readFileSync(file, "utf8")).filter((specifier) => {
-        if (!specifier.startsWith(".")) return specifier === "src" || specifier.startsWith("src/");
-        const target = resolve(dirname(file), specifier.replace(/\.js$/, ""));
-        return target === join(REPO_ROOT, "src") || target.startsWith(`${join(REPO_ROOT, "src")}/`);
-      });
-      assert.deepEqual(crossings, [], `${repoRelative(file)} imports the legacy tree`);
-    }
+      assert.ok(auditRuntimeIsolation(root, contract, scripts).some(({ detail }) => detail.includes("executable call")));
+    });
   });
 
-  it("treats the missing rebuild entrypoint as planned, then requires exact commands on activation", () => {
-    const rebuildRoot = join(REPO_ROOT, isolation.rebuild.sourceRoot);
-    if (!existsSync(rebuildRoot)) {
-      assert.equal(isolation.phase, "pre-tree");
-      assert.equal(existsSync(join(REPO_ROOT, isolation.rebuild.entrypoint)), false);
-      for (const command of isolation.rebuild.commands) assert.equal(packageJson.scripts[command], undefined);
-      return;
-    }
-    assert.ok(existsSync(join(REPO_ROOT, isolation.rebuild.entrypoint)));
-    for (const command of isolation.rebuild.commands) {
-      assert.match(packageJson.scripts[command] ?? "", /temp_src/);
-    }
+  it("detects static imports, computed dynamic imports, and require calls in both runtime directions", () => {
+    withActiveFixture((root, contract, scripts) => {
+      for (const [path, content] of [
+        ["temp_src/core/static.ts", "import \"../../src/cli.js\";\n"],
+        ["temp_src/core/bare.ts", "import \"src/cli.js\";\n"],
+        ["temp_src/core/dynamic.ts", "const target = \"../../src/cli.js\"; export const load = () => import(target);\n"],
+        ["temp_src/core/required.ts", "const target = \"../../src/cli.js\"; export const load = () => require(target);\n"],
+        ["src/rebuild-edge.ts", "export const load = () => import(\"../temp_src/cli.js\");\n"],
+      ] as const) {
+        write(root, path, content);
+        assert.ok(bridgeClasses(root, contract, scripts).includes("cross-tree-module-edge"), path);
+        rmSync(join(root, path));
+      }
+    });
+  });
+
+  it("detects direct invocation, filesystem/state access, runtime calls, proxy/forward/remount, lift, and shared sessions", () => {
+    withActiveFixture((root, contract, scripts) => {
+      const cases: readonly [string, string, ForbiddenBridgeClass][] = [
+        ["process.ts", "spawn(\"node\", [\"src/cli.ts\"]);\n", "cross-tree-process-invocation"],
+        ["process-env.ts", "spawn(process.env.LEGACY_COMMAND);\n", "cross-tree-process-invocation"],
+        ["files.ts", "readFileSync(\"src/tracker/state.ts\");\n", "cross-tree-filesystem-access"],
+        ["state.ts", "readFileSync(resolve(process.cwd(), \".tracker\"));\n", "cross-tree-state-access"],
+        ["state-env.ts", "readFileSync(process.env.LEGACY_TRACKER_ROOT);\n", "cross-tree-state-access"],
+        ["runtime.ts", "fetch(\"http://127.0.0.1:3838/api/entries\");\n", "cross-tree-runtime-bridge"],
+        ["runtime-port.ts", "connect({ port: 3838 });\n", "cross-tree-runtime-bridge"],
+        ["runtime-env.ts", "fetch(process.env.LEGACY_URL);\n", "cross-tree-runtime-bridge"],
+        ["proxy.ts", "app.use(\"/legacy\", \"http://127.0.0.1:3838\");\n", "route-proxy-forward-remount"],
+        ["proxy-env.ts", "proxy(process.env.LEGACY_URL);\n", "route-proxy-forward-remount"],
+        ["forward.ts", "router.forward(\"http://127.0.0.1:3838\");\n", "route-proxy-forward-remount"],
+        ["remount.ts", "app.mount(\"/legacy\", \"http://127.0.0.1:3838\");\n", "route-proxy-forward-remount"],
+        ["lift.ts", "liftLegacyRows();\n", "continuous-runtime-lift"],
+        ["profile.ts", "launchPersistentContext(\".auth\");\n", "shared-browser-session"],
+        ["profile-env.ts", "launchPersistentContext(process.env.LEGACY_PROFILE);\n", "shared-browser-session"],
+      ];
+      for (const [name, content, expected] of cases) {
+        const path = `temp_src/core/${name}`;
+        write(root, path, content);
+        assert.ok(bridgeClasses(root, contract, scripts).includes(expected), `${name} must trigger ${expected}`);
+        rmSync(join(root, path));
+      }
+
+      write(root, "src/rebuild-state.ts", "readFileSync(\".tracker-rebuild\");\n");
+      assert.ok(bridgeClasses(root, contract, scripts).includes("cross-tree-state-access"));
+      rmSync(join(root, "src/rebuild-state.ts"));
+
+      write(
+        root,
+        "temp_src/core/declarations-only.ts",
+        "// fetch('http://127.0.0.1:3838'); liftLegacyRows();\nconst legacyState = '.tracker';\nfunction liftLegacyRows(): void {}\n",
+      );
+      assert.deepEqual(auditRuntimeIsolation(root, contract, scripts), []);
+    });
   });
 });

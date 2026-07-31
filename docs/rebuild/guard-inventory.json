@@ -4,7 +4,7 @@
   "architectureRoot": "tests/unit/architecture",
   "testScript": "test:architecture",
   "coveragePolicy": {
-    "exclusionListSha256": "2b3bc4a4a56db839722ff4d91f8e193054598802b7ab6a7c1b133092baab4edd",
+    "exclusionListSha256": "f51ffe5bc626b6f49bc24301df12c6f7878b90b5990419526478e175e2612a33",
     "minimumFloors": {
       "global": 60,
       "safetyCritical": 80
@@ -28,7 +28,7 @@
       "code-conventions",
       "frontend-tailwind-compliance"
     ],
-    "state": "planned-until-first-file"
+    "state": "executable-arms-planned-until-target-family"
   },
   "guards": [
     {

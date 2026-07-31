@@ -4,13 +4,13 @@ Cross-codebase patterns and mistakes to avoid. Read this before non-trivial work
 
 ## 2026-07-31 — Pre-tree rebuild gates need explicit activation and semantic baselines
 
-**Tried:** Prepare rebuild lint, coverage, preservation, and change-accounting gates while `temp_src` and `tests/rebuild` were still absent, starting from the legacy suite's aggregate ESLint totals.
+**Tried:** Prepare rebuild lint, coverage, isolation, preservation, and change-accounting gates while `temp_src` and `tests/rebuild` were still absent, starting from the legacy suite's aggregate ESLint totals and source-text checks that future guard files mentioned `temp_src`.
 
-**Failed because:** An unmatched future glob either fails too early or gets weakened into a vacuous pass, while aggregate lint counts allow one diagnostic to disappear and a different one to take its place. Comparing only with `HEAD` also loses the stable origin after Phase 1a commits begin accumulating.
+**Failed because:** An unmatched future glob either fails too early or gets weakened into a vacuous pass, while checking only child test directories misses an empty `tests/rebuild` activation root. A coverage exclusion whose activation glob equals its exclusion glob can never detect staleness. Source-text mentions do not prove a ratchet executes, shallow guard discovery misses nested tests, and import-only isolation scans miss dynamic imports, process/filesystem bridges, proxy/remount calls, and runtime configuration that declares isolated values without consuming them. Aggregate lint counts also allow one diagnostic to disappear and a different one to take its place; comparing only with `HEAD` loses the stable origin after Phase 1a commits accumulate.
 
-**Fix:** Treat absence as a named pre-activation state and require a non-empty file set as soon as a root exists. Pin legacy lint debt by repo-relative path, rule, semantic message, columns, and the SHA-256 of the reported source line, with multiplicity. Anchor preservation and D90 change accounting to the explicit Phase-0 commit, then require every changed legacy path to name affected capability ids and rebuild rechecks.
+**Fix:** Treat absence as a named pre-activation state and require a non-empty runnable file set as soon as either side's root exists. Give every coverage exclusion a distinct exact owner root plus `planned|active` status. Register executable ratchet auditors with adversarial fixtures, recursively reconcile guard files, and parse the architecture command exactly. For isolation, parse TypeScript call sites and constant expressions, consume a closed bridge-class registry, and require exact config values to flow through executable composition calls. Pin legacy lint debt by repo-relative path, rule, semantic message, columns, and source-line SHA-256 with multiplicity; anchor preservation/change accounting to the explicit Phase-0 commit.
 
-**Tags:** rebuild, architecture-guards, lint, coverage, non-vacuity, fingerprints, preservation, change-accounting
+**Tags:** rebuild, architecture-guards, lint, coverage, non-vacuity, fingerprints, preservation, change-accounting, runtime-isolation, activation
 
 ## 2026-07-16 — In-process workflows need their own immutable retry authority
 

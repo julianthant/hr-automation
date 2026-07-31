@@ -4,12 +4,16 @@ import { recordConsoleLog } from "./tests/log-audit-core.js";
 
 export const REBUILD_COVERAGE_INCLUDE = ["temp_src/**/*.ts", "temp_src/**/*.tsx"] as const;
 export const REBUILD_COVERAGE_EXCLUSIONS = [
-  { pattern: "temp_src/**/*.d.ts", activationRoot: "temp_src/**/*.d.ts", reason: "Type declarations are not executable authored code." },
-  { pattern: "temp_src/**/generated/**", activationRoot: "temp_src/**/generated/**", reason: "Generated projections are verified by determinism guards." },
-  { pattern: "temp_src/dashboard/**/*.tsx", activationRoot: "temp_src/dashboard/**/*.tsx", reason: "Presentation components use the headless Playwright lane; extracted .ts logic remains measured." },
-  { pattern: "temp_src/stores/*/driver/raw-page/**", activationRoot: "temp_src/stores/*/driver/raw-page/**", reason: "The sole raw Page internals require the live semantic-driver lane." },
-  { pattern: "temp_src/**/index.ts", activationRoot: "temp_src/**/index.ts", reason: "Pure barrels contain no decision logic." },
-  { pattern: "temp_src/cli.ts", activationRoot: "temp_src/cli.ts", reason: "The process entrypoint is boot-smoke verified." },
+  {
+    pattern: "temp_src/generated/**/*.ts",
+    activation: { ownerRoot: "temp_src/generated", status: "planned" },
+    reason: "Generated projections are verified by determinism guards.",
+  },
+  {
+    pattern: "temp_src/dashboard/**/*.tsx",
+    activation: { ownerRoot: "temp_src/dashboard", status: "planned" },
+    reason: "Presentation components use the headless Playwright lane; extracted .ts logic remains measured.",
+  },
 ] as const;
 
 export const REBUILD_COVERAGE_FLOORS = {

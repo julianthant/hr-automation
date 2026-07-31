@@ -58,6 +58,11 @@
       "rebuildEvidenceIds": []
     },
     {
+      "path": "tests/unit/architecture/helpers",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
       "path": "tests/unit/control",
       "disposition": "preserved",
       "rebuildEvidenceIds": []
