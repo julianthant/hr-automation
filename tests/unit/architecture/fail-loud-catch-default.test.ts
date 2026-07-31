@@ -1,7 +1,13 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  REPO_ROOT,
+  repoRelative,
+  walkFiles,
+  type CountAllowlist,
+} from "./helpers/guard-files.js";
 
 /**
  * Guard: "fail loud — no unverified silent fallbacks" (root CLAUDE.md, "Fail
@@ -23,23 +29,8 @@ import { join, relative } from "node:path";
  * silent add to the allowlist.
  */
 
-const ROOT = process.cwd();
+const ROOT = REPO_ROOT;
 const SRC = join(ROOT, "src");
-
-function walk(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    const stat = statSync(full);
-    if (stat.isDirectory()) out.push(...walk(full));
-    else if (full.endsWith(".ts") || full.endsWith(".tsx")) out.push(full);
-  }
-  return out;
-}
-
-function rel(path: string): string {
-  return relative(ROOT, path);
-}
 
 // ---------------------------------------------------------------------------
 // Pattern A: `catch { <single bare-default statement> }` (try/catch form)
@@ -71,7 +62,7 @@ function findCatchBlocks(content: string): CatchBody[] {
 }
 
 /** file (relative to repo root) -> { count, reason } */
-const STATEMENT_CATCH_ALLOWLIST: Record<string, { count: number; reason: string }> = {
+const STATEMENT_CATCH_ALLOWLIST: CountAllowlist = {
   "src/control/actions/perform-workflow-action.ts": {
     count: 1,
     reason: "emitDashboardCancelTrackerRow's catch is commented in place: falls back to the caller's original error rather than claiming success.",
@@ -280,7 +271,7 @@ const PLAYWRIGHT_PROBE_METHODS = [
 const PLAYWRIGHT_PROBE_RE = new RegExp(`\\.(${PLAYWRIGHT_PROBE_METHODS.join("|")})\\(`);
 const BACKWARD_WINDOW = 2000;
 
-const ARROW_CATCH_ALLOWLIST: Record<string, { count: number; reason: string }> = {
+const ARROW_CATCH_ALLOWLIST: CountAllowlist = {
   "src/infra/auth/duo-poll.ts": {
     count: 1,
     reason: "Caller-supplied `successCheck(page)` during the cached-trust pre-check throws -> treated as not-verified (false), which falls through to the normal Duo flow instead of wrongly skipping it — the safe direction.",
@@ -301,7 +292,7 @@ const ARROW_CATCH_ALLOWLIST: Record<string, { count: number; reason: string }> =
 
 function scanStatementCatches(): Map<string, string[]> {
   const found = new Map<string, string[]>();
-  for (const file of walk(SRC)) {
+  for (const file of walkFiles(SRC)) {
     const content = readFileSync(file, "utf8");
     const hits: string[] = [];
     for (const { start, body } of findCatchBlocks(content)) {
@@ -315,14 +306,14 @@ function scanStatementCatches(): Map<string, string[]> {
         hits.push(`${lineNo}: catch { ${codeLines[0]} }`);
       }
     }
-    if (hits.length > 0) found.set(rel(file), hits);
+    if (hits.length > 0) found.set(repoRelative(file), hits);
   }
   return found;
 }
 
 function scanArrowCatches(): Map<string, string[]> {
   const found = new Map<string, string[]>();
-  for (const file of walk(SRC)) {
+  for (const file of walkFiles(SRC)) {
     const content = readFileSync(file, "utf8");
     const hits: string[] = [];
     CATCH_ARROW_DEFAULT.lastIndex = 0;
@@ -337,14 +328,14 @@ function scanArrowCatches(): Map<string, string[]> {
       const lineNo = content.slice(0, m.index).split("\n").length;
       hits.push(`${lineNo}: ${trimmed.slice(0, 140)}`);
     }
-    if (hits.length > 0) found.set(rel(file), hits);
+    if (hits.length > 0) found.set(repoRelative(file), hits);
   }
   return found;
 }
 
 function checkAgainstAllowlist(
   found: Map<string, string[]>,
-  allowlist: Record<string, { count: number; reason: string }>,
+  allowlist: CountAllowlist,
   patternLabel: string,
 ): string[] {
   const violations: string[] = [];

@@ -1,7 +1,14 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  REPO_ROOT,
+  auditCountAllowlist,
+  repoRelative,
+  walkFiles,
+  type CountAllowlist,
+} from "./helpers/guard-files.js";
 
 /**
  * Guard: every `waitForTimeout(` in src/workflows/ and src/systems/ must be
@@ -26,26 +33,11 @@ import { join, relative } from "node:path";
  * remaining sleeps changed shape, the reason.
  */
 
-const ROOT = process.cwd();
+const ROOT = REPO_ROOT;
 const SCAN_ROOTS = [join(ROOT, "src", "workflows"), join(ROOT, "src", "systems")];
 
-function walk(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    const stat = statSync(full);
-    if (stat.isDirectory()) out.push(...walk(full));
-    else if (full.endsWith(".ts") || full.endsWith(".tsx")) out.push(full);
-  }
-  return out;
-}
-
-function rel(path: string): string {
-  return relative(ROOT, path);
-}
-
 /** file (relative to repo root) -> { count, reason } */
-const ALLOWLIST: Record<string, { count: number; reason: string }> = {
+const ALLOWLIST: CountAllowlist = {
   "src/workflows/emergency-contact/enter.ts": {
     count: 2,
     reason: "TODO(live-verify)-marked: no detectable post-fill DOM condition for a plain text field / the Phone field specifically — see inline comments.",
@@ -161,31 +153,21 @@ describe("fail-loud guard: waitForTimeout allowlist in workflows/systems", () =>
   it("every waitForTimeout( in src/workflows/ and src/systems/ is accounted for", () => {
     const found = new Map<string, number>();
     for (const scanRoot of SCAN_ROOTS) {
-      for (const file of walk(scanRoot)) {
+      for (const file of walkFiles(scanRoot)) {
         const content = readFileSync(file, "utf8");
         const n = countWaitForTimeout(content);
-        if (n > 0) found.set(rel(file), n);
+        if (n > 0) found.set(repoRelative(file), n);
       }
     }
 
-    const violations: string[] = [];
-    for (const [file, n] of found) {
-      const entry = ALLOWLIST[file];
-      if (!entry) {
-        violations.push(`${file}: ${n} unallowlisted waitForTimeout( call(s)) — new sleep introduced outside the allowlist.`);
-        continue;
-      }
-      if (entry.count !== n) {
-        violations.push(
-          `${file}: allowlisted for ${entry.count} waitForTimeout( call(s)) but found ${n} — update the ALLOWLIST count (and reason, if the shape changed).`,
-        );
-      }
-    }
-    for (const file of Object.keys(ALLOWLIST)) {
-      if (!found.has(file)) {
-        violations.push(`${file}: allowlisted for ${ALLOWLIST[file].count} waitForTimeout( call(s)) but none found anymore — remove the stale entry.`);
-      }
-    }
+    const violations = auditCountAllowlist(found, ALLOWLIST, {
+      unallowlisted: (file, count) =>
+        `${file}: ${count} unallowlisted waitForTimeout( call(s)) — new sleep introduced outside the allowlist.`,
+      changed: (file, expected, actual) =>
+        `${file}: allowlisted for ${expected} waitForTimeout( call(s)) but found ${actual} — update the ALLOWLIST count (and reason, if the shape changed).`,
+      stale: (file, expected) =>
+        `${file}: allowlisted for ${expected} waitForTimeout( call(s)) but none found anymore — remove the stale entry.`,
+    });
 
     assert.deepEqual(violations, [], `\n${FIX_GUIDANCE}\n\n${violations.join("\n")}`);
   });

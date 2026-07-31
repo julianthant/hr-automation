@@ -37,9 +37,14 @@ npm run typecheck                                  # Type-check backend src/ + t
 npm run typecheck:dashboard                        # Type-check the dashboard project (src/dashboard/tsconfig.json)
 npm run typecheck:all                              # Both of the above — the full type gate
 npm run test                                       # Unit tests (dot reporter — live progress)
+npm run test:rebuild                               # Rebuild unit/scenario lanes; explicit planned no-op before temp_src activation
+npm run test:coverage                              # Rebuild 60/80 coverage gate + suite-size report; inert only while temp_src is absent
 npm run test:verbose                               # Per-test lines (scoped debugging)
 npm run test:watch                                 # Vitest in watch mode for iterative dev
 npm run test:architecture                          # Static architecture/convention guards
+npm run lint:rebuild                               # Zero-debt rebuild source lint; present-but-empty temp_src fails
+npm run lint:rebuild-tests                         # Zero-debt tests/rebuild lint; present-but-empty root fails
+npm run lint:legacy-tests-ratchet                  # Semantic no-new-debt gate over the reviewed legacy diagnostic baseline
 npm run build:dashboard                            # Single-file dashboard build
 ```
 
@@ -96,6 +101,7 @@ If you can't satisfy both, **fail loud** — do not add the fallback. When in do
 - **Before commits:** `npm run test` + `npm run test:architecture` (architecture guards run here).
 - **After changes — CLAUDE.md:** update after every non-trivial fix, new pattern, or gotcha; merge/replace stale entries, don't layer duplicates.
 - **After changes:** update only the nearest relevant `CLAUDE.md` when a non-obvious pattern, gotcha, or contract changes; merge stale lessons instead of adding duplicates.
+- **Rebuild coexistence gates:** Phase 1a inventories live under `config/rebuild/` and `docs/rebuild/guard-inventory.json`. The missing `temp_src` / `tests/rebuild` roots are an explicit planned state; once either family activates, empty source/test matches fail. Legacy test lint is intentionally non-zero and must be checked with `lint:legacy-tests-ratchet`, which permits removals but rejects every new or replacement semantic fingerprint.
 - **Lessons (add vs. audit):** record a new gotcha with the `custom-hr-lesson` skill (it self-dedupes against neighbors before appending). Periodically GC the lesson stores with the `custom-hr-lesson-audit` skill (`.claude/skills/custom-hr-lesson-audit/`) — it sweeps every `LESSONS.md` + `CLAUDE.md` "Lessons Learned" section to remove duplicate/superseded/dead-reference lessons and verify each remaining lesson still maps to real code. Lessons are maintained, not append-only.
 
 ## Live verification — standing pre-authorization (always available, never ask)

@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 2,
+  "phase": "pre-tree",
+  "legacy": {
+    "sourceRoot": "src",
+    "entrypoint": "src/cli.ts",
+    "commands": {
+      "dashboard": "tsx --env-file=.env src/cli.ts dashboard --capture-ngrok",
+      "dashboard:prod": "tsx --env-file=.env src/cli.ts dashboard --prod",
+      "dashboard:watch": "tsx watch --env-file=.env src/cli.ts dashboard --capture-ngrok"
+    },
+    "stateRoot": ".tracker",
+    "artifactRoot": ".tracker",
+    "backendPort": 3838,
+    "frontendPort": 5173,
+    "processLockRoot": ".tracker/daemons",
+    "browserProfileRoot": ".auth",
+    "browserSessionNamespace": "hrauto-legacy"
+  },
+  "rebuild": {
+    "sourceRoot": "temp_src",
+    "entrypoint": "temp_src/cli.ts",
+    "commands": {
+      "rebuild:dashboard": "tsx --env-file=.env temp_src/cli.ts dashboard",
+      "rebuild:dashboard:prod": "tsx --env-file=.env temp_src/cli.ts dashboard --prod",
+      "rebuild:cli": "tsx --env-file=.env temp_src/cli.ts"
+    },
+    "stateRoot": ".tracker-rebuild",
+    "artifactRoot": ".tracker-rebuild/artifacts",
+    "backendPort": 3938,
+    "frontendPort": 5174,
+    "processLockRoot": ".tracker-rebuild/locks",
+    "browserProfileRoot": ".auth-rebuild",
+    "browserSessionNamespace": "hrauto-rebuild",
+    "runtimeConfig": {
+      "module": "temp_src/config/runtime-isolation.ts",
+      "factory": "defineRuntimeIsolation",
+      "factoryModule": "temp_src/config/define-runtime-isolation.ts",
+      "factoryExport": "defineRuntimeIsolation",
+      "exportName": "rebuildRuntimeIsolation"
+    },
+    "compositionRoots": [
+      {
+        "path": "temp_src/cli.ts",
+        "factory": "startRebuildRuntime",
+        "factoryModule": "temp_src/core/runtime-composition.ts",
+        "factoryExport": "startRebuildRuntime",
+        "bindingPath": "0.isolation"
+      },
+      {
+        "path": "temp_src/core/workflow-registry.ts",
+        "factory": "composeRebuildRuntime",
+        "factoryModule": "temp_src/core/runtime-composition.ts",
+        "factoryExport": "composeRebuildRuntime",
+        "bindingPath": "0.isolation"
+      }
+    ]
+  },
+  "moduleFamilies": [
+    {
+      "family": "filesystem",
+      "specifiers": ["fs", "fs/promises", "node:fs", "node:fs/promises"],
+      "bridgeClasses": ["cross-tree-filesystem-access"]
+    },
+    {
+      "family": "network-route",
+      "specifiers": ["dgram", "http", "http2", "https", "net", "node:dgram", "node:http", "node:http2", "node:https", "node:net", "node:tls", "tls", "undici", "ws"],
+      "bridgeClasses": ["cross-tree-runtime-bridge", "route-proxy-forward-remount"]
+    },
+    {
+      "family": "process-execution",
+      "specifiers": ["child_process", "cluster", "node:child_process", "node:cluster", "node:vm", "node:worker_threads", "vm", "worker_threads"],
+      "bridgeClasses": ["cross-tree-process-invocation"]
+    },
+    {
+      "family": "module-loader",
+      "specifiers": ["module", "node:module"],
+      "bridgeClasses": ["cross-tree-module-edge"]
+    },
+    {
+      "family": "browser-profile",
+      "specifiers": ["@playwright/test", "playwright", "playwright-core", "puppeteer", "puppeteer-core"],
+      "bridgeClasses": ["shared-browser-session"]
+    }
+  ],
+  "forbiddenBridgeClasses": [
+    "continuous-runtime-lift",
+    "cross-tree-filesystem-access",
+    "cross-tree-module-edge",
+    "cross-tree-process-invocation",
+    "cross-tree-runtime-bridge",
+    "cross-tree-state-access",
+    "route-proxy-forward-remount",
+    "shared-browser-session"
+  ]
+}
