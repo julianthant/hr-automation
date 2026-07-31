@@ -311,7 +311,10 @@ shape simplification rather than being normalized as editor lag.
 invoke, proxy, or read/write its live state; commands, roots, ports, locks, and browser profiles/
 sessions are distinct in both directions. Verified leaf knowledge is ported with provenance.
 Every legacy change maps to affected capabilities and rebuild evidence; legacy source/tests are
-preserved, while new/touched test diagnostics cannot add debt. Phase 1 proves only inside the
+preserved. D88's syntax enforcement is hash-bound: exact manifest-matching legacy files keep their
+frozen side-local dynamic shapes while still rejecting resolved rebuild crossings; all rebuild,
+new legacy, and changed legacy files use the full fail-closed normal form. New/touched test
+diagnostics cannot add debt. Phase 1 proves only inside the
 isolated rebuild runtime and never changes production routing.
 
 ---
@@ -723,7 +726,10 @@ During development, `src` remains the sole production authority and `temp_src` i
 rebuild runtime. Phase 1a mechanically enforces distinct commands/entrypoints, state/artifact
 roots, ports, process locks, and browser profiles/sessions, plus bidirectional import/invocation/
 state-access bans. Legacy maintenance continues; each changed path is recorded against affected
-capabilities and rebuild evidence. Verified knowledge is ported with provenance, never linked at
+capabilities and rebuild evidence. The legacy preservation manifest binds every current TypeScript
+path to its whole-file hash: exact matches receive known-cross-tree-only scanning, while new or
+changed files automatically receive the same strict normal form as `temp_src`; the manifest's
+coverage and hashes are audited. Verified knowledge is ported with provenance, never linked at
 runtime. Legacy source and tests cannot be deleted during the rebuild or initial cutover.
 
 The following are forbidden: continuous tracker lift, legacy API proxy/remount, a compatibility

@@ -952,14 +952,21 @@ The legacy and rebuilt event worlds coexist only as **two fully isolated runtime
   and browser profiles/sessions. The rebuild cannot import or invoke legacy runtime modules, read
   or mutate legacy live state, or attach to legacy browsers. The same bans apply legacy→rebuild.
 - The D88 guard enforces a deliberately finite syntax normal form during coexistence, not an
-  optimistic whole-language data-flow guess. Dynamic loaders and bridge-capable filesystem,
-  process, network, route, state, and browser/profile sinks must consume statically exact
-  literal/`const` values or properties of the current side's exact runtime-isolation binding;
-  unresolved/computed operands fail in the sink's owning bridge class. Imported or namespace
+  optimistic whole-language data-flow guess. The full fail-closed normal form applies to every
+  `temp_src` file and every new, modified, or hash-mismatched `src` file: dynamic loaders and
+  bridge-capable filesystem, process, network, route, state, and browser/profile sinks must consume
+  statically exact literal/`const` values or properties of the current side's exact runtime-isolation
+  binding; unresolved/computed operands fail in the sink's owning bridge class. Imported or namespace
   bridge capabilities may only be direct audited callees — aliasing, binding, wrapping, returning,
-  passing, computed selection, and re-export are forbidden. This intentionally rejects generic
-  wrappers at the runtime boundary; a reviewed side-local facade is the escape hatch, not a looser
-  scanner. A manifest-pinned module-family catalog classifies every non-type named/default/namespace
+  passing, computed selection, and re-export are forbidden. Existing legacy files are the narrow
+  exception only while their path and whole-file SHA-256 exactly match the exhaustive
+  `legacy-preservation.json` runtime-isolation map. Those frozen files use preservation scanning:
+  unresolved side-local operations and existing capability shapes are accepted, but any statically
+  resolved reference/import/invocation into `temp_src`, rebuild state/ports, or rebuild browser
+  profiles/sessions still fails in its owning class. Missing/stale hashes fail the binding audit and
+  switch that file back to strict scanning; D90 accounts the legacy change before a reviewed hash can
+  move. This intentionally rejects generic wrappers in new runtime-boundary code without making the
+  already-live legacy tree impossible to activate. A manifest-pinned module-family catalog classifies every non-type named/default/namespace
   import and member from filesystem, HTTP/network, process/worker/module-loader, and browser/profile
   packages; the rule is not limited to familiar method names. Calls and constructors share the same
   operand audit, and computed selection from `globalThis`/`window`/other runtime-global roots fails
