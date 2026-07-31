@@ -223,10 +223,6 @@ const ALLOWLIST: Record<string, { count: number; reason: string }> = {
     count: 3,
     reason: "Mirrors verify.ts: `record.formKind ?? \"unknown\"` is the explicit 'we don't know' sentinel; `record.documentType ?? \"expected\"` is the OCR prompt schema's own enum default (same shape as oath/EC); `record.name ?? \"\"` is comparison/carry-forward keying only.",
   },
-  "src/workflows/person-match/workflow.ts": {
-    count: 2,
-    reason: "`input.ssn ?? \"\"` / `input.dob ?? \"\"` — searchPerson treats empty as 'criterion absent' and its own personSearchCriteriaSufficient gate THROWS when both are empty (the schema also rejects that input at enqueue); never treated as a real SSN/DOB.",
-  },
 };
 
 const FIX_GUIDANCE =

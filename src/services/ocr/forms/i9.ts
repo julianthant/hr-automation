@@ -11,8 +11,8 @@
  * approve fan-out.
  *
  * The live UCPath person search does NOT run during OCR (rev. 2026-07-16 — it
- * used to fan out one person-match child per record here). When this run
- * completes, `/api/ocr/prepare` enqueues one REAL separations `i9-check`
+ * used to fan out one dedicated match child per record here). When this run
+ * completes, `/api/ocr/prepare` enqueues one REAL `i9-check`
  * member task per person (`enqueueI9CheckMemberTasks`), which searches
  * UCPath, re-matches the roster by the resolved EID, and appends the master
  * retention-tracker row. Enrichment here owns only what the packet itself can
@@ -191,7 +191,7 @@ export const I9PreviewRecordSchema = I9OcrRecordSchema.extend({
   disputedFields: z.array(z.string()).default([]),
   /** A Section 2 sheet whose person has no Section 1 page anywhere in the packet. */
   orphanSection2: z.boolean().default(false),
-  /** @deprecated No person-match children run during OCR anymore — historical rows only. */
+  /** @deprecated No match children run during OCR anymore — historical rows only. */
   personMatchStatus: z.enum(["pending", "running", "completed", "failed"]).optional(),
   /** @deprecated See `personMatchStatus` — historical rows only. */
   personMatchTraceId: z.string().optional(),
@@ -567,7 +567,7 @@ function maskSsn(digits: string): string {
   return `${digits.slice(0, 3)}-**-*${digits.slice(-2)}`;
 }
 
-/** The person-match child input built for one i9 record. */
+/** The HR-Tasks person-search input built for one i9-check record. */
 export type I9PersonMatchInput = {
   lastName: string;
   firstName: string;
@@ -577,7 +577,7 @@ export type I9PersonMatchInput = {
 };
 
 /**
- * Decide how to drive the person-match child for one i9 record.
+ * Decide how to drive the HR-Tasks match step for one i9 record.
  *
  * UCPath person search needs a name plus at least one hard identifier — a
  * usable (9-digit) SSN or a normalized MM/DD/YYYY DOB. A record missing the
@@ -652,7 +652,7 @@ export function isI9SecondOpinionSuspect(rec: I9PreviewRecord): boolean {
 }
 
 /**
- * Stamp the person-match outcome onto an i9 record from an
+ * Stamp the HR-Tasks match outcome onto an i9 record from an
  * `outcome.data`-shaped object. Pure — mutates + returns the record.
  */
 export function applyPersonMatchToI9Record(
@@ -858,7 +858,7 @@ export const i9OcrFormSpec: OcrFormSpec<I9OcrRecord, I9PreviewRecord> = {
 
   // Roster-less second-opinion policy: without this, the orchestrator's
   // tier-1 re-read phase (gated on a loaded roster) never runs for i9, so a
-  // weak-tier misread of Section 1 sails straight into the person-match
+  // weak-tier misread of Section 1 sails straight into the HR-Tasks match
   // search. Suspect = an i9 page that is unsearchable; a re-read is adopted
   // only when it strictly improves searchability (and, when the first read
   // had a name, shares a name token with it — orchestrator identity gate).
@@ -895,8 +895,8 @@ export const i9OcrFormSpec: OcrFormSpec<I9OcrRecord, I9PreviewRecord> = {
   // ─── Enrichment: Section 2 corroboration + roster NAME match ──
   //
   // The UCPath person search no longer runs here (it used to fan out one
-  // person-match child per record). It now runs AFTER this run completes, as
-  // REAL separations member tasks enqueued by `enqueueI9CheckMemberTasks`
+  // dedicated match child per record). It now runs AFTER this run completes,
+  // as REAL i9-check member tasks enqueued by `enqueueI9CheckMemberTasks`
   // (`src/tracker/dashboard/ocr/i9-check-results.ts`) — one retry-safe task
   // per person, which re-matches the roster BY the UCPath-resolved EID. This
   // phase owns what the packet alone can answer: pairing each person's two

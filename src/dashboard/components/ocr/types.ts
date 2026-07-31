@@ -494,7 +494,7 @@ export function parseVerifyPrepareRowData(
 
 /**
  * One I-9 record (one Section-1 page of a scanned I-9 packet), enriched by the
- * `i9` form spec's person-match fan-out. Mirrors the server-side
+ * I-9 form spec and, for current runs, an i9-check member task. Mirrors the server-side
  * `I9PreviewRecordSchema` (`src/services/ocr/forms/i9.ts`). Renders through
  * `VerifyRecordView` — it carries the same `checks` / `matchState` /
  * `warnings` fields the completeness report reads.
@@ -516,9 +516,9 @@ export interface I9PreviewRecord {
   ucpathFound?: boolean;
   matchedEmplId?: string;
   matchedName?: string;
-  /** State of the person-match child that enriched this record. */
+  /** @deprecated Historical pre-i9-check child state; retained for old OCR rows. */
   personMatchStatus?: "pending" | "running" | "completed" | "failed";
-  /** Trace id of the person-match child that enriched this record. */
+  /** @deprecated Historical pre-i9-check child trace; retained for old OCR rows. */
   personMatchTraceId?: string;
   matchState: MatchState;
   selected: boolean;
