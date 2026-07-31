@@ -209,12 +209,12 @@ SQLite permanent-key/atomic-outbox behavior, and native online backup/read-only 
 the same controls against the real API as committed Phase-1 tests. One adversarial case initially
 failed—pre-propagation negative evidence could contribute a vote—and is now closed by D69.
 
-**Measured existing gate baseline.** `typecheck:all`, unit+serial tests, all 137 architecture tests,
-and dashboard build pass. Source lint currently has 2 errors + 1 warning; test lint has 1,325 errors
-+ 2 warnings. D70/doc 10 §1.1 makes this explicit: source lint is repaired before 1b; new rebuild
-source/tests are zero-warning from their first file; legacy test diagnostics are fingerprinted,
-shrink-only coexistence debt and must reach zero before final cutover. No plan milestone may report
-`npm run lint:tests` green until it actually is.
+**Measured existing gate baseline (2026-07-31).** `typecheck:all`, source lint, dashboard build,
+479 unit files / 4,619 tests, 11 serial files / 20 tests, and 23 architecture files / 129 tests all
+pass. Test lint remains red at 1,344 errors + 2 warnings. D70/doc 10 §1.1 makes this explicit: new
+rebuild source/tests are zero-warning from their first file; legacy test diagnostics are
+fingerprinted, shrink-only coexistence debt and must reach zero before final cutover. No plan
+milestone may report `npm run lint:tests` green until it actually is.
 
 **Exit criteria.** Docs 00–12 and this build order approved; every deferred question has an owner,
 evidence needed, and resolution point. No `temp_src` code before this gate.
