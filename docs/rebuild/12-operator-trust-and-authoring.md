@@ -11,12 +11,14 @@ local-only network defaults, durable recovery, and evidence because this tool re
 HR records. **Round 8 also trims the DSL graph-authoring mode entirely (§5.4, D79a).**
 **Amended 2026-07-30 (Round 9):** the base-capability inventory names explicit per-workflow worker
 counts and authored fresh-browser-session boundaries instead of executor lanes/capacity math (D87).
+**Amended 2026-07-31 (Round 10):** UI knowledge is copied with provenance into an isolated rebuild;
+the explorer is Phase-2-only and graph DSL/codegen remains cut.
 
 ## Ownership (D1)
 
 | This doc **OWNS** | Imports from the owning sibling |
 |---|---|
-| Canonical UI vocabulary: `ElementId`, `ScreenId`, `PageStateId`, `ObservationId`, aliases, registry records, generated catalog, and the typed system-driver boundary | Task contract/store/session model → doc 01; page leases → doc 05 |
+| Canonical UI vocabulary: `ElementId`, `ScreenId`, `PageStateId`, `ObservationId`, search terms, registry records, generated catalog, and the typed system-driver boundary | Task contract/store/session model → doc 01; page leases → doc 05 |
 | Operator evidence receipt, failure record, diagnostic bundle, `explain run`, and redaction policy | Event/storage wire and retention → doc 03; write-binding proof/write ledger → doc 09; secrets → doc 11 |
 | Scenario corpus/manifests and the bug→regression-scenario rule | Task `example` and errors → doc 01; graph outcomes → doc 02; test lanes/guards → doc 10 |
 | Structured knowledge lifecycle and the AI-assisted `FixRecord` ledger | Existing lessons are migration inputs, not another authority |
@@ -80,7 +82,7 @@ export type ObservationId = Brand<string, "ObservationId">;  // "new-kronos.time
 
 IDs are stable kebab-case dotted names, never generated from a TypeScript file/property path. A
 source rename does not rename the operator vocabulary. Every id has one canonical human label and
-zero or more search aliases. Aliases help humans/AI find the canonical id; they never create another
+zero or more search terms. Search terms help humans/AI find the canonical id; they never create another
 identity.
 
 ### 1.2 Registry record
@@ -93,7 +95,7 @@ export interface UiElementDefinition<ValueSchema extends z.ZodType = z.ZodType> 
   system: BrowserSystemId;
   screen: ScreenId;
   label: string;                         // "Save and Submit"
-  aliases: readonly string[];            // "submit button", "finalize transaction"
+  searchTerms: readonly string[];        // "submit button", "finalize transaction"
   role: "button" | "field" | "grid" | "row" | "dialog" | "heading" | "link" | "status";
   effect: "observe" | "navigate" | "prepare" | "external-commit";
   value?: CanonicalJsonSchema<ValueSchema>;
@@ -138,11 +140,11 @@ from the same system registry and carry a fixture/test.
 ### 1.3 One canonical catalog for the operator and AI tools
 
 The build generates a **safe projection** at `generated/ui-catalog.json` and per-system
-`UI-CATALOG.md` from the server registry. Each entry includes canonical id, label, aliases,
+`UI-CATALOG.md` from the server registry. Each entry includes canonical id, label, search terms,
 screen/state, role/effect, verified date/method, sensitivity classification, tasks that use it,
 related observations, and an exact registry source link. It deliberately omits locator/state/read
-recipes and captured values. Search resolves labels and aliases to exactly one canonical id; an alias
-collision fails generation with both definitions named. The dashboard receives this projection; it
+recipes and captured values. Search resolves labels and search terms to exactly one canonical id; a
+search-term collision fails generation with both definitions named. The dashboard receives this projection; it
 never imports the server registry.
 
 Examples of operator language that resolve without source archaeology:
@@ -152,9 +154,10 @@ Examples of operator language that resolve without source archaeology:
 - “UCPath Save and Submit” → `ucpath.smart-hr.save-submit` (`ElementId`)
 - “the OnBase import form is ready” → `onbase.import.ready` (`PageStateId`)
 
-Existing `SELECTORS.md` and `selector:search` become compatibility inputs during migration. They do
-not remain a second catalog: selector property paths map to canonical element ids, and the generated
-catalog can show the old path as a temporary alias until the old tree is deleted.
+Existing `SELECTORS.md` and `selector:search` are porting evidence, never runtime inputs. Verified
+recipes are copied into `temp_src` with source path/key, verification date, and rebuild tests; the
+generated catalog may display the legacy property path as provenance text, not a resolvable search term.
+No rebuilt module imports legacy selector code, and old source remains preserved through cutover.
 
 ### 1.4 Tasks do not receive raw `Page`
 
@@ -398,7 +401,7 @@ migration, each relevant old lesson is triaged into one of three destinations:
 2. historical incident/context → incident history linked from a record/scenario;
 3. superseded/incorrect/duplicate → retained only in git history, not the generated active guide.
 
-The old file remains authoritative for legacy code until that code is deleted. The rebuilt system
+The old file remains authoritative for preserved legacy code. The rebuilt system
 uses only the structured store and its generated active view, eliminating a permanent dual source.
 
 ```ts
@@ -489,13 +492,12 @@ registry entry, or call the command/mutation services.
 
 ### 5.1 Decision
 
-Build a **read-only workflow explorer in the base**, then add constrained editing after the graph,
-validation, versioning, and evidence pipeline have proved themselves. A fully free-form visual
-programmer is rejected: arbitrary code, selectors, and write-proof logic cannot be made safer than
-reviewed TypeScript merely by drawing nodes. A permanently read-only screen is also too limiting
-for routine presentation and composition changes.
+Build a **read-only workflow explorer in Phase-2 tail 2i**, with closed presentation/policy editing
+alongside it after graph, validation, versioning, and evidence are proven. A free-form visual
+programmer and DSL/codegen are rejected: graph/composition, arbitrary code, selectors, and
+write-proof logic remain reviewed source work.
 
-### 5.2 Phase A—read-only explorer (Phase 1 base)
+### 5.2 Phase A—read-only explorer (Phase-2 tail 2i)
 
 The explorer is a projection of the exact descriptor and live span/checkpoint data—not a mined or
 parallel graph. It shows:
@@ -516,14 +518,10 @@ locations without reverse-engineering row prose.
 
 ### 5.3 Phase B—safe edits only
 
-After Phase 2, the editor may change a closed, reviewable subset:
+In Phase-2 tail 2i, the editor may change only a closed, reviewable subset:
 
 - presentation labels/order/grouping and notification preferences;
-- compose **existing** registered task nodes;
-- bind fields using typed source/target schema paths and a closed transform library;
-- choose declared branch/join/gate/delegation/action policies from closed unions;
-- choose contract-permitted replay behavior; task retry/freshness limits themselves remain
-  source-authored contract policy and cannot be weakened in the editor;
+- choose explicitly allowlisted presentation and operational policy values from closed unions;
 - configure descriptor-allowlisted Edit Data fields.
 
 It may not author arbitrary JavaScript, new task implementations, selectors/locator recipes,
@@ -547,18 +545,17 @@ schema, graph, guard, and scenario checks as source-authored descriptors. “Gen
 > restart-gated atomic apply, and exact-hash rollback. It is cut. Two reasons, both from the plan's
 > own text: §b question 12 expects everything real to stay source-authored, and the Phase-2 proof
 > would have needed a *synthetic* workflow because no real candidate was ever named — a pipeline
-> whose only user is its own test. **Every workflow is source-authored.** Reinstate the mode only
-> if a migration questionnaire names a concrete workflow that wants it; the paragraph below is
-> retained as the design to restore from.
+> whose only user is its own test. **Every workflow is source-authored.** Reconsideration requires
+> a new explicit operator architecture decision; migration questionnaires cannot enable it.
 
 **What remains after the trim.** There are two apply levels. **Presentation-only** changes write the
 existing strict versioned override through temp+fsync+atomic-replace and can hot-apply.
-**Graph/policy/composition** changes never mutate a live descriptor in memory and, for a
-source-authored workflow (i.e. all of them), the editor emits a **reviewed patch scaffold** and
+**Graph/composition/code-only policy** changes never mutate a live descriptor; the editor emits a
+**reviewed code-change brief** and
 cannot apply the edit itself. Anything the closed editable set cannot express produces a
 **code-change brief**, never partial config and never a second authority.
 
-*(Retained design history for the trimmed DSL mode.)*
+*(Historical rejected DSL design—do not implement.)*
 A DSL draft runs codegen, typecheck, graph guards, the impacted scenario set, and a clean build in an
 isolated output directory. Apply atomically stores the prior DSL/version for rollback, writes the new
 DSL+generated artifacts, and requires a controlled server restart; it never loads arbitrary code or
@@ -579,8 +576,8 @@ search and copied boilerplate:
    freshness, evidence, and notification expectations;
 4. receive an automatically generated “missing obligations” list—unbound fields, uncovered branch,
    missing subject observation, result dependency, proof/probe, scenario, UI id, or secret;
-5. generate the workflow descriptor/scenario scaffold and a code-change brief for anything the safe
-   DSL cannot express; then validate with the exact compile/scenario/diff pipeline above.
+5. generate a source-authored workflow/scenario scaffold plus code-change brief; no DSL or runtime
+   generated descriptor is produced.
 
 The authoring UI never invents a task because a name looks similar. It shows exact schemas and
 requires an explicit binding. New browser behavior starts in the UI registry/driver/task contract,
@@ -588,8 +585,8 @@ then becomes selectable by workflows; this is the “fix once, reuse everywhere�
 
 ### 5.6 What happens to the old workflow modifier
 
-Its useful presentation editing and operation mining are port inventory. During the scoped flip it
-remains proxied. The new read-only explorer replaces mined operations with descriptor tasks and
+Its useful presentation editing and operation mining are port inventory. The preserved legacy
+modifier remains isolated with `src`; it is never proxied or imported. The new read-only explorer replaces mined operations with descriptor tasks and
 driver UI ids. Presentation overrides may migrate into Phase B once they round-trip through the
 same descriptor projection. Generated `config/workflow-design/*.md` files are not runtime
 authority; the descriptor and validated draft history are.
@@ -693,7 +690,8 @@ what the **base** implements before workflow-specific leaf behavior is migrated:
     sequence of authoritative negative observations all captured after the propagation window,
     otherwise it
     parks, and there is no generic “force done”.
-18. Never-pruned, hash-chained local write ledger with anchored tail verification.
+18. Never-pruned ordered actor-attributed write ledger projected from atomic outboxes; hash-chain/
+    tail-anchor tamper evidence is deferred until multi-user.
 19. Content-addressed immutable artifacts and idempotent outbox-based mutable projections.
 20. Append-only span/note streams and server-side queue/timeline/session projections.
 21. Durable typed notifications with acknowledgement/snooze/resolution lifecycle.
@@ -706,7 +704,8 @@ what the **base** implements before workflow-specific leaf behavior is migrated:
 27. Structured active/superseded/retired knowledge records instead of append-only lessons.
 28. AI FixRecord ledger linking code changes, failures, scenarios, evidence, and commits.
 29. Read-only workflow explorer overlaying descriptor design and live execution on the same graph.
-30. Constrained, versioned workflow editing for safe closed-union composition after Phase 2.
+30. Constrained, versioned editing of closed presentation and operational-policy fields in Phase-2
+    tail 2i; graph/composition changes remain source-authored code changes.
 31. Operator-defined spreadsheet mappings keyed by stable target-field path (not just concept),
     with projection fingerprints, duplicate-safe source columns, per-cell schema errors, and saved
     layout maps.
@@ -721,7 +720,8 @@ what the **base** implements before workflow-specific leaf behavior is migrated:
     rescue mode.
 37. Full type/lint/architecture/fixture/stub/live guard umbrella with non-vacuity checks, zero-debt
     rebuild linting, and fingerprinted shrink-only legacy test-lint debt during coexistence.
-38. Per-run legacy/native generation authority for gradual migration without double ownership.
+38. Bidirectional runtime/state/import isolation plus one global cutover interlock; no per-run
+    legacy/native generation or gradual production flip.
 39. Immutable intake admission manifests and hash-diffed reruns showing every valid, rejected, and
     explicitly excluded source row.
 40. Guided new-workflow scaffolding with task/schema search and a generated missing-obligations list.
@@ -738,8 +738,8 @@ what the **base** implements before workflow-specific leaf behavior is migrated:
     produced/unavailable/invalid outcomes—remote I/O cannot hide in an import.
 46. Optional schema-bounded AI triage/sanity/selector/summary assistance over redacted structured
     evidence; it has no command, identity, registry-write, completion, or mutation authority.
-47. Machine-checked legacy capability disposition so every old service/route/UI/CLI/tool is ported,
-    replaced, deliberately retired, or still visibly blocking deletion.
+47. Machine-checked legacy capability disposition so every old service/route/UI/CLI/tool is native,
+    replaced, retired in the target, or visibly blocking cutover; it never authorizes old-source deletion.
 48. One exhaustive runtime-dependency inventory covering every browser system, provider,
     endpoint, env/config/secret consumer, and preflight check in both directions.
 49. One typed environment doctor powering startup, Settings health, workflow preflight, and
@@ -766,7 +766,7 @@ what the **base** implements before workflow-specific leaf behavior is migrated:
 
 Doc 10 registers the following:
 
-- canonical UI ids/aliases unique; every task-used element/state/observation resolves;
+- canonical UI ids/search terms unique; every task-used element/state/observation resolves;
 - raw `Page`/`Locator` imports and `page.` calls restricted to driver/session infrastructure;
 - subject-scoped browser tasks have registered authoritative observations and mismatch scenarios;
 - strict runtime schemas parse all UI registry, scenario, knowledge, fix, evidence, failure, and

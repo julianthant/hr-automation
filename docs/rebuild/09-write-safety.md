@@ -1,7 +1,8 @@
 # 09 — Write-Safety: Fenced, Fail-Closed Real HR Mutations
 
 Status: **revised 2026-07-22 after the whole-plan/legacy-code review; amended 2026-07-26
-(Round 8).** Round-8 amendments: **§13 OQ1 is RESOLVED** — the 2026-07-23 live probe proved Kuali
+(Round 8), and 2026-07-31 (Round 10 — ordered actor-attributed ledger now; hash/tail tamper evidence
+deferred by D79).** Round-8 amendments: **§13 OQ1 is RESOLVED** — the 2026-07-23 live probe proved Kuali
 `save-verify` is buildable and produced four binding constraints on it — **OQ2 (OnBase) is restated
 as blocked on a real upload target**, and **§14 designs the identity-approval gate** (D77
 ALWAYS-GATE), the control that guards the wrong-**person** class this doc's fence explicitly cannot.
@@ -27,14 +28,14 @@ from duplicate unattended attempts and reported **done only when we are sure it 
 | The **crash-window fence** (`write_intents` SQLite table) and the **crash-recovery replay** (positive proof or stabilized negative-proof branching) |
 | Typed, intent-generation-locked operator resolution for parked writes (confirmed present/absent; no generic Done/Retry) |
 | **Double-submit prevention** — idempotency key derivation + the per-workflow probe-policy knob (§b) |
-| The **immutable receipt/transaction ledger** — schema, location, never-pruned guarantee, hash-chain, what one entry records |
+| The **immutable receipt/transaction ledger** — schema, location, ordered actor-attributed projection, never-pruned guarantee, what one entry records; hash-chain/tail-anchor is deferred by D79 |
 | The **identity-approval gate** (§14) — the operator-confirmed subject selection that guards the wrong-**person** class, its resolver payload, staleness rule, and composition with the subject proof. *(Gate NODE mechanics — park/resume, subscriptions, command arm — are doc 02/03's; this doc owns what this particular gate asks and what its answer authorizes.)* |
 
 | This doc **references** (owner) |
 |---|
 | `PrepareTaskContract`/`CommitTaskContract`, transaction-scoped dry-run composition, `MutationCapability`, error taxonomy, freshness, stores → **doc 01** |
 | Transaction nodes, gates + `PARKED(needs-operator)`, checkpoint provenance/fingerprints, declared dependency DAG, `RunEnvelope` → **doc 02** |
-| Span/note wire schema, `.tracker/` storage layout, SQLite system-of-record vs projection split (D14), completion fan-out union → **doc 03** |
+| Span/note wire schema, isolated `.tracker-rebuild/` layout, SQLite system-of-record vs projection split (D14), completion fan-out union → **doc 03** |
 | The injectable Clock (all timestamps), per-run test/prod instance selection, the config/secrets domain → **doc 11 (clock/config/secrets)** |
 | The fill↔submit pairing guard + dry-run composition guard → **doc 10 (guard-architecture)** |
 | Subject declarations, semantic `ObservationId`, driver evidence/bundles → **docs 01 and 12** |
@@ -48,7 +49,7 @@ Amendments at sibling seams (each is a one-owner-per-concept addition, not a red
   Doc 02 owns those fields; this doc owns only the recovery-probe *mechanism* they invoke.
 - **Doc 03 §2.1 / §2.3 (per D21 — doc 03 OWNS and adds these).** The `ledger/` dir (never-pruned
   retention floor) and the `write_intents` **system-of-record** table live in doc 03's storage
-  layout; this doc owns their *shape/semantics*, not their placement in the `.tracker/` tree.
+  layout; this doc owns their *shape/semantics*, not their placement in the rebuild state tree.
 
 ---
 
@@ -429,13 +430,6 @@ CREATE TABLE durable_outbox (
   id TEXT PRIMARY KEY, kind TEXT NOT NULL, aggregate_key TEXT NOT NULL,
   payload_json TEXT NOT NULL, created_at TEXT NOT NULL, projected_at TEXT
 );
-
-CREATE TABLE ledger_heads (
-  system TEXT NOT NULL, ledger_date TEXT NOT NULL,
-  expected_seq INTEGER NOT NULL, expected_hash TEXT NOT NULL,
-  expected_bytes INTEGER NOT NULL,
-  PRIMARY KEY (system, ledger_date)
-);
 ```
 
 `write_attempts` contains only generations in which this automation crossed a fence; a live probe
@@ -561,16 +555,15 @@ prepared page and restarts at preflight, never clicks on an over-age result.
 ## 6. The immutable receipt / transaction ledger
 
 **Purpose (operator §13):** an immutable record of what real transactions were actually filed, **never
-pruned** — it outlives doc 03's decided base retention (spans 30d / notes 7d, D21) and the
+pruned** — it outlives doc 03's decided base retention (spans 30d / notes 30d, D86) and the
 `clean-tracker` sweep.
 
 ```ts
 // temp_src/domain/ledger.ts — the append-only at-rest entry shape.
-// Beat ⑦ writes its unsequenced payload to durable_outbox; the projector adds seq/prevHash.
+// Beat ⑦ writes its unsequenced payload to durable_outbox; the projector adds ordered seq.
 export interface LedgerEntry {
   outboxId: OutboxId;             // immutable DB identity; projector idempotency key
   seq: NonNegativeInt;            // assigned transactionally by the serialized projector
-  prevHash: Sha256 | "GENESIS";  // sha256 of the previous entry's canonical JSON
   workflow: WorkflowId;
   itemId: ItemId;
   system: BrowserSystemId;        // ucpath | crm | servicenow | kuali | onbase
@@ -596,29 +589,23 @@ export interface LedgerEntry {
 `proofSchemaHash` during projection/read. The interface is shown only for readability; persisted
 code uses its inferred type. There is no unchecked cast from the generic canonical proof envelope.
 
-- **Location:** `.tracker/ledger/<system>-<YYYY-MM-DD>.jsonl` (doc 03 §2.1 adds the dir). JSONL so the
-  operator greps it; per-system+day partition so `grep 10694136 .tracker/ledger/ucpath-*.jsonl`
+- **Location:** `.tracker-rebuild/ledger/<system>-<YYYY-MM-DD>.jsonl` (doc 03 §2.1). JSONL so the
+  operator greps it; per-system+day partition so `grep 10694136 .tracker-rebuild/ledger/ucpath-*.jsonl`
   answers "what did we file for this person?" across time.
-- **Never pruned (retention floor):** `clean-tracker` (which prunes `spans/` at 30d and `notes/` at
-  7d — doc 03's decided base retention, D21) skips `ledger/` unconditionally — a ratchet guard fails
+- **Never pruned (retention floor):** rebuild cleanup (which prunes `spans/` and `notes/` at
+  30d—D86) skips `ledger/` unconditionally—a ratchet guard fails
   if any prune path can reach `ledger/`. This is the "immutable transaction ledger, never pruned" of
   operator §13. The never-pruned floor sits above a *settled* number (D21), not a guessed one.
-- **Serialized projection.** Executors never append the ledger file. Beat ⑦ writes a unique ledger
-  outbox row. One projector holds a SQLite lease for `(system,date)` and processes exactly one row:
-  it verifies the anchored file tail, derives `seq/prevHash`, appends one canonical line, fsyncs, then
-  CAS-updates `ledger_heads` and marks that outbox projected in one SQLite transaction. A crash after
-  append but before the CAS leaves the file exactly one known `outboxId` ahead; restart validates and
-  adopts that line instead of appending it twice. A torn/unrecognized tail is truncated only to the
-  anchored `expected_bytes` after preserving a corruption artifact and raising an alert. Multiple
-  executors therefore cannot fork a chain, and the DB/file seam has an explicit recovery protocol.
-- **Hash-chain + durable tail anchor.** Each entry carries `seq` + `prevHash`; SQLite table
-  `ledger_heads(system,date,expected_seq,expected_hash,expected_bytes)` is the independent expected tail. A
-  `cli ledger verify` compares the file to that anchor, so editing, interior deletion, record-boundary
-  tail truncation, and whole-file loss are detectable. Without this anchor a valid-prefix tail
-  truncation would be invisible. This is tamper-evidence, not tamper-proof: a local attacker who
-  rewrites both the DB and file coherently is out of scope for a single-operator tool. It is the right
-  altitude: enough to trust the audit trail, no HSM ceremony. Escalation to signed/anchored is a
-  documented future option (§13 Q3), not built now.
+- **Serialized ordered projection.** Executors never append the ledger file. Beat ⑦ writes a
+  unique ledger outbox row. One projector holds a SQLite lease for `(system,date)`, assigns the next
+  sequence, appends one canonical actor-attributed line, fsyncs, and marks that outbox projected.
+  Restart reconciles committed intents/outboxes against `outboxId` + sequence and appends only
+  missing entries; duplicate, gap, malformed-tail, or order conflicts stop projection and surface
+  degraded health rather than silently rewriting history.
+- **Hash-chain/tail-anchor deferred (D79).** `prevHash`, `ledger_heads`, and tamper-evident tail
+  verification are not initial single-operator requirements. They return only with the multi-user
+  phase or a separately ratified compliance requirement. Never-pruned retention, strict schemas,
+  atomic outboxes, one ordered projector, actor attribution, backups, and reconciliation remain.
 - **Projection is idempotent** by `outboxId`. Recovery audits committed intents against ledger and
   terminal-span outboxes, creates only missing outboxes in SQLite, then lets projectors catch up.
 - **One entry = one filed transaction.** The ledger is the durable superset of the `write.committed`
@@ -695,8 +682,9 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
   sleeping.
 - **Atomic outbox + ledger integrity** — crash injection at every subpoint of beat ⑦ proves the
   intent/checkpoint/ledger-outbox/span-outbox commit is all-or-none. Concurrent projector fixtures
-  prove one linear chain. Verification detects interior edits, tail truncation, and missing files
-  against `ledger_heads`.
+  prove one ordered stream, actor attribution, idempotence by outbox id, and loud failure on
+  sequence gaps, malformed tails, duplicates, or missing files. Hash-chain/tail-anchor tests wait
+  for the deferred multi-user upgrade.
 - **Idempotency key hygiene** — a grep/AST guard flags an `idempotency.key` body referencing
   `attempt`, `index`, `runId`, or array position (the doc1/doc2 ban); keys must read input fields.
 - **Transaction pairing** — every prepare and commit contract is paired in a transaction node;
@@ -760,7 +748,7 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
 
 **Newly built (mostly the write-ahead layer — the gap audit's "mostly new"):**
 - The permanent-key intent table, atomic outboxes, fixed sequencer, `ProbeVerdict`, serialized
-  ledger projector + anchored hash-chain, and recovery reconciliation.
+  ordered ledger projector, and recovery reconciliation.
 - **Kuali `kuali/read-saved-document`** — a positive `save-verify` read-back that does NOT exist today
   (Kuali removed its error detection as false-positive-prone). Must be built and live-verified before
   Kuali submit tasks can instantiate a passing `completion`.
@@ -815,8 +803,9 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
 - **Probe-policy misconfig.** `"retries-and-recovery-only"` can miss a transaction created outside
   this ledger on a pristine key; it cannot bypass durable committed history. The choice remains a
   required migration decision and should default by review preference to `always`.
-- **Ledger tamper / loss.** The SQLite tail anchor detects file truncation/loss but remains local; an
-  attacker rewriting both DB and file is out of scope. External signing remains an escalation path.
+- **Ledger damage/loss.** Strict entry parsing, ordered outbox reconciliation, backups, and degraded
+  health catch malformed/gapped projection state; hash-chain/tail-anchor tamper evidence is deferred
+  to multi-user work (D79), so malicious coherent local rewriting remains out of current scope.
 
 ---
 
@@ -924,10 +913,9 @@ proves every business choice.
    2026-07-24). Consequence to be explicit about before order 7: if OnBase lands on always-park,
    its automation degrades to "the operator manually confirms every upload," which changes the
    daily workload rather than the safety story. Owner: this doc; gate: doc 07 §3.8.
-3. ~~Ledger tamper-evidence altitude~~ — **resolved 2026-07-21:** local hash chain + independent
-   SQLite tail anchor is diagnostic tamper-evidence, not a security boundary. Coordinated local
-   DB+file rewriting is out of scope. External signing/anchoring is added only if a later compliance
-   requirement names it; Phase 1 does not wait for an unanswered preference.
+3. ~~Ledger tamper-evidence altitude~~ — **amended by D79:** hash chain + independent tail anchor
+   are deferred until multi-user or a separately ratified compliance need. The initial ledger is
+   never-pruned, ordered, actor-attributed, strict, backed up, and reconciled from atomic outboxes.
 4. **Probe policy + elapsed budget per workflow (§b).** For each migrating workflow: `"always"`
    (safe, +1 round-trip) or `"retries-and-recovery-only"` (cannot detect a prior external write on
    an unseen key), and what justified `probeToFenceMaxMs` bounds preparation after that probe?

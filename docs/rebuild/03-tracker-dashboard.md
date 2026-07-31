@@ -125,8 +125,6 @@ interface RunQueuedBase extends Base {
   displayOnly: boolean;            // task-less display row (§4.3, §5) — no claim will ever follow
   priority: "interactive" | "bulk"; // trusted server stamp; children inherit their root
   retryOf?: string;                // prior runId when this is a cross-run retry
-  engine: "legacy" | "native";
-  cutoverGeneration: number;
   descriptorVersion: number;
   contractFingerprint: Fingerprint;
   resolvedInstance: Partial<Record<BrowserSystemId, SystemInstance>>;
@@ -198,10 +196,11 @@ export interface SpanEnded extends Base {
 
 The TypeScript declarations above are readable views, **not validation**. `SpanEventSchema`,
 `NoteSchema`, every `*WireSchema`, and the SSE payload schemas are strict discriminated zod unions;
-their inferred types are the implementation types. JSONL read, SQLite read/write, legacy lift,
-HTTP input/output, SSE emission, and fixture load all parse at the boundary. Unknown keys, invalid
-ISO instants, unbranded ids, non-canonical JSON, `NaN`, and invalid state combinations fail or enter
-the explicit legacy quarantine—never get cast into the model.
+their inferred types are the implementation types. Native JSONL read, SQLite read/write, HTTP
+input/output, SSE emission, and fixture load all parse at the boundary. Unknown keys, invalid ISO
+instants, unbranded ids, non-canonical JSON, `NaN`, and invalid state combinations fail—never get
+cast into the model. An optional offline historical importer owns its own explicit-version parse and
+visible quarantine contract; it is not a runtime boundary.
 
 **Notes** (high-volume annotations — log lines, screenshots, per-action records, data points) are a
 parallel stream, not span events. Same `SpanRef` addressing, so a note attributes to its exact task
@@ -287,7 +286,6 @@ flowchart LR
     CMD["commands (CAS, actor-stamped)"]
     WI["write_intents (the fence)"]
     OB["ledger + span OUTBOXES"]
-    LH["ledger heads (tail anchor)"]
   end
 
   subgraph PROJ["projections — REGENERABLE"]
@@ -310,8 +308,7 @@ flowchart LR
   T --> OB
   N --> NJ
   OB -->|"serialized projector"| SJ
-  OB ==>|"serialized projector<br/>+ hash / tail anchor"| LED
-  LH -.->|verifies tail| LED
+  OB ==>|"serialized ordered projector"| LED
   AUTH --> RM
   SJ --> RM
   RM --> WP & SB & QP
@@ -321,40 +318,41 @@ flowchart LR
   classDef auth stroke:#c0392b,stroke-width:2px,fill:#00000000;
   classDef proj stroke:#7f8c8d,fill:#00000000;
   classDef ledger stroke:#8e44ad,stroke-width:2px,fill:#00000000;
-  class CL,DEP,CMD,WI,OB,LH auth;
+  class CL,DEP,CMD,WI,OB auth;
   class SJ,NJ,RM proj;
   class LED ledger;
 ```
 
 Three things to read off it: a write reaches **authority in one atomic transaction** before any
 JSONL exists (so a crash between them is repairable, never a lost filing); the **ledger has exactly
-one writer** and an independent SQLite tail anchor, so concurrent chain forks and tail truncation
-are both detectable; and **every count in the UI descends from one node** (D81, §10.1) — there is
+one ordered writer**, with actor-attributed entries reconciled from atomic outboxes; and **every
+count in the UI descends from one node** (D81, §10.1) — there is
 no second path a badge could take.
 
 ### 2.1 On disk — JSONL-per-day stays, two streams
 
+The rebuild owns the distinct `.tracker-rebuild/` state root. Production `src` owns `.tracker/`;
+neither runtime reads or writes the other's root.
+
 ```
-.tracker/
+.tracker-rebuild/
 ├── spans/   <workflow>-<date>.jsonl   span events (low volume — the queue/timeline truth)
 ├── notes/   <workflow>-<date>.jsonl   notes (high volume — logs, actions, screenshots, data points)
 ├── evidence/<runId>/                  run receipts + redacted diagnostic bundle manifests (doc 12)
 ├── artifacts/sha256/<prefix>/<hash>    content-addressed task outputs; atomic, immutable bytes
 ├── ledger/  <system>-<date>.jsonl     immutable write receipts (D21; shape owned by doc 09 §6) —
-│                                      hash-chained (seq + prevHash), append-only, per-SYSTEM+day,
-│                                      NEVER pruned (the audit floor)
-├── rows/ logs/ sessions/ …            LEGACY dirs — still written/read only by production `src`;
-│                                      `temp_src` has no runtime access (§5)
+│                                      ordered, actor-attributed, append-only, per-SYSTEM+day,
+│                                      NEVER pruned (the audit floor; hash chain deferred by D79)
 ├── backups/state/                     checksummed online backups + restore manifests (§2.5)
-└── state.db                           SQLite — claims/checkpoints/intents/outboxes/ledger heads,
+└── state.db                           SQLite — claims/checkpoints/intents/outboxes,
                                        commands/dependencies/notifications are system-of-record;
                                        read projections alone are rebuildable
 ```
 
 Rationale against alternatives:
 - **Why not SQLite-only?** The operator greps files. **Debug grep now spans two dirs:**
-  `grep ou-1430 .tracker/spans/*.jsonl` answers *what happened* (state transitions, outcomes,
-  gates); `grep ou-1430 .tracker/notes/*.jsonl` answers *what it did* (log lines, per-action
+  `grep ou-1430 .tracker-rebuild/spans/*.jsonl` answers *what happened* (state transitions, outcomes,
+  gates); `grep ou-1430 .tracker-rebuild/notes/*.jsonl` answers *what it did* (log lines, per-action
   records, screenshots). One trace id returns the whole operation tree across workflows in both.
   This second grep is a real cost of the D10 split and is documented as such — the `spans/` grep
   alone no longer contains log-line text the way `rows/`+`logs/` greps did.
@@ -362,21 +360,20 @@ Rationale against alternatives:
   lazily per selected run. Mirrors today's proven rows/logs split.
 - **Why a separate `ledger/` (D21 — owner = this doc)?** Doc 09's write-safety layer files one
   immutable receipt per real HR mutation. It is partitioned per-**system**+day so
-  `grep 10694136 .tracker/ledger/ucpath-*.jsonl` answers "what did we file for this person, across
-  time," hash-chained (`seq` + `prevHash`) for tamper-evidence, and **never pruned**. Doc 09 owns
+  `grep 10694136 .tracker-rebuild/ledger/ucpath-*.jsonl` answers "what did we file for this person,
+  across time." It is ordered, actor-attributed, and **never pruned**. Doc 09 owns
   the entry *shape* (`LedgerEntry`, §6 there); this doc owns that the dir lives in the layout and is
   exempt from `clean-tracker`.
-- **Base retention — DECIDED (D21):** `notes/` prune at **7 days** (the high-volume stream, matching
-  today's `clean:tracker` default) and `spans/` at **30 days** (the audit skeleton, kept longer).
+- **Base retention — DECIDED (D86):** `notes/` and `spans/` both prune at **30 days**.
   `ledger/` is exempt from both — its never-pruned floor now sits **above a settled number, not a
-  guess** (this is what doc 09 §6 references). `rows/`/`logs/`/`sessions/` keep their legacy policy
-  until deletion.
+  guess** (this is what doc 09 §6 references). Legacy `.tracker/` retention is unchanged and owned
+  only by production `src`.
 - **Why per-workflow files?** Small greppable files; partition key matches the SSE topic scope.
   Worker spans write to their workflow's file (a daemon serves one workflow).
 - **Span/note write discipline (ported):** append-at-now partitioning; cross-midnight solved at the
   read layer with the OPEN-span forward-merge (same algorithm as `cross-midnight.ts`); synchronous
   SIGINT terminal writes; `O_APPEND` single-line writes. **Ledger is different:** executors write
-  durable outbox rows and one serialized projector assigns sequence/hash and appends (doc 09).
+  durable outbox rows and one serialized projector assigns ordered sequence and appends (doc 09).
 - **Local artifacts are not hidden task writes (D45).** A read task may create only immutable,
   content-addressed bytes under `artifacts/` through doc 01's writer; the returned `{id,sha256,bytes,
   mediaType}` is canonical JSON and checkpoints reference it without exposing a filesystem path.
@@ -410,7 +407,6 @@ interface EventsHubPayload {
                                              // closed tuples, backend-authoritative rail badges
   sessions: WorkerCardWire[];              // worker-span projections
   notifications: NotificationWire[];       // incl. gate.opened rising edges (kills App.tsx:386)
-  quarantine: { workflow: string; count: number }[];   // §5.1 — lifted-row quarantine is VISIBLE
 }
 
 interface QueueSurfaceWire {
@@ -459,14 +455,14 @@ owning merge/dedup heuristics (`mergeDisplayItems` collapse survives as a server
   dependencies, delegation manifests, commands, notifications, capture sessions/photo order/
   finalization outboxes — doc 02 §5.7's checkpoint payloads,
   §4.4's `ocr_approvals` manifests, and
-  doc 09's permanent-key `write_intents`, `write_attempts`, durable outbox, and `ledger_heads`, plus
+  doc 09's permanent-key `write_intents`, `write_attempts`, and durable outbox, plus
   stable-keyed local `artifact_outbox`/sink-head rows). The system-of-record set is
-  "claims + checkpoint payloads + write authority/outboxes/ledger tails + local artifact projection
+  "claims + checkpoint payloads + write authority/outboxes + local artifact projection
   authority + in-progress capture/handoff authority."
   Losing any of these loses claims, checkpoints, in-flight write fences, or accepted capture work — they have no JSONL
   double.
 - **Projection tables (rebuildable):** span-shaped read models (`spans`, `gates`, `notes`,
-  `runs_view`) fed by one projector consuming both native spans and lifted legacy events (§5).
+  `runs_view`) fed by one projector consuming only native `temp_src` spans.
   These — and only these — can be deleted and rebuilt from JSONL, with today's operational rules:
   JSONL writes first, projection applies after, projection failures schedule guarded rebuilds and
   never block workflows; source identity is `resolve(path)`; deletion tombstones and offline
@@ -1115,7 +1111,7 @@ its own milestones with no parity deadline coupling.
 | 11 | A historical import silently drops unknown legacy records | One-time importer fixtures require source/result/quarantine counts to reconcile and render quarantines in the imported archive; import commits only with a signed-off manifest, never against live state |
 | 12 | Resolved member trees creep back onto the wire (the 5-8k-field re-serialization) | `QueueSurfaceWire` has `memberRunIds: string[]` only — no recursive member field exists to populate; a type-level test pins that the wire type is non-recursive; the SSE tick test asserts a 100-member operation patch serializes one surface |
 | 13 | Attempt discipline erodes (a re-pend reuses attempt 1 and re-opens closed spans) | The replay fixture asserts open/close-once per `(runId, attempt, spanPath)` across days containing real reassign/bump traffic; `run.requeued.nextAttempt` is emit-validated as monotonic |
-| 14 | The `ledger/` dir gets pruned, or `write_intents` treated as a rebuildable projection (D21) | `ledger/` is exempt from `clean-tracker` (a retention-floor ratchet — owned by doc 09 §8 — fails if any prune path reaches it); `write_intents` is enumerated in §2.3's system-of-record set (amends D14), so the "rebuildable ⇒ projection tables only" rule (§2.3) keeps it undeletable. Base retention (`notes/` 7d, `spans/` 30d) is a fixed §2.1 decision, so the never-pruned floor sits above a settled number, not a guess |
+| 14 | The `ledger/` dir gets pruned, or `write_intents` treated as a rebuildable projection (D21/D79/D86) | `.tracker-rebuild/ledger/` is exempt from cleanup; `write_intents` remains system-of-record; ordered actor-attributed ledger projection reconciles from atomic outboxes. Notes/spans are both 30d. Hash-chain/tail-anchor is explicitly deferred until multi-user |
 | 15 | Cancel/deletion targets fall back to whatever roots the caller can currently see | command integration tests make SQLite authority unavailable/inconsistent and assert zero transitions; source scan bans caller-supplied root fallback in target resolution |
 | 16 | Two active runs appear because active-run lookup failed and enqueue continued | transactional enqueue-policy tests inject lookup/constraint failures; every result is reject/no-op/one new generation, never two active generations |
 | 17 | A dashboard retry races a newer state and mutates the wrong attempt | every action carries `expectedVersion`; concurrency tests prove one applies and the loser gets a typed conflict |
@@ -1131,7 +1127,7 @@ Span ids shown in doc 02's path grammar; `attempt` omitted where 1.
 
 ```jsonc
 // Abridged for readability. Checked fixtures are generated through RunQueuedSchema and include
-// every required Base/engine/config field; these snippets are not accepted as standalone events.
+// every required Base/envelope/config field; these snippets are not accepted as standalone events.
 // spans/oath-signature-2026-07-17.jsonl        (coordinator — operation shape, file kind)
 {"t":"run.queued","workflow":"oath-signature","runId":"R-op","spanPath":"os-141002-9f3e",
  "traceId":"os-141002-9f3e","itemId":"op-9f3e","shape":"operation","subjectKind":"file",
@@ -1192,19 +1188,18 @@ joined by `parentRunId`; the operation row itself carries only `memberRunIds` + 
 The coordinator completes to `done` when all members are terminal (`rollupOperationStatus` ported
 into the projection). The coordinator's timeline shows its own notes ⊕ each member's
 `run.claimed`/`span.ended` boundary events (selected by `parentRunId` — structurally, not via the
-memberRunIds SQL widening workaround). Grep debug: `grep os-141002 .tracker/spans/*.jsonl` returns
-the operation's state history across all three files; `grep os-141002 .tracker/notes/*.jsonl`
+memberRunIds SQL widening workaround). Grep debug: `grep os-141002 .tracker-rebuild/spans/*.jsonl` returns
+the operation's state history across all three files; `grep os-141002 .tracker-rebuild/notes/*.jsonl`
 returns its log/action detail (§2.1 — two greps, by design).
 
 ---
 
 ## 8. Settled design questions and one volume monitor
 
-1. **Notes retention & volume — RESOLVED (D21), no longer open.** Base retention is **decided**
-   (§2.1): `notes/` prune at **7 days** (today's `clean:tracker` default — the high-volume stream
-   that now also carries per-action records, D10), `spans/` at **30 days** (the audit skeleton). The
+1. **Notes retention & volume — RESOLVED (D86), no longer open.** Base retention is **decided**
+   (§2.1): `notes/` and `spans/` both prune at **30 days**. The
    `ledger/` dir is **never pruned** and sits above both floors (doc 09 §6 depends on this settled
-   number). Only the *volume* question — whether 7-day notes strain disk in practice — remains a
+   number). Only the *volume* question—whether 30-day notes strain disk in practice—remains a
    monitor-and-revisit, not an open design decision.
 2. ~~Worker-span ownership~~ — **resolved 2026-07-21; amended by D87 on 2026-07-30:** one worker
    span per workflow-scoped worker process, with worker-owned per-system browser/session child spans

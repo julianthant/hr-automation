@@ -1,6 +1,7 @@
 # 02 — Workflow Model: Descriptor SSOT · Constant Input · Run-State Machine · Start-Anywhere Resume
 
-Status: **revised 2026-07-22 after the whole-plan/legacy-code review; amended 2026-07-26 (Round 8).**
+Status: **revised 2026-07-22 after the whole-plan/legacy-code review; amended 2026-07-26 (Round 8)
+and 2026-07-31 (Round 10 — native-only envelope and global cutover boundary).**
 The abandoned Step-0 spike and skeleton were deleted. The expanded graph, typed delegation/control
 seams, and three-effect task API require a new real-scale type proof before code lands in
 `temp_src/`. Round-8 amendments: §4 records the two graph-legality rules the identity-approval gate
@@ -12,7 +13,7 @@ alongside the workflow version + fingerprint (D80 archive-on-bump, owned by doc 
 | This doc OWNS | Imported from siblings (referenced, never redefined) |
 |---|---|
 | The ONE workflow builder API — read steps, page-scoped transactions, output-dependent branches, parallel fork/join, typed child runs/delegation policy, gates, decoration/instrumentation, auth | Doc 01: task contracts, three effects, stores, sessions, freshness metadata, subject declarations, decoration |
-| Descriptor shape (incl. verdict mappings, gate declarations, derived session union) | Doc 03: span/event **wire** schema incl. `gate.opened`/`gate.resolved`, notes stream, storage layout, SQLite projection, SSE wire shapes, lift adapter, completion (fan-out/approval) union |
+| Descriptor shape (incl. verdict mappings, gate declarations, derived session union) | Doc 03: native span/event **wire** schema incl. `gate.opened`/`gate.resolved`, notes stream, isolated rebuild storage, SQLite projection, SSE wire shapes, completion (fan-out/approval) union |
 | `RunEnvelope` (incl. `dryRun` — D6) | |
 | Run-state machine incl. gate nodes and parks (D5) | |
 | Checkpoint/resume model: store, freshness (D8), scope (D9), task-authoring rule | |
@@ -481,7 +482,7 @@ learns goes into the run context (§5), never back into input.
 |---|---|---|
 | subject identity: name / emplId / docId / email / pdf blob ref | task outputs (resolved EID, CRM record, receipts) | runId, workflowId, itemId, parent `{runId, tracePrefix, edgeId}` |
 | operator flags: `keepNonHdh`, `includeCrmDates` | statuses, screenshots refs, warnings | **`dryRun` (D6)**, `shape`, `priority`, `startAt`, `injected`, `freshnessOverride` (§5.5) |
-| delegation *display* subject (`parentSubject`) | timing (spans own it — §6) | claim/lease/attempt metadata, `enqueuedAt`, engine/cutover generation, descriptor+config fingerprints |
+| delegation *display* subject (`parentSubject`) | timing (spans own it — §6) | claim/lease/attempt metadata, `enqueuedAt`, descriptor+config fingerprints |
 
 `dryRun` is **kernel-owned envelope state, never workflow input** (D6): workflow schemas cannot
 declare it, and the executor compiles a dry-run graph with transaction commit arms absent. No
@@ -494,8 +495,6 @@ export interface RunEnvelope {
   workflow: WorkflowId;
   itemId: ItemId;                    // logical-item key half: (workflow, itemId) — §5.7
   traceId: TraceId;                  // frozen at enqueue (ported verbatim)
-  engine: "legacy" | "native";       // immutable per-run source authority (doc 03)
-  cutoverGeneration: number;
   descriptorVersion: number;
   contractFingerprint: Fingerprint;
   requestedInstance?: Partial<Record<BrowserSystemId, "prod" | "test">>; // request only; resolved at enqueue
@@ -1150,7 +1149,7 @@ storage, SSE. This section keeps only the engine-side semantics that doc 02 owns
 | Stub lane quietly narrows to happy-path only | derived examples cover the minimum happy path; all other behavior comes from doc 12's checked-in `ScenarioManifest` corpus, and deleting a descriptor-referenced scenario fails the coverage guard |
 | A workflow claims the right transaction after acting on the wrong open person/page | every write task declares a doc 01 subject binding; the kernel records a fresh driver observation after prepare and refuses before the fence on mismatch or unknown identity |
 | Delegated fan-out changes across replay or one failed child disappears from the join | atomic immutable delegation manifests, stable edge/item ids, typed child results, and registered zero/one/many/partial/cancel/retry/replay scenarios |
-| Old/new enqueue routing drifts | cutover-generation registry is authoritative for new runs and stores the explicit legacy drain set; per-run engine authority rejects double emission |
+| Runtime isolation or cutover interlock drifts | import/state/command guards forbid cross-runtime access; `temp_src` accepts only its own native runs; the single global cutover stops legacy enqueues, reconciles all active/uncertain work, verifies backups, and atomically interlocks launchers so exactly one production authority can start |
 
 ---
 

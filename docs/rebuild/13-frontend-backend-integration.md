@@ -24,7 +24,8 @@ Visual authority:
 The demo is a **visual specification and contract fixture**, not production infrastructure. The
 production app must not import `src/dashboard/components/dev/rebuild-demo/**`. Approved surfaces
 and primitives are ported into `temp_src/dashboard/`; mock wire factories stay test-only and are
-deleted when every production surface has replaced them.
+preserved with the legacy/design-oracle tree through initial cutover. Ported production code owns
+its own copies and provenance; no runtime import or proxy is permitted.
 
 ---
 
@@ -745,8 +746,8 @@ Frontend/backend integration is complete only when:
 8. Person Lookup and the controlled write slice pass their live gates;
 9. the complete reference route matrix passes a11y, keyboard, reduced-motion, responsive, and
    screenshot comparison in both themes;
-10. the dev demo/mock wire modules can be deleted without removing any production capability or
-   design-system primitive; and
+10. the preserved legacy demo/mock wire modules remain a design oracle/rollback asset and no
+    `temp_src` production import reaches them; and
 11. cutover rehearsal proves the legacy and rebuild servers cannot share a port/root/lock/browser
    profile, every normal launch target switches atomically as one unit, rollback assets remain
    intact, and no production route proxies/remounts the other runtime.

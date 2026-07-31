@@ -20,11 +20,12 @@ guard inventory, TDD topology, and stub/live lanes.
 |---|---|
 | **This doc OWNS** | The test/guard suite: ratchet inventory, strict-boundary/driver/subject/control/delegation/storage guards, transaction/write/outbox/provenance/artifact safety guards, descriptor projection coverage, accidental-shrink meta-test, TDD tiers, scenario/stub/live lanes. |
 | **Imports (never redefines)** | Task contract / `effect` / `example` / `fakeCtx` / mutation primitive / dry-run overloads — **doc 01**. Descriptor shape + `descriptor-coverage.test.ts` §1.4 + run-state/checkpoint/delegation — **doc 02**. Span/event schema + command protocol + storage recovery + notifications + completion and isolated-runtime/cutover boundary — **doc 03**. Worker/session/sleep-budget guards — **doc 05**. Receipt/idempotency/fence/subject contract — **doc 09**. Clock/config/secrets single-source — **doc 11**. Semantic UI registry, scenarios, evidence, knowledge/fix records, editor projections — **doc 12**. |
-| **Charter bindings** | "Same quality umbrella from day one" (every ratchet covers `temp_src` from the first line); "fail loud"; §1a fill/submit split is the dry-run safety model this doc makes a static invariant; §5 descriptor SSOT retires the parity guards. |
+| **Charter bindings** | "Same quality umbrella from day one"; "fail loud"; §1a fill/submit split is the dry-run safety model. Descriptor SSOT replaces parity lists in `temp_src`; existing legacy guard tests remain through initial cutover. |
 
 **One-sentence thesis.** The umbrella is only real if ONE place owns *how* every doc's per-§ guard
 promise actually lands in `tests/unit/architecture/`, extends the 23 existing ratchets to
-`temp_src`, replaces parity guards with descriptor projection coverage, and adds the cross-cutting
+`temp_src`, replaces the need for parallel rebuild parity lists with descriptor projection coverage,
+preserves the legacy guards through initial cutover, and adds the cross-cutting
 safety suite: dry-run composition, transaction pairing, typed write safety, permanent-key dedupe,
 atomic outbox/ledger projection, field provenance, and stable identity.
 
@@ -42,7 +43,8 @@ in four mechanism families:
 - **Registry-parity coverage guards** — side-effect-import the kernel registry (`getAll()`) and diff
   it against a hand-list: `instance-labels-coverage` (vs `INSTANCE_LABELS`), `queue-row-kind-coverage`
   (vs `SUBJECT_TO_KIND`), `archetype-coverage`, `runtime-policy-coverage`. **These exist ONLY because
-  of the ~10 parallel registries the charter is killing** — they are the ones the descriptor retires.
+  of the ~10 parallel registries the rebuild replaces**. The descriptor removes the need to copy
+  these lists into `temp_src`; legacy guards/lists remain while legacy automation is preserved.
 - **Structural bans / import-boundary guards** (an exact allowlist or SCC set): `cancel-mechanism`,
   `delegate-to-usage`, `delegate-to-all-impl-callers`, `workflow-boundaries`, `control-layering`,
   `import-cycles` (SCC vs `ALLOWED_CYCLES`), `i9-check-import-guard`, `origin-workflow-banned`,
@@ -82,8 +84,8 @@ maintenance change is also mapped to the capability and rebuild evidence it may 
 resolve to non-empty file sets after activation, and run with `--max-warnings 0` plus **no debt
 manifest**. Before activation, an absent tree is an explicit Phase-0 state; after the first file,
 absence/unmatched globs fail. The small existing `src` lint failure is repaired before 1b, so the
-ordinary `npm run lint` also returns green during coexistence. The legacy-test manifest must be zero
-and its projects remain runnable through initial cutover. The manifest may remain non-zero; it is
+ordinary `npm run lint` also returns green during coexistence. Legacy projects remain runnable
+through initial cutover. The manifest may remain non-zero; it is
 deleted only in a separately authorized retirement after reaching zero. Until then
 `lint:legacy-tests-ratchet` is the truthful coexistence gate, not a false claim that
 `npm run lint:tests` passes.
@@ -112,15 +114,15 @@ Before activation, a missing `temp_src` is an explicit planned state—not a swa
 | `delegate-to-usage` / `delegate-to-all-impl-callers` | **RE-DERIVE** | delegation is now workflow-composition (docs 01/02). Re-expressed as "child runs enqueue only via the kernel composition API," but note: peer-to-peer store reuse is now *allowed* (charter §1), so the old "no cross-workflow internal import" shape loosens — see `workflow-boundaries`. |
 | `workflow-boundaries` | **RE-DERIVE (loosened)** | charter §1 makes tasks peer-reusable, so importing another workflow's *task contract* is legal. New rule: a workflow may import another's **contracts** and store tasks, never its `descriptor.ts` internals or non-task private helpers. |
 | `tracker-row-emission` | **RE-DERIVE** | archetype-stamping is gone; the new invariant is doc 03's: writes go only through the typed span-emit path, `appendFileSync` to event JSONL banned outside `temp_src/tracker/`. |
-| `deletion-tombstones` | **RE-DERIVE** | UI exposes reversible `hide/unhide`, never ambiguous Delete. No physical delete of authority/audit tables in runtime code; the exact-id offline purge command requires a verified backup and emits a purge receipt (doc 03 §2.4). Legacy tombstones remain lift-only. |
+| `deletion-tombstones` | **PRESERVE LEGACY + RE-DERIVE** | Keep the existing legacy guard unchanged. The rebuild UI exposes reversible `hide/unhide`, never ambiguous Delete; runtime physical delete of authority/audit tables is forbidden and exact-id offline purge requires verified backup + receipt. No lift path exists. |
 | `dashboard-security-boundary` | **RE-DERIVE FOR LOCAL SCOPE + ISOLATION** | Both servers bind distinct configured loopback ports and accept only their own same-origin UI. No shared middleware, proxy/remount, route forwarding, state root, process lock, or browser profile/session is allowed; Phase 1 does not build a user/account system (docs 03/11/12/13). |
 | `frontend-tailwind-compliance` | **EXTEND** | over `temp_src/dashboard`. |
 | `i9-check-import-guard` | **GENERALIZE** | a descriptor with no transaction/commit contract is structurally read-only; graph coverage proves it cannot reach a mutation capability. |
 | `origin-workflow-banned` | **DROP-OR-PORT** | the lineage field it bans does not exist in `temp_src`; keep a banned-term guard only if the concept resurfaces. Decide at Phase 1. |
-| `archetype-coverage` | **RETIRE → descriptor** | `descriptor.surface.shape` is the SSOT (§4). |
-| `runtime-policy-coverage` | **RETIRE → descriptor** | shape/actions/gates read off the descriptor (§4). |
-| `instance-labels-coverage` + `INSTANCE_LABELS` | **RETIRE → descriptor** | label = `descriptor.sessionLabel ?? label` (doc 02 §1.3). |
-| `queue-row-kind-coverage` + `SUBJECT_TO_KIND` | **RETIRE → descriptor** | kind derived from `descriptor.inputSubject` inside descriptor-coverage. |
+| `archetype-coverage` | **PRESERVE LEGACY; rebuild uses descriptor** | Existing guard remains through initial cutover; `descriptor.surface.shape` covers `temp_src`. |
+| `runtime-policy-coverage` | **PRESERVE LEGACY; rebuild uses descriptor** | Existing guard remains; rebuild shape/actions/gates derive from the descriptor. |
+| `instance-labels-coverage` + `INSTANCE_LABELS` | **PRESERVE LEGACY; rebuild uses descriptor** | Existing guard/list remain for `src`; rebuild label = `descriptor.sessionLabel ?? label`. |
+| `queue-row-kind-coverage` + `SUBJECT_TO_KIND` | **PRESERVE LEGACY; rebuild uses descriptor** | Existing guard/list remain for `src`; rebuild kind derives from `descriptor.inputSubject`. |
 | `gate-coverage` (meta) | **KEEP + EXTEND** | becomes the guard-of-guards manifest (§5): also asserts `test:architecture` still globs `temp_src`, each activated arm resolves ≥1 file, ESLint's command *and actual config* cover `temp_src`, and every named guard file exists + is registered. |
 | — | **NEW** | `descriptor-coverage`, `strict-boundary-schemas`, `semantic-ui-registry`, `task-driver-boundary`, `subject-before-fence`, `scenario-coverage`, `control-command-single-path`, `authority-target-no-fallback`, `delegation-manifest`, `storage-recovery`, `notification-durability`, `evidence-receipt`, `knowledge-fix-integrity`, `workflow-editor-compile-integrity`, `legacy-capability-disposition`, `capture-durability-and-scope`, `ai-advisory-no-authority`, `preflight-coverage`, `dry-run-composition-submit-free`, `transaction-pairing`, `write-safety-contract`, `commit-routes-through-mutation`, `no-positional-identity`, atomic-outbox/ledger guards, `clock-single-source`. |
 
@@ -316,23 +318,21 @@ read while still permitting replay-safe browser downloads.
   conflict. Fix records link failure, changed contracts/UI ids/scenarios, verification, and commit.
   A verified FixRecord requires a commit plus non-empty evidence; drafts stay out of active
   guidance. Raw chronological lesson append is not accepted as active architecture authority.
-- **`workflow-editor-compile-integrity.test.ts`.** Read-only explorer projections round-trip from the
-  real descriptor/contract/UI registries. Editable drafts are strict closed-DSL documents with a
-  base fingerprint; compile validates every task/UI/scenario/delegation reference and emits a
-  deterministic generated artifact. Stale-base apply, handwritten generated-file edits, unsupported
-  node kinds, or an apply without a reviewed semantic diff all fail. Rollback restores the exact
-  prior version and re-runs descriptor/scenario coverage (doc 12 §5).
+- **`workflow-editor-compile-integrity.test.ts`.** Phase-2 read-only explorer projections
+  round-trip from the real descriptor/contract/UI registries. Editable drafts are limited to the
+  closed presentation/policy union; stale-base apply, graph/schema/selector/bind/proof edits, or an
+  apply without reviewed semantic diff fail and yield a code-change brief. No DSL/codegen artifact
+  exists (doc 12 §5).
 
 ### 3.11 Old-capability closure, mobile capture, and advisory AI
 
 - **`legacy-capability-disposition.test.ts`.** Doc 07 §3.6's strict inventory covers every old
   workflow directory, `services/*` module, route file/endpoint family, top-level dashboard component
   family, CLI subcommand/ops script, exporter/codegen/maintenance/dev tool exactly once. New legacy
-  paths fail until classified. A proxy requires a concrete removal milestone and native
-  disposition. Final-delete mode rejects proxy/undecided entries, missing native/replacement
-  targets, retirement without evidence, duplicate path ownership, or a CLI/navigation inventory
-  mismatch. This is the mechanical proof that “all workflows migrated” did not forget supporting
-  capabilities.
+  paths fail until classified. Runtime proxy is forbidden. Cutover-readiness mode rejects open/
+  undecided entries, missing native/replacement targets, target retirement without evidence,
+  duplicate path ownership, or CLI/navigation inventory mismatch; it never authorizes source/test
+  deletion. A deletion/retirement mode may be designed only after separate operator ratification.
 - **`capture-durability-and-scope.test.ts`.** Capture session/photo/finalization schemas are strict
   authority; commands are idempotent and version-CAS checked; photo refs are content-addressed;
   finalize reaches bundle/artifact/intake enqueue only through one stable outbox. Crash/restart
@@ -467,9 +467,10 @@ file outside the repository is never a Phase-1 gate and is deleted after its fin
 
 ---
 
-## 4. `descriptor-coverage.test.ts` — the ONE guard that replaces the parity guards
+## 4. `descriptor-coverage.test.ts` — the ONE rebuild guard replacing parity-list design
 
-Owned by **doc 02 §1.4**; this doc owns the **crosswalk** (which old guards it retires) and the
+Owned by **doc 02 §1.4**; this doc owns the **crosswalk** (which legacy invariants it replaces for
+`temp_src`, while existing legacy guard files remain through initial cutover) and the
 **exhaustiveness argument**. A table-driven test over the core composition-root registry and its
 generated client projection. It is exhaustive because every named projection in this matrix is derived
 from the descriptor, and the guard walks the whole projection set—a descriptor that fails to
@@ -539,7 +540,8 @@ The manifest prevents accidental file deletion, rename, or glob orphaning. It **
 deliberate coordinated edit that deletes both a guard and its inventory entry; no self-owned test can.
 Guard removal therefore requires an explicit architecture decision entry naming the retired
 invariant and its replacement/manual rationale, checked by CI for removed inventory keys and by
-code review. The plan makes no stronger mechanical claim.
+code review. Existing legacy guards may not be removed during rebuild or initial cutover. The plan
+makes no stronger mechanical claim.
 
 ### 5.1 The full registered set — where every doc's guards converge
 
@@ -555,7 +557,7 @@ contracts; the manifest owns that they exist and stay wired. The set (contract-o
   `transaction-pairing`, `write-safety-contract` (typed proof on every union arm + the
   `unverifiableByPage` allowlist), `commit-routes-through-mutation`, atomic-write-outbox,
   permanent-key sequential/concurrent dedupe, recovery-negative-proof-settlement,
-  ledger-projector concurrency/tail-anchor,
+  ledger-projector ordering/idempotence/recovery,
   `no-positional-identity`, `edit-data-field-policy`, canonical-input-snapshot (raw + parsed +
   ingress/canonical schema hashes; resume validates but never reapplies defaults/transforms),
   `strict-boundary-schemas`,
@@ -569,7 +571,7 @@ contracts; the manifest owns that they exist and stay wired. The set (contract-o
   `runtime-policy-coverage`, `instance-labels-coverage`, `queue-row-kind-coverage`, `i9-check-import-guard`.
 - **Task-store guards (doc 01):** pairing, reachability, bundle-safety, `example`-parse, freshness,
   verb↔effect, `KnownTaskId` stringly-dispatch ratchet, `z.record` output ban, auth-boilerplate ban,
-  UCPath-selectors pure-re-export, undeclared-error-code type-test, commit-capability boundary,
+  copied-selector provenance/isolation/change-accounting, undeclared-error-code type-test, commit-capability boundary,
   declared-secret reachability (every `requireSecret` name appears in its contract and descriptor union),
   provenance-policy coverage (pure/service/workflow transforms cannot declare live observation without
   an allowlisted authoritative source operation; derived outputs retain oldest input provenance),
