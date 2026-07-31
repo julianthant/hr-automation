@@ -530,6 +530,14 @@ export const separationsWorkflow = defineWorkflow({
       holidayDates: [],
     };
     let newKronosFound = false;
+    // Did we actually GET an answer from New Kronos? True only when the
+    // kronos-search timecard branch FULFILLED — i.e. the timecard was opened and
+    // parsed (including the legitimate "employee not in New Kronos" answer).
+    // Stays FALSE when the branch REJECTED (e.g. found-but-Go-To-Timecard-failed),
+    // which means we know NOTHING about this employee's punches. That is not the
+    // same as "no punches", and must never be used to derive a date — see the
+    // separation-date gate below.
+    let timecardRead = false;
 
     // INPUT-based reasons to skip kronos-search — computed UP FRONT because the
     // Job-Summary fetch + identity-check below skip on the same conditions:
@@ -861,6 +869,7 @@ export const separationsWorkflow = defineWorkflow({
       );
       if (phase1.newK.status === "fulfilled") {
         newKronosFound = phase1.newK.value.found;
+        timecardRead = true;
         timecard = {
           lastPunchDate: phase1.newK.value.lastPunchDate,
           sickDates: phase1.newK.value.sickDates,
@@ -924,7 +933,19 @@ export const separationsWorkflow = defineWorkflow({
     // timecard read → no timecard-derived change → no comment. (Note: an HDH
     // employee whose timecard RAN but returned no punch still derives via the
     // LDW — that path read the timecard; only the skip paths keep Kuali's date.)
-    const separationDate = kronosSkipped
+    //
+    // The SAME rule must cover a kronos-search that RAN but whose timecard read
+    // REJECTED (`!timecardRead`) — e.g. the employee was found but Go To →
+    // Timecard failed. That is not an answer of "no punches", it is the absence
+    // of an answer, so deriving a date from it and stamping "per Kronos
+    // timesheet" on the Kuali form asserts a timesheet we never opened. Live
+    // damage (2026-07-31): 20/21 found employees hit the Go To failure and three
+    // of them — docs 4445, 4461, 4471 — wrote a changed Separation Date back to
+    // Kuali citing a timesheet that was never read. Gating on `timecardRead`
+    // keeps Kuali's date verbatim in exactly that case (fail-loud: no
+    // unverified fallback).
+    const noTimecardToDeriveFrom = kronosSkipped || !timecardRead;
+    const separationDate = noTimecardToDeriveFrom
       ? kualiData.separationDate
       : computeSeparationDate(lastDayWorked, timecard.sickDates, timecard.holidayDates);
     const separationDateChanged = separationDate !== kualiData.separationDate;
@@ -939,8 +960,11 @@ export const separationsWorkflow = defineWorkflow({
     const hasLeave = timecard.sickDates.length > 0 || timecard.holidayDates.length > 0;
     log.step(
       `[Dates] Separation Date = ${separationDate}` +
-      (kronosSkipped
-        ? ` (Kuali Separation Date kept as-is — New Kronos not read, no timecard to derive from)`
+      (noTimecardToDeriveFrom
+        ? kronosSkipped
+          ? ` (Kuali Separation Date kept as-is — New Kronos not read, no timecard to derive from)`
+          : ` (Kuali Separation Date kept as-is — the New Kronos timecard read FAILED, ` +
+            `so there is no timecard to derive from; not claiming a Kronos-derived date)`
         : hasLeave
           ? ` (last day paid — last day worked extended by sick/holiday leave; ` +
             `Kuali had '${kualiData.separationDate}')`
