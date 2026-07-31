@@ -20,14 +20,23 @@ export async function runKualiExtract(
 ): Promise<Awaited<ReturnType<typeof extractSeparationData>>> {
   const t0 = Date.now();
   log.debug(`[Step: kuali-extraction] START docId='${docId}'`);
-  const kualiPage = await ctx.page("kuali");
   // Auto-dismiss PeopleSoft dialogs on UCPath — important when a previous
   // doc's transaction leaves a confirmation modal up (batch mode state).
   // Registered per-invocation and removed in finally so batch mode doesn't
   // stack N handlers on the same long-lived page.
+  //
+  // ORDER MATTERS: acquire the UCPath page FIRST, then Kuali. The kernel's
+  // end-of-step audit screenshot captures the LAST system this step touched
+  // (`Session.pageAccess()`), and this step's subject is the Kuali separation
+  // document — the UCPath page is touched only to attach this dialog handler
+  // and is never navigated here. Acquiring UCPath last made every
+  // `kuali-extraction` step shot capture an idle UCPath Search/Match page
+  // instead of the Kuali doc (2026-07-31: 18 byte-identical useless captures
+  // in one batch). Keep `ctx.page("kuali")` as the final page acquisition.
   const ucpathPage = await ctx.page("ucpath");
   const dialogHandler = (d: Dialog) => d.accept().catch(() => {});
   ucpathPage.on("dialog", dialogHandler);
+  const kualiPage = await ctx.page("kuali");
   try {
     await openActionList(kualiPage);
     await clickDocument(kualiPage, docId);
