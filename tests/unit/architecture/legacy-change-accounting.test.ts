@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import accounting from "../../../config/rebuild/legacy-change-accounting.json" with { type: "json" };
 import capabilities from "../../../config/rebuild/legacy-capabilities.json" with { type: "json" };
 import preservation from "../../../config/rebuild/legacy-preservation.json" with { type: "json" };
-import { REPO_ROOT } from "./helpers/guard-files.js";
+import { gitVisibleFiles, REPO_ROOT } from "./helpers/guard-files.js";
 
 interface ChangeRecord {
   readonly path: string;
@@ -23,16 +23,7 @@ function hash(bytes: Uint8Array): string {
 }
 
 function currentFiles(root: string): string[] {
-  const files: string[] = [];
-  function walk(directory: string): void {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) walk(path);
-      else if (entry.isFile()) files.push(relative(REPO_ROOT, path).replaceAll("\\", "/"));
-    }
-  }
-  walk(join(REPO_ROOT, root));
-  return files;
+  return gitVisibleFiles([root]);
 }
 
 function baselineBytes(path: string): Buffer {
