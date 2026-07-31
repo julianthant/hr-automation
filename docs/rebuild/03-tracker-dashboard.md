@@ -951,6 +951,15 @@ The legacy and rebuilt event worlds coexist only as **two fully isolated runtime
 - `temp_src` uses distinct commands/entrypoints, state and artifact roots, ports, process locks,
   and browser profiles/sessions. The rebuild cannot import or invoke legacy runtime modules, read
   or mutate legacy live state, or attach to legacy browsers. The same bans apply legacy→rebuild.
+- The D88 guard enforces a deliberately finite syntax normal form during coexistence, not an
+  optimistic whole-language data-flow guess. Dynamic loaders and bridge-capable filesystem,
+  process, network, route, state, and browser/profile sinks must consume statically exact
+  literal/`const` values or properties of the current side's exact runtime-isolation binding;
+  unresolved/computed operands fail in the sink's owning bridge class. Imported or namespace
+  bridge capabilities may only be direct audited callees — aliasing, binding, wrapping, returning,
+  passing, computed selection, and re-export are forbidden. This intentionally rejects generic
+  wrappers at the runtime boundary; a reviewed side-local facade is the escape hatch, not a looser
+  scanner.
 - Live-verified selectors, parsers, and behavioral knowledge may be copied/ported into `temp_src`
   only with source/provenance evidence and rebuild tests. This is knowledge transfer, not a runtime
   dependency.
