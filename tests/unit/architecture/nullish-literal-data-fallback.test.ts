@@ -1,7 +1,14 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  REPO_ROOT,
+  auditCountAllowlist,
+  repoRelative,
+  walkFiles,
+  type CountAllowlist,
+} from "./helpers/guard-files.js";
 
 /**
  * Guard: root CLAUDE.md "Fail loud — no unverified silent fallbacks" calls
@@ -28,23 +35,8 @@ import { join, relative } from "node:path";
  * need the same read-in-context review, not a silent allowlist add.
  */
 
-const ROOT = process.cwd();
+const ROOT = REPO_ROOT;
 const SCAN_DIRS = ["src/core", "src/control", "src/tracker", "src/workflows", "src/systems", "src/services"];
-
-function walk(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    const stat = statSync(full);
-    if (stat.isDirectory()) out.push(...walk(full));
-    else if (full.endsWith(".ts") || full.endsWith(".tsx")) out.push(full);
-  }
-  return out;
-}
-
-function rel(path: string): string {
-  return relative(ROOT, path);
-}
 
 // Data-shaped LHS identifiers, per the task heuristic: property access like
 // data.foo / row.bar / input.baz. `?? "<string>"` / `?? 0` / `?? true` only
@@ -54,7 +46,7 @@ const NULLISH_LITERAL_RE =
   /\b(data|row|input|item|entry|record|payload|fields|opts|args)\.[A-Za-z0-9_.]+\s*\?\?\s*("(?:[^"\\]|\\.)*"|0|true)(?!\s*[?:.\w])/g;
 
 /** file (relative to repo root) -> { count, reason } */
-const ALLOWLIST: Record<string, { count: number; reason: string }> = {
+const ALLOWLIST: CountAllowlist = {
   "src/core/daemon/in-flight-shutdown.ts": {
     count: 1,
     reason: "`args.settleDependency ?? true` is a declared function-parameter default (caller didn't specify -> default to true), not a failure-recovery fallback on corrupted data.",
@@ -240,7 +232,7 @@ describe("fail-loud guard: nullish-literal data fallbacks", () => {
   it("every `data.x ?? <literal>` in core/control/tracker/workflows/systems/services is allowlisted with a justification", () => {
     const found = new Map<string, number>();
     for (const dir of SCAN_DIRS) {
-      for (const file of walk(join(ROOT, dir))) {
+      for (const file of walkFiles(join(ROOT, dir))) {
         const content = readFileSync(file, "utf8");
         let n = 0;
         for (const line of content.split("\n")) {
@@ -249,28 +241,18 @@ describe("fail-loud guard: nullish-literal data fallbacks", () => {
           NULLISH_LITERAL_RE.lastIndex = 0;
           while (NULLISH_LITERAL_RE.exec(line)) n++;
         }
-        if (n > 0) found.set(rel(file), n);
+        if (n > 0) found.set(repoRelative(file), n);
       }
     }
 
-    const violations: string[] = [];
-    for (const [file, n] of found) {
-      const entry = ALLOWLIST[file];
-      if (!entry) {
-        violations.push(`${file}: ${n} unallowlisted nullish-literal data fallback(s) — new occurrence introduced outside the allowlist.`);
-        continue;
-      }
-      if (entry.count !== n) {
-        violations.push(
-          `${file}: allowlisted for ${entry.count} occurrence(s) but found ${n} — update the ALLOWLIST count (and reason, if the shape changed).`,
-        );
-      }
-    }
-    for (const file of Object.keys(ALLOWLIST)) {
-      if (!found.has(file)) {
-        violations.push(`${file}: allowlisted for ${ALLOWLIST[file].count} occurrence(s) but none found anymore — remove the stale entry.`);
-      }
-    }
+    const violations = auditCountAllowlist(found, ALLOWLIST, {
+      unallowlisted: (file, count) =>
+        `${file}: ${count} unallowlisted nullish-literal data fallback(s) — new occurrence introduced outside the allowlist.`,
+      changed: (file, expected, actual) =>
+        `${file}: allowlisted for ${expected} occurrence(s) but found ${actual} — update the ALLOWLIST count (and reason, if the shape changed).`,
+      stale: (file, expected) =>
+        `${file}: allowlisted for ${expected} occurrence(s) but none found anymore — remove the stale entry.`,
+    });
 
     assert.deepEqual(violations, [], `\n${FIX_GUIDANCE}\n\n${violations.join("\n")}`);
   });
