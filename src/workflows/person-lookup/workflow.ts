@@ -1,10 +1,9 @@
 /**
- * Person Lookup workflow: resolve an employee in UCPath Person Org Summary by
- * name or EID, cross-verify names against CRM, and derive active / HDH status.
+ * Person Lookup workflow with two UCPath modes and an optional CRM check.
  *
- * Merges the former EID Lookup and Active Check workflows: name inputs run the
- * full searching → cross-verification → active-status chain; EID inputs skip
- * CRM cross-verification (the EID already identifies the person).
+ * Search resolves a name/EID through Person Org Summary and derives active /
+ * HDH status. Match asks the HR-Tasks Search/Match surface whether UCPath
+ * already knows the legal-name + SSN/DOB identity.
  *
  * Kernel-based (shared-context-pool mode). Each input-run batch launches one
  * UCPath browser (+ CRM browser), authenticates once per system, then fans out
@@ -52,12 +51,18 @@ import {
   displayPersonName,
 } from "../../domain/identity/person-name.js";
 import { prepareNames } from "../../domain/identity/person-name-batch.js";
+import { searchPerson } from "../../systems/ucpath/navigate.js";
+import { handlePersonMatch } from "./match.js";
 import {
   PersonLookupItemSchema,
   derivePersonLookupItemId,
   displayPersonLookupInput,
   isEidInput,
+  isMatchInput,
+  resolvePersonLookupCrmCheck,
+  resolvePersonLookupMode,
   type PersonLookupItem,
+  type PersonLookupSearchInput,
 } from "./schema.js";
 
 export interface LookupResult {
@@ -110,12 +115,11 @@ export const PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
  * and stamps the resulting filename onto the tracker row's
  * `personOrgScreenshot` data field.
  *
- * Returns the raw results so the CRM step can cross-reference them
- * (CRM cross-verification is skipped for EID-input items).
+ * Returns the raw results so the optional CRM step can cross-reference them.
  */
 async function searchingStep<TSteps extends readonly string[]>(
   ctx: Ctx<TSteps, PersonLookupItem>,
-  input: PersonLookupItem,
+  input: PersonLookupSearchInput,
 ): Promise<EidResult[]> {
   const page = await ctx.page("ucpath");
 
@@ -374,6 +378,31 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
 ): Promise<void> {
   const crmPage = await ctx.page("crm");
 
+  // Match inputs use the HR-Tasks result EID when available, then fall back
+  // to the legal name. CRM is an optional independent check here; it never
+  // changes the UCPath `found` answer stamped by the searching step.
+  if (isMatchInput(input)) {
+    const matchedEmplId = dataString(ctx.data.matchedEmplId).trim();
+    let crmRecords: CrmRecord[];
+    try {
+      crmRecords = await searchCrmByEidOrName(crmPage, {
+        ...(matchedEmplId ? { emplId: matchedEmplId } : {}),
+        lastName: input.lastName,
+        firstName: input.firstName,
+      });
+    } catch (err) {
+      log.error(
+        `CRM match check failed for "${input.lastName}, ${input.firstName}" — ${errorMessage(err)}`,
+      );
+      await ctx.captureAndStampScreenshot("CRM search failed", "crmSearchScreenshot", {
+        systems: ["crm"],
+      });
+      throw err;
+    }
+    await stampCrmStartDateAndScreenshot(ctx, crmRecords, matchedEmplId || undefined);
+    return;
+  }
+
   // EID inputs: search CRM by EID or name purely to source the Start Date.
   if (isEidInput(input)) {
     const { lastName, firstName } = resolveCrmSearchNameParts(
@@ -527,7 +556,7 @@ function stampActiveCheckFields<TSteps extends readonly string[]>(
 }
 
 export function resolveActiveStatusResultsForPersonLookup(args: {
-  input: PersonLookupItem;
+  input: PersonLookupSearchInput;
   sdcmpFromSearch: EidResult[];
   crmMatchedEmplId?: string;
 }): {
@@ -554,7 +583,7 @@ export function resolveActiveStatusResultsForPersonLookup(args: {
  */
 async function activeStatusStep<TSteps extends readonly string[]>(
   ctx: Ctx<TSteps, PersonLookupItem>,
-  input: PersonLookupItem,
+  input: PersonLookupSearchInput,
   sdcmpFromSearch: EidResult[],
 ): Promise<void> {
   const crmMatch = ctx.data.crmMatch as string | undefined;
@@ -692,17 +721,17 @@ async function crmDatesStep<TSteps extends readonly string[]>(
 }
 
 /**
- * Person Lookup kernel definition. Two systems (UCPath + CRM), four handler
- * steps: searching → cross-verification → active-status → crm-dates. CRM auth
- * is part of the batch's one-time auth chain; EID-input items skip the
- * cross-verification step at runtime; crm-dates is skipped unless
- * `input.includeCrmDates === true`.
+ * Person Lookup kernel definition. Two systems (UCPath + CRM), four stable
+ * handler steps: searching → cross-verification → active-status → crm-dates.
+ * CRM auth remains in the batch's eager one-time auth chain; `crmCheck` gates
+ * the CRM work, not browser launch/auth. Match mode skips active-status and
+ * crm-dates; Search runs crm-dates only when `includeCrmDates` is true.
  */
-export const personLookupWorkflow = defineWorkflow({
+export const personLookupWorkflow = defineWorkflow<PersonLookupItem, typeof steps>({
   name: "person-lookup",
   label: "Person Lookup",
   archetype: "single",
-  inputSubject: (input) => ("emplId" in input ? "eid" : "name"),
+  inputSubject: (input) => (isEidInput(input) ? "eid" : "name"),
   statusExtensions: personLookupStatusExtensions,
   code: "pl",
   category: "Search",
@@ -734,48 +763,88 @@ export const personLookupWorkflow = defineWorkflow({
     { key: "startDate", label: "Start Date" },
     { key: "terminationDate", label: "End Date", conditional: true },
     { key: "terminationReason", label: "Term Reason", conditional: true },
+    { key: "found", label: "Found in UCPath", conditional: true },
+    { key: "matchedEmplId", label: "Matched Empl ID", conditional: true },
+    { key: "matchedName", label: "Matched Name", conditional: true },
   ],
   getName: (d) => d.searchName ?? "",
   getId: (d) => d.searchName ?? "",
   operatorSubject: (input) =>
-    isEidInput(input)
+    isMatchInput(input)
+      ? buildOperatorSubject({
+          kind: "person",
+          value: `${input.lastName}, ${input.firstName}`,
+        })
+      : isEidInput(input)
       ? buildOperatorSubject({ kind: "eid", value: input.emplId })
       : buildOperatorSubject({ kind: "person", value: input.name }),
   initialData: (input) =>
-    isEidInput(input)
+    isMatchInput(input)
+      ? { searchName: displayPersonLookupInput(input) }
+      : isEidInput(input)
       ? { searchName: displayPersonLookupInput(input), emplId: input.emplId }
       : { searchName: normalizeName(input.name) },
   deriveItemId: derivePersonLookupItemId,
-  handler: async (ctx: Ctx<typeof steps, PersonLookupItem>, input) => {
-    if (!isEidInput(input)) {
-      ctx.updateData({ searchName: normalizeName(input.name) });
-    } else {
-      ctx.updateData({ searchName: displayPersonLookupInput(input) });
+  handler: handlePersonLookup,
+});
+
+/** Shared Search/Match handler, exported so mode-specific step routing is testable. */
+export async function handlePersonLookup(
+  ctx: Ctx<typeof steps, PersonLookupItem>,
+  input: PersonLookupItem,
+  matchSearchImpl: typeof searchPerson = searchPerson,
+): Promise<void> {
+  const mode = resolvePersonLookupMode(input);
+  const crmCheck = resolvePersonLookupCrmCheck(input);
+
+  if (mode === "match") {
+    if (!isMatchInput(input)) {
+      throw new Error(
+        `Person Lookup mode "match" requires lastName, firstName, and an SSN or DOB`,
+      );
     }
-    const sdcmp = await ctx.step("searching", async () => searchingStep(ctx, input));
-    // Cross-verification now runs for EID inputs too: even though the EID
-    // already identifies the person, the step sources the operator-facing
-    // Start Date from CRM (searching CRM by EID, then name).
+    ctx.updateData({ searchName: displayPersonLookupInput(input) });
+    await ctx.step("searching", async () => handlePersonMatch(ctx, input, matchSearchImpl));
+    if (crmCheck) {
+      await ctx.step("cross-verification", async () => {
+        await crossVerificationStep(ctx, input, []);
+      });
+    } else {
+      ctx.skipStep("cross-verification");
+    }
+    ctx.skipStep("active-status");
+    ctx.skipStep("crm-dates");
+    return;
+  }
+
+  if (isMatchInput(input)) {
+    throw new Error(
+      `Person Lookup Search mode requires a name or Empl ID; match-shaped input must set mode="match"`,
+    );
+  }
+
+  ctx.updateData({
+    searchName: isEidInput(input)
+      ? displayPersonLookupInput(input)
+      : normalizeName(input.name),
+  });
+  const sdcmp = await ctx.step("searching", async () => searchingStep(ctx, input));
+  if (crmCheck) {
     await ctx.step("cross-verification", async () => {
       await crossVerificationStep(ctx, input, sdcmp);
     });
-    if (isEidInput(input)) {
-      await ctx.step("active-status", async () => activeStatusStep(ctx, input, sdcmp));
-      if (input.includeCrmDates !== true) {
-        ctx.skipStep("crm-dates");
-      } else {
-        await ctx.step("crm-dates", async () => crmDatesStep(ctx));
-      }
-      return;
-    }
-    await ctx.step("active-status", async () => activeStatusStep(ctx, input, sdcmp));
-    if (input.includeCrmDates !== true) {
-      ctx.skipStep("crm-dates");
-    } else {
-      await ctx.step("crm-dates", async () => crmDatesStep(ctx));
-    }
-  },
-});
+  } else {
+    // Absence means CRM was not consulted. Never stamp crmFound="Not found"
+    // for this branch — that would turn a skipped check into a false result.
+    ctx.skipStep("cross-verification");
+  }
+  await ctx.step("active-status", async () => activeStatusStep(ctx, input, sdcmp));
+  if (!crmCheck || input.includeCrmDates !== true) {
+    ctx.skipStep("crm-dates");
+  } else {
+    await ctx.step("crm-dates", async () => crmDatesStep(ctx));
+  }
+}
 
 export async function runPersonLookup(input: PersonLookupItem): Promise<void> {
   await runWorkflow(personLookupWorkflow, input);

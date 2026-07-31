@@ -23,6 +23,7 @@ test("EidLookupEidInputSchema: accepts UCPath Empl IDs", () => {
   assert.doesNotThrow(() => EidLookupEidInputSchema.parse({ emplId: "10706431" }));
   assert.deepEqual(EidLookupEidInputSchema.parse({ emplId: "10-706431" }), {
     emplId: "10706431",
+    mode: "search",
   });
   assert.doesNotThrow(() =>
     EidLookupEidInputSchema.parse({ emplId: "10706431", keepNonHdh: true }),

@@ -33,6 +33,7 @@ export { searchCrmByName, datesWithinDays, type CrmRecord } from "./crm-search.j
 
 // Workflow + CLI adapter.
 export {
+  handlePersonLookup,
   personLookupWorkflow,
   runPersonLookup,
   runPersonLookupCli,
@@ -48,7 +49,13 @@ export {
   PersonLookupItemSchema,
   PersonLookupNameInputSchema,
   PersonLookupEidInputSchema,
+  PersonLookupMatchInputSchema,
+  PERSON_LOOKUP_MODES,
   isEidInput,
+  isMatchInput,
+  resolvePersonLookupMode,
+  resolvePersonLookupCrmCheck,
+  parsePersonLookupMatchLine,
   buildPersonLookupCliInput,
   displayPersonLookupInput,
   derivePersonLookupItemId,
@@ -56,4 +63,8 @@ export {
   type PersonLookupItem,
   type PersonLookupNameInput,
   type PersonLookupEidInput,
+  type PersonLookupMatchInput,
+  type PersonLookupSearchInput,
+  type PersonLookupMode,
 } from "./schema.js";
+export { handlePersonMatch } from "./match.js";

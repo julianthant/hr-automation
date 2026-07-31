@@ -7,7 +7,11 @@ import {
   PersonLookupItemSchema,
   PersonLookupNameInputSchema,
   PersonLookupEidInputSchema,
+  PersonLookupMatchInputSchema,
   isEidInput,
+  isMatchInput,
+  parsePersonLookupMatchLine,
+  resolvePersonLookupCrmCheck,
 } from "../../../../src/workflows/person-lookup/schema.js";
 
 describe("normalizeName", () => {
@@ -79,14 +83,49 @@ describe("PersonLookupItemSchema", () => {
     assert.throws(() => PersonLookupEidInputSchema.parse({ emplId: "1234" }));
   });
 
-  it("PersonLookupItemSchema accepts both shapes via union", () => {
+  it("PersonLookupItemSchema accepts all three shapes via union", () => {
     PersonLookupItemSchema.parse({ name: "Smith, Bob" });
     PersonLookupItemSchema.parse({ emplId: "10812990" });
+    PersonLookupItemSchema.parse({
+      mode: "match",
+      lastName: "Smith",
+      firstName: "Bob",
+      dob: "01/02/2000",
+    });
   });
 
   it("isEidInput discriminates the union", () => {
     assert.equal(isEidInput(PersonLookupItemSchema.parse({ name: "Smith, Bob" })), false);
     assert.equal(isEidInput(PersonLookupItemSchema.parse({ emplId: "10706431" })), true);
+  });
+
+  it("defaults mode to search for legacy name and EID callers", () => {
+    assert.equal(PersonLookupItemSchema.parse({ name: "Smith, Bob" }).mode, "search");
+    assert.equal(PersonLookupItemSchema.parse({ emplId: "10706431" }).mode, "search");
+  });
+
+  it("defaults CRM on for search and off for match, with explicit overrides", () => {
+    assert.equal(resolvePersonLookupCrmCheck({ name: "Smith, Bob" }), true);
+    assert.equal(
+      resolvePersonLookupCrmCheck({
+        mode: "match",
+        lastName: "Smith",
+        firstName: "Bob",
+        dob: "01/02/2000",
+      }),
+      false,
+    );
+    assert.equal(resolvePersonLookupCrmCheck({ name: "Smith, Bob", crmCheck: false }), false);
+    assert.equal(
+      resolvePersonLookupCrmCheck({
+        mode: "match",
+        crmCheck: true,
+        lastName: "Smith",
+        firstName: "Bob",
+        dob: "01/02/2000",
+      }),
+      true,
+    );
   });
 
   it("keepNonHdh flag carries through both shapes", () => {
@@ -141,8 +180,103 @@ describe("PersonLookupItemSchema", () => {
   it("includeCrmDates carries through the union schema", () => {
     const n = PersonLookupItemSchema.parse({ name: "Smith, Bob", includeCrmDates: true });
     const e = PersonLookupItemSchema.parse({ emplId: "10812990", includeCrmDates: true });
-    assert.equal(n.includeCrmDates, true);
-    assert.equal(e.includeCrmDates, true);
+    assert.equal("includeCrmDates" in n ? n.includeCrmDates : undefined, true);
+    assert.equal("includeCrmDates" in e ? e.includeCrmDates : undefined, true);
+  });
+});
+
+describe("PersonLookupMatchInputSchema", () => {
+  it("accepts a legal name with either SSN or DOB", () => {
+    assert.equal(
+      PersonLookupMatchInputSchema.parse({
+        mode: "match",
+        lastName: "Doe",
+        firstName: "Jane",
+        ssn: "123456789",
+      }).ssn,
+      "123456789",
+    );
+    assert.equal(
+      PersonLookupMatchInputSchema.parse({
+        mode: "match",
+        lastName: "Doe",
+        firstName: "Jane",
+        dob: "04/01/1998",
+      }).dob,
+      "04/01/1998",
+    );
+  });
+
+  it("rejects missing or whitespace-only hard identifiers", () => {
+    assert.equal(
+      PersonLookupMatchInputSchema.safeParse({
+        mode: "match",
+        lastName: "Doe",
+        firstName: "Jane",
+      }).success,
+      false,
+    );
+    assert.equal(
+      PersonLookupMatchInputSchema.safeParse({
+        mode: "match",
+        lastName: "Doe",
+        firstName: "Jane",
+        ssn: "  ",
+        dob: "",
+      }).success,
+      false,
+    );
+  });
+});
+
+describe("parsePersonLookupMatchLine", () => {
+  it("uses the last two fields as DOB and SSN and rejoins the comma name", () => {
+    assert.deepEqual(
+      parsePersonLookupMatchLine("Battistessa, Johnnie, 12/04/1998, 123456721"),
+      {
+        mode: "match",
+        lastName: "Battistessa",
+        firstName: "Johnnie",
+        dob: "12/04/1998",
+        ssn: "123456721",
+      },
+    );
+  });
+
+  it("treats x case-insensitively as an absent DOB or SSN", () => {
+    assert.deepEqual(parsePersonLookupMatchLine("Reyes, Marta, 03/19/2001, x"), {
+      mode: "match",
+      lastName: "Reyes",
+      firstName: "Marta",
+      dob: "03/19/2001",
+    });
+    assert.deepEqual(parsePersonLookupMatchLine("Reyes, Marta, X, 987654321"), {
+      mode: "match",
+      lastName: "Reyes",
+      firstName: "Marta",
+      ssn: "987654321",
+    });
+  });
+
+  it("refuses both x fields and names the offending line", () => {
+    assert.throws(
+      () => parsePersonLookupMatchLine("Reyes, Marta, x, X"),
+      /Reyes, Marta, x, X.*cannot use x for both DOB and SSN/,
+    );
+  });
+
+  it("refuses fewer than three comma fields and names the offending line", () => {
+    assert.throws(
+      () => parsePersonLookupMatchLine("Reyes, Marta"),
+      /Reyes, Marta.*must contain name, DOB, and SSN fields/,
+    );
+  });
+
+  it("isMatchInput discriminates parsed Match inputs", () => {
+    assert.equal(
+      isMatchInput(parsePersonLookupMatchLine("Reyes, Marta, 03/19/2001, x")),
+      true,
+    );
   });
 });
 
@@ -153,6 +287,18 @@ describe("derivePersonLookupItemId", () => {
 
   it("uses the display name as the stable item id for name inputs", () => {
     assert.equal(derivePersonLookupItemId({ name: "zaw, hein thant" }), "Zaw, Hein Thant");
+  });
+
+  it("uses the legal name plus identifier-presence hint for match inputs", () => {
+    assert.equal(
+      derivePersonLookupItemId({
+        mode: "match",
+        lastName: "Reyes",
+        firstName: "Marta",
+        dob: "03/19/2001",
+      }),
+      "Reyes, Marta (DOB)",
+    );
   });
 });
 
