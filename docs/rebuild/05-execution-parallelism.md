@@ -467,8 +467,10 @@ flight at once.
 ## 8. Worked example — a 10-person i9-check batch
 
 Phase 1 (OCR) is unchanged — the per-page pool already parallelizes extraction. This schedules
-**Phase 2**: 10 member runs, each `person-match` (UCPath read) → `person-lookup` (UCPath read,
-conditional — assume 4 of 10 need it) → `roster-match` (pure local compute). The checkpoint
+**Phase 2**: 10 member runs, each `person-lookup` in **Match** mode (UCPath HR-Tasks read) →
+`person-lookup` in **Search** mode (UCPath Person Org read, conditional — assume 4 of 10 need it)
+→ `roster-match` (pure local compute). These are two questions carried by one workflow identity,
+not a return of the retired `person-match` workflow. The checkpoint
 atomically enqueues one stable-keyed retention-workbook projection; a single sink projector performs
 the idempotent xlsx upsert under a local exclusive lease (~1s, docs 03/06). The append is not hidden
 inside an `effect:"read"` task.
@@ -482,12 +484,12 @@ the write tab is never touched); the independent workbook projector serializes o
 
 ```
 t=0        claim R1..R4 (lane cap 4); ucpath cold → single-flight login (~35s); R4 waits for a tab
-t=35s      tab1: R1 person-match   tab2: R2 person-match   tab3: R3 person-match
+t=35s      tab1: R1 lookup(match)  tab2: R2 lookup(match)  tab3: R3 lookup(match)
 t≈55s      matches resolve (~20s with condition waits, not 3s-sleep chains)
-           tab1: R4 person-match   tab2: R5 …   tab3: R6 …      R1 → roster-match → outbox
+           tab1: R4 lookup(match)  tab2: R5 …   tab3: R6 …      R1 → roster-match → outbox
 t≈75s      R7..R9 on tabs; R2,R3 roster-match; R1 waits for/gets projection ack, then done
-t≈95s      R10 + the 4 person-lookup runs (needed-lookup members) start their second UCPath task
-t≈115–140s stragglers: person-lookup (~25s each, 3-wide) + serialized appends drain
+t≈95s      R10 + 4 lookup(search) runs (needed-lookup members) start their second UCPath task
+t≈115–140s stragglers: lookup(search) (~25s each, 3-wide) + serialized appends drain
 ```
 
 **Wall clock ≈ 2.5 min cold (≈2 min on a warm executor) vs ≈ 12 min today — roughly 5×**, from

@@ -1376,10 +1376,17 @@ operator actions, and a breakage disguised as a decision is a gate that will nev
 Consistent with row-model D2. Rationale: a group of one that looks like a Run Row makes the next
 fan-out look like a new object.
 
-### D15 — `person-match` keeps its Workflow Panel entry
+### D15 — Person Lookup carries Search and Match as modes
 
-It stays visible in the rail despite having zero callers today (i9-check searches inline).
-**Supersedes `reviews/delegation-layouts-2026-07-25.md` §7 Q10, which recommended hiding it.**
+Person Lookup owns one Workflow Panel entry and one queue surface. **Search** asks Person
+Organizational Summary for identity/employment status by EID or name; **Match** asks HR-Tasks
+Search/Match whether UCPath already knows a legal-name + DOB/SSN identity. The operator chooses
+the question at start time, like choosing an OCR form spec, rather than navigating to a second
+workflow identity for the same person-check domain.
+
+This supersedes the earlier D15 decision to keep a standalone `person-match` entry and
+`reviews/delegation-layouts-2026-07-25.md` §7 Q10's recommendation to hide that entry. The two
+UCPath surfaces remain distinct; only their workflow/panel identity is unified.
 
 ### D16 — cancelling a group is tree-scoped, final, with no dialog and no undo
 

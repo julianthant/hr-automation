@@ -504,7 +504,7 @@ last as the highest-stakes proofs.
 | Order | Workflow(s) | Class | One-line justification |
 |---|---|---|---|
 | 0 | **person-lookup** | read | Phase 2 slice; will prove the spine before any migration |
-| 1 | **person-match**, **i9-lookup** | read | Pure UCPath reads; reuse person-lookup's store tasks almost wholesale — fastest reuse proof |
+| 1 | **person-lookup** (Search + Match modes), **i9-lookup** | read | Both Person Lookup questions and the signer lookup are pure UCPath reads; the two modes prove one workflow descriptor can preserve distinct system surfaces without a second workflow identity |
 | 2 | **crm-doc-download**, **sharepoint-download**, **old-kronos-reports** | read/download | Single-system reads/downloads; stand up crm/sharepoint/old-kronos stores at low risk |
 | 3 | **ocr** pipeline workflow (consumes the Phase-1h service stores) | service | No browser, no submit; the `extraction`/`normalization`/`ocr`/`roster` service stores are already built in **Phase 1h** (§3.5) — this order migrates the pipeline *workflow* on top of them, unblocking every OCR/contact/roster-dependent workflow below |
 | 4 | **oath-signature**, **emergency-contact** | OCR fan-out + light write | Exercise the completion union (D11) + approval gates (D5) + operation-member fan-out; the write is a bounded UCPath enter/fill |
