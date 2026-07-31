@@ -186,7 +186,7 @@ export interface Idempotency<In extends z.ZodType> {
    *  (the doc1/doc2 fix, §5). e.g. `${eid}|termination|${effectiveDate}`. Pure. */
   key: (input: z.output<In>) => string;
   /** What may turn a post-fence absence into retry authority (D64). Waiting is scheduler requeue,
-   * never a sleeping task/lane. `operator-only` is mandatory when the target has no trustworthy
+   * never a sleeping task/worker. `operator-only` is mandatory when the target has no trustworthy
    * negative read or bounded propagation behavior. */
   recoveryAbsence:
     | { kind: "stabilized"; minSinceFenceMs: number;
@@ -467,7 +467,7 @@ selects exactly one of three outcomes and never retries from a single unproven U
    included.**
 2. **The write is proven absent.** One `absent` result is only an observation, not retry authority.
    The kernel validates its `AbsentEvidence` and schedules the **first qualifying** probe no earlier
-   than `fencedAt + minSinceFenceMs` using a `not_before` requeue (no sleeping lane). It then obtains
+   than `fencedAt + minSinceFenceMs` using a `not_before` requeue (no sleeping worker). It then obtains
    the configured 2–3 consistent observations separated by `minBetweenReadsMs`. Every counted
    observation—not merely the final one—must have `observedAt >= fencedAt + minSinceFenceMs` and
    bind the same key/query/authoritative source state. Earlier observations remain diagnostic only
@@ -864,7 +864,7 @@ re-run ucpath/find-existing-termination key="10694136|termination|08/01/2026"
 second unattended commit attempt.
 ```
 Had an early recovery probe returned `absent`, it would be retained only as diagnostic evidence.
-The kernel would requeue without occupying a lane, take its first qualifying observation at least
+The kernel would requeue without occupying a worker, take its first qualifying observation at least
 30s after the fence, then require a second same-key/same-state absence at least 5s
 later before marking the intent retryable. An early, malformed, or disagreeing absence would park.
 Had it returned `ambiguous` (two "Terminatn" rows for that EID+date) or

@@ -459,7 +459,7 @@ its row has an implementation and a test.
 | Start Run | descriptor start capability + server start plan + preflight | descriptor/config/preflight invalidation | start command referencing plan token/artifact ids | descriptor parser, config resolver, enqueue authority |
 | Spreadsheet Intake | artifact inspection, detected headers/samples, saved exact-fingerprint mapping, validation/manifest draft | parse/validation/finalize progress | confirm mapping, correct/exclude, validate, enqueue manifest | doc 06 artifact/mapping/intake authority |
 | Mobile Capture | capture session + ordered immutable photo refs | session/photo/finalize/handoff patches | upload/replace/reorder/delete/finalize/retry/discard | doc 06 capture authority + artifact/finalize outbox |
-| Session Panel | worker cards, browser health, current run, capacity and lease waits | worker/browser/run patches | plan/spawn/stop/refresh/reopen/pause/resume | worker/session authority and browser health services |
+| Session Panel | worker cards, browser health, current run, queue/wait reasons | worker/browser/run patches | plan/spawn/stop/refresh/reopen/pause/resume | worker/session authority and browser health services |
 | Settings + doctor/storage | schema-driven sections, effective/default/override provenance, revision, health/backups | config/storage/preflight patches | atomic settings update; recovery actions when explicitly served | doc 11 config/preflight + doc 03 authority recovery |
 | Archive + version bump | paged archive index, self-contained archived detail, integrity, version plan | version/archive job progress | plan/apply bump, relaunch as new run | doc 03 archive snapshots + descriptor/version service |
 | Explorer | descriptor graph projection; optional run overlay | selected run overlay patches | navigation only in Phase A; safe edit commands later | docs 02/12 exact descriptor + spans/checkpoints |
@@ -593,7 +593,7 @@ mobile capture authority/outbox recovery.
 ### 6.7 `2i`: complete product shell
 
 Wire Settings/doctor/storage health, Archive/version bump, Explorer/run overlay, Activity report,
-generated safe catalog/help surfaces, worker capacity controls, and the remaining notification and
+generated safe catalog/help surfaces, worker/session controls, and the remaining notification and
 search states. Development row/panel catalog and design-system kit remain fixture-only.
 
 ### 6.8 Phase 3+ workflow migrations
@@ -622,7 +622,7 @@ Freeze deterministic target screenshots and accessibility snapshots for at least
 - open gate, failed, unknown-write parked, running, terminal receipt, and empty states;
 - Start Run methods and refusals;
 - intake header choice, mapping, validation/rejection, and fan-out preview;
-- Session Panel browser-health states and capacity refusal;
+- Session Panel browser-health states, N-worker spawn, and authored fresh-session transitions;
 - Settings healthy/degraded, Archive old version, Explorer overlay, and Activity report;
 - Graphite Warm and Paper Ink at 1280×720, 1440×900, and one narrow supported width;
 - keyboard-only and reduced-motion variants.

@@ -49,8 +49,8 @@ Every concept has exactly one owner (reconciliation `04` D1). Reference the owne
 | Task contract (`defineTaskContract`/`defineTask`), contract/impl split (D3), task-namespace grammar + closed `SystemId` union (D2), error taxonomy, three effects/dry-run mechanics, retry, decoration, system/service stores + pure workflow mini-stores, session providers + login signature, `stores/common/` leaf homes | **Doc 01** |
 | Workflow builder API (single), descriptor shape, `RunEnvelope`, run-state machine incl. gates/parks (D5), checkpoint/resume + freshness walk (D8), label precedence (D16) | **Doc 02** |
 | Span/event wire schema (D10), notes stream, storage layout, SQLite projection role (D14), SSE wire shapes, completion (fan-out/approval) union (D11), the ONE run/queue projection every count reads (D81), run versioning + archive-on-bump (D80), run display names (D83) — *the D12/D13 lift adapter + flip plan are deleted by D73, §4* | **Doc 03** |
-| Binding cross-doc reconciliation (D1–D72, including 2026-07-22 Round 7) | **Doc 04** |
-| Scheduler/lanes/fairness/backpressure, session pool + driver leases, executor process model, speed/sleep-tax contract, page/subject-isolation invariant | **Doc 05** |
+| Binding cross-doc reconciliation (D1–D87, through 2026-07-30 Round 9) | **Doc 04** |
+| One-item workers, queue dispatch/backpressure, explicit browser-session boundaries + driver leases, speed/sleep-tax contract, page/subject-isolation invariant | **Doc 05** |
 | Data-service systems: CSV/PDF extraction, typed contact/address normalization, roster matching, durable mobile capture, operator column mapping, immutable intake manifest/rerun, Edit Data checkpoint UI | **Doc 06** |
 | Cross-cutting gap findings memo (owns nothing — a design input) | **Doc 08** |
 | Write-safety contract, permanent-key intents, typed proof, atomic outboxes/recovery, serialized anchored ledger | **Doc 09** |
@@ -160,7 +160,7 @@ than inventing one mid-migration.
 
 | Phase | Headline deliverable | Gate to exit | Size |
 |---|---|---|---|
-| **0** | Corrected foundation design approved; empty rebuild tree | Round-7/8 decisions reconciled across 00–12; executable feasibility + honest gate baseline recorded; the two remaining live probes run (§3.8) | **M** |
+| **0** | Corrected foundation design approved; empty rebuild tree | Decisions reconciled through Round 9; executable feasibility + honest gate baseline recorded; write-proof probes carry explicit later milestone gates (§3.8) | **M** |
 | **1** | **The SPINE** — the minimum base that can carry one workflow end to end (1a–1f + the span/projection slice + the queue-surface slice) | **person-lookup runs LIVE on it** (D74 — a fixture cannot falsify a contract the way a real run can); full gates green; strict/subject/control/delegation/recovery/scenario fixtures pinned | **XL** |
 | **2** | **Transaction proof, then the deferred base tails** — controlled real commit + crash/recovery, *then* trust tails, data services/intake/capture, explorer | subject-bound dry-run and controlled commit/crash/outbox/ledger proof green; then evidence/notification/knowledge, intake/capture/Edit-Data, and read-only explorer land against a proven spine | **XL** |
 | **3+** | Per-workflow migration, one at a time (order §3.3), plus explicit non-workflow capability closure (§3.6) | each: §b questionnaire answered; live dry-run + controlled write evidence where applicable; every capability inventory entry advances to native/replaced/retired; docs updated | **XL** |
@@ -196,7 +196,7 @@ probe policy/elapsed budget and pending-termination sweep modeling (09 OQ4/OQ5�
 Canonical EID is now settled as `/^10\d{6}$/` with a legacy-fixture audit; roster-match freshness is
 settled at a 24h base maximum over immutable artifact observation time (doc 06 §1/§4). Checkpoint
 retention is settled by D14—logical-item deletion only, never JSONL age. Ledger altitude, config
-snapshots, four lanes, and context-exclusive transactions are also settled defaults, not open
+snapshots, one active item per worker, explicit fresh-session boundaries, and context-exclusive transactions are also settled defaults, not open
 Phase-1 dependencies.
 
 **Executable feasibility evidence (not implementation).** Disposable files outside the repository
@@ -239,7 +239,7 @@ and a real consumer. **No contract in docs 01–06 changed — only delivery ord
 
 | In the spine | Deferred to the Phase-2 tails |
 |---|---|
-| 1a guard plumbing · 1b strict domain/clock/config/secrets · 1c authority storage + recovery + command/write type shell · 1d semantic UI registry + drivers + task/store/session contracts · 1e workflow DAG + delegation + completion + scenarios · 1f registry + executor + command service + write sequencer | rest of 1g (evidence receipts, failure records, diagnostic bundles, notifications, knowledge/fix records, ledger services) · all of 1h (extraction/normalization/ocr/roster stores, provider infra, column mapping, intake manifests, durable capture, Edit Data) · rest of 1i (explorer, AI advisories, storage-health UI, generated catalog UI) · 1j soak/restore/doc gate |
+| 1a guard plumbing · 1b strict domain/clock/config/secrets · 1c authority storage + recovery + command/write type shell · 1d semantic UI registry + drivers + task/store/session contracts · 1e workflow DAG + delegation + completion + scenarios · 1f registry + workers + command service + write sequencer | Phase-2 tails: 2g (evidence receipts, failure records, diagnostic bundles, notifications, knowledge/fix records, ledger services) · 2h (extraction/normalization/ocr/roster stores, provider infra, column mapping, intake manifests, durable capture, Edit Data) · 2i (explorer, AI advisories, storage-health UI, generated catalog UI) · 2j soak/restore/doc gate |
 | **1g-spine** — spans/notes emission + the run/queue projection only (what the queue surface reads) | |
 | **1i-spine** — the four parity surfaces only: Queue Panel rows, Log Panel, Session Cards, Workflow Panel counts | |
 
@@ -252,7 +252,7 @@ and a real consumer. **No contract in docs 01–06 changed — only delivery ord
 | 1c | **Authority storage + recovery + command/write type shell.** Create the infra-owned native authority adapter, versioned authority/projection table classes, self-describing `node:sqlite` online-backup manifest/doctor/degraded-mode/restore APIs, full command-family types, `ProbeVerdict`/negative-settlement policy, typed write-binding proof union, permanent intent/attempt, dependency/manifest, gate-result, notification, outbox and ledger-head schemas before consumers refer to them | **Docs 03/09/11** | DDL/invariants; raw `DatabaseSync` private; authority vs projection enumeration; boot corruption fixture; native backup opens/read-checks its own generation + follow-up trigger; restore skeleton; committed key cannot reinsert; pre-window/single negative cannot unlock retry; no untyped command/proof/gate/notification arm |
 | 1d | **Semantic UI registry, typed drivers, task + provider contracts and stores/sessions.** Inventory legacy selector keys into one canonical id/alias migration map; implement the server-only recipe registry, safe generated `UI-CATALOG.md` projection, driver boundary, then read/prepare/commit overloads, subject specs, mutation capability, freshness/provenance, artifact writer, declared provider capabilities with narrowed injected clients, store/session providers and exclusivity. Fully typed recipes populate as tasks migrate; no task may port first and bypass this step | **Docs 01/05/12** | semantic-id uniqueness/dependencies/catalog; catalog omits recipes; commit UI actions require mutation capability; raw Page/Locator absent outside driver/session internals; remote I/O requires provider declaration and infra adapter; effect/capability/subject/contract/impl/example/error/store/no-any/artifact/OnBase guards; every new observation/recipe has fixture plus live/read-only verification evidence |
 | 1e | **Complete workflow DAG + result/delegation/scenario descriptor.** Real-scale type spike first; then ingress parser plus transform-free canonical-input validator, read/transaction/branch/fork-join/typed child result/gate nodes, complete delegation policies/manifests, enqueue/actions, completion, fingerprints, checkpoints/migrations and registered scenarios | **Docs 02/03/12** | realistic graph type suite; ingress→canonical round-trip and corrupted-authority rejection; strict terminal/gate result; delegation matrix; transaction pairing; descriptor projection matrix; no erased target; every branch/gate/policy has an executable scenario |
-| 1f | **Core registry + executor/checkpoints/command service/write sequencer.** Composition root above workflows; claims/lanes/provider budgets; standard run/gate/notification/capture commands; authority-only target resolution; context-exclusive transactions; probe→prepare→binding proof→fence→commit→proof→atomic outbox; evidence-qualified negative recovery and parked-intent resolution | **Docs 02/03/05/09** | command idempotency/CAS; lookup failure creates no duplicate; no visible-root fallback; dry-run commit-free; binding mismatch/unknown creates zero fence/click; a bare/early negative cannot retry; provider admission, probe-age/settlement/CAS/dedupe/crash/context tests |
+| 1f | **Core registry + workers/checkpoints/command service/write sequencer.** Composition root above workflows; one-item claims, explicit browser-session boundaries, provider budgets; standard run/gate/notification/capture commands; authority-only target resolution; context-exclusive transactions; probe→prepare→binding proof→fence→commit→proof→atomic outbox; evidence-qualified negative recovery and parked-intent resolution | **Docs 02/03/05/09** | command idempotency/CAS; one-active-item-per-worker; authored fresh-session close→start proof; lookup failure creates no duplicate; no visible-root fallback; dry-run commit-free; binding mismatch/unknown creates zero fence/click; a bare/early negative cannot retry; provider admission, probe-age/settlement/CAS/dedupe/crash/context tests |
 | 1g-spine | **Span emission + the ONE projection (slice only).** Strict spans/notes on the executor's paths, and the single server-side run/queue projection that every surface reads. **D81: counts have exactly one code path** — Workflow Panel badges, Status Bar, and Queue Panel rows all read this projection; a second count path is a guard failure, not a bug to fix later. Evidence receipts, failure records, diagnostic bundles, notifications, knowledge, and the ledger *services* defer to Phase 2 (the ledger *tables + atomic outbox* already landed in 1c, so no write is unrecorded) | **Docs 03/09** | boundary corruption; redaction canaries; atomic projection tests; **one-projection guard: no count computed off a second path**; span identity `(runId, attempt, spanPath)` |
 | 1i-spine | **The exact Person Lookup capability slice in the approved shell.** Queue Panel rows (three row types, eight statuses); run/member `Logs · Receipt`; persistent timeline; Context rail; typed Start Run; Session Cards; Workflow Panel/Status Bar/day counts. Rendered from the 1g-spine BFF. Review/People tabs, full trust/data surfaces, Archive/Explorer/Activity/Settings tails defer | **Docs 03/12/13** | one typed transport client; finished wires only; no workflow-id switches; both-theme headless a11y + screenshot parity at reference viewports |
 
@@ -339,8 +339,8 @@ over checkpoints, intake manifests) is shaped by what the write path actually tu
 tail built before the transaction proof is a tail built against a guess.
 
 **The read half already happened.** Person-lookup was Phase 1's exit test (D74), so the spine
-arrives here already proven end to end: descriptor → contracts → executor → session pool (the
-proven 4-tab shared context) → spans → the one projection → the four surfaces. Its worked example
+arrives here already proven end to end: descriptor → contracts → one-item worker → worker-owned
+browser session → spans → the one projection → the four surfaces. Its worked example
 is in doc 02 §8; mark it as-built when the exit test passes.
 
 **Transactional work items.** Choose the smallest controlled test-instance or sacrificial test
@@ -358,7 +358,7 @@ verifiable target exists, Phase 2 is blocked; write-heavy workflow migration may
 2026-07-23 probe proved a save round-trip is verifiable (D78). UCPath and ServiceNow targets are
 being named by the operator; OnBase is gated on the next real upload.
 
-**Then: the deferred base tails.** Each is a Phase-1 work item that D74 moved behind the first
+**Then: the deferred base tails.** Each was a Phase-1 work item that D74 moved behind the first
 live proof. They land in this order, because each is a consumer of the one before:
 
 | Tail | Content | Owner |
@@ -366,7 +366,7 @@ live proof. They land in this order, because each is a consumer of the one befor
 | **2g** | Rest of the event/trust layer: structured `FailureRecord`s, redacted diagnostic bundles, terminal run evidence receipts + `explain run`, durable actor-keyed notification inbox (read/unread + snooze per D79b), knowledge/fix records, ledger projector + tail verification. **D82 acceptance test applies here:** the receipt must let the operator complete their double-check without opening UCPath | Docs 03/09/11/12 |
 | **2h** | Data-service/intake foundation: extraction/normalization/ocr/roster stores; shared provider admission infra; generic/duplicate-safe column mapping; strict validation/rejection; immutable intake manifests + rerun diff; durable capture sessions/photo artifacts/finalize outbox (crash matrix slimmed per D79d); Edit Data core; stable-keyed local artifact projector | Docs 01/03/06/12 |
 | **2i** | Rest of the operator surface: evidence/failure/notification/run-explain views, storage health/backups, Edit Data + intake + capture UI, generated UI catalog, optional read-only AI advisories, and the **read-only Workflow Explorer** over tasks/delegation/scenarios/source links | Docs 03/06/12 |
-| **2j** | Base integration/restore/soak + documentation gate: full scenario corpus, corruption→restore drill, dependency/control/capture concurrency matrix, executor teardown/parallel soak, redaction scan, capability-inventory validation, then update every owning doc to as-built | Docs 03/05/10/12 + this plan |
+| **2j** | Base integration/restore/soak + documentation gate: full scenario corpus, corruption→restore drill, dependency/control/capture concurrency matrix, worker teardown/multi-worker soak, redaction scan, capability-inventory validation, then update every owning doc to as-built | Docs 03/05/10/12 + this plan |
 
 **Workflow editor scope (D79a — DSL mode TRIMMED).** The read-only explorer is 2i. Editing is
 limited to presentation overrides (hot-applied through their strict atomic file) plus a closed set
@@ -391,8 +391,8 @@ questionnaire names a real workflow that wants it.
   plus validated proof, one ledger entry,
   one terminal span; a later fresh same-key run performs no second click.
 - Crash/outbox/projector fixtures and context-exclusive UCPath/OnBase lease tests remain green under
-  multiple executors. Recovery demonstrates that one `absent` observation cannot retry, durable
-  `not_before` scheduling occupies no execution lane, and only contract-qualified negative
+  multiple workers. Recovery demonstrates that one `absent` observation cannot retry, durable
+  `not_before` scheduling occupies no worker, and only contract-qualified negative
   settlement may increment the generation.
 - Read-only explorer accurately renders the as-built person-lookup graph/task/UI/scenario/result
   dependencies and exact source links. Every supported constrained edit passes compile+scenario+
@@ -504,10 +504,10 @@ last as the highest-stakes proofs.
 
 | Order | Workflow(s) | Class | One-line justification |
 |---|---|---|---|
-| 0 | **person-lookup** | read | Phase 2 slice; will prove the spine before any migration |
+| 0 | **person-lookup** | read | Phase 1 spine proof; runs live before any later migration |
 | 1 | **person-lookup** (Search + Match modes), **i9-lookup** | read | Both Person Lookup questions and the signer lookup are pure UCPath reads; the two modes prove one workflow descriptor can preserve distinct system surfaces without a second workflow identity |
 | 2 | **crm-doc-download**, **sharepoint-download**, **old-kronos-reports** | read/download | Single-system reads/downloads; stand up crm/sharepoint/old-kronos stores at low risk |
-| 3 | **ocr** pipeline workflow (consumes the Phase-1h service stores) | service | No browser, no submit; the `extraction`/`normalization`/`ocr`/`roster` service stores are already built in **Phase 1h** (§3.5) — this order migrates the pipeline *workflow* on top of them, unblocking every OCR/contact/roster-dependent workflow below |
+| 3 | **ocr** pipeline workflow (consumes the Phase-2h service stores) | service | No browser, no submit; the `extraction`/`normalization`/`ocr`/`roster` service stores are already built in **Phase 2h** (§3.5) — this order migrates the pipeline *workflow* on top of them, unblocking every OCR/contact/roster-dependent workflow below |
 | 4 | **oath-signature**, **emergency-contact** | OCR fan-out + light write | Exercise the completion union (D11) + approval gates (D5) + operation-member fan-out; the write is a bounded UCPath enter/fill |
 | 5 | **i9-check** | UCPath read + durable roster projection | Operation coordinator + member enqueue + display-only rows, but **no external submit**; its stable-keyed SQLite outbox + serialized workbook projector must prove retry-safe local materialization |
 | 6 | **work-study**, **kronos-pay-rule** | single write | First workflow-specific production commits—small, isolated; validate receipt/save proof on the proven transaction kernel |
@@ -590,21 +590,21 @@ Embed in **every** workflow's migration plan doc; answer with the operator BEFOR
 
 #### 3.5 Where the data systems slot
 
-- **Service stores** (`extraction`/`normalization`/`ocr`/`roster` contract+impl) — **Phase 1h** (they need 01+11+12)
+- **Service stores** (`extraction`/`normalization`/`ocr`/`roster` contract+impl) — **Phase 2h** (they need 01+11+12)
   so they exist before consumers; the **ocr pipeline workflow** migrates at **order 3** (before its
   OCR/roster consumers at orders 4–5, 9).
-- **Provider infrastructure + advisory AI.** Shared model/key/rate-limit clients land in 1h for OCR
-  and normalization. Operator triage/sanity/selector/summary adapters land in 1i against redacted
+- **Provider infrastructure + advisory AI.** Shared model/key/rate-limit clients land in 2h for OCR
+  and normalization. Operator triage/sanity/selector/summary adapters land in 2i against redacted
   structured evidence but stay disabled for authority and cut over after Phase 2 proves the receipt/
   failure surfaces. Provider absence is an explicit advisory-unavailable result.
-- **Column mapping + intake manifest + Edit-Data UI** (doc 06) — land in **Phase 1h/1i** as base
+- **Column mapping + intake manifest + Edit-Data UI** (doc 06) — land in **Phase 2h/2i** as base
   capabilities over synthetic fixtures, even though their first production workflow consumer is
   work-study (order 6). This avoids inventing data/rerun/edit contracts during a high-risk write
   migration. Note **i9-check (order 5) does not exercise operator mapping**—it matches against a
   fixed retention roster—but it does exercise the same stable artifact/outbox/evidence machinery.
   Work-study and onboarding therefore validate an already-built mapping surface rather than owning it.
-- **Mobile capture** backend/session recovery/bundle outbox lands in **1h** and its dashboard/phone UI
-  in **1i** over synthetic handoffs. It remains legacy-proxied until the native OCR workflow cutover
+- **Mobile capture** backend/session recovery/bundle outbox lands in **2h** and its dashboard/phone UI
+  in **2i** over synthetic handoffs. It remains frozen-reference-only until the native OCR workflow cutover
   at order 3, then flips with OCR so finalized PDFs cannot cross old/new authority implicitly.
 
 #### 3.6 Non-workflow capability closure inventory (D58)
@@ -633,19 +633,19 @@ The initial grouped decisions are:
 
 | Legacy capability family | Binding disposition and milestone |
 |---|---|
-| `services/capture` + capture routes/components/ngrok | native durable capture foundation in 1h/1i; proxy only until OCR order 3, then remove old route/service/UI together |
-| `services/address` + `llm/normalize-contact` | replaced by `normalization` service contracts in 1h; OCR order 3 proves real contact normalization/approval parity |
-| OCR vision provider pool/rate limits/key status | native shared provider infra + OCR store in 1h; OCR workflow/order 3 closes legacy provider consumers |
-| LLM triage/sanity/selector/summarize routes + ops scripts | native optional advisory adapters in 1i, cut over after Phase 2 trust surfaces; deterministic explain/rules/catalog remain primary; no authority edge |
-| `services/matching` | roster/domain identity contracts in 1h; each real consumer closes during orders 3–9; no hardcoded header matcher survives |
+| `services/capture` + capture routes/components/ngrok | native durable capture foundation in 2h/2i; frozen reference remains until OCR order 3, then old route/service/UI delete together |
+| `services/address` + `llm/normalize-contact` | replaced by `normalization` service contracts in 2h; OCR order 3 proves real contact normalization/approval parity |
+| OCR vision provider pool/rate limits/key status | native shared provider infra + OCR store in 2h; OCR workflow/order 3 closes legacy provider consumers |
+| LLM triage/sanity/selector/summarize routes + ops scripts | native optional advisory adapters in 2i after trust surfaces; deterministic explain/rules/catalog remain primary; no authority edge |
+| `services/matching` | roster/domain identity contracts in 2h; each real consumer closes during orders 3–9; no hardcoded header matcher survives |
 | `services/timecard` | pure Clock-injected domain range logic + semantic common driver helper in 1d; Old Kronos adapter closes at order 2, New Kronos at order 8 after its last separations consumer |
-| queue/task/dependency/worker/browser/daemon control routes | native command/executor/session protocol in 1f and operator UI in 1i; workflow-specific aliases disappear as each workflow cuts over |
-| files, screenshots, search/failures, SSE/projection routes | native artifact/evidence/query/projection services in 1g/1i; compatibility aliases removed with the last legacy UI consumer |
-| settings, preflight, credentials reference | native strict config/secrets/storage-health UI in 1b/1i; legacy settings proxy removed after Phase 2 UI verification |
-| workflow presentation/design/data-bank/modifier | read-only explorer in 1i; constrained editor/replacement in Phase 2; old generated design briefs are migrated as history or retired, never runtime authority |
+| queue/task/dependency/worker/browser/daemon control routes | native command/worker/session protocol in 1f and operator UI in 2i; workflow-specific aliases disappear as each workflow cuts over |
+| files, screenshots, search/failures, SSE/projection routes | native projection spine in 1g, then artifact/evidence/query UI in 2g/2i; compatibility aliases disappear with the frozen tree |
+| settings, preflight, credentials reference | native strict config/secrets foundation in 1b and storage-health UI in 2i; no legacy proxy ships during pause-until-done |
+| workflow presentation/design/data-bank/modifier | read-only explorer and constrained editor/replacement in 2i; old generated design briefs are migrated as history or retired, never runtime authority |
 | OCR review/approve/retry/research/discard routes | native OCR workflow/gates/commands at orders 3–4; no compatibility mutation route remains afterward |
 | oath-upload/sharepoint and other workflow-special routes | absorbed into descriptor start surfaces and standard commands at that workflow's migration; route removal is part of its exit gate |
-| export to xlsx, setup, test-login, tracker clean/compact, schema/catalog/search codegen | native CLI/maintenance work items attached to 1b/1d/1g/1i as appropriate; behavioral CLI fixtures and help output required before alias removal |
+| export to xlsx, setup, test-login, tracker clean/compact, schema/catalog/search codegen | native CLI/maintenance work items attached to 1b/1d/1g/2i as appropriate; behavioral CLI fixtures and help output required before old-tree deletion |
 | one-off debug/dev helpers (for example Kronos debug and dashboard dev components) | port only if a named supported diagnostic remains; otherwise retire with zero-consumer search plus accepted replacement/evidence |
 | general `utils`/infra helpers | no bulk copy; each consumer-driven port maps to domain/infra/store ownership, and the capability guard blocks an orphan at final deletion |
 
@@ -673,7 +673,7 @@ table: S ≈ 1 session, M ≈ 2–4, L ≈ 5–10, XL ≈ 10+). They are estimat
 | 1c authority storage + recovery + type shell | **XL** | backup/doctor/degraded-mode/**restore drill** is a subsystem, not a table; plus the full command family + proof union types |
 | 1d semantic UI registry + drivers + task contracts | **XL** | inventorying every legacy selector key into one canonical id/alias map, then the driver boundary + effect overloads + capability + provider narrowing |
 | 1e workflow DAG + delegation + completion | **XL** | starts with the real-scale type proof (below); delegation policy matrix + completion program are each substantial on their own |
-| 1f registry + executor + commands + write sequencer | **XL** | the write sequence (probe→prepare→binding proof→fence→commit→proof→atomic outbox) plus lanes/leases/budgets and evidence-qualified negative recovery |
+| 1f registry + workers + commands + write sequencer | **XL** | the write sequence (probe→prepare→binding proof→fence→commit→proof→atomic outbox) plus one-item worker/session ownership and evidence-qualified negative recovery |
 | 1g-spine spans + the one projection | **M** | thin by design — emission + one projection, no services |
 | 1i-spine exact Person Lookup surface slice | **M** | thin by capability, exact by presentation — the target is already ratified and demoed (`?view=rebuild-demo`) |
 | **Phase 1 total** | **XL** | four XL items on the critical path; this is the program's centre of mass |
@@ -899,7 +899,7 @@ this plan.
 | **Phase-2 transaction proof** | wire preview, binding, fenced write, read-back, receipt/failure, write-parked resolution and command conflict through the same production client | the trust UI is backed by real intent/proof/ledger state, never fixture prose |
 | **2g** | Receipt/Failure/captures, rerun diff, notifications/search, archive snapshot generation and lazy detail resources | terminal and archived runs remain explainable without live-system or old-code access |
 | **2h** | descriptor upload/capture/spreadsheet starts, intake mapping/manifests, progressive Review records and Edit Data | complete upload→review→manifest/fan-out and correction→same-run/new-run flows |
-| **2i** | Settings/doctor/storage, Archive/version bump, Explorer overlay, Activity, worker capacity controls and remaining product shell states | every product surface in doc 13 §5 has query/patch/command/authority coverage |
+| **2i** | Settings/doctor/storage, Archive/version bump, Explorer overlay, Activity, worker/session controls and remaining product shell states | every product surface in doc 13 §5 has query/patch/command/authority coverage |
 
 ### 7.3 Integration execution rule
 

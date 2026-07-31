@@ -304,39 +304,25 @@ toast viewport's mount point before assuming it's a pure state problem.
 
 **Screenshot:** `11.png`
 
-**What it shows.** A modal titled `Add workers`, subtitle "Start parallel executors for one
-workflow", ✕ top right.
-
-- Row: a `Workflow` select showing `Onboarding` (focused, white ring); on the right `Workers` with
-  a `− 1 +` stepper.
-- A bordered well: `◔ 4/6 workers up  |  0 more Onboarding workers can start now`, then four capacity
-  chips laid out 3-then-1: `crm 1/2`, **`ucpath 1/1`** (amber border and text), **`i9 1/1`** (amber),
-  `kuali 1/2`.
-- A tooltip overlays the row: `ucpath: 1 of 1 concurrent sessions in use · hel…`.
-- Footer: **`1 of these will be refused`** on the left; `Close` and a white `Start 1 worker` on the
-  right.
-
 **Asked for, verbatim:** *"we dont need the bottom part and uc path 1/1 does not make any sense. uc
 path 1/1 should mean that for each session there can only be 1 ucpath window. not for each
 workflow."*
 
-**Interpretation — two changes.**
+**Correction (2026-07-29):** the earlier interpretation that UCPath is a **global session singleton**
+(one window for the whole app) was wrong. The right model is:
 
-1. **Remove the `1 of these will be refused` line** at the bottom of the modal.
-2. **Re-scope the UCPath capacity semantics.** `ucpath 1/1` is currently computed and displayed
-   **per workflow**, which is wrong. The real constraint is **one UCPath window per session,
-   globally** — it is a session-wide singleton shared by every workflow, not a per-workflow budget.
-   The chip must express the global session constraint. This is a **model** change, not just a label
-   change: the capacity accounting behind it is wrong, and the tooltip copy
-   ("1 of 1 concurrent sessions in use") needs to match the corrected model.
+1. Each **worker** may have at most one UCPath window (`ucpath 1/1` on that worker's card).
+2. Distinct browser sessions may each hold their own UCPath window — N workers ⇒ N UCPath sessions.
+3. The Add-workers dialog must **not** hardcap or refuse on lease/pool math. It is workflow + worker
+   count only; every requested worker starts.
 
-**Backend implication.** This belongs in
-`docs/rebuild/reviews/backend-capabilities-from-the-demo-2026-07-28.md` — the backend must serve
-**session-scoped** system capacity separately from per-workflow worker capacity, otherwise the
-frontend cannot render the distinction honestly.
+**Clarification (2026-07-30):** remove the capacity-chip row from Session Cards entirely: both the
+per-system counters (`ucpath 1/1`, `i9 1/1`, `crm 1/2`, and similar) and the aggregate `N/M lanes`
+counter. Remove the Sessions-bar lane total too. System-level state remains visible through the
+concrete browser health tiles; workflows explicitly declare any new-browser-session boundary
+instead of asking the card to explain it through capacity math.
 
-**Where it lives.** `DemoShell.tsx` (contains both "Add workers" and "workers up"),
-`demo-workers-wire.ts`.
+**Where it lives.** `DemoShell.tsx` (Session Cards + Add workers), `demo-workers-wire.ts`.
 
 ---
 

@@ -1271,7 +1271,7 @@ Nothing launched, no Duo spent, no partial run row.
    per-workflow *pre-write* `probePolicy` knob (doc 09 §5, on the transaction node), not this
    question.
 3. ~~Injected-data surface scope~~ — **resolved 2026-07-21:** engine + explicitly allowlisted
-   Edit-Data fields land in Phase 1h; arbitrary checkpoint JSON and internal transaction arms are
+   Edit-Data fields land in Phase 2h; arbitrary checkpoint JSON and internal transaction arms are
    never editable/start targets.
 4. ~~Descriptor version~~ — **resolved 2026-07-21:** required and combined with a build-derived
    contract/implementation fingerprint; output schema hash alone is insufficient.

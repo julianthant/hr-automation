@@ -8,6 +8,9 @@ carries the operator-ratified delegation and presentation decisions (row-model s
 (D73) and §10 adds the four surviving Round-8 obligations this doc owns — the one projection every
 count reads (D81), run versioning + archive-on-version-bump (D80), operator-assigned run display
 names (D83), and the slimmed notification model (D79b).
+**Amended 2026-07-30:** row-model D8 makes OCR approval Review-only; D19 places screenshot
+evidence inside Receipt and run data in Context. Reconciliation D87 removes executor-capacity
+projections and chips in favor of concrete worker/browser-session state.
 
 ## Ownership (D1)
 
@@ -1197,9 +1200,10 @@ returns its log/action detail (§2.1 — two greps, by design).
    `ledger/` dir is **never pruned** and sits above both floors (doc 09 §6 depends on this settled
    number). Only the *volume* question — whether 7-day notes strain disk in practice — remains a
    monitor-and-revisit, not an open design decision.
-2. ~~Worker-span ownership of multi-workflow executors~~ — **resolved 2026-07-21:** one worker span
-   per executor process, with per-system browser/session child spans and linked workflow run spans.
-   Never fabricate one process span per workflow; the executor is intentionally multi-workflow.
+2. ~~Worker-span ownership~~ — **resolved 2026-07-21; amended by D87 on 2026-07-30:** one worker
+   span per workflow-scoped worker process, with worker-owned per-system browser/session child spans
+   and linked run spans. A worker owns at most one active run; distinct workflows never share its
+   authenticated sessions.
 3. ~~Descriptor `verdicts` expressiveness~~ — **resolved 2026-07-21:** use a closed serializable
    `tag: { fromDetail, map }` rule interpreted exhaustively on the server/client projection. No
    pure-function escape is sent to the browser and no workflow-id switch is introduced.
@@ -1222,7 +1226,7 @@ with review-as-status and eight statuses; D2: a PDF upload is always a Group; D3
 are typed Rejected Member Rows, delete-only; D4: a delegated OCR run keeps its own Run Row in the
 OCR panel plus a link from the parent; D5: groups default collapsed, auto-expand on a member
 `Waiting on you` or `Failed`). **This series is not the reconciliation memo's D-numbers**
-(`04-reconciliation.md` D1–D72) — cite these as *row-model D6…D21*.
+(`04-reconciliation.md` D1–D87) — cite these as *row-model D6…D24*.
 
 D6–D17 close the twelve delegation questions in `reviews/delegation-layouts-2026-07-25.md` §7;
 D18–D20 close three build-gating decisions in `reviews/demo-feature-plan-2026-07-25.md` §6. The
@@ -1286,12 +1290,15 @@ The count badge reads `6 people extracted` while the delegated OCR run is open, 
 `6 people` at fan-out. Rationale: "how big is this" is answerable before the members exist, and a
 blank group before approval reads as broken.
 
-### D8 — bulk approve from the Group Row; any edit forces the review surface
+### D8 — record approval exists only after the operator works through Review
 
-`Approve N of M` is available from the Group Row without opening the OCR review row. **Editing an
-extracted value is not** — any edit routes through `Open review` so the scanned page is on screen
-when the value changes. Rationale: approving is a decision about a list; changing a value is a claim
-about paper, and the paper must be visible when it is made.
+Neither the packet Group Row nor the OCR row's Logs gate offers `Approve N of M`. Both route the
+operator into the OCR **Review** surface, where every person is shown beside the scanned page they
+were read from. The approval action exists only on that surface and remains disabled until the
+operator has visited every record. `N of M` may still exclude records that genuinely cannot be
+submitted, but it is never a shortcut around the review. Rationale: approval is the operator's
+attestation that the extraction was checked against its source, so the source and the complete set
+must have been presented before approval becomes possible.
 
 ### D9 — rejected members never count toward done
 
@@ -1443,14 +1450,16 @@ this run left behind" — the difference between a safe retry and a duplicate te
 **unconditionally in the stream, never behind a disclosure**. Only diagnosis (progress ledger,
 cause chain, fingerprint) may sit behind a disclosure.
 
-### D19 — run-detail tabs derive from panel kind; Screenshots is not a tab; Data is not a tab either
+### D19 — run-detail tabs derive from panel kind; screenshot evidence lives in Receipt; Data lives in Context
 
 Ratifies the tab model **as built in the rebuild demo**:
 
 - **(a) Tabs derive from the panel kind**, not a fixed set. **Amended 2026-07-27:** the sets are
   **Run 2 · Review 3 · Group 3 · Member 2** — `Logs · Review · Receipt`, plus `People` on a group —
   where they were Run 3 · Review 4 · Group 4 · Member 3.
-- **(b) Screenshots is not a tab.** Evidence is its own surface, not a tab.
+- **(b) Screenshots is not a tab.** Captures are evidence and render inside the Receipt tab,
+  beside the outcome they qualify. This applies to both a full `RunEvidenceReceipt` and the honest
+  short receipt shown before a full receipt exists.
 - **(c) Data and Edit Data are ONE merged surface** — every value the run touched. Reads are editable
   in place; **writes are shown but not editable**; the footer offers `Load a prior run` and
   `Start a run from this data`.
@@ -1480,15 +1489,15 @@ run's log stream and see what that run read and wrote at the same time. That mut
 significant part of the reported clutter — the panel appeared to hold more than it did because
 half of what it held was behind the other half. The split is by **reading pattern**, not by
 importance: live state (what the run is doing, what it needs from you) stays in the centre column,
-reference (what it read and wrote, what it captured, who asked for it) moves to the rail. Nothing
-is deleted and nothing hides behind a hover.
+reference data (what it read and wrote, who asked for it) moves to the rail. Screenshot evidence
+moves to Receipt, beside the outcome it qualifies. Nothing is deleted and nothing hides behind a
+hover.
 
-**(b) is now honoured more literally than before.** D19b said evidence is not a tab; it did not say
-evidence had to be a 52px strip wedged between the timeline and the tab bar, where a capture got a
-76×40 chip and a three-character label. Evidence is now a rail section of real tiles — kind, label,
-the step it was taken on, the clock — so two captures can be told apart without opening either. The
-failure capture keeps its red frame, in the tile and in the lightbox; the filter chips and the
-Export menu carry over unchanged.
+**(b) is now honoured by putting the proof with the verdict.** D19b said Screenshots is not a tab;
+captures first moved from a 52px strip into Context, but that still separated evidence from the
+receipt it qualifies. The Receipt tab now owns the real capture tiles — kind, label, workflow step,
+and clock — under both full and short receipt states. The failure capture keeps its red frame in the
+tile and lightbox; the filter chips and Export menu carry over unchanged.
 
 **Supersedes the "Log Panel tabs are therefore FIVE: Logs / Data / Review / Receipt / Screenshots"
 wording in `reviews/second-look-2026-07-22.md` §6.6.** Unchanged from that decision sheet: the step
@@ -1498,7 +1507,7 @@ defaults stay state-driven (`Waiting on you` / `Write parked` → Review, termin
 
 Consequence for §2.2's wire: `QueueSurfaceWire.detailSurfaces` stays server-declared and
 capability-driven — the panel kind selects from what the server declares — but `"screenshots"` no
-longer projects a tab (it projects the evidence rail section), and `"edit-data"` / `"view-data"`
+longer projects a tab (it projects capture evidence inside Receipt), and `"edit-data"` / `"view-data"`
 collapse into one `data` surface — which, as of (d), projects a **rail section edited in place**,
 not a tab and not a dialog, with its write fields still rendering read-only.
 
