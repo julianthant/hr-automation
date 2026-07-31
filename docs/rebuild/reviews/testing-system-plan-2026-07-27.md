@@ -50,7 +50,8 @@ From doc 10, unchanged and imported here:
   through the real kernel, `TestTargetRegistry`, positive no-write proof (empty write-intent
   ledger).
 - **Guard set + guard-of-guards manifest** (§§2–5): ~50 registered guard files; grep-ratchets
-  extend to `temp_src` with zero-allowlist; parity guards retire into `descriptor-coverage`.
+  extend to `temp_src` with zero-allowlist; legacy parity guards remain runnable as rollback
+  coverage while native `descriptor-coverage` becomes the rebuild authority.
 - **Lanes** (§7): derived-stub happy path from `example`, ScenarioManifest corpus for everything
   `example` can't express, opt-in live lane, headless `playwright-cli` dashboard loop.
 - From doc 07 1a: legacy tests remain runnable and maintainable behind a
@@ -196,7 +197,8 @@ rather than past it? A "coverage improved 92%→96%" commit is a smell, not a wi
 - **`tests/rebuild/scenario/`** — the ScenarioManifest corpus + runner (doc 12); deterministic
   fixture drivers; the everyday lane (D85 #1).
 - **`tests/unit/architecture/`** — stays where it is; guards follow the doc 10 §2 fate table
-  (EXTEND / RE-DERIVE / RETIRE), the manifest pins the path.
+  (EXTEND / RE-DERIVE / RETIRE), the manifest pins the path. `RETIRE` means a guard stops gating
+  the rebuild only after separate authorization; it does not delete the preserved legacy test.
 - **`tests/live/`** — ports as-is (doc 10 §7), opt-in, never CI, never in coverage.
 - Vitest projects: `rebuild-unit` (parallel), `rebuild-scenario` (parallel unless a fixture is
   proven load-sensitive—serialization is per-file opt-in with a reason, not a lane default).

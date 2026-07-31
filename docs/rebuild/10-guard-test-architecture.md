@@ -252,10 +252,11 @@ read while still permitting replay-safe browser downloads.
   schema on every DB/resume read. A deliberately non-idempotent transform proves resume does not
   reapply it; a corrupted stored value proves validation is not skipped (D62).
 - **`semantic-ui-registry.test.ts`.** Every driver action/observation/page-state dependency resolves
-  to one same-system canonical registry id. IDs/aliases are unique; aliases cannot form chains or
-  cycles; entries have owner/intent/state/selector-strategy/verification metadata and scenario refs.
-  Generated `UI-CATALOG.md` must match the registry. Removed ids require an explicit versioned alias
-  or a migration that updates all dependents—never a second name for the same element.
+  to one same-system canonical registry id. IDs are unique; search terms never create identity;
+  `supersedes` references resolve without cycles. Entries have owner/intent/state/selector-strategy/
+  verification metadata and scenario refs. Generated `UI-CATALOG.md` must match the registry.
+  Removed ids require an explicit `supersedes` migration that updates all dependents—never a second
+  name for the same element.
 - **`task-driver-boundary.test.ts`.** Task/workflow modules cannot import Playwright types, driver
   internals, selector registry implementation, or call `locator/newPage/evaluate` directly. Public
   driver signatures reject selector strings, Page, Locator, and untyped maps; they expose domain
@@ -273,12 +274,13 @@ read while still permitting replay-safe browser downloads.
   mutation capability is bound to one `WriteBindingProof` digest, never an empty subject placeholder.
 - **`control-command-single-path.test.ts`.** Dashboard/CLI/gate/recovery/notification/capture
   modules can mutate authority only through doc 03's D67 command family. Command ids are idempotent
-  and target versions are CAS
-  checked. Hide is presentation-only; runtime physical deletes and UI label `Delete` fail. Enqueue
+  and target versions are carried on every wire arm; CAS is checked only for cancel-tree,
+  edit-vs-resume, gate resolution, and write-recovery races. Hide is presentation-only; runtime
+  physical deletes and UI label `Delete` fail. Enqueue
   policies get transaction/concurrency fixtures, including an injected active-run lookup error that
   must create zero new runs. Coverage is bidirectional over every mutating route/action; typed gate
-  results parse the descriptor result schema and store a checkpoint/ref, notification snooze cannot
-  use an acknowledge payload, and capture mutation cannot target a run id.
+  results parse the descriptor result schema and store a checkpoint/ref, notification commands are
+  limited to read/unread/snooze, and capture mutation cannot target a run id.
 - **`authority-target-no-fallback.test.ts`.** Cancel/cascade/retry/bump resolve exact targets and
   dependency trees from SQLite. Fixtures make the DB unavailable/inconsistent and pass tempting
   caller-visible roots; the expected result is zero transitions + typed error, never a fallback.
@@ -311,8 +313,9 @@ read while still permitting replay-safe browser downloads.
   unresolved write/subject/storage condition. Diagnostic bundle tests prove schema redaction and
   assert no env/cookie/storage-state/raw-SSN leakage.
 - **`notification-durability.test.ts`.** Each closed trigger commits a durable inbox item; dedupe,
-  ack/snooze/resolve, delivery retry, redaction, and run/failure links are pinned. An injected OS
-  delivery failure must leave the critical inbox notification unread and retryable.
+  read/unread state, snooze, redaction, and run/failure links are pinned. An injected OS delivery
+  failure must leave the critical inbox notification durably unread; no per-attempt delivery state
+  is required.
 - **`knowledge-fix-integrity.test.ts`.** Knowledge records have status/scope/evidence/validity and
   supersession refs; no two active records may claim the same scoped rule without an explicit
   conflict. Fix records link failure, changed contracts/UI ids/scenarios, verification, and commit.
@@ -334,9 +337,10 @@ read while still permitting replay-safe browser downloads.
   duplicate path ownership, or CLI/navigation inventory mismatch; it never authorizes source/test
   deletion. A deletion/retirement mode may be designed only after separate operator ratification.
 - **`capture-durability-and-scope.test.ts`.** Capture session/photo/finalization schemas are strict
-  authority; commands are idempotent and version-CAS checked; photo refs are content-addressed;
-  finalize reaches bundle/artifact/intake enqueue only through one stable outbox. Crash/restart
-  fixtures at every publish/DB boundary converge to one artifact and one handoff. Phone-origin
+  authority; commands are idempotent, version-stamped, and transactionally validate current state
+  without blanket CAS; photo refs are content-addressed; finalize reaches bundle/artifact/intake
+  enqueue only through one stable outbox. Restart fixtures cover an open session and mid-finalize;
+  outbox fault injection around publish/enqueue converges to one artifact and one handoff. Phone-origin
   route enumeration is fail-closed: every allowed route is token-scoped and every non-capture,
   operator-only, catch-all, or newly added route returns unavailable externally until explicitly
   reviewed. Expiry uses the Clock and cannot race a finalizing handoff into deletion.
@@ -492,7 +496,7 @@ project any surface fails the build:
 | scenario corpus + minimal happy stub | e2e stub map | examples seed the minimal happy execution; descriptor references every branch/delegation/gate/control scenario in the checked manifest corpus (§7) |
 | runtimePolicy actions | `runtime-policy-coverage` | actions/gates read off descriptor (retires parity) |
 | `details`, capabilities, coordinator, completion-consumption, artifact projections | detail/runtime-policy special cases and i9 retention append | every emitted detail/action/member/coordinator projection validates; Edit Data paths exist in producing schemas and exclude identity/idempotency/proof/provenance; artifact source/key paths exist in exact node outputs and every sink kind resolves |
-| `enqueue`, actions, delegation policies | workflow-specific route/control handlers | only closed doc 03 policies/actions; every action projects the standard CAS command target and no custom row mutation callback exists |
+| `enqueue`, actions, delegation policies | workflow-specific route/control handlers | only closed doc 03 policies/actions; every action projects the standard versioned command target, CAS is enforced only for doc 03's real-race arms, and no custom row mutation callback exists |
 | task UI dependencies + subjects | selectors/helpers scattered through workflows | every semantic id resolves in the same-system driver registry; every write has an enforceable subject observation; raw page access is absent |
 | workflow terminal `result` | parent reading child tracker blobs | strict result derives only from declared terminal dependencies and every awaited child consumes that exact schema |
 | evidence requirements | implicit “done means probably okay” | required receipts/proofs/artifacts/failure/confidence project from the descriptor/contracts; terminal completeness validates |
@@ -583,9 +587,9 @@ contracts; the manifest owns that they exist and stay wired. The set (contract-o
   sealed-completion (`defineFormSpec`, + oath-upload & verify pinned to NO `CompletionProgram`),
   runtime-isolation, one-time-import offline/idempotency coverage,
   notes-not-a-data-channel, non-recursive wire type-test,
-  real-tracker-day zero-quarantine replay fixture, command CAS/idempotency/enqueue policies,
+  immutable-backup/version/idempotency/quarantine-count import fixture, command idempotency/scoped-CAS/enqueue policies,
   authority target fail-closed behavior, durable notification delivery, SQLite backup/restore
-  drill, D13 golden-payload parity gate.
+  drill, native projection/fixture parity.
 - **Local artifact projector guards (docs 03/06):** stable non-positional outbox key, checkpoint+
   outbox atomicity, duplicate-delivery idempotence, single projector per sink, workbook head-hash
   conflict parks without overwrite, and blocking projection ack before terminal done.
@@ -649,8 +653,8 @@ gates** (`E2EScriptedFailError` → terminal `failed` + Retry). Migration:
   unindexed parallel list. Doc 05 §7's multi-worker scenario holds two workers simultaneously
   and asserts distinct worker ids plus span overlap (`maxConcurrentWorkers ≥ 2`).
 - **Span-emitting workflows**: the stub daemon emits the same span/note events (doc 03) a real run
-  would, so the dashboard parity gate (D13) and lift-free new-server projections are exercised
-  without a browser. `oath-upload`-style real-handler-with-stubbed-legs cases port as test seams.
+  would, so native projection/BFF contracts and seeded dashboard fixtures are exercised without a
+  browser. `oath-upload`-style real-handler-with-stubbed-legs cases port as test seams.
 
 **Live lane (`tests/live/`, opt-in, never CI).** Ports as-is: real Chromium, real UCSD SSO, Duo
 cleared hands-off by the enrolled WebAuthn credential (charter §9 — no phone step). Its safety

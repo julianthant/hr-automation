@@ -935,7 +935,8 @@ export interface SessionProvider<S extends BrowserSystemId> {
   (§2.6, charter §9) — a login either finishes or throws; it never parks.
 - When auth must be deliberately delayed (oath-signature: UCPath only after OCR approval), the
   descriptor uses `auth(...:"on-first-use")`; the first downstream node acquisition emits a visible
-  session/auth child span. Login is pool infrastructure, not a fake task contract or checkpoint.
+  session/auth child span. Login is worker-owned session infrastructure, not a fake task contract
+  or checkpoint.
 - `DUO_LOGIN_FLOWS` itself becomes a projection over `stores[*].session` (key/label/run) — the
   smoke test and live auth test keep deriving from one table, which is now the same table the
   kernel uses.
@@ -1007,7 +1008,7 @@ inference — tasks stay plain objects.
 | 4 | **Effect misdeclaration** — an external write hides in read/prepare code | Verb↔effect ratchet (`fill|stage`→prepare; `save|submit|upload|create|update|delete`→commit); external-write helpers require the unforgeable `MutationCapability`, which exists only on `CommitTaskCtx`; dry-run plans contain zero commit nodes |
 | 5 | **God tasks** — a task grows into a mini-workflow spanning systems | Browser store sessions are constrained to that system; service/workflow stores are sessionless and have no page. Cross-system logic physically belongs in graph composition |
 | 6 | **The untyped blob returns** — someone adds `any`/`Record<string, unknown>` side channels for display data | `CanonicalJsonSchema` rejects `any`/non-JSON outputs; `TaskCtx` has no `updateData`; display fields are projections of typed outputs (doc 03); a ratchet forbids `z.record(` in contract `output` schemas without an allowlist entry |
-| 7 | **Auth boilerplate re-accretes** — a workflow hand-rolls a login step | Auth timing is descriptor policy and execution is pool-owned; a grep-ratchet forbids login-task contracts and importing `stores/*/session.ts` login functions from workflows |
+| 7 | **Auth boilerplate re-accretes** — a workflow hand-rolls a login step | Auth timing is descriptor policy and execution is worker-owned; a grep-ratchet forbids login-task contracts and importing `stores/*/session.ts` login functions from workflows |
 | 8 | **Retry as a fallback** — cranking attempts to paper over a broken selector | `attempts` typed `2 \| 3`; `retryOn` has one value (`"transient"`); business-code errors are never transient unless the throw site explicitly claims it, which the fail-loud review catches |
 | 9 | **Decoration forks** — copying a base task file to tweak it | One-task-one-file + duplicate-id load-time throw; a ratchet flags two tasks whose `run` bodies import the same `impl` entry function with >90% identical text (cheap AST-less heuristic, allowlisted) |
 | 10 | **Verified legacy knowledge drifts after it is ported** | Bidirectional runtime-import guard forbids `src`↔`temp_src`; every copied selector/leaf records source path/key + verification evidence; D90 change accounting maps a later legacy edit to rebuilt capability ids and forces re-port/reverification; old source remains preserved through initial cutover |

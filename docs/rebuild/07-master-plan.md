@@ -33,7 +33,7 @@ see governance §0.3).
 
 ### 0.1 The one-plan rule
 
-Per charter §"One master plan": the design docs (01–12) are the binding detail; THIS doc is the
+Per charter §"One master plan": the owning design docs (01–06 and 09–13) are the binding detail; THIS doc is the
 authoritative build order. No second plan, no per-workflow "alt plan," no execution doc that
 re-sequences phases. Per-workflow *migration plan docs* (Phase 3+) are **children** of this plan —
 they answer the §b questionnaire (§3.4) and record what a workflow reuses/adds; they never re-order
@@ -249,8 +249,8 @@ and a real consumer. **No contract in docs 01–06 changed — only delivery ord
 | 1c | **Authority storage + recovery + command/write type shell.** Create the infra-owned native authority adapter, versioned authority/projection table classes, self-describing `node:sqlite` online-backup manifest/doctor/degraded-mode/restore APIs, full command-family types, `ProbeVerdict`/negative-settlement policy, typed write-binding proof union, permanent intent/attempt, dependency/manifest, gate-result, notification, and atomic outbox schemas before consumers refer to them | **Docs 03/09/11** | DDL/invariants; raw `DatabaseSync` private; authority vs projection enumeration; boot corruption fixture; native backup opens/read-checks its own generation + follow-up trigger; restore skeleton; committed key cannot reinsert; pre-window/single negative cannot unlock retry; no untyped command/proof/gate/notification arm |
 | 1d | **Semantic UI registry, typed drivers, task + provider contracts and stores/sessions.** Inventory legacy selector keys into one canonical-id/search-term port map; implement the server-only recipe registry, safe generated `UI-CATALOG.md` projection, driver boundary, then read/prepare/commit overloads, subject specs, mutation capability, freshness/provenance, artifact writer, declared provider capabilities with narrowed injected clients, store/session providers and exclusivity. Fully typed recipes populate as tasks migrate; no task may port first and bypass this step | **Docs 01/05/12** | semantic-id uniqueness/dependencies/catalog; catalog omits recipes; commit UI actions require mutation capability; raw Page/Locator absent outside driver/session internals; remote I/O requires provider declaration and infra adapter; effect/capability/subject/contract/impl/example/error/store/no-any/artifact/OnBase guards; every new observation/recipe has fixture plus live/read-only verification evidence |
 | 1e | **Complete workflow DAG + result/delegation/scenario descriptor.** Real-scale type spike first; then ingress parser plus transform-free canonical-input validator, read/transaction/branch/fork-join/typed child result/gate nodes, complete delegation policies/manifests, enqueue/actions, completion, fingerprints, checkpoints/migrations and registered scenarios | **Docs 02/03/12** | realistic graph type suite; ingress→canonical round-trip and corrupted-authority rejection; strict terminal/gate result; delegation matrix; transaction pairing; descriptor projection matrix; no erased target; every branch/gate/policy has an executable scenario |
-| 1f | **Core registry + workers/checkpoints/command service/write sequencer.** Composition root above workflows; one-item claims, explicit browser-session boundaries, provider budgets; standard run/gate/notification/capture commands; authority-only target resolution; context-exclusive transactions; probe→prepare→binding proof→fence→commit→proof→atomic outbox; evidence-qualified negative recovery and parked-intent resolution | **Docs 02/03/05/09** | command idempotency/CAS; one-active-item-per-worker; authored fresh-session close→start proof; lookup failure creates no duplicate; no visible-root fallback; dry-run commit-free; binding mismatch/unknown creates zero fence/click; a bare/early negative cannot retry; provider admission, probe-age/settlement/CAS/dedupe/crash/context tests |
-| 1g-spine | **Span emission + the ONE projection (slice only).** Strict spans/notes on the executor's paths, and the single server-side run/queue projection that every surface reads. **D81: counts have exactly one code path** — Workflow Panel badges, Status Bar, and Queue Panel rows all read this projection; a second count path is a guard failure, not a bug to fix later. Evidence receipts, failure records, diagnostic bundles, notifications, knowledge, and the ledger *services* defer to Phase 2 (the ledger *tables + atomic outbox* already landed in 1c, so no write is unrecorded) | **Docs 03/09** | boundary corruption; redaction canaries; atomic projection tests; **one-projection guard: no count computed off a second path**; span identity `(runId, attempt, spanPath)` |
+| 1f | **Core registry + workers/checkpoints/command service/write sequencer.** Composition root above workflows; one-item claims, explicit browser-session boundaries, provider budgets; standard run/gate/notification/capture commands; authority-only target resolution; context-exclusive transactions; probe→prepare→binding proof→fence→commit→proof→atomic outbox; evidence-qualified negative recovery and parked-intent resolution | **Docs 02/03/05/09** | command idempotency + CAS only for real-race arms; one-active-item-per-worker; authored fresh-session close→start proof; lookup failure creates no duplicate; no visible-root fallback; dry-run commit-free; binding mismatch/unknown creates zero fence/click; a bare/early negative cannot retry; provider admission, probe-age/settlement/write-fence-CAS/dedupe/crash/context tests |
+| 1g-spine | **Span emission + the ONE projection (slice only).** Strict spans/notes on the executor's paths, and the single server-side run/queue projection that every surface reads. **D81: counts have exactly one code path** — Workflow Panel badges, Status Bar, and Queue Panel rows all read this projection; a second count path is a guard failure, not a bug to fix later. Evidence receipts, failure records, diagnostic bundles, notifications, knowledge, and the ledger *services* defer to Phase 2 (the ledger *tables + atomic outbox* already landed in 1c, so no write is unrecorded) | **Docs 03/09** | boundary corruption; redaction canaries; atomic projection tests; **one-projection guard: no count computed off a second path**; run/task identity `(runId, attempt, spanPath)` plus worker/browser identity `(workerId, spanPath)` |
 | 1i-spine | **The exact Person Lookup capability slice in the approved shell.** Queue Panel rows (three row types, eight statuses); run/member `Logs · Receipt`; persistent timeline; Context rail; typed Start Run; Session Cards; Workflow Panel/Status Bar/day counts. Rendered from the 1g-spine BFF. Review/People tabs, full trust/data surfaces, Archive/Explorer/Activity/Settings tails defer | **Docs 03/12/13** | one typed transport client; finished wires only; no workflow-id switches; both-theme headless a11y + screenshot parity at reference viewports |
 
 **Item 1e begins with a new real-scale type-inference proof.** The deleted spike covered only two
@@ -284,12 +284,13 @@ shape simplification rather than being normalized as editor lag.
 - Write-safety fixtures pin simultaneous and later sequential same-key dedupe, proof validation for
   every completion arm, fresh subject binding, crash injection across atomic commit, and ledger
   projector concurrency/tail loss. Alternating-EID/file-digest mismatch produces zero fence/click.
-- Command/delegation fixtures prove transactional enqueue policies, CAS/idempotent actions,
+- Command/delegation fixtures prove transactional enqueue policies, versioned/idempotent actions,
+  scoped CAS only for real-race arms,
   authority-only cancel targets, zero/one/many/partial/cancel/retry/replay/multi-edge child behavior,
   and no duplicate active runs when authority lookup fails.
 - Strict schema mutation tests cover every durable/wire/config/intake/evidence boundary recursively;
   raw Page/Locator/selector access exists only in driver/session internals; generated UI catalog has
-  no duplicate ids/aliases or unresolved dependencies.
+  no duplicate ids, invalid `supersedes` references, or unresolved dependencies.
 - A real-shaped copied authority DB passes corruption detection → read-only degraded mode → newest
   checksummed-backup restore → projection rebuild, preserving commands/dependencies/checkpoints/
   write intents/outboxes. Backup age/health is visible.
@@ -365,8 +366,8 @@ second authoring pipeline, no codegen, no exclusive source-vs-DSL mode, no synth
 built to prove it. §b Q12's own phrasing expected everything real to stay source-authored, and no
 concrete DSL-authored workflow was ever named. Selectors, driver operations, schemas, bind
 functions, and write-proof/subject rules stay code-only; anything the closed editor cannot express
-generates a **code-change brief**, never partial config. Reinstate the mode only if a migration
-questionnaire names a real workflow that wants it.
+generates a **code-change brief**, never partial config. Reinstating the mode requires a new,
+explicit operator architecture decision; a migration questionnaire cannot enable it.
 
 **Hard exit criteria (Phase 2).**
 - *(Live person-lookup, `descriptor-coverage`, surface rendering, and speed sanity all moved to
@@ -460,7 +461,8 @@ capability milestones only; legacy source/tests remain production and rollback a
   capability may become `candidate-for-later-retirement`, but deletion requires separate explicit
   operator authorization after cutover and rollback-window closure.
 - Every old service/route/dashboard/CLI/tool capability touched by the workflow has an updated D58
-  disposition; every removed source path has zero remaining imports.
+  disposition; every native replacement has evidence, and the runtime-isolation guard proves that
+  `temp_src` imports no legacy source. Preserved legacy paths are not deleted by this migration.
 
 #### 3.3 Recommended migration order (by risk / complexity / reuse)
 
@@ -649,7 +651,7 @@ table: S ≈ 1 session, M ≈ 2–4, L ≈ 5–10, XL ≈ 10+). They are estimat
 | 1a guard plumbing + honest baselines | **L** | not the guards—the D58 capability inventory, D90 isolation/change-accounting/preservation manifests, coverage activation, and diagnostic fingerprints over 1,344 test-lint errors + 2 warnings |
 | 1b strict domain leaf + coverage activation | **L** | the exhaustive **bidirectional** runtime-dependency registry (D68 — every system endpoint, provider key, secret, feature flag, legacy env name, in both directions) |
 | 1c authority storage + recovery + type shell | **XL** | backup/doctor/degraded-mode/**restore drill** is a subsystem, not a table; plus the full command family + proof union types |
-| 1d semantic UI registry + drivers + task contracts | **XL** | inventorying every legacy selector key into one canonical id/alias map, then the driver boundary + effect overloads + capability + provider narrowing |
+| 1d semantic UI registry + drivers + task contracts | **XL** | inventorying every legacy selector key into one canonical-id registry with search terms and explicit `supersedes` links, then the driver boundary + effect overloads + capability + provider narrowing |
 | 1e workflow DAG + delegation + completion | **XL** | starts with the real-scale type proof (below); delegation policy matrix + completion program are each substantial on their own |
 | 1f registry + workers + commands + write sequencer | **XL** | the write sequence (probe→prepare→binding proof→fence→commit→proof→atomic outbox) plus one-item worker/session ownership and evidence-qualified negative recovery |
 | 1g-spine spans + the one projection | **M** | thin by design — emission + one projection, no services |
@@ -673,9 +675,9 @@ behind the stop-loss (§5.1). These tiers give a paused/reassessed rebuild a def
   `explain run`; structured failures + diagnostic bundles; notification inbox; intake mapping +
   manifests; Edit Data; durable capture. Slipping one of these past order 0–2 costs operator
   convenience, not correctness.
-- **LATER (may slip past several migrations without harm).** Read-only Workflow Explorer;
+- **LATER (may reorder within Phase 2, but must land before Phase 3).** Read-only Workflow Explorer;
   AI advisories; generated UI catalog UI; knowledge/fix-record tooling; activity-report demo.
-  Nothing in the write path depends on any of them.
+  Nothing in the write path depends on any of them, but Phase 3 does not begin until 2i closes.
 
 **Already-ratified trims folded in (D79).** DSL graph-authoring mode — cut (§Phase 2). Notification
 lifecycle — read/unread + snooze, actor-keyed inbox, not a five-state lifecycle. Commands — keep
@@ -755,7 +757,7 @@ idempotent one-time command over an immutable backup; it is never a runtime adap
 | 4 | **A target can make settlement unknowable** (write-safety residual) | UI-only systems may expose neither an idempotent API nor a trustworthy immediate negative read after a click; early absence can be eventual-consistency lag, and a positive match can still be for the wrong subject | D48/D64/D69/doc 09: permanent key fence; fresh binding proof; typed positive proof; every counted negative observation must occur after the target-specific propagation window and repeated authoritative checks must agree; unsettled/ambiguous evidence parks; per-probe live verification at migration. The guarantee is at most one unattended commit attempt per intent generation plus verified convergence—not unconditional distributed exactly-once |
 | 5 | **Build context + operator-attention limits** | The program is long (16 workflow directories across 10 migration orders, plus shared capability closure); high WIP and oversized sessions cause ownership drift | One-at-a-time Phase 3, coherent local commits, explicit handoffs/checkpoints when needed, Phase-2 gates before scale, machine inventories/guards so review concentrates on live evidence; §3.7 sizes the work so attention is spent where the mass actually is |
 | 11 | **Decisions drift ahead of the docs that own them** | *Observed 2026-07-26*: the 07-23/24 operator ratifications sat in a review file for four days while docs 00/07/09 still specified the world they replaced — the master plan would have had Phase 1 build a lift adapter, a parity harness, and a generation-authority stamp that the operator had already deleted | Charter standing rule: **a decision is not ratified until it lands in its owning doc, in the same commit that records the answer.** Doc 04 is a changelog with pointers, never a second spec; review files are history. A doc's amendment date must be ≥ the latest round that touched it |
-| 6 | **Canonical UI registry becomes a second stale selector list** | Drivers change selectors but forget ids/catalog/scenarios, or aliases multiply | registry is driver authority, generated catalog only, same-system dependency guard, selector verification metadata, alias uniqueness/supersession, migration scenario before removal |
+| 6 | **Canonical UI registry becomes a second stale selector list** | Drivers change selectors but forget ids/catalog/scenarios, or obsolete ids multiply | registry is driver authority, generated catalog only, same-system dependency guard, selector verification metadata, non-identity search terms, explicit `supersedes` links, migration scenario before removal |
 | 7 | **Authority backup exists but has never been restored** | Corruption is discovered during a real run and the “backup” is unusable | Phase-1 automated corruption/restore drill and recurring doctor/backup-health surface; degraded mode blocks mutations instead of creating an empty DB |
 | 8 | **Evidence volume recreates an unreadable log pile** | screenshots/notes/bundles consume disk and hide decisive facts | structured indexes, on-demand bundles, 30d notes/30d spans, content-addressed dedupe, disk warnings/redaction |
 | 9 | **The closed editor regrows DSL/codegen** | a UI edit changes graph, bind, selector, or proof semantics without code review | DSL/codegen remains absent; Phase-2 2i exposes a read-only explorer plus a closed presentation/policy edit union; prohibited changes emit only a code-change brief |

@@ -302,9 +302,9 @@ interface RunEnvelope {
 - **Recorded in the audit trail.** `RunQueued.resolvedInstance` (doc 03's span schema) carries the resolved
   map (even when empty/all-prod) — so every run's actual target, per system, is queryable from the
   ledger (gap-audit gap 5), not inferred.
-- **Executor pool partitioning.** Browser contexts are keyed by `(system,resolvedInstance,
-  configFingerprint)`. Prod/test runs never share a context. A config change creates new contexts;
-  existing runs finish against their stamped snapshot.
+- **Worker-owned context partitioning.** Each worker owns its browser contexts, keyed by
+  `(system,resolvedInstance,configFingerprint)`. Prod/test runs never share a context. A config
+  change creates new worker-owned contexts; existing runs finish against their stamped snapshot.
 
 ---
 
@@ -369,20 +369,20 @@ private-key file — replacing `validateEnv()` + `getTimekeeperName()` + ~20 fil
 
 ```ts
 // temp_src/domain/secrets.ts
-interface SecretSpec { env: string; required: boolean }
+interface SecretSpec { env?: string; envFamily?: string; source?: string; requiredAtBoot: boolean }
 
 const SECRETS = {
-  ucpathUserId:      { env: "UCPATH_USER_ID", required: true },
-  ucpathPassword:     { env: "UCPATH_PASSWORD", required: true },
-  timekeeperName:     { env: "TIMEKEEPER_NAME", required: false },  // lazy-required — see below
+  ucpathUserId:      { env: "UCPATH_USER_ID", requiredAtBoot: false },
+  ucpathPassword:     { env: "UCPATH_PASSWORD", requiredAtBoot: false },
+  timekeeperName:     { env: "TIMEKEEPER_NAME", requiredAtBoot: false }, // descriptor-scoped
   // Provider key families are registered patterns, not ad-hoc process.env scans. The existing
   // Gemini 1..8 pool and each provider's supported cardinality are explicit in the spec.
-  geminiApiKeys:      { envFamily: "GEMINI_API_KEY{1..8}", required: false },
-  groqApiKeys:        { envFamily: "GROQ_API_KEY{n}", required: false },
-  mistralApiKeys:     { envFamily: "MISTRAL_API_KEY{n}", required: false },
-  openRouterApiKeys:  { envFamily: "OPEN_ROUTER_API_KEY{n}", required: false },
-  sambaNovaApiKeys:   { envFamily: "SAMBANOVA_API_KEY{n}", required: false },
-  ngrokCredential:    { source: "local-ngrok-config", required: false },
+  geminiApiKeys:      { envFamily: "GEMINI_API_KEY{1..8}", requiredAtBoot: false },
+  groqApiKeys:        { envFamily: "GROQ_API_KEY{n}", requiredAtBoot: false },
+  mistralApiKeys:     { envFamily: "MISTRAL_API_KEY{n}", requiredAtBoot: false },
+  openRouterApiKeys:  { envFamily: "OPEN_ROUTER_API_KEY{n}", requiredAtBoot: false },
+  sambaNovaApiKeys:   { envFamily: "SAMBANOVA_API_KEY{n}", requiredAtBoot: false },
+  ngrokCredential:    { source: "local-ngrok-config", requiredAtBoot: false },
 } as const;
 type SecretName = keyof typeof SECRETS;
 
@@ -396,19 +396,19 @@ export function requireSecret(name: SecretName): string { /* … */ }
 export function optionalSecret(name: SecretName): string | undefined { /* … */ }
 
 /**
- * `timekeeperName` and any similarly-lazy secret stays "required: false" in the table (so process
+ * `timekeeperName` and every workflow credential stays `requiredAtBoot:false` (so process
  * boot doesn't demand it for workflows that never touch Kuali) but IS on the mandatory-at-startup
  * list for any run whose descriptor reaches a Kuali fill task — the descriptor declares which
  * secrets its tasks need (a `requires: SecretName[]` on the contract, mirroring doc 01's session
  * needs), so "lazy" is descriptor-driven, not a second ad hoc throw site.
  */
 
-/** Batch gate at process boot — ports validateEnv()'s all-missing-at-once reporting. */
-export function validateRequiredSecrets(): void {
-  const missing = (Object.keys(SECRETS) as SecretName[]).filter(
-    (n) => SECRETS[n].required && !process.env[SECRETS[n].env],
-  );
-  if (missing.length) throw new SecretMissingError(missing.map((n) => SECRETS[n].env));
+/** Boot gate covers only secrets required to read authority and serve safely. It starts empty. */
+export function validateBootSecrets(): void { /* batch-report missing requiredAtBoot entries */ }
+
+/** Enqueue/daemon preflight batch-reports the descriptor-derived secret subset before launch. */
+export function validateDescriptorSecrets(names: readonly SecretName[]): void {
+  /* resolve registered env/family/local sources; throw once with every missing requirement */
 }
 
 /** Named file secrets only—callers cannot turn this into an arbitrary path reader. */
@@ -424,9 +424,11 @@ read maps back to exactly one entry. Optional provider keys remain optional glob
 blocking workflow/feature preflight when a required provider capability has no usable configured
 cell.
 
-- **Fail-loud at startup, ported pattern.** `validateRequiredSecrets()` runs once at daemon/
-  dashboard boot (successor to today's `validateEnv()` call), throwing with every missing var named
-  at once — not one at a time across three separate run failures.
+- **Fail loud at the correct scope.** `validateBootSecrets()` runs once at daemon/dashboard boot
+  and covers only secrets required to read authority and serve safely. Enqueue/daemon preflight
+  calls `validateDescriptorSecrets()` for the selected descriptor-derived capability subset and
+  reports every missing requirement at once. An unused workflow credential never blocks dashboard
+  boot, while a selected workflow still fails before spending Duo/browser work.
 - **Never logged.** The accessor is the only function permitted to read a secret's raw value; every
   other module receives it as an opaque string to hand to a login/fill call, never to `log.*`. A
   grep-ratchet guard (below) backstops this structurally.
@@ -540,7 +542,9 @@ exhaustion, unavailable ngrok, and healthy mode.
 ```ts
 const clock = systemClock;
 const config = resolveConfig(process.env, readOperatorSettingsOverride());
-validateRequiredSecrets();                                    // throws loud if UCPATH_USER_ID/PASSWORD unset
+const onboardingDescriptor = getWorkflowDescriptor("onboarding");
+validateBootSecrets();                                        // no unused workflow credential gate
+validateDescriptorSecrets(onboardingDescriptor.requiredSecrets); // reports UCPath requirements together
 
 const runId = crypto.randomUUID();
 const traceId = buildTraceId({ code: "ou", runId, at: clock.now() });   // §2 — Clock supplies `at`
@@ -582,7 +586,8 @@ fiscal literal.
    explicit map. No reflection/uniform "every leaf" override. Production endpoint maps remain code
    defaults; settings and named URL env vars populate sparse test maps only.
 4. ~~Fiscal-year entry authoring UI~~ — **resolved:** schema/file authoring works in Phase 1;
-   operator UI lands when native Settings migrates under doc 03's scoped-flip sequence. Until then,
-   Settings proxies old controls and the validated JSON entry is the supported new-config path.
+   operator UI lands with native Settings in Phase 2 tail 2i. Until then, the validated JSON entry
+   is the supported rebuild-config path; legacy Settings continues independently in `src` and is
+   never proxied into `temp_src`.
 5. ~~Per-run config snapshot timing~~ — **resolved 2026-07-21:** required in Phase 1 because every
    write ledger record needs trustworthy instance/config provenance even when all runs are prod.

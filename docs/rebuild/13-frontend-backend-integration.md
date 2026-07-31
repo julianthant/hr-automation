@@ -269,7 +269,8 @@ The approved queue contract must include:
 - server-resolved title/subtitle/status/live message/run facts;
 - final pipeline and open gates;
 - member ids/rollups/containment and streamed-record rollups;
-- server-authored action descriptors with placement and CAS tokens;
+- server-authored action descriptors with placement and version/audit tokens; CAS is enforced only
+  for the four real-race command families owned by doc 03;
 - `panelKind` plus closed available-section keys;
 - evidence/failure/receipt confidence pointers;
 - a monotonic `rowRevision` used by commands and patches.
@@ -624,7 +625,7 @@ Each workflow migration uses the same integration checklist:
 Freeze deterministic target screenshots and accessibility snapshots for at least:
 
 - queue: each of the eight statuses and three row types;
-- group density rungs: 1–3, 4–12, and 13+ members;
+- group member counts at 1, 3, 4, 12, and 13, proving the same presentation at every count;
 - run/member/review/group panel kinds;
 - open gate, failed, unknown-write parked, running, terminal receipt, and empty states;
 - Start Run methods and refusals;
