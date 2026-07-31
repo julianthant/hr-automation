@@ -976,22 +976,37 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                     void wakeDaemonsForReleasedParents(released, trackerDir)
                   }
                 }
-                // Reset every system's page to its `resetUrl` after a
-                // cancelled item — leaves the daemon's auth intact but
-                // returns the workflow surface to a clean starting state
-                // for the next claim. Reset failures are best-effort: a
-                // failed reset won't block the next item from claiming.
-                // Fires only for a per-item cancel where the daemon STAYS
-                // alive and will claim the next item. On a stop (reassign or
-                // fail), the daemon is tearing chromium down, so resetting
-                // pages is pointless and would just log best-effort warnings.
-                if (isCancelOutcome && !state.shuttingDown) {
+                // Reset every system's page to its `resetUrl` after EVERY
+                // completed item (done / failed / cancelled) — leaves the
+                // daemon's auth intact but returns the workflow surface to a
+                // clean starting state for the next claim. Reset failures are
+                // best-effort: a failed reset won't block the next claim.
+                //
+                // This MUST fire on the normal (non-cancel) path too. It used
+                // to be gated on `isCancelOutcome`, which made the daemon the
+                // only run mode that did NOT reset between items — the
+                // in-process batch (`kernel/workflow.ts`) and pool
+                // (`kernel/pool-core.ts`) paths both reset every system
+                // between items. Since the dashboard starts every operator run
+                // through the daemon, page state leaked across docs for the
+                // whole batch. Live damage (2026-07-31, 23-doc separations
+                // run): after doc #1 New Kronos stayed parked on that
+                // employee's Timecard, so for docs #2..#23 the Go To →
+                // Timecard option never rendered and 20/21 found employees
+                // failed to open a timecard — every one of them silently fell
+                // back to the Kuali dates. Same class as the UCPath Job
+                // Summary leak (ISS-B02).
+                //
+                // On a stop (reassign or fail), the daemon is tearing chromium
+                // down, so resetting pages is pointless and would just log
+                // best-effort warnings — hence the `shuttingDown` gate stays.
+                if (!state.shuttingDown) {
                   for (const sys of wf.config.systems) {
                     try {
                       await session.reset(sys.id)
                     } catch (resetErr) {
                       log.warn(
-                        `[Daemon ${instanceId}] post-cancel reset(${sys.id}) failed: ${
+                        `[Daemon ${instanceId}] between-items reset(${sys.id}) failed: ${
                           resetErr instanceof Error ? resetErr.message : String(resetErr)
                         }`,
                       )

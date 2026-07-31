@@ -521,6 +521,81 @@ test('runWorkflowDaemon: records worker ownership, heartbeats, browser pids, and
   }
 })
 
+test('runWorkflowDaemon: resets every system between items on the NORMAL (non-cancel) path', async () => {
+  // Regression (2026-07-31, live): the between-items `session.reset` was gated
+  // on `isCancelOutcome`, so the daemon — the path every dashboard operator run
+  // takes — was the ONLY run mode that did not reset pages between items (the
+  // in-process batch `kernel/workflow.ts` and pool `kernel/pool-core.ts` paths
+  // both do). Page state therefore leaked across every doc in a batch: in a
+  // 23-doc separations run, New Kronos stayed parked on doc #1's employee
+  // Timecard, so for docs #2..#23 the "Go To → Timecard" option never rendered
+  // and 20 of 21 found employees failed to open a timecard.
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-reset-'))
+  const control = openControlDb({ trackerDir: dir })
+  const taskStore = createTaskStore(control)
+  const resetCalls: string[] = []
+  const resetSpy = vi
+    .spyOn(Session.prototype, 'reset')
+    .mockImplementation(async (id: string) => {
+      resetCalls.push(id)
+    })
+  try {
+    const wf = defineWorkflow({
+      name: 'dint-reset',
+      schema: z.object({ id: z.string() }),
+      steps: ['work'],
+      systems: [{ id: 'ucpath', login: async () => {} }],
+      authSteps: false,
+      getId: (d) => (d as { id: string }).id,
+      handler: async (ctx) => {
+        await ctx.step('work', async () => {})
+      },
+    })
+
+    // Two items that both complete NORMALLY (done) — no cancel anywhere.
+    await enqueueItems<{ id: string }>(
+      'dint-reset',
+      [{ id: 'one' }, { id: 'two' }],
+      (d) => d.id,
+      dir,
+    )
+    const runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunchWithChromePid('ucpath', 424243),
+      idleTimeoutMs: 10_000,
+      heartbeatIntervalMs: 50,
+      commandPollIntervalMs: 50,
+    })
+    const { port } = await waitForDaemon('dint-reset', dir)
+
+    await waitFor(
+      () =>
+        taskStore.listTasksForWorkflow('dint-reset').filter((t) => t.state === 'done').length === 2,
+      5_000,
+    )
+
+    // One reset per completed item, for every declared system.
+    await waitFor(() => resetCalls.filter((id) => id === 'ucpath').length >= 2, 5_000)
+    assert.equal(
+      resetCalls.filter((id) => id === 'ucpath').length >= 2,
+      true,
+      `expected a reset after each of the 2 completed items, got ${JSON.stringify(resetCalls)}`,
+    )
+
+    await fetch(`http://127.0.0.1:${port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    await runPromise
+  } finally {
+    resetSpy.mockRestore()
+    control.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('runWorkflowDaemon: browser disconnect cancels in-flight step errors', async () => {
   clear()
   const dir = mkdtempSync(join(tmpdir(), 'daemon-int-browser-disconnect-'))
