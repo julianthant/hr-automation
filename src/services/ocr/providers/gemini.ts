@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ApiError, GoogleGenAI } from "@google/genai";
 import { buildPrompt } from "../prompts.js";
 import {
   OcrProviderError,
@@ -27,30 +27,38 @@ export class GeminiProvider implements OcrProvider {
       override: req.prompt,
     });
 
-    const genai = new GoogleGenerativeAI(key.value);
-    const model = genai.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-      },
-    });
+    const genai = new GoogleGenAI({ apiKey: key.value });
 
-    let raw: { response: { text(): string } };
+    let raw: Awaited<ReturnType<typeof genai.models.generateContent>>;
     try {
-      raw = await model.generateContent([
-        { text: prompt },
-        {
-          inlineData: {
-            mimeType: "application/pdf",
-            data: pdfBytes.toString("base64"),
+      raw = await genai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType: "application/pdf",
+              data: pdfBytes.toString("base64"),
+            },
           },
-        },
-      ]);
+        ],
+        config: { responseMimeType: "application/json" },
+      });
     } catch (err) {
       throw classifyProviderError(err);
     }
 
-    const text = raw.response.text();
+    // `response.text` is a getter that yields undefined when the candidate
+    // carries no text part (safety block, empty candidates). Fail loud —
+    // coercing to "" would surface as a JSON parse error and hide the cause.
+    const text = raw.text;
+    if (text === undefined) {
+      throw new OcrProviderError(
+        `Gemini returned no text part (finishReason=${raw.candidates?.[0]?.finishReason ?? "unknown"})`,
+        "unknown",
+      );
+    }
+
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
@@ -72,6 +80,18 @@ export class GeminiProvider implements OcrProvider {
 
 function classifyProviderError(err: unknown): OcrProviderError {
   const message = err instanceof Error ? err.message : String(err);
+
+  // The SDK raises `ApiError` carrying the real HTTP status. Prefer it over
+  // regexing the message: a message-format change would otherwise silently
+  // downgrade a 429 to "unknown" and stop key rotation. The message regexes
+  // below still cover transport errors, which are not `ApiError`s.
+  if (err instanceof ApiError) {
+    if (err.status === 429) return new OcrProviderError(message, "rate-limit", 429);
+    if (err.status === 403) return new OcrProviderError(message, "quota-exhausted", 403);
+    if (err.status === 401) return new OcrProviderError(message, "auth", 401);
+    if (err.status >= 500) return new OcrProviderError(message, "transient", err.status);
+  }
+
   if (/429|rate.?limit|too\s*many/i.test(message)) {
     return new OcrProviderError(message, "rate-limit", 429);
   }
