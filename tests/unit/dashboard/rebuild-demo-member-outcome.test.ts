@@ -54,6 +54,9 @@ const PL_VOCABULARY: { key: string; label: string; tone: MemberOutcomeSpec["tone
   { key: "resolved", label: "Resolved", tone: "quiet" },
   { key: "separated", label: "Separated", tone: "warn" },
   { key: "not-found", label: "Not found", tone: "danger" },
+  { key: "matched", label: "Matched", tone: "quiet" },
+  { key: "no-match", label: "No match", tone: "danger" },
+  { key: "ambiguous", label: "Ambiguous", tone: "warn" },
 ];
 
 test("Person Lookup declares its member-outcome vocabulary, and `separated` is its own answer", () => {

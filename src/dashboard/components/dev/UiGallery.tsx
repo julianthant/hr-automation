@@ -670,7 +670,6 @@ function SessionCardsTab() {
 const RAIL_ROWS = [
   { label: "Separations", total: 2, queued: 0, on: true, note: "Active — 3px primary accent, bold label, primary count." },
   { label: "I-9 Check", total: 1, queued: 6, on: false, note: "Queued work waiting behind the running item." },
-  { label: "Person Match", total: 0, queued: 0, on: false, note: "Nothing today — the count dims rather than vanishing, so the set of entries is stable." },
 ];
 
 const MATRIX_CELL: Record<ProposedStatus, string> = {

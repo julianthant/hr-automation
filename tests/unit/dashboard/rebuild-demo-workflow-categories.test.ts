@@ -51,7 +51,6 @@ test("each workflow sits in the group its production descriptor declares", () =>
     "kronos-pay-rule": "Payroll",
     "old-kronos-reports": "Timekeeping",
     "person-lookup": "Search",
-    "person-match": "Search",
     "i9-lookup": "Search",
     ocr: "Utils",
     "crm-doc-download": "Utils",
@@ -105,7 +104,7 @@ test("an uncategorised workflow falls into a trailing Other, and an unlisted cat
     // a category the order list has never heard of
     { ...DEMO_WORKFLOWS.ocr, id: "ocr", category: "Recruiting" },
     // and one that declares none at all
-    { ...DEMO_WORKFLOWS["person-match"], id: "person-match", category: "" },
+    { ...DEMO_WORKFLOWS["sharepoint-download"], id: "sharepoint-download", category: "" },
   ];
   const groups = buildWorkflowCategoryGroups(invented);
   assert.deepEqual(
@@ -114,7 +113,7 @@ test("an uncategorised workflow falls into a trailing Other, and an unlisted cat
   );
   assert.deepEqual(
     groups[2].workflows.map((w) => w.id),
-    ["person-match"],
+    ["sharepoint-download"],
   );
 });
 

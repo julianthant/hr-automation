@@ -669,13 +669,7 @@ export function DemoTopBar({
  * be missing from the rail and can never sit under a heading the product does
  * not use.
  */
-const RAIL_NOTES: Partial<Record<string, string>> = {
-  // Deliberately kept at zero. It has no callers today, but it is a real
-  // workflow that can be run on its own, and an entry that disappears when idle
-  // teaches the operator that the rail is not the whole system.
-  "Person Match":
-    "No runs today. Kept visible on purpose — a workflow that vanishes when idle is a workflow you stop trusting the rail about.",
-};
+const RAIL_NOTES: Partial<Record<string, string>> = {};
 
 /**
  * The rail's groups, in display order.

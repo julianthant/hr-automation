@@ -1007,7 +1007,7 @@ function i9MemberFailure(row: DemoRow, failureId: string): DemoFailureSpec {
   return {
     failureId,
     fingerprint: "ucpath/person-search/no-results/name-then-eid",
-    nodeId: "person-match",
+    nodeId: "person-lookup",
     taskId: "ic.search",
     code: "ucpath.person-not-found",
     summary: `UCPath person search found no row for “${name}”, on the name and again on the EID read from the page.`,

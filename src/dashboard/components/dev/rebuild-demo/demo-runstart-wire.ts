@@ -197,13 +197,24 @@ const NAME_RE = /^[^\d@]{2,}$/;
  * name is only ever the fallback — so a token is classified by what it IS
  * rather than by which kind the workflow happened to list first.
  */
-const KIND_TEST_ORDER: StartValueKind[] = ["email", "eid", "docId", "name"];
+const PERSON_MATCH_RE = /^.+,\s*.+,\s*(?:x|\d{1,2}\/\d{1,2}\/\d{4}),\s*(?:x|\d{9})$/i;
+
+function isPersonMatch(value: string): boolean {
+  if (!PERSON_MATCH_RE.test(value)) return false;
+  const parts = value.split(",").map((part) => part.trim());
+  const dob = parts.at(-2);
+  const ssn = parts.at(-1);
+  return !(dob?.toLowerCase() === "x" && ssn?.toLowerCase() === "x");
+}
+
+const KIND_TEST_ORDER: StartValueKind[] = ["personMatch", "email", "eid", "docId", "name"];
 
 const KIND_MATCH: Record<StartValueKind, (value: string) => boolean> = {
   email: (v) => EMAIL_RE.test(v),
   eid: (v) => EID_RE.test(v),
   docId: (v) => DOC_ID_RE.test(v),
   name: (v) => NAME_RE.test(v) && v.split(/[\s,]+/).filter(Boolean).length >= 2,
+  personMatch: isPersonMatch,
 };
 
 const KIND_RULE: Record<StartValueKind, { code: EntryProblemCode; rule: string }> = {
@@ -211,6 +222,10 @@ const KIND_RULE: Record<StartValueKind, { code: EntryProblemCode; rule: string }
   docId: { code: "not-a-doc-id", rule: "a Kuali document ID is 3 to 6 digits" },
   email: { code: "not-an-email", rule: "a campus email looks like name@ucsd.edu" },
   name: { code: "not-a-name", rule: "a name needs a first and a last part" },
+  personMatch: {
+    code: "not-a-name",
+    rule: "a match record is Last, First, DOB, SSN with x for one unavailable identifier — not both",
+  },
 };
 
 function classify(value: string, accepts: readonly StartValueKind[]): StartValueKind | undefined {

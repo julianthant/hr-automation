@@ -72,7 +72,6 @@ export const MANUAL_MINUTES: Record<DemoWorkflowId, number> = {
   separations: 22,
   onboarding: 35,
   "person-lookup": 4,
-  "person-match": 3,
   "i9-lookup": 3,
   "work-study": 6,
   "kronos-pay-rule": 8,
