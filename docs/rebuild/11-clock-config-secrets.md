@@ -3,6 +3,7 @@
 Status: **revised 2026-07-22 after the whole-plan/legacy-code review.** Configuration is now
 recursively strict/branded, diagnostic redaction is part of the secret contract, and scope is
 explicitly a loopback-only single-operator tool—no RBAC/multi-user infrastructure in the base.
+**Amended 2026-07-31 (Round 10):** legacy and rebuild config/secret worlds remain isolated.
 
 Answers gap-audit (`08`) TOP GAP 3 and closes config/instance, secrets, and fiscal rollover gaps.
 Grounded in `src/config.ts`, settings, queue trace-id, env, and Duo credential code.
@@ -358,10 +359,13 @@ export function requireAnnualDates(config: Config, clock: Clock): AnnualDateEntr
 
 ## 6. Secrets accessor
 
-One typed accessor is the sole native home for every credential — `.env` vars and the `.auth/` Duo
+One typed accessor is the sole rebuild home for every credential—rebuild-scoped `.env` resolution
+and a distinct rebuild auth/profile root—replacing inline reads inside `temp_src`. Production
+`src` keeps its existing config/secret world unchanged. The two runtimes never import accessors,
+read each other's settings/state/auth files, or proxy requests.
+Within `temp_src`, the accessor covers environment variables and the rebuild Duo
 private-key file — replacing `validateEnv()` + `getTimekeeperName()` + ~20 files' inline
-`process.env.*` reads with one surface. The old LAN password remains readable only inside the
-temporary legacy-compatibility adapter and is deliberately absent from native configuration.
+`process.env.*` reads with one surface. No legacy-proxy secret/config class exists.
 
 ```ts
 // temp_src/domain/secrets.ts
@@ -415,7 +419,7 @@ export function requireSecretFile(name: SecretFileName): Buffer { /* resolve con
 This block is the intended **registry shape**, not permission to stop at the shown entries. Phase
 1b's D68 inventory starts from `.env.example`, all current `process.env`/computed-env reads (including
 provider key/model families), `.auth`, capture tooling, and each descriptor's requirements. Every
-entry is classified as secret, non-secret config, test-only, legacy-proxy, or retired; every runtime
+entry is classified as secret, non-secret config, test-only, or retired-in-target; every rebuild runtime
 read maps back to exactly one entry. Optional provider keys remain optional globally but become a
 blocking workflow/feature preflight when a required provider capability has no usable configured
 cell.
@@ -450,8 +454,8 @@ shape as the existing ratchets, catching an accidental `log.info(`login as ${pas
 
 The rebuilt operator dashboard binds `127.0.0.1`/`::1` only. Phase 1 does not build accounts, roles,
 permissions, teams, remote synchronization, high availability, a secret manager, certificate
-management, or signed audit anchoring. `HRAUTO_DASHBOARD_LAN_PASSWORD` is legacy-compatibility-only
-while the old server is proxied and is not part of the native config/secret model. A non-loopback
+management, or signed audit anchoring. Legacy-only LAN configuration remains inside preserved
+`src` and is never imported/proxied into `temp_src`. A non-loopback
 bind is rejected by the native server with a message that remote access is outside the current
 contract; adding it later requires a separate threat model and explicit operator decision.
 

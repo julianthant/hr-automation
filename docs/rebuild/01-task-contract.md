@@ -1,7 +1,8 @@
 # 01 — The Task Contract & Per-System Task Stores
 
 Status: **Phase 0 revised design — 2026-07-22 whole-plan/legacy-code corrections integrated;
-amended 2026-07-26 (Round 8, §2.7 — the three-tier authoring floor + scaffold generators, D79f).**
+amended 2026-07-26 (Round 8, §2.7 — the three-tier authoring floor + scaffold generators, D79f),
+and 2026-07-31 (Round 10 — isolated copy/port with legacy preservation, D88/D90).**
 Conforms to `00-charter.md` and the binding reconciliation memo `04-reconciliation.md`. The
 abandoned Step-0 spike is evidence only and has been deleted; all three effect overloads must be
 re-proved.
@@ -646,8 +647,8 @@ temp_src/
       driver/                 # ONLY task-adjacent layer allowed raw Page/Locator access (doc 12)
         index.ts              # typed SystemDriver implementation + named complex operations
         ui-registry.ts        # canonical elements/screens/states/observations
-        legacy-selectors.ts   # temporary mapping/re-export from src selector registry (§3.3)
-      UI-CATALOG.md           # generated; stable ids/labels/aliases/evidence/task uses
+        selectors.ts          # copied/ported verified recipes + provenance (§3.3)
+      UI-CATALOG.md           # generated; stable ids/labels/search terms/evidence/task uses
       impl/                   # verbatim-ported leaf drivers (person-org-summary.ts, ss-smart-hr.ts…)
       tasks/
         search-person-org.task.ts      # defineTask(contract, impl) — binds the pair
@@ -720,29 +721,27 @@ export function defineWorkflowStore<Id extends string,
      declared content-addressed writer; workflow mini-stores cannot declare artifacts, and mutable
      append/update paths are confined to reviewed serialized projectors.
 
-### 3.3 Porting selectors + knowledge (preserve evidence, do not copy stale authority)
+### 3.3 Porting selectors + knowledge (copy verified recipes; never import legacy runtime)
 
-- **UCPath selectors are NOT copied — they are mapped/re-exported behind the new driver.**
-  `stores/ucpath/driver/legacy-selectors.ts` is a pure re-export of
-  `src/systems/ucpath/selectors.ts` until the old tree's deletion day (D15):
-  27 commits touched that file, ~7 since June — a copied snapshot WILL drift during the
-  dual-maintenance window. `ui-registry.ts` assigns stable doc-12 `ElementId`s to those legacy
-  property paths; tasks call the typed driver, never the re-export directly. A guard asserts the
-  re-export stays pure and every mapped legacy selector resolves until the old registry is deleted,
-  at which point locator recipes move behind the same stable ids.
-  The same pattern is offered to any other high-churn store (crm, kuali) at its migration time;
-  low-churn stores may move their registry in the port commit.
-- **Two-commit rule per store:** commit 1 is a pure move (`impl/*` with only import-path edits —
-  reviewable as zero-logic-diff); commit 2 wraps `impl` in `defineTask` shells
+- **Verified selector recipes are copied/ported into the rebuilt driver with provenance.**
+  `temp_src` never imports or re-exports `src/systems/**`. Each new registry entry records its
+  legacy source path/key, verification date, copied recipe/fallback chain, and rebuild fixture/live
+  verification. `ui-registry.ts` assigns stable doc-12 `ElementId`s; tasks call the typed driver.
+  D90 change accounting maps later legacy selector maintenance to the affected rebuilt ids and
+  requires re-port/reverification where applicable. The legacy registry remains intact and serves
+  production through initial cutover.
+- **Two-commit rule per store:** commit 1 is a faithful copy/port (`impl/*` with only the import-path
+  edits required inside `temp_src` — reviewable as zero-logic-diff against the preserved source);
+  commit 2 wraps `impl` in `defineTask` shells
   + contract files. Re-derivation is forbidden (charter): `// verified <date>` stamps, `.or()`
   fallback chains, `getContentFrame`, employment-instance expansion, Duo two-phase factor logic
-  move byte-for-byte.
+  are copied faithfully with source provenance; the legacy originals remain in place.
 - Existing LESSONS do **not** move wholesale. Each referenced lesson is triaged during migration:
   active invariant → structured `KnowledgeRecord`; incident-only context → linked incident history;
   superseded/duplicate/incorrect → excluded from the generated active guide. The old LESSONS file
-  remains for the legacy store only until its last consumer is deleted. See doc 12 §4.
+  remains with the preserved legacy store through initial cutover. See doc 12 §4.
 - `npm run ui:catalog` generates the new catalog; `selector:search` searches canonical ids, labels,
-  aliases, active knowledge, and temporary legacy paths. During coexistence the old
+  search terms, active knowledge, and temporary legacy paths. During coexistence the old
   `selectors:catalog` still serves legacy source, but it is not a second source for new tasks.
 - The existing inline-selector architecture guard extends to `temp_src/stores/*/tasks/**` and
   workflow code. Raw `Page`/`Locator`, `page.` calls, and locator recipes are allowed only under
@@ -1011,7 +1010,7 @@ inference — tasks stay plain objects.
 | 7 | **Auth boilerplate re-accretes** — a workflow hand-rolls a login step | Auth timing is descriptor policy and execution is pool-owned; a grep-ratchet forbids login-task contracts and importing `stores/*/session.ts` login functions from workflows |
 | 8 | **Retry as a fallback** — cranking attempts to paper over a broken selector | `attempts` typed `2 \| 3`; `retryOn` has one value (`"transient"`); business-code errors are never transient unless the throw site explicitly claims it, which the fail-loud review catches |
 | 9 | **Decoration forks** — copying a base task file to tweak it | One-task-one-file + duplicate-id load-time throw; a ratchet flags two tasks whose `run` bodies import the same `impl` entry function with >90% identical text (cheap AST-less heuristic, allowlisted) |
-| 10 | **Schema drift between old and new trees during migration** — dual-maintained leaf code diverges | UCPath selectors: the store file is a **pure re-export** of the old registry until deletion day, with a guard asserting it declares nothing locally (§3.3 — no second copy exists to drift); other leaf code: two-commit port rule (moves are zero-logic diffs), old `src/systems/<x>` deleted when its last workflow migrates (charter), per-workflow migration plan lists the port inventory |
+| 10 | **Verified legacy knowledge drifts after it is ported** | Bidirectional runtime-import guard forbids `src`↔`temp_src`; every copied selector/leaf records source path/key + verification evidence; D90 change accounting maps a later legacy edit to rebuilt capability ids and forces re-port/reverification; old source remains preserved through initial cutover |
 | 11 | **Contract/impl drift** — a contract edited without its impl (or vice versa), or a contract quietly importing server code | Pairing guard + bundle-safety import-graph guard (§3.2); the impl's `run` is typed against the contract's schemas, so a schema edit fails `tsc` in the impl; `example` re-parses on every CI run |
 | 12 | **Stale reads feeding writes** — a resumed run replays an old checkpoint into a commit | freshness+provenance metadata are mandatory on every read; derived outputs retain oldest input observation; `Infinity` needs a justification comment; graph dependencies are declared, never inferred by executing JavaScript bind functions (doc 02) |
 | 13 | **Undeclared error codes** — `ctx.fail` drifting to arbitrary strings | `const Codes` literal-tuple inference + a checked-in type-level test pinning that an undeclared code fails `tsc` (D15) |

@@ -142,8 +142,9 @@ only readable current truth. (Added 2026-07-26 after the 07-23/24 ratifications 
      must be *very sure* the upload completed before it reports done — fail-closed, never fail-open.
    - An **immutable write-proof ledger** records what was actually filed/saved and is **never
      pruned**. SQLite is the transactional authority: committing a write atomically records the
-     checkpoint plus ledger/span outbox rows. A serialized projector assigns hash-chain sequence
-     numbers and appends JSONL; recovery reconciles every committed-intent/outbox/span permutation.
+     checkpoint plus ledger/span outbox rows. A serialized projector appends one ordered stream
+     with actor attribution; recovery reconciles every committed-intent/outbox/span permutation.
+     Hash-chain/tail-anchor tamper evidence is deferred until the multi-user phase (D79).
    - The per-submit **double-submit probe policy is decided per-workflow at migration time**
      (operator deferred it), via the §b migration questionnaire.
    - A parked write has no generic Done/Retry escape hatch. The operator may attach proof that parses
@@ -224,11 +225,13 @@ only readable current truth. (Added 2026-07-26 after the 07-23/24 ratifications 
     is distinguishable from “nothing wrong.” AI cannot select a person, resolve a gate, alter run
     state, declare success, create a selector, or authorize a commit. Deterministic contracts,
     scenarios, receipts, and UI registry remain authoritative.
-24. **The old code is retired by capability inventory, not workflow count.** Every old workflow,
-    service, route family, dashboard surface, CLI/ops command, exporter, code generator, and
-    maintenance tool receives a port/replace/retire/proxy disposition plus a closing milestone.
-    `src` cannot be deleted while any inventory entry is undecided or still proxied. Master owner:
-    doc 07; guard owner: doc 10.
+24. **Cutover readiness is proven by capability inventory, not workflow count.** Every legacy
+    workflow, service, route family, dashboard surface, CLI/ops command, exporter, code generator,
+    and maintenance tool receives a native/replaced/retired-in-target/open disposition plus a
+    closing milestone and legacy-change-accounting links. Runtime proxy is not a disposition.
+    Completing the inventory authorizes the single cutover only; `src` and legacy tests remain
+    preserved afterward. Any later retirement/deletion requires a separate explicit operator
+    authorization and its own capability/rollback proof. Master owner: doc 07; guard owner: doc 10.
 25. **Versioning by fingerprint; archiving by version bump; git is the archive (2026-07-24).**
     No archive folders. Descriptors carry a version + content fingerprint; guards force a bump on
     behavior change; every run permanently stamps the workflow version *and* app version it ran
