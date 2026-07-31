@@ -304,7 +304,22 @@ read while still permitting replay-safe browser downloads.
   not, and adding an authority table without generation coverage fails. A restore drill corrupts a copied
   real-shaped DB, restores the newest verified backup, rebuilds projections only, and proves
   commands/dependencies/checkpoints/write-intents/outboxes survive. No code path creates a fresh
-  empty authority DB over an invalid existing file.
+  empty authority DB over an invalid existing file. **D93 additions:** authority and projection
+  tables resolve to two distinct files with the pragmas each class requires (`FULL`/`NORMAL`); a
+  table registered in one class may not be created in the other file; no transaction spans both
+  handles; and daemon-role connections open with `wal_autocheckpoint=0` while exactly one projector
+  role owns checkpointing. A contention fixture reproduces the round-11 measurement shape — N writer
+  processes against shared vs split files — and fails if the split does not keep the authority
+  writer's blocked-time tail under the configured warning threshold.
+- **`authority-transaction-purity.test.ts` (D95).** An authority transaction is synchronous and
+  short, mechanically. No `await`, no `Promise`-returning call, and no driver/page interaction may
+  appear between `BEGIN IMMEDIATE` and `COMMIT` — the lock would be held across unbounded async work,
+  which is how a millisecond tail becomes a `SQLITE_BUSY` inside a live write. Per-file allowlist
+  with a required one-line justification, in the ported ratchet style. The companion assertion pins
+  D94's asymmetry at the type level: the beat-⑦ commit path resolves a *retrying* storage executor
+  and the beat-①–④ paths resolve a *throwing* one, so a single uniform handler cannot be substituted
+  for both without failing the guard. `authority.blockedMs` is asserted present on spans and on
+  `FailureRecord`s produced by write-bearing runs.
 - **`scenario-coverage.test.ts`.** Descriptor/task/UI entries reference real, unique, strict
   `ScenarioManifest`s. Every task has happy/empty or no-match/schema-failure/transient/permanent
   coverage as applicable; every write has subject/proof/crash cases; every branch/delegation/gate
@@ -602,7 +617,8 @@ contracts; the manifest owns that they exist and stay wired. The set (contract-o
   `strict-boundary-schemas`,
   `semantic-ui-registry`, `task-driver-boundary`, `subject-before-fence`,
   `control-command-single-path`, `authority-target-no-fallback`, `delegation-manifest`,
-  `storage-recovery`, `scenario-coverage`, `evidence-receipt`, `notification-durability`,
+  `storage-recovery` (incl. the D93 split-file/checkpoint-owner arms), `authority-transaction-purity`,
+  `scenario-coverage`, `evidence-receipt`, `notification-durability`,
   `knowledge-fix-integrity`, `workflow-editor-compile-integrity`, `legacy-capability-disposition`,
   `capture-durability-and-scope`, `ai-advisory-no-authority`, `provider-capability-boundary`,
   `runtime-dependency-coverage`, and `preflight-coverage`.
