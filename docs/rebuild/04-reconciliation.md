@@ -608,7 +608,38 @@ records them and the same commit folds each into its owner. **One line each — 
 | **D91** | **TESTING POLICY RATIFIED.** Lines/statements/functions gate at 60% globally and 80% for safety-critical rebuild code. Branches report through Phase 1 and gate at 50%/70% at Phase-2 exit. Suite size is a soft report plus phase-exit review. Legacy tests remain until a separately authorized retirement. | docs 07 Phase gates; 10 §3.14; testing-system plan §§3–8 |
 | **D92** | **LIVE PROBES ARE MANDATORY AT THEIR NAMED LATER GATES, NOT PHASE-1 BLOCKERS.** UCPath receipt proof precedes the Phase-2 controlled commit that uses it; ServiceNow receipt proof and OnBase upload verification precede their order-7 migration/cutover evidence. | doc 07 §§3.8 and Phase 2; doc 09 owns proof contracts |
 
-**Two separate D-series exist — do not confuse them.** This memo's `D1–D92` are cross-doc
+## Reconciliation round 11 (2026-07-31) — storage contention and write-position retry policy, folded
+
+**Origin.** An external stack review raised synchronous-SQLite event-loop blocking as an unowned
+seam: daemons are separate OS processes (`spawnDaemon`) that each open the authority DB **and** drive
+Playwright, so a blocked write stalls that process's CDP traffic and reads as a browser flake — a
+confound for the flakiness campaign. Measured before deciding (Node 26.1.0, `node:sqlite`, the
+project pragmas, D32-shaped transaction = `BEGIN IMMEDIATE` + 2 inserts + `COMMIT`, 300 txns per
+writer; wall time **is** event-loop block time because `DatabaseSync` is synchronous):
+
+| scenario | p50 | p95 | p99 | max |
+|---|---|---|---|---|
+| 1 writer, `synchronous=NORMAL` | 0.01ms | 0.02ms | 0.03ms | 0.22ms |
+| 1 writer, `synchronous=FULL` | 0.08ms | 0.19ms | 0.31ms | 0.70ms |
+| 6 writers, `NORMAL`, one shared DB | 0.01ms | 0.02ms | 0.03ms | **40.8ms** |
+| 6 writers, `FULL`, one shared DB | 0.03ms | 0.12ms | 0.31ms | **124.8ms** |
+| 6 writers, `FULL`, authority writer on its OWN file | 0.09ms | 0.18ms | 0.43ms | **0.77ms** |
+
+Three readings. `synchronous=FULL` is essentially free at the single-writer margin (0.08ms p50), so
+§2.5's existing choice needs no tradeoff defense. Contention is a pure **tail** phenomenon —
+percentiles barely move, only the max does — which is consistent with WAL checkpoint stalls rather
+than lock waits. A separate file for authority erases that tail (~160x). The 124.8ms worst case sits
+~40x under the 5000ms busy timeout, and this is a hammer benchmark with zero think time, so what
+follows is cheap insurance plus an observability floor, **not** an incident response. D94 is a
+correctness fix and would stand at any measurement.
+
+| # | Decision | Owner (normative text) |
+|---|---|---|
+| **D93** | **PHYSICAL AUTHORITY/PROJECTION DATABASE SPLIT; ONE CHECKPOINT OWNER.** §2.3's two table *classes* become two *files*: `state.db` (system-of-record, `synchronous=FULL`) and `projections.db` (rebuildable read models, `synchronous=NORMAL`). Separate files mean separate write locks, so high-frequency span/note projection writes can never stall an authority commit. Daemon processes set `wal_autocheckpoint=0`; the serialized projector — already the single ordered writer — owns checkpointing for both files, keeping checkpoint stalls out of processes that drive browsers. Backup/restore/doctor scope stays authority-only; a projection DB is rebuildable by definition. | doc 03 §§2.1/2.3/2.5; built in doc 07 work item 1c |
+| **D94** | **`SQLITE_BUSY` POLICY IS SPLIT BY WRITE POSITION — THROW BEFORE THE EXTERNAL WRITE, RETRY AFTER IT.** A transient storage failure means opposite things on either side of doc 09 beat ⑤, and the kernel must not treat it uniformly. **Before** the external commit (beats ①–④) nothing external has happened: throw and fail closed. **After** it, the HR mutation is already real, so throwing at beat ⑦ would discard proof of a write that exists and manufacture exactly the unknown-outcome ambiguity doc 09 exists to remove. Beat ⑦ retries with bounded backoff; if it still cannot land, it escalates to a durable out-of-band record plus a critical notification and leaves the intent `attempting` for recovery — it never reports the write as lost or absent. Retrying the same commit is not a fallback under the fail-loud rule (root `CLAUDE.md`: retrying the *same* operation on a transient error re-runs it, it does not substitute data). | doc 09 §3 beats ④/⑦ + §7; guard in doc 10 §3.10 |
+| **D95** | **AUTHORITY BLOCK TIME IS OBSERVABLE; AUTHORITY TRANSACTIONS ARE `await`-FREE.** Every authority transaction is timed inside the D72 `AuthorityDatabase` adapter — the one place every write already funnels through — and its blocked milliseconds ride the span and any `FailureRecord`/diagnostic bundle, with a structured warning past a configured threshold. This is what makes a browser timeout that coincided with a storage stall *diagnosable* instead of a flake misattributed to UCPath. Separately: because `DatabaseSync` is synchronous, an `await` between `BEGIN IMMEDIATE` and `COMMIT` holds the write lock across unbounded async work — that is how a 125ms tail becomes a 5s timeout — so a mechanical guard forbids it. | doc 03 §2.5; doc 10 §3.10 (`authority-transaction-purity`); doc 12 bundle field |
+
+**Two separate D-series exist — do not confuse them.** This memo's `D1–D95` are cross-doc
 reconciliation decisions. Doc 03 §9 carries a **row-model series** (`row-model D1–D24`: three row
 types, eight statuses, containment, delegation shapes) ratified 2026-07-24/25. Doc 03 states the
 distinction at its §9 header; always cite the row-model series with the `row-model` prefix.

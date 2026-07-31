@@ -356,9 +356,12 @@ neither runtime reads or writes the other's root.
 │                                      ordered, actor-attributed, append-only, per-SYSTEM+day,
 │                                      NEVER pruned (the audit floor; hash chain deferred by D79)
 ├── backups/state/                     checksummed online backups + restore manifests (§2.5)
-└── state.db                           SQLite — claims/checkpoints/intents/outboxes,
-                                       commands/dependencies/notifications are system-of-record;
-                                       read projections alone are rebuildable
+├── state.db                           SQLite AUTHORITY (D93) — claims/checkpoints/intents/outboxes,
+│                                      commands/dependencies/notifications. System-of-record,
+│                                      `synchronous=FULL`, backed up, NEVER rebuildable
+└── projections.db                     SQLite PROJECTIONS (D93) — span-shaped read models
+                                       (`spans`, `gates`, `notes`, `runs_view`). `synchronous=NORMAL`,
+                                       not backed up, rebuildable from JSONL by definition
 ```
 
 Rationale against alternatives:
@@ -458,9 +461,13 @@ Per-run detail (timeline, notes, screenshots) stays request/response + a per-run
 today — but the payload is the span tree + notes, already merged and ordered; `LogStream` stops
 owning merge/dedup heuristics (`mergeDisplayItems` collapse survives as a server-side fold).
 
-### 2.3 SQLite (role per D14)
+### 2.3 SQLite (role per D14, physically split per D93)
 
-`state.db` has **two classes of table with different authority**:
+There are **two classes of table with different authority**, and since D93 they live in **two
+physical database files** — `state.db` (authority) and `projections.db` (rebuildable). The split is
+not cosmetic: separate files carry separate write locks, so the high-frequency projection writes can
+never block an authority commit in a process that is also driving a browser (§2.5 item 1, measured
+in reconciliation round 11).
 
 - **System-of-record (NOT rebuildable and never deleted by projection/runtime row maintenance):**
   the task/claim store (tasks, leases,
@@ -481,8 +488,11 @@ owning merge/dedup heuristics (`mergeDisplayItems` collapse survives as a server
   compaction port as-is.
 
 The system-of-record class includes a singleton `authority_meta(schema_version,
-authority_generation,updated_at)`. The infra adapter exposes separate authority and projection
-transaction APIs; repositories cannot execute arbitrary SQL or receive the raw connection. Every
+authority_generation,updated_at)`. The infra adapter privately holds **both** native handles and
+exposes separate authority and projection transaction APIs; repositories cannot execute arbitrary
+SQL or receive the raw connection. Because the two classes are now separate files, a cross-class
+transaction is not expressible — a projection update can never share an authority transaction, which
+is the invariant §2.1's "JSONL writes first, projection applies after" already assumed. Every
 top-level committed transaction that mutates at least one authority table increments
 `authority_generation` exactly once inside that same transaction; projection-only rebuilds do not.
 Nested authority operations share the outer transaction/generation increment. The table-class
@@ -621,8 +631,13 @@ response overwrites earlier errors.
 Calling `state.db` authoritative without a recovery path would make a single corrupt file capable
 of erasing claim, delegation, checkpoint, and write-fence truth. The base therefore includes:
 
-1. SQLite runs with WAL, foreign keys on, a busy timeout, and `synchronous=FULL` for authority
-   transactions. Schema migrations run only under an exclusive migration lease.
+1. SQLite runs with WAL, foreign keys on, and a busy timeout. Authority (`state.db`) runs
+   `synchronous=FULL`; projections (`projections.db`) run `synchronous=NORMAL` (D93). `FULL` is
+   measured essentially free — 0.08ms p50 per D32-shaped transaction, round 11 — so it carries no
+   tradeoff to defend. **Checkpointing has one owner:** daemon processes set `wal_autocheckpoint=0`
+   and the serialized projector checkpoints both files, so a checkpoint stall can never land in a
+   process that is concurrently driving a browser. Schema migrations run only under an exclusive
+   migration lease.
 2. Boot runs `PRAGMA quick_check`, schema-version validation, foreign-key checks, and invariant
    queries (one active claim per run, manifest children match dependencies, every attempting write
    has an attempt, every outbox references authority, every finalizing capture has exactly one live
@@ -654,6 +669,18 @@ of erasing claim, delegation, checkpoint, and write-fence truth. The base theref
    authority from spans. Runs/events newer than the restored authority generation are surfaced as
    `authority-unknown`; any possible external write is parked for doc 09's live probe/operator
    resolution before execution continues.
+7. **Contention is observable, and transactions stay short (D95).** `DatabaseSync` is synchronous, so
+   an authority write blocks its own process's event loop — and daemons are separate OS processes
+   that each open the DB *and* drive Playwright, which means an unobserved stall is
+   indistinguishable from a UCPath flake. The `AuthorityDatabase` adapter therefore times every
+   transaction and attaches `authority.blockedMs` to the span and to any `FailureRecord`/diagnostic
+   bundle, emitting a structured warning past a configured threshold. Two invariants keep the number
+   small: an authority transaction may not contain an `await` (an awaited call between
+   `BEGIN IMMEDIATE` and `COMMIT` holds the write lock across unbounded async work — the mechanism
+   by which a ~125ms tail becomes a 5s `SQLITE_BUSY`), and no page interaction may occur inside one.
+   Both are mechanically guarded (doc 10 §3.10). What a `SQLITE_BUSY` *means* is not uniform — it
+   depends on whether the external write has already happened — and that policy is owned by doc 09
+   beats ④/⑦ (D94), not here.
 
 Phase 1 cannot exit until an automated restore drill copies a real-shaped fixture DB, corrupts the
 copy, detects it, restores the newest verified backup, rebuilds projections, and proves pending

@@ -40,6 +40,15 @@
       "replacementRequired": true
     },
     {
+      "name": "authority-transaction-purity",
+      "file": "tests/unit/architecture/authority-transaction-purity.test.ts",
+      "status": "planned",
+      "owner": "docs/rebuild/10-guard-test-architecture.md",
+      "invariant": "Planned Phase 1+ guard (D95/D94): no await or page interaction between BEGIN IMMEDIATE and COMMIT; pre-beat-5 storage failures throw while post-beat-5 retry, so one uniform handler cannot serve both.",
+      "replacementRequired": true,
+      "activationMilestone": "phase-1-or-later"
+    },
+    {
       "name": "cancel-mechanism",
       "file": "tests/unit/architecture/cancel-mechanism.test.ts",
       "status": "active",
