@@ -52,6 +52,26 @@ test("a graph's label and version are the registry's, so the page cannot drift f
   }
 });
 
+test("Person Lookup serves Search and Match lanes with optional CRM checks on both", () => {
+  const graph = graphFor("person-lookup");
+  assert.ok(graph);
+  assert.ok(lanesOf(graph).includes("Per person"));
+  assert.ok(lanesOf(graph).includes("Match mode"));
+
+  const matchSearch = graph.nodes.find((node) => node.id === "Search");
+  assert.ok(matchSearch);
+  assert.equal(laneOf(matchSearch), "Match mode");
+  assert.deepEqual(
+    matchSearch.contract.map((row) => row.field),
+    ["Found", "Matched EID", "Matched name", "Candidates"],
+  );
+  assert.deepEqual(matchSearch.uiIds, ["ucpath.personSearch.form", "ucpath.personSearch.results"]);
+
+  const crmNodes = graph.nodes.filter((node) => node.system === "crm");
+  assert.ok(crmNodes.some((node) => node.when?.includes("Search mode")));
+  assert.ok(crmNodes.some((node) => node.when?.includes("Match mode")));
+});
+
 /* =========================================================================
  * Structural integrity — the renderer relies on all of it
  * ====================================================================== */
@@ -174,7 +194,6 @@ test("the three postures are distinct, and each graph lands in exactly the right
 
   // Changes no system of record, so there is nothing to stop short of.
   assert.equal(posture["person-lookup"], "no-system-write");
-  assert.equal(posture["person-match"], "no-system-write");
   assert.equal(posture["i9-lookup"], "no-system-write");
   assert.equal(posture.ocr, "no-system-write");
   assert.equal(posture["i9-check"], "no-system-write");

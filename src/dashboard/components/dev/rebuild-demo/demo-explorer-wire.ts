@@ -252,6 +252,7 @@ const MULTI_DOCUMENT = "Multi-document start";
 const PER_PERSON = "Per person";
 const MULTI_PERSON = "Multi-person start";
 const DELEGATED_BATCH = "Delegated batch";
+const MATCH = "Match mode";
 const PER_PACKET = "Per packet";
 const PER_SIGNER = "Per signer";
 
@@ -543,10 +544,10 @@ export const ONBOARDING_GRAPH: ExplorerGraph = {
 export const PERSON_LOOKUP_GRAPH: ExplorerGraph = {
   workflowId: "person-lookup",
   label: "Person Lookup",
-  version: 4,
+  version: 5,
   minorVersion: 0,
   summary:
-    "Finds one person in UCPath, confirms they are the same person the CRM record describes, and reports what it found. It writes nothing, anywhere — so every run of it is already a rehearsal.",
+    "Searches Person Org by EID/name or matches a legal identity in HR-Tasks, with an optional CRM cross-check on either mode. It writes nothing, anywhere — so every run of it is already a rehearsal.",
   nodes: [
     {
       id: "Accept delegation",
@@ -603,7 +604,7 @@ export const PERSON_LOOKUP_GRAPH: ExplorerGraph = {
       purpose:
         "Match the UCPath person against the CRM onboarding record, so a name collision cannot resolve to the wrong person.",
       skippedInDryRun: false,
-      when: "a CRM record exists for the search term",
+      when: "Search mode and CRM check is enabled",
       contract: [
         { dir: "read", field: "Start date", system: "crm" },
         { dir: "read", field: "Campus email", system: "crm" },
@@ -631,43 +632,20 @@ export const PERSON_LOOKUP_GRAPH: ExplorerGraph = {
       system: "crm",
       purpose: "Read the hire and oath dates the caller asked for, and report them back.",
       skippedInDryRun: false,
-      when: "the caller asked for CRM dates",
+      when: "Search mode, CRM check is enabled, and the caller asked for CRM dates",
       contract: [
         { dir: "read", field: "Employment date", system: "crm" },
         { dir: "read", field: "Oath date", system: "crm" },
       ],
       uiIds: ["crm.onboardingRecord.dates"],
     },
-  ],
-  edges: [
-    { from: "Searching", to: "Cross-verification", condition: "a CRM record exists" },
-    { from: "Searching", to: "Active status", condition: "no CRM record — go straight to the status read" },
-    { from: "Cross-verification", to: "Active status" },
-    { from: "Active status", to: "CRM dates", condition: "the caller asked for dates" },
-    { from: "Accept delegation", to: "Member fan-out" },
-    { from: "Member fan-out", to: "Searching", condition: "each member starts the per-person path" },
-    { from: "Member fan-out", to: "Report back", condition: "every member is terminal" },
-  ],
-};
-
-// ---------------------------------------------------------------------------
-// 4 · Person Match — one step, delegated only
-// ---------------------------------------------------------------------------
-
-export const PERSON_MATCH_GRAPH: ExplorerGraph = {
-  workflowId: "person-match",
-  label: "Person Match",
-  version: 2,
-  minorVersion: 0,
-  summary:
-    "One UCPath person search, keyed on an SSN or a date of birth plus a name, answering whether that person already exists. Delegated only, and it writes nothing.",
-  nodes: [
     {
       id: "Search",
+      lane: MATCH,
       kind: "task",
       system: "ucpath",
       purpose:
-        "Search UCPath's HR-Tasks person search on the identifiers the parent holds, and hand back the first confident match or none.",
+        "Search UCPath HR-Tasks with legal name plus SSN and/or DOB, and answer whether UCPath already knows this person.",
       skippedInDryRun: false,
       contract: [
         { dir: "read", field: "Found", system: "ucpath" },
@@ -677,8 +655,31 @@ export const PERSON_MATCH_GRAPH: ExplorerGraph = {
       ],
       uiIds: ["ucpath.personSearch.form", "ucpath.personSearch.results"],
     },
+    {
+      id: "Match CRM check",
+      lane: MATCH,
+      kind: "task",
+      system: "crm",
+      purpose: "Optionally cross-check the HR-Tasks match against CRM and read its start date.",
+      skippedInDryRun: false,
+      when: "Match mode and CRM check is enabled",
+      contract: [
+        { dir: "read", field: "Start date", system: "crm" },
+        { dir: "read", field: "CRM match", system: "crm" },
+      ],
+      uiIds: ["crm.onboardingRecord.header"],
+    },
   ],
-  edges: [],
+  edges: [
+    { from: "Searching", to: "Cross-verification", condition: "CRM check enabled" },
+    { from: "Searching", to: "Active status", condition: "CRM check disabled" },
+    { from: "Cross-verification", to: "Active status" },
+    { from: "Active status", to: "CRM dates", condition: "the caller asked for dates" },
+    { from: "Accept delegation", to: "Member fan-out" },
+    { from: "Member fan-out", to: "Searching", condition: "each member starts the per-person path" },
+    { from: "Member fan-out", to: "Report back", condition: "every member is terminal" },
+    { from: "Search", to: "Match CRM check", condition: "CRM check enabled" },
+  ],
 };
 
 // ---------------------------------------------------------------------------
@@ -1698,7 +1699,6 @@ export const EXPLORER_GRAPHS: ExplorerGraph[] = [
   KRONOS_PAY_RULE_GRAPH,
   OLD_KRONOS_REPORTS_GRAPH,
   PERSON_LOOKUP_GRAPH,
-  PERSON_MATCH_GRAPH,
   I9_LOOKUP_GRAPH,
   OCR_GRAPH,
   CRM_DOC_DOWNLOAD_GRAPH,
