@@ -1,9 +1,9 @@
 # Rebuild demo — production feature & data plan (2026-07-25)
 
-**Status:** working plan. This is a **features/data** document, not a design document — it says WHAT
-the demo frontend must show and WHAT data the production backend will serve for it. A separate
-design pass decides how each surface looks (bound by the §6.6 visual-parity directive and
-`shell-build-spec-2026-07-25.md`).
+**Status (2026-07-30): completed historical build plan; do not execute its tiers.** The target
+surfaces were built and audited. `docs/rebuild/13-frontend-backend-integration.md` now owns the
+production wiring/completeness contract, while doc 07 remains the only build sequence. This file is
+retained as the feature-by-feature rationale and should not be treated as a competing plan.
 
 **Question this answers:** the operator's "we need our frontend to show what our backend can serve
 properly" — a coverage plan so `?view=rebuild-demo` becomes a faithful preview of every capability
