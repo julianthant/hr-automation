@@ -194,7 +194,7 @@ pkill -f seed-session-fixture; pkill -f 'dashboard --prod --port 3939'
 
 Principles: `HRAUTO_TRACKER_DIR` points the dashboard (and the e2e stub lane) at an isolated root — NEVER seed into the real `.tracker/`. The session panel only shows a card whose `workflow_start.pid` is a LIVE process, which is why the seeder hangs (kill it when done). The seeder uses the **production emitters** (`emitBrowserHealth`, …) so the fixture can't drift from the event schema — extend it (or write a sibling seeder) when you add a surface. The a11y `snapshot` is more reliable to assert on than a screenshot (text/labels/`[pressed]`/aria); `Read` the PNG only for the visual gestalt. `:3838` is usually the user's own dashboard — use a fallback port and never kill it. Screenshots land in `.screenshots/` (gitignored). **ALWAYS surface the screenshots back to the user after a verification — `Read` the PNG(s) into your reply (they render inline in the conversation) and cite the saved `.screenshots/<area>/` path(s).** The user can't always re-run your verification, so showing the actual rendered result (not just asserting "it works") is mandatory: every dashboard/UI verification ends with the operator SEEING the before/after, the same images you judged from. What this CANNOT verify: behavior that needs a real browser daemon (refresh/reopen/peek *acting*, real auth) — that's the opt-in live lane (see "Live verification — standing pre-authorization" above + `tests/live/`).
 
-## The rebuild lives in another repository (D93, 2026-07-31)
+## The rebuild lives in another repository (D93/D94, 2026-07-31)
 
 **This repo is production and stays production.** The ground-up rebuild now lives at
 `/Users/julianhein/Projects/hr-automation-rebuild` — its own git repo, seeded from
@@ -206,11 +206,13 @@ Nothing here was deleted and nothing here is deprecated. This repo remains live-
 maintainable, and the sole production authority until a single all-at-once cutover.
 
 **Standing duty — every legacy maintenance change must be recorded in the rebuild repo.** When you
-change anything under `src/` or `tests/` here, add or update its record in the rebuild repo's
-`config/legacy-change-accounting.json`: the path, its before/after content hashes, the **affected**
-capability ids (not merely the owning path — a `src/core/daemon` fix affects every workflow that
-runs through the daemon), and the rebuild evidence the change may invalidate. Records are keyed by
-**this repo's** commit hashes.
+change anything under `src/` or `tests/` here, **commit the legacy change first**, then add one
+schema-v2 record per changed path under that exact commit in the rebuild repo's
+`config/legacy-change-accounting.json`: first-parent/commit blob hashes, the **affected** capability
+ids (not merely the owning path — a `src/core/daemon` fix affects every workflow that runs through
+the daemon), a non-empty impact rationale, and closed rebuild recheck evidence. Dirty legacy
+`src/`/`tests/` state—including staged and untracked changes—intentionally makes the rebuild guards
+red until the named legacy commit exists and is accounted.
 
 Why it matters: D93 retired the same-tree scan that used to notice a legacy edit incidentally, so
 this accounting is now the program's *only* drift detector — load-bearing, not corroborating. The
