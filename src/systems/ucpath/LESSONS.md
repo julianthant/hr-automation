@@ -310,10 +310,22 @@ as a second, live-verified arm:
 stays correct if the operator text changes (`contains`, `=`, …). Ids are
 `UC_ORG_SUM_VW_EMPLID` / `UC_ORG_SUM_VW_PARTNER_LAST_NAME` /
 `UC_ORG_SUM_VW_NAME_DISPLAY`; both arms were probed on the same live page, so
-neither is an unverified guess. **`payPathActions` (and any other
-Find-an-Existing-Value form) uses the same `exact: true` shape on the same kind
-of `$op`-bearing search grid and is very likely broken the same way — it was
-NOT reachable on this probe and remains unverified.**
+neither is an unverified guess.
+
+**Blast radius — the non-exact arms are the safe ones.** The UCPath search form
+that production actually drives for EID lookups is **Workforce Job Summary**
+(separations / onboarding), and it is structurally immune: `jobSummary` exposes
+exactly one textbox selector, `emplIdInput`, written **non-exact**
+(`getByRole("textbox", { name: "Empl ID" })`), so `"Empl ID"` still matches
+`"Empl ID begins with"` by substring — the same accident that kept
+`personOrgSummary.lastNameInput` alive. Its only `exact: true` is the Search
+BUTTON, which has no `$op` sibling. `payPathActions` still carries the fragile
+`exact: true` textbox shape on a `$op`-bearing search grid and would break the
+same way, but no current workflow drives it (operator confirmed 2026-08-04:
+"don't use paypath actions, use workforce job summary"), so it is left as-is
+rather than edited unverified. **The rule to carry forward: on a PeopleSoft
+Find-an-Existing-Value form, never pin a search textbox with `exact: true` on
+the bare label — the operator text is part of the accessible name.**
 **Selector:** `personOrgSummary.emplIdInput`, `personOrgSummary.lastNameInput`,
 `personOrgSummary.nameInput`
 **Tags:** person-org-summary, search, accessible-name, aria-labelledby, operator,
