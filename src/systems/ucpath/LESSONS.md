@@ -333,3 +333,40 @@ begins-with, exact, strict-mode, getbyrole, peoplesoft, person-lookup, selector-
 **References:** Live-probed 2026-08-04 via `npm run sel:browser` + Duo Autopilot
 (read-only). Related: `#2026-07-08` and `#2026-07-13`, the other two cases where a
 Person-Org/person-search chain was dead live while looking verified in the registry.
+
+## 2026-08-04 — A UCPath name-search "Not found" is usually a MISREAD FIRST NAME, not a missing record; and an EID-mode "Not found" can be a plain false negative
+
+**Tried:** Treating `person-lookup` verdicts as authoritative while resolving 216
+handwritten Emergency Contact forms: a name search returning "Not found" was
+read as "this person has no UCPath record", and an EID-mode search returning
+"Not found" was read as "this EID does not exist".
+**Failed because:** Both verdicts are far weaker than they look.
+(1) **Name searches fail on a single wrong letter, and the wrong letter is
+usually mine, not the employee's.** Three of four "unresolvable" people resolved
+immediately once the name line was re-read at 450 DPI: `Megan`→**`Merav`** Price
+(10683737), `Dogan`→**`Dogen`** Shiota (10712336), and `Pina`→**`Piña`**
+Contreras (10682312 — the accent is load-bearing; both unaccented spellings
+returned "Not found" in two separate sessions days apart). A 200-DPI identity
+crop is enough to transcribe an EID but NOT enough to trust a first name.
+(2) **An EID-mode "Not found" can be transient.** Andrew Reyes' form EID
+10495223 returned "Not found" by EID, but a name search returned that exact EID
+(UCPath stores him as `Reyes-Gomez, Andrew`). Had the negative been trusted, a
+correct form would have been sent back to the operator as bad data.
+(3) Compound surnames defeat the naive `First Last` → `Last, First` flip:
+`lsanchezhernandez@ucsd.edu` revealed the surname was **Sanchez Hernandez**,
+which is why `Sanchez, Lucero` missed.
+**Fix:** Before declaring anyone unresolvable — (a) **re-read the name at
+≥450 DPI**, cropping the name line specifically, and (b) **cross-check it
+against the campus email on the form**, which is the cheapest available oracle
+for spelling: `meravprice@gmail.com` contradicted "Megan" on the very first
+pass and would have saved three failed searches. `mschaever@ucsd.edu`
+corroborated "Schaever", correctly leaving him as the one genuine no-record
+case out of 216. (c) **Re-run every negative once** — a repeat "Not found"
+across two runs is evidence; a single one is not. (d) For compound surnames,
+derive the search key from the email local-part rather than by flipping tokens.
+**Selector:** `personOrgSummary.nameInput`, `personOrgSummary.lastNameInput`
+**Tags:** person-lookup, name-search, not-found, false-negative, accent, unicode,
+compound-surname, campus-email, transcription, ocr, emergency-contact, onbase
+**References:** Companion to the `#2026-08-04` `$op` accessible-name entry above
+(that one made these searches fail at all; this one is about interpreting their
+results). Live batch: 216 EC forms, 208 filed.
