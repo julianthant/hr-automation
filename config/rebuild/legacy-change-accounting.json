@@ -105,9 +105,10 @@
       "path": "src/systems/ucpath/LESSONS.md",
       "changeKind": "modified",
       "beforeSha256": "010e7a25f50d7e63b24355bb254ded76690c9278a6885285ef3a52101fc5f9a1",
-      "afterSha256": "fb63f9f9524fb4c7cf279cef640f7b3a21f5768ad01c6453190f8a6260f208ab",
+      "afterSha256": "d2a518410d2d5e6056860de22685c1a17da88aeb571d55f4df4d96c91b676721",
       "capabilityIds": [
         "legacy-workflow-onboarding",
+        "legacy-workflow-person-lookup",
         "legacy-workflow-separations"
       ],
       "rebuildRecheckIds": [
