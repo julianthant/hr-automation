@@ -357,13 +357,24 @@ correct form would have been sent back to the operator as bad data.
 which is why `Sanchez, Lucero` missed.
 **Fix:** Before declaring anyone unresolvable — (a) **re-read the name at
 ≥450 DPI**, cropping the name line specifically, and (b) **cross-check it
-against the campus email on the form**, which is the cheapest available oracle
-for spelling: `meravprice@gmail.com` contradicted "Megan" on the very first
-pass and would have saved three failed searches. `mschaever@ucsd.edu`
-corroborated "Schaever", correctly leaving him as the one genuine no-record
-case out of 216. (c) **Re-run every negative once** — a repeat "Not found"
-across two runs is evidence; a single one is not. (d) For compound surnames,
-derive the search key from the email local-part rather than by flipping tokens.
+against the campus email on the form**: `meravprice@gmail.com` contradicted
+"Megan" on the very first pass and would have saved three failed searches.
+(c) **Re-run every negative once** — a repeat "Not found" across two runs is
+evidence; a single one is not. (d) For compound surnames, derive the search key
+from the email local-part rather than by flipping tokens.
+
+**Corrected same-day — a HANDWRITTEN email is NOT independent corroboration of a
+handwritten name.** This entry originally cited `mschaever@ucsd.edu` as
+confirming "Schaever" and concluded he was the one genuine no-record case in
+216. He was not: CRM shows **Mason Schaerer, EID 10634340**. The handwritten
+`r` reads as `v`, and the SAME substitution was made in both the name line and
+the email — two samples of one hand share the same letterform ambiguity, so
+agreement between them proves only that the reader was consistent, not correct.
+A cross-check is only independent when the second source is **typed by someone
+else**: CRM / UCPath / a roster. Treat a form's own email as a *hint* that can
+contradict a read (which is all it did for Price), never as confirmation that
+one is right. Final tally: **216 forms, 210 filed, zero genuine no-record
+cases** — every "not found" was a transcription error.
 **Selector:** `personOrgSummary.nameInput`, `personOrgSummary.lastNameInput`
 **Tags:** person-lookup, name-search, not-found, false-negative, accent, unicode,
 compound-surname, campus-email, transcription, ocr, emergency-contact, onbase
