@@ -280,3 +280,44 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `ssSmartHRTransactions.transactionDetailTxnId` (`span#UC_SS_TRANSACT_UC_TRANSACT_ID`) + `ssSmartHRTransactions.transactionDetailApprovalStatus` (`span#UC_SS_TRANSACT_APPR_STATUS`), verified 2026-08-04 by read-only probe across 3 templates × 3 statuses (HIR/Approved, REH/Denied `T002204014`, XFR/Pending) — exactly one node each. These are BARE spans with no label association, so the PeopleSoft `RECORD_FIELD` id is the correct anchor **on this route only** — do NOT generalize it to Kuali, where role+label remains the rule. The detail route renders at TOP level (`getContentFrame()` resolves to nothing there) while the results grid it is reached from is served inside `#main_target_win0`, so `readSsSmartHrReceiptFields` probes both roots for the same unique id and fails loud when neither resolves.
 **Tags:** ss-smart-hr, transaction, receipt, approval-status, denied, pending, onboarding, fail-loud, record-field, deep-link, live-verified
 **References:** `tests/unit/systems/ucpath/transaction.test.ts` (`classifyTxnApprovalStatus`, `interpretPostSubmitTxnReadback`); `tests/unit/systems/ucpath/ss-smart-hr.test.ts` (`receiptMatchesRequestedTransaction`); `src/workflows/onboarding/CLAUDE.md`. **URL is never state evidence on this route:** the addressable form is `?Action=U&UC_TRANSACT_ID=T…`, but the BARE url is not a deep link — a reload silently returns to the search form with a byte-identical URL, and an UNKNOWN id renders the ordinary search form with NO error and NO banner. "The page loaded" proves nothing; assert the Transaction ID field RESOLVED **and** equals the requested id (`receiptMatchesRequestedTransaction`, pure + unit-pinned).
+
+## 2026-08-04 — Person Org Summary search inputs gained a `$op` operator in their accessible name; every `exact: true` textbox arm went dead while the non-exact one silently survived
+
+**Tried:** Searching Person Organizational Summary by name via the registry arms
+`personOrgSummary.lastNameInput` (`getByRole("textbox", { name: "Last Name" })`,
+non-exact) then `personOrgSummary.nameInput`
+(`getByRole("textbox", { name: "Name", exact: true })`), as mapped 2026-04-24.
+**Failed because:** PeopleSoft now points each search input's `aria-labelledby`
+at the label **and** the adjacent operator `<select>` (`<field>$op`, the
+"begins with" dropdown), so the computed accessible names became
+`"Empl ID begins with"`, `"Last Name begins with"`, `"Name begins with"`. The
+`exact: true` arms match **zero** elements and die on the 10s fill timeout, so
+`nameInput` and `emplIdInput` were both structurally dead. `lastNameInput`
+survived purely by accident — it was the one arm written non-exact, and
+`"Last Name"` is still a substring of `"Last Name begins with"`. That asymmetry
+is what made the break look like a data problem instead of a selector problem:
+the run got far enough to log `Searching: Last Name="Paz", Name="Esperanza"`
+and fill Last Name in 11ms before timing out, and the failure screenshot shows
+a perfectly normal search form with the field plainly visible. All 10 name-mode
+lookups in a batch failed identically at `step=searching`. Note the naive
+repair — dropping `exact` — is also wrong: a bare `"Name"` substring matches
+BOTH `"Name begins with"` and `"Last Name begins with"`, i.e. a strict-mode
+violation rather than a timeout.
+**Fix:** Anchor the role name with a regex and add the record.field element id
+as a second, live-verified arm:
+`f.getByRole("textbox", { name: /^Name\b/ }).or(f.locator("#UC_ORG_SUM_VW_NAME_DISPLAY")).first()`
+— `^Label\b` pins to the start so each pattern resolves exactly one box and
+stays correct if the operator text changes (`contains`, `=`, …). Ids are
+`UC_ORG_SUM_VW_EMPLID` / `UC_ORG_SUM_VW_PARTNER_LAST_NAME` /
+`UC_ORG_SUM_VW_NAME_DISPLAY`; both arms were probed on the same live page, so
+neither is an unverified guess. **`payPathActions` (and any other
+Find-an-Existing-Value form) uses the same `exact: true` shape on the same kind
+of `$op`-bearing search grid and is very likely broken the same way — it was
+NOT reachable on this probe and remains unverified.**
+**Selector:** `personOrgSummary.emplIdInput`, `personOrgSummary.lastNameInput`,
+`personOrgSummary.nameInput`
+**Tags:** person-org-summary, search, accessible-name, aria-labelledby, operator,
+begins-with, exact, strict-mode, getbyrole, peoplesoft, person-lookup, selector-drift
+**References:** Live-probed 2026-08-04 via `npm run sel:browser` + Duo Autopilot
+(read-only). Related: `#2026-07-08` and `#2026-07-13`, the other two cases where a
+Person-Org/person-search chain was dead live while looking verified in the registry.
