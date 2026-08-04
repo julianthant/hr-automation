@@ -8,6 +8,7 @@ import {
   parsePayRate,
   waitForNamedCondition,
   interpretPostSubmitTxnReadback,
+  classifyTxnApprovalStatus,
   assertTerminationLastDateWorkedReadback,
   requirePeopleSoftControlRefresh,
   fillTerminationLastDateWorked,
@@ -402,42 +403,129 @@ describe("waitForNamedCondition", () => {
 });
 
 /**
- * Post-submit txn-number stamping decision (onboarding readback). The rule it
- * pins: only a real PeopleSoft transaction id (`T` + ≥6 digits) may be stamped
- * as `transactionNumber`; anything else — empty readback, the literal "NEW"
- * the Person ID column renders for unprocessed hires, a stray grid value —
- * maps to the explicit `submittedWithoutTxnNumber` marker instead of a
- * plausible-but-wrong number (fail-loud rule).
+ * Approval-status classification for a post-submit receipt. Only the statuses
+ * the live Approval Status combobox actually exposes (plus the two extra values
+ * the grid parser recognizes) are classified; everything else stays `unknown`
+ * so an unreadable status can never drift into "approved".
+ */
+describe("classifyTxnApprovalStatus", () => {
+  test("the accepted statuses are the only ones that classify as accepted", () => {
+    for (const s of ["Approved", "approved", "  APPROVED ", "Manually Processed", "manually  processed"]) {
+      assert.equal(classifyTxnApprovalStatus(s), "accepted");
+    }
+  });
+
+  test("Pending is its own outcome — neither accepted nor refused", () => {
+    for (const s of ["Pending", " pending "]) {
+      assert.equal(classifyTxnApprovalStatus(s), "pending");
+    }
+  });
+
+  test("every terminal-failed status classifies as refused", () => {
+    for (const s of ["Denied", "Error", "Pushed Back", "pushed  back", "Recycled", "Cancelled", "Canceled"]) {
+      assert.equal(classifyTxnApprovalStatus(s), "refused");
+    }
+  });
+
+  test("blank / unrecognized statuses stay unknown — never optimistically accepted", () => {
+    for (const s of ["", "   ", null, undefined, "Saved", "Needs Review", "Approve", "OK"]) {
+      assert.equal(classifyTxnApprovalStatus(s), "unknown");
+    }
+  });
+});
+
+/**
+ * Post-submit RECEIPT decision (onboarding readback).
+ *
+ * The rule it pins: success is proved by the PAIR
+ * `(transactionNumber, approvalStatus)`, NEVER by the number alone. UCPath
+ * issues a `T…` number regardless of outcome — live `T002204014` is a
+ * well-formed number on a **Denied** transaction — so the old number-only shape
+ * stamped a refused UCPath transaction as a successful receipt (defect found +
+ * fixed 2026-08-04).
+ *
+ * The number is still validated first (`T` + ≥6 digits): anything else — empty
+ * readback, the literal "NEW" the Person ID column renders for unprocessed
+ * hires, a stray grid value — maps to the explicit `submittedWithoutTxnNumber`
+ * marker instead of a plausible-but-wrong number (fail-loud rule).
  */
 describe("interpretPostSubmitTxnReadback", () => {
-  test("a real T-number is stamped, uppercased and trimmed", () => {
-    assert.deepEqual(interpretPostSubmitTxnReadback("T002114817"), {
+  test("an Approved receipt is a success — number uppercased and trimmed", () => {
+    assert.deepEqual(interpretPostSubmitTxnReadback("T002114817", "Approved"), {
       transactionNumber: "T002114817",
+      approvalStatus: "Approved",
+      outcome: "accepted",
       submittedWithoutTxnNumber: false,
+      accepted: true,
     });
-    assert.deepEqual(interpretPostSubmitTxnReadback("  t002144847 "), {
+    assert.deepEqual(interpretPostSubmitTxnReadback("  t002144847 ", " Manually  Processed "), {
       transactionNumber: "T002144847",
+      approvalStatus: "Manually Processed",
+      outcome: "accepted",
       submittedWithoutTxnNumber: false,
+      accepted: true,
     });
+  });
+
+  test("a DENIED receipt with a valid T-number is NOT a success (live T002204014)", () => {
+    // The defect this pins: T002204014 is Denied on live UCPath and carries a
+    // perfectly well-formed transaction number. The number-only interpreter
+    // reported it as a successful receipt.
+    const denied = interpretPostSubmitTxnReadback("T002204014", "Denied");
+    assert.equal(denied.accepted, false);
+    assert.equal(denied.outcome, "refused");
+    // The number is still carried, for the audit trail — but not as success.
+    assert.equal(denied.transactionNumber, "T002204014");
+    assert.equal(denied.approvalStatus, "Denied");
+    assert.equal(denied.submittedWithoutTxnNumber, false);
+
+    for (const refused of ["Error", "Pushed Back", "Recycled", "Cancelled"]) {
+      const r = interpretPostSubmitTxnReadback("T002204014", refused);
+      assert.equal(r.outcome, "refused", `${refused} must be refused`);
+      assert.equal(r.accepted, false, `${refused} must not be accepted`);
+    }
+  });
+
+  test("a PENDING receipt is a distinct intermediate — not success, not failure", () => {
+    const pending = interpretPostSubmitTxnReadback("T002204015", "Pending");
+    assert.equal(pending.outcome, "pending");
+    assert.equal(pending.accepted, false);
+    assert.equal(pending.transactionNumber, "T002204015");
+    assert.equal(pending.submittedWithoutTxnNumber, false);
+  });
+
+  test("an unreadable / absent approval status fails loud as unknown, never as approved", () => {
+    for (const miss of ["", "   ", null, undefined, "???"]) {
+      const r = interpretPostSubmitTxnReadback("T002114817", miss);
+      assert.equal(r.outcome, "unknown", `status ${JSON.stringify(miss)} must be unknown`);
+      assert.equal(r.accepted, false);
+      // Distinguishable from "no number at all": the number IS known here.
+      assert.equal(r.submittedWithoutTxnNumber, false);
+      assert.equal(r.transactionNumber, "T002114817");
+    }
   });
 
   test("empty / null / undefined readback → submittedWithoutTxnNumber marker", () => {
     for (const miss of ["", "   ", null, undefined]) {
-      assert.deepEqual(interpretPostSubmitTxnReadback(miss), {
+      assert.deepEqual(interpretPostSubmitTxnReadback(miss, "Approved"), {
         transactionNumber: "",
+        approvalStatus: "Approved",
+        outcome: "unknown",
         submittedWithoutTxnNumber: true,
+        accepted: false,
       });
     }
   });
 
-  test("non-txn-shaped values are NOT stamped as numbers", () => {
+  test("non-txn-shaped values are NOT stamped as numbers, even with an Approved status", () => {
     // "NEW" is what the Smart HR Person ID column renders for an unprocessed
     // hire; "T12345" is too short to be a real transaction id.
     for (const bogus of ["NEW", "T12345", "002114817", "TXN"]) {
-      assert.deepEqual(interpretPostSubmitTxnReadback(bogus), {
-        transactionNumber: "",
-        submittedWithoutTxnNumber: true,
-      });
+      const r = interpretPostSubmitTxnReadback(bogus, "Approved");
+      assert.equal(r.transactionNumber, "");
+      assert.equal(r.submittedWithoutTxnNumber, true);
+      assert.equal(r.outcome, "unknown");
+      assert.equal(r.accepted, false);
     }
   });
 });

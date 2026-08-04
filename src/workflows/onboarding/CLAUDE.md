@@ -33,6 +33,16 @@ The fix lives in this workflow (not the kernel): the `transaction` step now prob
 
 `supportsRetry` flags / structured "not retryable" errors remain out of scope — idempotency belongs in the workflow, and this probe is it.
 
+## Post-submit receipt (2026-08-04 — success is proved by the PAIR)
+
+A `T…` transaction NUMBER is issued regardless of outcome — live `T002204014` is **Denied** and carries a well-formed number — so the number ALONE never proves a successful submit. The `transaction` step now reads the receipt PAIR `(transactionNumber, approvalStatus)` and classifies it with the pure `interpretPostSubmitTxnReadback` (`src/systems/ucpath/transaction.ts`, unit-pinned).
+
+- **A dedicated reader, NOT the duplicate guard.** The readback uses `readSubmittedHireReceipt` (`ss-smart-hr.ts`), not `findExistingHireTransaction`. The two are inverses: the pre-submit guard must fail OPEN and therefore only ever reports an in-flight/approved hire, so reusing it made a REFUSED hire indistinguishable from "the number could not be read" — the operator was told to look up a number for a transaction UCPath had rejected. The receipt reader reports whatever status the receipt carries, still effdt-gated to THIS run exactly (a begins-with name search can return a different same-named person's hire).
+- **Four outcomes, four tracker rows.** `accepted` (`Approved`/`Manually Processed`) → `status: "Done"`. `pending` (`Pending` — the normal state right after a submit, awaiting an approver) → `status: "Pending Approval"`, a legitimate intermediate that is neither success nor failure. `refused` (`Denied`/`Error`/`Pushed Back`/…) → `status: "Transaction Refused"` + `transactionRefused`, number stamped for the audit trail only. `unknown` (no readable number → `submittedWithoutTxnNumber`; or a number with a blank/unrecognized status → `transactionReceiptUnverified`) → `status: "Needs Review"`. Every non-`Done` branch logs and screenshots. `transactionApprovalStatus` is stamped on all of them.
+- **An unreadable status is NEVER "assume approved."** Only positively recognized statuses classify; everything else stays `unknown`.
+- **No branch throws.** The hire IS already submitted by the time the receipt is read, and failing the run would invite a retry whose fail-open duplicate probe could file a DUPLICATE hire. Loudness lives in the tracker row + screenshot, not an exception.
+- **The detail page's own identity must be asserted.** An UNKNOWN transaction id renders the ordinary SS Smart HR search form with NO error and NO banner, and the bare route URL is byte-identical after a reload — so neither "the page loaded" nor the URL is state evidence. `receiptMatchesRequestedTransaction` (pure, unit-pinned) requires the Transaction ID span to have RESOLVED and to equal the requested id.
+
 ## Gotchas
 
 - SSN/DOB are optional (international students) but wage requires `$` prefix

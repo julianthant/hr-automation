@@ -24,7 +24,10 @@ import {
 } from "../../systems/crm/index.js";
 import { TransactionError } from "../../systems/ucpath/types.js";
 import { searchPerson } from "../../systems/ucpath/navigate.js";
-import { findExistingHireTransaction } from "../../systems/ucpath/index.js";
+import {
+  findExistingHireTransaction,
+  readSubmittedHireReceipt,
+} from "../../systems/ucpath/index.js";
 import { interpretPostSubmitTxnReadback } from "../../systems/ucpath/transaction.js";
 import { loginToI9, createI9Employee, searchI9Employee } from "../../systems/i9/index.js";
 import { extractRawFields, extractRecordPageFields } from "./extract.js";
@@ -530,45 +533,115 @@ export const onboardingWorkflow = defineWorkflow({
           log.success("Transaction created successfully in UCPath");
           ctx.updateData({ status: "Done" });
 
-          // ── Post-submit transaction-number readback ──
+          // ── Post-submit RECEIPT readback ──
           // A new hire has no EID (the Smart HR list's Person ID column renders
           // "NEW" until the transaction processes), so clickSaveAndSubmit's
-          // EID-keyed readback is structurally unavailable here. Instead reuse
-          // the NAME-keyed SS Smart HR probe — the same HIGH-CONFIDENCE
-          // instrument as the pre-submit duplicate guard (HIR/REH + in-flight
-          // status + effdt matching this run EXACTLY), so it can only return
-          // THIS run's just-submitted transaction, never a guessed number.
+          // EID-keyed readback is structurally unavailable here. Read the
+          // receipt off the transaction's own SS Smart HR detail page instead
+          // (`readSubmittedHireReceipt`), effdt-gated to THIS run exactly.
+          //
+          // A `T…` NUMBER is issued regardless of outcome — a Denied
+          // transaction carries a perfectly well-formed one — so success is
+          // proved by the PAIR (transactionNumber, approvalStatus), never by
+          // the number alone (2026-08-04). The old readback reused the
+          // PRE-submit duplicate guard, which fails OPEN and only ever reports
+          // an in-flight hire: a REFUSED hire came back indistinguishable from
+          // "couldn't read the number", so the operator was told to look up a
+          // number for a transaction UCPath had rejected.
+          //
           // Poll a few attempts: the list can take a beat to show the new row.
-          let readbackTxnId = "";
-          for (let attempt = 1; attempt <= 3 && !readbackTxnId; attempt++) {
+          let receipt = { transactionId: "", approvalStatus: "", effectiveDate: "" };
+          for (let attempt = 1; attempt <= 3 && !receipt.transactionId; attempt++) {
             if (attempt > 1) await ucpathPage.waitForTimeout(5_000);
-            const readback = await findExistingHireTransaction(ucpathPage, {
+            receipt = await readSubmittedHireReceipt(ucpathPage, {
               firstName: data.firstName,
               lastName: data.lastName,
               effectiveDate: data.effectiveDate,
               templateId: TEMPLATE_ID,
             });
-            if (readback.found) readbackTxnId = readback.transactionId;
           }
-          const stamp = interpretPostSubmitTxnReadback(readbackTxnId);
+          const stamp = interpretPostSubmitTxnReadback(
+            receipt.transactionId,
+            receipt.approvalStatus,
+          );
+          const who = `${data.firstName} ${data.lastName} (effdt ${data.effectiveDate})`;
+          // NONE of these branches throws. The hire IS submitted by this point,
+          // and failing the run would invite a retry whose fail-open duplicate
+          // probe could re-submit and create a DUPLICATE HIRE. Loudness lives
+          // in the tracker row (status + explicit marker) and the screenshot.
           if (stamp.submittedWithoutTxnNumber) {
-            // Fail LOUD in the tracker data (explicit marker, mirroring
-            // separations' submittedWithoutTxnNumber) — but do NOT fail the
-            // run: the hire IS submitted, and failing here would invite a
-            // retry whose fail-open duplicate probe (the same instrument that
-            // just missed) could re-submit and create a DUPLICATE HIRE.
+            // No readable transaction number at all — mirrors separations'
+            // submittedWithoutTxnNumber marker.
             txnExit = "<submitted-without-txn-number>";
             log.warn(
-              `[Onboarding Txn] Smart HR hire submitted but the transaction number could not be `
-              + `read back from the SS Smart HR list for ${data.firstName} ${data.lastName} `
-              + `(effdt ${data.effectiveDate}) — marking submittedWithoutTxnNumber for manual lookup.`,
+              `[Onboarding Txn] Smart HR hire submitted but NO transaction number could be read `
+              + `back from the SS Smart HR list for ${who} — marking submittedWithoutTxnNumber for `
+              + `manual lookup. The submit outcome is UNCONFIRMED.`,
             );
             await ctx.screenshot({ kind: 'error', label: 'onboarding-transaction-submitted-missing-number' });
-            ctx.updateData({ transactionNumber: "", submittedWithoutTxnNumber: true });
+            ctx.updateData({
+              status: "Needs Review",
+              transactionNumber: "",
+              transactionApprovalStatus: "",
+              submittedWithoutTxnNumber: true,
+            });
+          } else if (stamp.outcome === "unknown") {
+            // A real number, but the approval status is blank/unrecognized.
+            // "The status could not be read" must never become "approved".
+            txnExit = `<receipt-unverified:${stamp.transactionNumber}>`;
+            log.error(
+              `[Onboarding Txn] Smart HR hire ${stamp.transactionNumber} for ${who} read back with an `
+              + `UNREADABLE approval status ('${stamp.approvalStatus || "<blank>"}') — refusing to treat `
+              + `it as a successful submit; a human must check the transaction in UCPath.`,
+            );
+            await ctx.screenshot({ kind: 'error', label: 'onboarding-transaction-receipt-unverified' });
+            ctx.updateData({
+              status: "Needs Review",
+              transactionNumber: stamp.transactionNumber,
+              transactionApprovalStatus: stamp.approvalStatus,
+              transactionReceiptUnverified: true,
+            });
+          } else if (stamp.outcome === "refused") {
+            // UCPath REFUSED the transaction. The number is stamped for the
+            // audit trail, but this is NOT a successful hire.
+            txnExit = `<refused:${stamp.transactionNumber}/${stamp.approvalStatus}>`;
+            log.error(
+              `[Onboarding Txn] UCPath REFUSED Smart HR hire ${stamp.transactionNumber} for ${who} `
+              + `— approval status '${stamp.approvalStatus}'. The hire did NOT go through; it is not `
+              + `resubmitted automatically because UCPath would refuse the same transaction again.`,
+            );
+            await ctx.screenshot({ kind: 'error', label: 'onboarding-transaction-refused' });
+            ctx.updateData({
+              status: "Transaction Refused",
+              transactionNumber: stamp.transactionNumber,
+              transactionApprovalStatus: stamp.approvalStatus,
+              transactionRefused: true,
+            });
+          } else if (stamp.outcome === "pending") {
+            // Submitted and awaiting an approver — the normal state right after
+            // a submit, and a legitimate intermediate. Distinct from "Done" so
+            // nobody reads an unapproved hire as a finished one.
+            txnExit = `${stamp.transactionNumber} (${stamp.approvalStatus})`;
+            log.success(
+              `[Onboarding Txn] Smart HR hire ${stamp.transactionNumber} submitted for ${who} — `
+              + `approval status '${stamp.approvalStatus}' (awaiting approval).`,
+            );
+            ctx.updateData({
+              status: "Pending Approval",
+              transactionNumber: stamp.transactionNumber,
+              transactionApprovalStatus: stamp.approvalStatus,
+            });
           } else {
-            txnExit = stamp.transactionNumber;
-            log.success(`[Onboarding Txn] Transaction number read back: ${stamp.transactionNumber}`);
-            ctx.updateData({ transactionNumber: stamp.transactionNumber });
+            txnExit = `${stamp.transactionNumber} (${stamp.approvalStatus})`;
+            log.success(
+              `[Onboarding Txn] Smart HR hire ${stamp.transactionNumber} ACCEPTED for ${who} — `
+              + `approval status '${stamp.approvalStatus}'.`,
+            );
+            ctx.updateData({
+              status: "Done",
+              transactionNumber: stamp.transactionNumber,
+              transactionApprovalStatus: stamp.approvalStatus,
+            });
           }
         } catch (error) {
           // `ctx.retry` rethrows the underlying error verbatim on exhaustion, so the

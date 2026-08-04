@@ -172,8 +172,8 @@ const ALLOWLIST: CountAllowlist = {
     reason: "`row.textContent ?? \"\"` — a DOM read that can legitimately be null (empty cell); immediately regex-cleaned/trimmed, not trusted as a specific value.",
   },
   "src/systems/ucpath/ss-smart-hr.ts": {
-    count: 2,
-    reason: "`opts.effectiveDate ?? \"<none>\"` / `opts.templateId ?? \"<none>\"` appear only inside a log message template.",
+    count: 4,
+    reason: "`opts.effectiveDate ?? \"<none>\"` / `opts.templateId ?? \"<none>\"` appear only inside a log message template — twice in findExistingHireTransaction and twice in readSubmittedHireReceipt's mirror of it.",
   },
   "src/systems/ucpath/transaction.ts": {
     count: 2,

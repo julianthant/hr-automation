@@ -1,4 +1,4 @@
-import type { Page, FrameLocator } from "playwright";
+import type { Page, FrameLocator, Locator } from "playwright";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import {
@@ -76,6 +76,21 @@ export interface HireTransactionStatus {
    * effdt column so this is the drilled value.
    */
   effectiveDate?: string;
+}
+
+/**
+ * The post-submit RECEIPT for a hire, read off the transaction's own SS Smart
+ * HR detail page: the PAIR that proves what UCPath did with the submit.
+ * Every field is `""` when it could not be proved — see
+ * {@link readSubmittedHireReceipt}, which never guesses.
+ */
+export interface SubmittedHireReceipt {
+  /** Transaction number as read from the detail page ("" when unproved). */
+  transactionId: string;
+  /** Approval status as read from the detail page ("" when unread). */
+  approvalStatus: string;
+  /** Effective date read from the detail page ("" when unread). */
+  effectiveDate: string;
 }
 
 /**
@@ -551,6 +566,226 @@ export async function findExistingHireTransaction(
   } catch (e) {
     log.warn(
       `[SS Smart HR] Hire existence probe threw (treating as no existing hire — will proceed with submit): ${errorMessage(e)}`,
+    );
+    return none;
+  }
+}
+
+/**
+ * PURE: does a transaction-detail page's read-back Transaction ID prove we are
+ * looking at the transaction we asked for?
+ *
+ * The one thing that makes a detail-page read trustworthy (live-verified
+ * 2026-08-04): an UNKNOWN transaction id renders the ordinary SS Smart HR
+ * search form with NO error and NO banner, and the bare route URL is
+ * byte-identical after a reload — so "the page loaded" and "the URL says T…"
+ * both prove nothing. Only a RESOLVED Transaction ID field whose text EQUALS
+ * the requested id does. A blank read (the search form: the field is not on the
+ * page at all) is therefore `false`, never a pass. Case- and
+ * whitespace-insensitive. Unit-pinned.
+ */
+export function receiptMatchesRequestedTransaction(
+  readTransactionId: string | null | undefined,
+  requestedTransactionId: string | null | undefined,
+): boolean {
+  const read = (readTransactionId ?? "").replace(/\s+/g, "").trim().toUpperCase();
+  const wanted = (requestedTransactionId ?? "").replace(/\s+/g, "").trim().toUpperCase();
+  if (!read || !wanted) return false;
+  return read === wanted;
+}
+
+/**
+ * Read ONE display-only span off the SS Smart HR transaction detail page.
+ *
+ * Both receipt spans were live-verified as EXACTLY ONE node each (2026-08-04,
+ * across 3 templates × 3 statuses: HIR/Approved, REH/Denied, XFR/Pending), so a
+ * count other than 1 means the page is not the detail page we think it is — it
+ * returns `""` (a distinguishable "unread"), never a guessed value. Every empty
+ * return is logged; the caller turns "" into a loud tracker marker and must
+ * never read it as approval.
+ */
+async function readReceiptSpan(locator: Locator, label: string): Promise<string> {
+  let count: number;
+  try {
+    count = await locator.count();
+  } catch (e) {
+    log.warn(`[SS Smart HR] Could not count the ${label} on the transaction detail page: ${errorMessage(e)}`);
+    return "";
+  }
+  if (count !== 1) {
+    log.warn(
+      `[SS Smart HR] Expected exactly 1 ${label} node on the transaction detail page, found ${count} — ` +
+      `treating the field as UNREAD`,
+    );
+    return "";
+  }
+  try {
+    const text = await locator.innerText({ timeout: 5_000 });
+    return text.replace(/\s+/g, " ").trim();
+  } catch (e) {
+    log.warn(`[SS Smart HR] Could not read the ${label} on the transaction detail page: ${errorMessage(e)}`);
+    return "";
+  }
+}
+
+/**
+ * Read the receipt PAIR (`transactionId`, `approvalStatus`) off the SS Smart HR
+ * transaction DETAIL page the caller has already drilled into, and prove it is
+ * the transaction we asked for.
+ *
+ * **Why the id must be re-asserted (live-verified 2026-08-04).** An UNKNOWN
+ * transaction id renders the ordinary search form with NO error and NO banner,
+ * and the bare route URL is byte-identical after a reload — so neither "the
+ * page loaded" nor the URL is state evidence. The only proof is: the Transaction
+ * ID span RESOLVED **and** its text EQUALS the requested id. Anything else
+ * returns empty, which the caller must treat as "no receipt".
+ *
+ * **Dual-root probe.** The detail route renders at TOP level (`getContentFrame()`
+ * resolves to nothing there) while the results grid it was reached from is
+ * served inside `#main_target_win0`. Both roots are probed for the SAME unique
+ * `RECORD_FIELD` id — a scope probe, not a substituted element — and neither
+ * resolving is a loud failure.
+ */
+async function readSsSmartHrReceiptFields(
+  page: Page,
+  frame: FrameLocator,
+  requestedTransactionId: string,
+): Promise<{ transactionId: string; approvalStatus: string }> {
+  const none = { transactionId: "", approvalStatus: "" };
+  const wanted = requestedTransactionId.trim().toUpperCase();
+  const roots: Array<Page | FrameLocator> = [page, frame];
+  for (const root of roots) {
+    const readId = await readReceiptSpan(
+      ssSmartHRTransactions.transactionDetailTxnId(root),
+      "Transaction ID",
+    );
+    if (!readId) continue;
+    if (!receiptMatchesRequestedTransaction(readId, wanted)) {
+      log.warn(
+        `[SS Smart HR] The transaction detail page reports '${readId}' but ${wanted} was requested — ` +
+        `refusing to read a receipt off a DIFFERENT transaction`,
+      );
+      return none;
+    }
+    const approvalStatus = await readReceiptSpan(
+      ssSmartHRTransactions.transactionDetailApprovalStatus(root),
+      "Approval Status",
+    );
+    if (!approvalStatus) {
+      log.warn(
+        `[SS Smart HR] Transaction ${wanted}'s approval status could not be read — ` +
+        `an unread status is NOT an approval`,
+      );
+      return none;
+    }
+    return { transactionId: readId.toUpperCase(), approvalStatus };
+  }
+  log.warn(
+    `[SS Smart HR] Transaction ${wanted}: the detail page's Transaction ID field did not resolve at ` +
+    `page OR content-frame scope — an unknown id renders the ordinary search form with no error, ` +
+    `so this is NOT a receipt`,
+  );
+  return none;
+}
+
+/**
+ * Post-submit RECEIPT read for a Smart HR hire: find the hire this run just
+ * submitted on the SS Smart HR list, drill into it, and return the PAIR
+ * `(transactionId, approvalStatus)` read off its own detail page.
+ *
+ * **Distinct from — and the inverse of — {@link findExistingHireTransaction}.**
+ * That is the PRE-submit duplicate guard, which must fail OPEN (any uncertainty
+ * → submit) and therefore only ever reports an in-flight/approved hire; it
+ * deliberately cannot see a Denied one. Using it as the post-submit readback
+ * made a REFUSED hire indistinguishable from "the number could not be read",
+ * so the operator was told to go look up a number for a transaction UCPath had
+ * actually rejected. This reader reports whatever status the receipt carries —
+ * `Approved`, `Pending`, `Denied` alike — and the pure
+ * `interpretPostSubmitTxnReadback` decides what it proves.
+ *
+ * **Still effdt-gated to THIS run.** A NAME search is a PeopleSoft begins-with
+ * match, so a different same-named person's hire row can come back; only a hire
+ * whose effective date matches this run's EXACTLY ({@link hireEffectiveDateMatches})
+ * is this run's receipt. An unreadable effdt fails the gate.
+ *
+ * **Never throws, never guesses.** Any failure (navigation, parse, no hire row,
+ * effdt mismatch, unresolved detail fields) returns all-empty, which the caller
+ * turns into a loud "submitted, receipt unproven" tracker marker. It must NOT
+ * throw: the hire IS already submitted at this point, and failing the run would
+ * invite a retry that could file a DUPLICATE hire.
+ */
+export async function readSubmittedHireReceipt(
+  page: Page,
+  opts: { firstName: string; lastName: string; effectiveDate?: string; templateId?: string },
+): Promise<SubmittedHireReceipt> {
+  const none: SubmittedHireReceipt = { transactionId: "", approvalStatus: "", effectiveDate: "" };
+  const searchName = buildHireSearchName(opts.firstName, opts.lastName);
+  try {
+    if (!searchName) {
+      log.warn("[SS Smart HR] Empty name — cannot read back the submitted hire's receipt");
+      return none;
+    }
+    log.step(
+      `[SS Smart HR] Reading back the submitted hire's receipt: name='${searchName}' ` +
+      `effDate='${opts.effectiveDate ?? "<none>"}' template='${opts.templateId ?? "<none>"}'`,
+    );
+    await navigateToSsSmartHrTransactions(page);
+    const frame = getContentFrame(page);
+
+    await safeFill(ssSmartHRTransactions.nameInput(frame), searchName, {
+      timeout: 10_000,
+      label: "ss smart hr name input (hire receipt readback)",
+    });
+    await safeClick(ssSmartHRTransactions.searchButton(frame), {
+      timeout: 10_000,
+      label: "ss smart hr search button (hire receipt readback)",
+    });
+    await page.waitForTimeout(3_000);
+    await waitForPeopleSoftProcessing(frame, 15_000);
+    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+
+    const rows = await scanSsSmartHrResults(frame);
+    log.debug(
+      `[SS Smart HR] Hire receipt readback scanned ${rows.length} row(s): ` +
+      (rows.map((r) => `${r.transactionId}=${r.action}/${r.approvalStatus}`).join(", ") || "<none>"),
+    );
+    const hire = pickHireRow(rows);
+    if (!hire) {
+      log.warn(
+        `[SS Smart HR] No hire (HIR/REH) row for name='${searchName}' — the submitted hire's ` +
+        `receipt could not be read back`,
+      );
+      return none;
+    }
+
+    // Drill in — this leaves the browser on the transaction DETAIL page, which
+    // is where the receipt pair lives.
+    const effectiveDate = await readTransactionEffdt(page, frame, hire.transactionId, "submitted hire");
+    if (opts.effectiveDate && !hireEffectiveDateMatches(effectiveDate, opts.effectiveDate)) {
+      log.warn(
+        `[SS Smart HR] Hire row ${hire.transactionId} has effdt '${effectiveDate || "<unreadable>"}', which ` +
+        `does not exactly match this run's effective date '${opts.effectiveDate}' — it is a DIFFERENT hire ` +
+        `event (possibly a different same-named person), so it is NOT this run's receipt`,
+      );
+      return none;
+    }
+
+    const fields = await readSsSmartHrReceiptFields(page, frame, hire.transactionId);
+    if (!fields.transactionId || !fields.approvalStatus) return none;
+    log.step(
+      `[SS Smart HR] Hire receipt for name='${searchName}': txn='${fields.transactionId}' ` +
+      `status='${fields.approvalStatus}' effdt='${effectiveDate}'`,
+    );
+    return {
+      transactionId: fields.transactionId,
+      approvalStatus: fields.approvalStatus,
+      effectiveDate,
+    };
+  } catch (e) {
+    log.warn(
+      `[SS Smart HR] Hire receipt readback threw — the submit is NOT confirmed and the receipt stays ` +
+      `unproven (the run is deliberately not failed here: the hire is already submitted and a retry ` +
+      `could file a duplicate): ${errorMessage(e)}`,
     );
     return none;
   }

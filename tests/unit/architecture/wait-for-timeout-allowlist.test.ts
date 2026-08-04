@@ -119,8 +119,8 @@ const ALLOWLIST: CountAllowlist = {
     reason: "PeopleSoft Personal Data page settle waits across its dialogs/rows.",
   },
   "src/systems/ucpath/ss-smart-hr.ts": {
-    count: 5,
-    reason: "Smart HR transaction submit settle waits.",
+    count: 6,
+    reason: "Smart HR transaction submit settle waits (the 6th is readSubmittedHireReceipt's post-search settle, mirroring findExistingHireTransaction's).",
   },
   "src/systems/ucpath/transaction.ts": {
     count: 18,

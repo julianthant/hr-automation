@@ -1298,23 +1298,130 @@ export function rowMatchesTerminationEid(
 }
 
 /**
- * Pure decision for stamping a post-submit Smart HR transaction-number
- * readback into tracker data. A readback only counts when it looks like a
- * real PeopleSoft transaction id (`T` + ≥6 digits, e.g. `T002114817`) —
- * anything else (empty, `"NEW"`, whitespace, a stray grid value) maps to the
- * explicit `submittedWithoutTxnNumber` marker instead of being stamped as if
- * it were a number. This mirrors separations' pattern: "submit succeeded but
- * no txn# read" is a DISTINGUISHABLE state, never silently conflated with a
- * successful readback (fail-loud rule). Unit-pinned.
+ * SS Smart HR approval statuses that PROVE UCPath accepted the submitted
+ * transaction. The Approval Status combobox exposes exactly six values
+ * (`ssSmartHRTransactions.approvalStatusSelect`, verified 2026-04-24):
+ * Approved / Denied / Error / Manually Processed / Pending / Pushed Back.
+ */
+export const TXN_RECEIPT_ACCEPTED_STATUSES = ["Approved", "Manually Processed"] as const;
+
+/**
+ * The one LEGITIMATE INTERMEDIATE status. A freshly submitted Smart HR
+ * transaction sits in `Pending` until an approver acts — the submit itself
+ * succeeded, but the transaction has NOT been accepted yet. Modeled as its own
+ * outcome so callers neither collapse it into failure nor report it as a
+ * finished, accepted transaction.
+ */
+export const TXN_RECEIPT_PENDING_STATUSES = ["Pending"] as const;
+
+/**
+ * Statuses that mean UCPath REFUSED the transaction — it did not go through and
+ * a human must decide what happens next. `Recycled`/`Cancelled` are not in the
+ * combobox but are recognized by the SS Smart HR grid parser
+ * (`parseSsSmartHrRows`), so they are classified here rather than left unknown.
+ */
+export const TXN_RECEIPT_REFUSED_STATUSES = [
+  "Denied",
+  "Error",
+  "Pushed Back",
+  "Recycled",
+  "Cancelled",
+  "Canceled",
+] as const;
+
+/**
+ * What a post-submit receipt PAIR proves about the submitted transaction.
+ *
+ * - `accepted` — UCPath accepted it (`Approved` / `Manually Processed`).
+ * - `pending`  — submitted and awaiting approval (`Pending`). A real, expected
+ *                intermediate; the caller must surface it distinctly, NOT as a
+ *                finished success and NOT as a failure.
+ * - `refused`  — UCPath refused it (`Denied` / `Error` / `Pushed Back` / …).
+ * - `unknown`  — the pair does not prove anything: no readable transaction
+ *                number, or a number with a blank/unrecognized status. Never
+ *                degrade this into "assume approved" (fail-loud rule).
+ */
+export type PostSubmitTxnOutcome = "accepted" | "pending" | "refused" | "unknown";
+
+/** Interpreted post-submit receipt (see {@link interpretPostSubmitTxnReadback}). */
+export interface PostSubmitTxnReadback {
+  /** The readback transaction number, normalized — `""` when unreadable. */
+  transactionNumber: string;
+  /** The readback approval status, whitespace-collapsed — `""` when unread. */
+  approvalStatus: string;
+  /** What the PAIR proves. */
+  outcome: PostSubmitTxnOutcome;
+  /** True when no real transaction number could be read back at all. */
+  submittedWithoutTxnNumber: boolean;
+  /**
+   * True ONLY for `accepted`. The single boolean a caller may treat as "this
+   * transaction is a successful receipt".
+   */
+  accepted: boolean;
+}
+
+/**
+ * Pure: classify an SS Smart HR approval status. Case- and
+ * whitespace-insensitive. Anything not POSITIVELY recognized — blank, `Saved`,
+ * `Needs Review`, a truncated scrape — is `unknown`, never optimistically
+ * accepted. Unit-pinned.
+ */
+export function classifyTxnApprovalStatus(
+  approvalStatus: string | null | undefined,
+): PostSubmitTxnOutcome {
+  const norm = (approvalStatus ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (!norm) return "unknown";
+  const has = (set: readonly string[]): boolean =>
+    set.some((s) => s.toLowerCase() === norm);
+  if (has(TXN_RECEIPT_ACCEPTED_STATUSES)) return "accepted";
+  if (has(TXN_RECEIPT_PENDING_STATUSES)) return "pending";
+  if (has(TXN_RECEIPT_REFUSED_STATUSES)) return "refused";
+  return "unknown";
+}
+
+/**
+ * Pure decision for stamping a post-submit Smart HR transaction readback into
+ * tracker data.
+ *
+ * **Success is proved by the PAIR `(transactionNumber, approvalStatus)`, never
+ * by the number alone.** UCPath issues a `T…` number for a transaction
+ * REGARDLESS of its outcome — live `T002204014` is a well-formed number on a
+ * **Denied** transaction — so the old number-only shape stamped a refused
+ * UCPath transaction as a successful receipt (fixed 2026-08-04; the number-only
+ * signature is gone rather than deprecated so no caller can re-enter the bug).
+ *
+ * The number is still validated first (`T` + ≥6 digits, e.g. `T002114817`);
+ * anything else — empty, `"NEW"` (what the Person ID column renders for an
+ * unprocessed hire), whitespace, a stray grid value — maps to the explicit
+ * `submittedWithoutTxnNumber` marker instead of being stamped as if it were a
+ * number, mirroring separations' pattern. A valid number with an
+ * unreadable/unrecognized status is a DIFFERENT distinguishable state
+ * (`outcome: "unknown"`, `submittedWithoutTxnNumber: false`) — the caller must
+ * surface it, never assume approval. Unit-pinned.
  */
 export function interpretPostSubmitTxnReadback(
   txnNumber: string | null | undefined,
-): { transactionNumber: string; submittedWithoutTxnNumber: boolean } {
-  const normalized = (txnNumber ?? "").trim().toUpperCase();
-  if (/^T\d{6,}$/.test(normalized)) {
-    return { transactionNumber: normalized, submittedWithoutTxnNumber: false };
+  approvalStatus: string | null | undefined,
+): PostSubmitTxnReadback {
+  const normalizedNumber = (txnNumber ?? "").trim().toUpperCase();
+  const normalizedStatus = (approvalStatus ?? "").replace(/\s+/g, " ").trim();
+  if (!/^T\d{6,}$/.test(normalizedNumber)) {
+    return {
+      transactionNumber: "",
+      approvalStatus: normalizedStatus,
+      outcome: "unknown",
+      submittedWithoutTxnNumber: true,
+      accepted: false,
+    };
   }
-  return { transactionNumber: "", submittedWithoutTxnNumber: true };
+  const outcome = classifyTxnApprovalStatus(normalizedStatus);
+  return {
+    transactionNumber: normalizedNumber,
+    approvalStatus: normalizedStatus,
+    outcome,
+    submittedWithoutTxnNumber: false,
+    accepted: outcome === "accepted",
+  };
 }
 
 export function extractSmartHrTransactionNumber(text: string): string | null {
