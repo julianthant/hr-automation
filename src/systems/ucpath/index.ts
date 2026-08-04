@@ -37,12 +37,19 @@ export {
   navigateToSsSmartHrTransactions,
   findTerminationTransactionStatus,
   findExistingHireTransaction,
+  readSubmittedHireReceipt,
+  receiptMatchesRequestedTransaction,
   pickTerminationRow,
   pickHireRow,
   buildHireSearchName,
   HIRE_ACTION_CODES,
 } from "./ss-smart-hr.js";
-export type { SsSmartHrRow, TerminationTransactionStatus, HireTransactionStatus } from "./ss-smart-hr.js";
+export type {
+  SsSmartHrRow,
+  TerminationTransactionStatus,
+  HireTransactionStatus,
+  SubmittedHireReceipt,
+} from "./ss-smart-hr.js";
 export {
   navigateToWorkforceJobSummary,
   searchJobSummary,

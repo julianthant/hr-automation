@@ -11,6 +11,7 @@ import {
   hireEffectiveDateMatches,
   decideHireDuplicateSkip,
   HIRE_IN_FLIGHT_APPROVAL_STATUSES,
+  receiptMatchesRequestedTransaction,
 } from "../../../../src/systems/ucpath/ss-smart-hr.js";
 import type { SsSmartHrRow } from "../../../../src/systems/ucpath/ss-smart-hr.js";
 
@@ -380,5 +381,45 @@ describe("decideHireDuplicateSkip", () => {
     assert.match(decideHireDuplicateSkip(hire("HIR", "Denied"), "2026-07-01", RUN).reason, /in-flight|resubmit|status/i);
     assert.match(decideHireDuplicateSkip(hire("HIR", "Pending"), "2026-06-24", RUN).reason, /effdt|effective/i);
     assert.match(decideHireDuplicateSkip(hire("HIR", "Pending"), "2026-07-01", RUN).reason, /2026-07-01|match/i);
+  });
+});
+
+/**
+ * The receipt-identity assertion behind the post-submit readback
+ * (`readSubmittedHireReceipt` → `readSsSmartHrReceiptFields`).
+ *
+ * Live fact it encodes (verified 2026-08-04): an UNKNOWN transaction id on
+ * `UC_EXTENSIONS.UC_SS_TBH.GBL` renders the ordinary SS Smart HR search form
+ * with NO error and NO banner, and the bare route URL is byte-identical after a
+ * reload. So neither "the page loaded" nor the URL is state evidence — the ONLY
+ * proof that a detail page is the transaction we asked for is that the
+ * Transaction ID span RESOLVED and its text EQUALS the requested id.
+ */
+describe("receiptMatchesRequestedTransaction", () => {
+  it("accepts an exact match, case- and whitespace-insensitively", () => {
+    assert.equal(receiptMatchesRequestedTransaction("T002204014", "T002204014"), true);
+    assert.equal(receiptMatchesRequestedTransaction(" t002204014 ", "T002204014"), true);
+    assert.equal(receiptMatchesRequestedTransaction("T002 204 014", "T002204014"), true);
+  });
+
+  it("an unknown id (search-form fallback: the field never resolves) is NOT a receipt", () => {
+    // The search form carries no Transaction ID display span at all, so the
+    // read comes back blank — that must never pass as a receipt.
+    for (const blank of ["", "   ", null, undefined]) {
+      assert.equal(receiptMatchesRequestedTransaction(blank, "T002204014"), false);
+    }
+  });
+
+  it("a DIFFERENT transaction's detail page is NOT this run's receipt", () => {
+    assert.equal(receiptMatchesRequestedTransaction("T002114817", "T002204014"), false);
+    // Prefix/suffix overlap must not pass either.
+    assert.equal(receiptMatchesRequestedTransaction("T00220401", "T002204014"), false);
+    assert.equal(receiptMatchesRequestedTransaction("T0022040140", "T002204014"), false);
+  });
+
+  it("a blank requested id can never be satisfied", () => {
+    for (const blank of ["", "   ", null, undefined]) {
+      assert.equal(receiptMatchesRequestedTransaction("T002204014", blank), false);
+    }
   });
 });

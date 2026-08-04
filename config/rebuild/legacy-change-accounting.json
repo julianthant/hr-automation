@@ -87,6 +87,139 @@
       "preservation": "preserved"
     },
     {
+      "path": "src/systems/ucpath/CLAUDE.md",
+      "changeKind": "modified",
+      "beforeSha256": "c562816dd0f5b85109c6c6fd7b56703d32703f10c12a5ad5f5a3c834f84d8cff",
+      "afterSha256": "56f89d48a7170006e49e7619eced71d5cd1f3f467f571c0719f33da5d5efcddc",
+      "capabilityIds": [
+        "legacy-workflow-onboarding",
+        "legacy-workflow-separations"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "src/systems/ucpath/LESSONS.md",
+      "changeKind": "modified",
+      "beforeSha256": "010e7a25f50d7e63b24355bb254ded76690c9278a6885285ef3a52101fc5f9a1",
+      "afterSha256": "fb63f9f9524fb4c7cf279cef640f7b3a21f5768ad01c6453190f8a6260f208ab",
+      "capabilityIds": [
+        "legacy-workflow-onboarding",
+        "legacy-workflow-separations"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "src/systems/ucpath/SELECTORS.md",
+      "changeKind": "modified",
+      "beforeSha256": "57fb1caeac412725c3c5defb0430dd9d5d910db97d077328cf2f37368d6fb1f4",
+      "afterSha256": "28b13880b7b4ddfe118136b0b1f12e48dfcde6656ae287ad210e49d9e63cfb8e",
+      "capabilityIds": [
+        "legacy-workflow-onboarding",
+        "legacy-workflow-separations"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "src/systems/ucpath/index.ts",
+      "changeKind": "modified",
+      "beforeSha256": "799e4d5bdf7bbdc6767abd13469b87d1183a9fb19f1fe00dc8adc07f8df36d2f",
+      "afterSha256": "ff2d14d42606dc3c0f2848d65462690bbc6955247c3262854538b19523c717d7",
+      "capabilityIds": [
+        "legacy-workflow-onboarding",
+        "legacy-workflow-separations"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "src/systems/ucpath/selectors.ts",
+      "changeKind": "modified",
+      "beforeSha256": "4f6992525998eb6e3db8d2b3a4b67bb551aa0565e6a03710efd92a095d958aa5",
+      "afterSha256": "4791154cf631bd01b252b80555e56f9b2cba02a8e364119769d3c175a2677267",
+      "capabilityIds": [
+        "legacy-workflow-onboarding",
+        "legacy-workflow-separations"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "src/systems/ucpath/ss-smart-hr.ts",
+      "changeKind": "modified",
+      "beforeSha256": "6524118fb49e244442824d134484709530bf2a80a5be73bf183fd7d5cac847f2",
+      "afterSha256": "059dc4e3ac10a82317492618ea2c8d8baa8414f69a3376c8b6bafdddec904f32",
+      "capabilityIds": [
+        "legacy-workflow-onboarding",
+        "legacy-workflow-separations"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "src/systems/ucpath/transaction.ts",
+      "changeKind": "modified",
+      "beforeSha256": "1edbfd04c254d3a9a780431899ec30569b746536b45e53c1e1194ad84237bf94",
+      "afterSha256": "9cb55871baed0f7d22c42373f650920a4bdd8adfd7612bbaa07e2c4ae8adc155",
+      "capabilityIds": [
+        "legacy-workflow-onboarding",
+        "legacy-workflow-separations"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "src/workflows/onboarding/CLAUDE.md",
+      "changeKind": "modified",
+      "beforeSha256": "f7c38194ca9ef657840af3a87e56bc5dbae307f5e471d0605e729ff0e01872c2",
+      "afterSha256": "5da277c642b2ac09474ebe709808348cc200171465392224d66c6c8e013708e4",
+      "capabilityIds": [
+        "legacy-workflow-onboarding"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "src/workflows/onboarding/workflow.ts",
+      "changeKind": "modified",
+      "beforeSha256": "3fdbf1d1ed90700c5ad7aeaa93024083e6a319ecf778bdaf0874e8648c98b8a8",
+      "afterSha256": "eca9fa65c4371731444aea7a1d7952bd276baba9b5ee531f4efe510b7a467904",
+      "capabilityIds": [
+        "legacy-workflow-onboarding"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
       "path": "src/workflows/separations/CLAUDE.md",
       "changeKind": "modified",
       "beforeSha256": "705842e6a4800e8775cd1b002207bfef73af656070dc1751bf539b1bee018893",
@@ -300,7 +433,7 @@
       "path": "tests/unit/architecture/nullish-literal-data-fallback.test.ts",
       "changeKind": "modified",
       "beforeSha256": "60ca6b0b8644e7367301482a7c9a1cec47f4210d035d262e5b2f219d4805a417",
-      "afterSha256": "e47e31669abcada1e829e79f8bea3b6710c6f1147f49c47e395473bffa3ba203",
+      "afterSha256": "d5e81185d0e7132b6f36233132738d87009335bb4884af8433aac162b76c9c57",
       "capabilityIds": [
         "legacy-dev-tool-architecture-guards"
       ],
@@ -342,7 +475,7 @@
       "path": "tests/unit/architecture/wait-for-timeout-allowlist.test.ts",
       "changeKind": "modified",
       "beforeSha256": "d0f3949d6e35ef2889bde2db6b68bc842ce33fce34b2a44aacd9353682e83b0f",
-      "afterSha256": "0a110e5fd6ca71bbabdd6f6b26eb027a8c6e2e1e55eb32c40547987852fbd696",
+      "afterSha256": "2bd3130e8496ae5f40edbac28cc8626edd326fd383c8c90671042a1ac0e0677f",
       "capabilityIds": [
         "legacy-dev-tool-architecture-guards"
       ],
@@ -359,6 +492,36 @@
       "afterSha256": "2b37d3813a5ce07f3746fe14e10d51bca018d4b1c3f33be22f6119ff1a4ee41a",
       "capabilityIds": [
         "legacy-cli-daemon"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/systems/ucpath/ss-smart-hr.test.ts",
+      "changeKind": "modified",
+      "beforeSha256": "57506848064063459502da280dc9cb31d8a5dc6c5e9f44bc42bbf5be8b098f43",
+      "afterSha256": "d125f66d150d0febad496c36fb734211b1e051910a1e62e35d88932cbbaaa00a",
+      "capabilityIds": [
+        "legacy-workflow-onboarding",
+        "legacy-workflow-separations"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/systems/ucpath/transaction.test.ts",
+      "changeKind": "modified",
+      "beforeSha256": "425eac4dcc2c7ee649533bee1e83fa3670dd51f46a30998600438b5f037dfcdb",
+      "afterSha256": "a12dae87acdb5c1c703e7b0de4bbd9b0045d53e266976082fbdec19d4453fa10",
+      "capabilityIds": [
+        "legacy-workflow-onboarding",
+        "legacy-workflow-separations"
       ],
       "rebuildRecheckIds": [
         "npm:test",

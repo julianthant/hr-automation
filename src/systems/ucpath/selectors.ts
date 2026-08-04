@@ -900,28 +900,45 @@ export const hrTasks = {
 // LESSONS.md "Person Org Summary single-result redirect"). verified 2026-04-24
 
 export const personOrgSummary = {
+  // Each search input's accessible name is now "<Label> begins with": PeopleSoft
+  // points `aria-labelledby` at the label AND the adjacent operator <select>
+  // (`<field>$op`), so the operator text is folded into the accessible name.
+  // That silently broke the old `exact: true` arms ("Empl ID" / "Name" match
+  // nothing) while the non-exact "Last Name" arm kept working by substring.
+  // Anchored regexes are used instead of a plain substring because a bare
+  // "Name" substring also matches "Last Name begins with" — two hits, strict
+  // mode violation. `^<Label>\b` pins to the start so each matches exactly one
+  // box, and stays correct if the operator changes ("contains", "=", …).
+  // The `.or()` arms are the record.field element ids, live-verified alongside
+  // the regexes on the same probe, so neither arm is an unverified guess.
+
   /**
-   * Empl ID textbox. Exact: true avoids matching label-shaped probes
-   * elsewhere on the form. verified 2026-04-24
+   * Empl ID textbox. verified 2026-08-04 (live probe — accessible name is
+   * "Empl ID begins with"; id `UC_ORG_SUM_VW_EMPLID`)
    * @tags empl, id, employee, textbox, person-org-summary
    */
   emplIdInput: (f: FrameLocator): Locator =>
-    f.getByRole("textbox", { name: "Empl ID", exact: true }),
+    f.getByRole("textbox", { name: /^Empl ID\b/ }).or(f.locator("#UC_ORG_SUM_VW_EMPLID")).first(),
 
   /**
-   * Last Name textbox. verified 2026-04-24
+   * Last Name textbox. verified 2026-08-04 (live probe — accessible name is
+   * "Last Name begins with"; id `UC_ORG_SUM_VW_PARTNER_LAST_NAME`)
    * @tags last-name, name, textbox, person-org-summary
    */
   lastNameInput: (f: FrameLocator): Locator =>
-    f.getByRole("textbox", { name: "Last Name" }),
+    f.getByRole("textbox", { name: /^Last Name\b/ })
+      .or(f.locator("#UC_ORG_SUM_VW_PARTNER_LAST_NAME"))
+      .first(),
 
   /**
-   * Name (first/middle) textbox. Exact: true is required because "Last Name"
-   * also contains "Name". verified 2026-04-24
+   * Name (first/middle) textbox. verified 2026-08-04 (live probe — accessible
+   * name is "Name begins with"; id `UC_ORG_SUM_VW_NAME_DISPLAY`)
    * @tags name, first-name, middle-name, textbox, person-org-summary
    */
   nameInput: (f: FrameLocator): Locator =>
-    f.getByRole("textbox", { name: "Name", exact: true }),
+    f.getByRole("textbox", { name: /^Name\b/ })
+      .or(f.locator("#UC_ORG_SUM_VW_NAME_DISPLAY"))
+      .first(),
 
   /**
    * Case Sensitive checkbox — toggles case-aware name matching. verified 2026-04-24
@@ -1383,6 +1400,48 @@ export const ssSmartHRTransactions = {
       .first()
       .or(f.getByRole("link", { name: transactionId, exact: true }))
       .first(),
+
+  /**
+   * Transaction DETAIL page — the receipt's Transaction ID display span
+   * (`#UC_SS_TRANSACT_UC_TRANSACT_ID`). Half of the post-submit receipt PAIR;
+   * read together with {@link ssSmartHRTransactions.transactionDetailApprovalStatus}.
+   * verified 2026-08-04
+   *
+   * Anchored on the PeopleSoft `RECORD_FIELD` id because these are BARE
+   * `<span>`s with no label association — `getByLabel`/`getByRole` have nothing
+   * to bind to here. That is specific to this PeopleSoft route: do NOT
+   * generalize it to Kuali, where role+label remains the rule.
+   *
+   * Root is `Page | FrameLocator`: the detail route
+   * (`UC_EXTENSIONS.UC_SS_TBH.GBL`, addressable as
+   * `?Action=U&UC_TRANSACT_ID=T…`) renders at TOP level, where
+   * `getContentFrame()` resolves to nothing — while the results grid the
+   * drill-in starts from is served inside `#main_target_win0`. Callers probe
+   * both roots for this same unique id and fail loud when neither resolves.
+   *
+   * An UNKNOWN transaction id renders the ordinary search form with NO error
+   * and NO banner, and the URL is byte-identical after a reload — so "the page
+   * loaded" and "the URL says T…" both prove nothing. A caller MUST assert this
+   * span resolved AND that its text equals the requested id.
+   * @tags transaction, id, receipt, detail, span, record-field, ss-smart-hr
+   */
+  transactionDetailTxnId: (root: Page | FrameLocator): Locator =>
+    root.locator("#UC_SS_TRANSACT_UC_TRANSACT_ID"),
+
+  /**
+   * Transaction DETAIL page — the receipt's Approval Status display span
+   * (`#UC_SS_TRANSACT_APPR_STATUS`), e.g. `Approved` / `Denied` / `Pending`.
+   * The other half of the post-submit receipt PAIR. verified 2026-08-04
+   *
+   * A `T…` transaction NUMBER is issued regardless of outcome (live
+   * `T002204014` is **Denied** and carries a well-formed number), so the number
+   * ALONE never proves a successful submit — this status is what does. Same
+   * bare-span / `RECORD_FIELD` anchoring and same dual-root rule as
+   * {@link ssSmartHRTransactions.transactionDetailTxnId}.
+   * @tags approval, status, receipt, detail, span, record-field, ss-smart-hr
+   */
+  transactionDetailApprovalStatus: (root: Page | FrameLocator): Locator =>
+    root.locator("#UC_SS_TRANSACT_APPR_STATUS"),
 };
 
 // ─── Smart HR Transaction Status (filter + results dashboard) ─────────────
