@@ -319,7 +319,7 @@
       "path": "src/systems/ucpath/LESSONS.md",
       "changeKind": "modified",
       "beforeSha256": "010e7a25f50d7e63b24355bb254ded76690c9278a6885285ef3a52101fc5f9a1",
-      "afterSha256": "6ffae0874d9cc3454e63c751631aebfa41f3107cfb5de12db152bd3ee032994a",
+      "afterSha256": "260343d8ef71c792bc9236cf1e0fb285988400e9e2d3438c31981cdf777ac7c5",
       "capabilityIds": [
         "legacy-workflow-onboarding",
         "legacy-workflow-person-lookup",
@@ -329,13 +329,14 @@
         "npm:test",
         "npm:test:architecture"
       ],
-      "preservation": "preserved"
+      "preservation": "preserved",
+      "impactRationale": "2026-08-05 (aba05c65): corrected the 2026-08-04 $op accessible-name lesson's blast-radius paragraph \u2014 it had declared production immune while the production-driven ssSmartHRTransactions group carried the same fragile shape (the doc 4493 failure); adds the sweep-every-Find-an-Existing-Value-group rule."
     },
     {
       "path": "src/systems/ucpath/SELECTORS.md",
       "changeKind": "modified",
       "beforeSha256": "57fb1caeac412725c3c5defb0430dd9d5d910db97d077328cf2f37368d6fb1f4",
-      "afterSha256": "192edfa9225fdfbd0e9354abbc4c7079ab3ea00dce7b452d2c07adcb4fafaf3d",
+      "afterSha256": "c8b339ff211fd2418552e0e405ec3d287e0657ffe687a6330194e70fc5709bc5",
       "capabilityIds": [
         "legacy-workflow-onboarding",
         "legacy-workflow-separations"
@@ -344,7 +345,8 @@
         "npm:test",
         "npm:test:architecture"
       ],
-      "preservation": "preserved"
+      "preservation": "preserved",
+      "impactRationale": "2026-08-05 (aba05c65): regenerated catalog (npm run selectors:catalog) for the ssSmartHRTransactions re-anchoring; generated content only."
     },
     {
       "path": "src/systems/ucpath/index.ts",
@@ -384,7 +386,7 @@
       "path": "src/systems/ucpath/selectors.ts",
       "changeKind": "modified",
       "beforeSha256": "4f6992525998eb6e3db8d2b3a4b67bb551aa0565e6a03710efd92a095d958aa5",
-      "afterSha256": "8cb590d35206118d6504e1825f5c18ac8a9386099cf78db5780fde4d59e8e94e",
+      "afterSha256": "8776bafd1cdfd3509e117cbdff8baf51e44abba1fa566251a1b4630eff103a85",
       "capabilityIds": [
         "legacy-workflow-onboarding",
         "legacy-workflow-separations"
@@ -393,7 +395,8 @@
         "npm:test",
         "npm:test:architecture"
       ],
-      "preservation": "preserved"
+      "preservation": "preserved",
+      "impactRationale": "2026-08-05 (aba05c65): re-anchored every ssSmartHRTransactions search arm after PeopleSoft folded the Find-an-Existing-Value operator select (<field>$op) into each input's accessible name ('Empl ID begins with', 'Approval Status =', ...), which made all exact:true arms match zero elements and killed separations transaction-check live (doc 4493). Anchored ^Label regex + live-probed record.field id arms, same repair personOrgSummary received 2026-08-04. Locator resolution only; no contract change."
     },
     {
       "path": "src/systems/ucpath/ss-smart-hr.ts",
