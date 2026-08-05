@@ -963,6 +963,47 @@ export async function armDuoWebAuthn(page: Page, opts: { abortSignal?: AbortSign
 }
 
 /**
+ * Arm the virtual authenticator immediately BEFORE the click that navigates to
+ * a Duo prompt. **Every** SSO front-end must call this — not just Shibboleth.
+ *
+ * A Duo prompt can auto-fire a discoverable-passkey `get()` the instant it
+ * loads. With no virtual authenticator present yet, Chrome raises its NATIVE
+ * "insert your security key" dialog, and that dialog is unrecoverable from the
+ * page: it is browser chrome, so `keyboard.press("Escape")` — which reaches the
+ * renderer — cannot dismiss it, and while it is up it swallows the DOM click
+ * path `selectDuoFactor` depends on. Arming afterwards does not help either,
+ * because a late authenticator cannot answer an already-pending request. The
+ * run then dead-ends in a manual-Duo wait that no push will ever satisfy (a
+ * WebAuthn prompt sends none).
+ *
+ * This exists as a shared helper rather than an inline block per flow so a new
+ * SSO front-end cannot silently omit it — which is exactly how the UCSD ADFS
+ * path (SharePoint / OneDrive) regressed while Shibboleth stayed hands-off.
+ *
+ * Best-effort and idempotent: an already-armed page is a cheap no-op, and any
+ * failure degrades to manual Duo instead of breaking the login.
+ */
+export async function armDuoBeforeSsoNavigation(
+  page: Page,
+  opts: { label: string; abortSignal?: AbortSignal },
+): Promise<void> {
+  if (!isDuoWebAuthnEnabled()) return;
+  try {
+    const armed = await armDuoWebAuthn(page, { abortSignal: opts.abortSignal });
+    if (!armed) {
+      log.warn(
+        `Duo WebAuthn arm returned false at ${opts.label} — falling back to manual Duo (check credential file / prior arm logs)`,
+      );
+    }
+  } catch (err) {
+    if (opts.abortSignal?.aborted) throw err;
+    log.warn(
+      `Duo WebAuthn arm threw at ${opts.label} (${err instanceof Error ? err.message : String(err)}) — falling back to manual Duo`,
+    );
+  }
+}
+
+/**
  * Read back each credential's signature counter (best-effort), persist the
  * monotonic max to the credential file, and tear the page's virtual
  * authenticator(s) down. Idempotent — a no-op if the page was never armed or was

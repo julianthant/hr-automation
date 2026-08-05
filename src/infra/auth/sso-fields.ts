@@ -1,7 +1,7 @@
 import type { Page } from "playwright";
 import { validateEnv } from "../../utils/env.js";
 import { log } from "../../utils/log.js";
-import { armDuoWebAuthn, isDuoWebAuthnEnabled } from "./duo-webauthn.js";
+import { armDuoBeforeSsoNavigation } from "./duo-webauthn.js";
 
 /**
  * Fill UCSD Shibboleth SSO credentials (username + password) on the current page.
@@ -48,21 +48,10 @@ export async function clickSsoSubmit(page: Page, opts: { abortSignal?: AbortSign
   // instant its prompt loads, so the (resident) authenticator must already exist
   // to answer it — otherwise Chrome's native "insert your security key" dialog
   // blocks the page. Idempotent + best-effort; failure degrades to manual Duo.
-  if (isDuoWebAuthnEnabled()) {
-    try {
-      const armed = await armDuoWebAuthn(page, { abortSignal: opts.abortSignal });
-      if (!armed) {
-        log.warn(
-          "Duo WebAuthn arm returned false at SSO submit — falling back to manual Duo (check credential file / prior arm logs)",
-        );
-      }
-    } catch (err) {
-      if (opts.abortSignal?.aborted) throw err;
-      log.warn(
-        `Duo WebAuthn arm threw at SSO submit (${err instanceof Error ? err.message : String(err)}) — falling back to manual Duo`,
-      );
-    }
-  }
+  await armDuoBeforeSsoNavigation(page, {
+    label: "SSO submit",
+    ...(opts.abortSignal ? { abortSignal: opts.abortSignal } : {}),
+  });
   opts.abortSignal?.throwIfAborted();
   await page.locator(SSO_SUBMIT_SELECTOR).click({ timeout: 5_000 });
   log.step("SSO submit clicked");
