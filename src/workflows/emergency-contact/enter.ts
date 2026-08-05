@@ -281,13 +281,21 @@ export function buildEmergencyContactPlan(
  * as "Person ID <emplId> <Employee Name> Emergency Contact". This is the page's
  * OWN identity (distinct from anything the operator typed), used both to extract
  * the display name and as the pre-fill identity gate's `extract` source.
- * Returns "" when the header is absent (the gate then fails loud). An innerText
- * exception (frame detached, etc.) is left to propagate so the gate reports a
- * clear "could not read the displayed identity" rather than a false miss.
+ * Returns `null` when the header has not rendered yet — a RETRYABLE state the
+ * gate polls on, not a verdict. A count/innerText exception (frame detached,
+ * strict-mode violation) is left to propagate so the gate reports a clear
+ * "could not read the displayed identity" rather than a false miss.
+ *
+ * 2026-08-05: this previously returned `""` and swallowed a thrown `count()`
+ * via `.catch(() => 0)`. Both collapsed "I could not read the header" into
+ * "the header is not there" — and because the gate sampled only once, a header
+ * that was still rendering read as a hard identity mismatch. That failed all
+ * 13 records of a live batch with "the expected identity was not found on the
+ * page" while the screenshots showed `Person ID <emplId>` plainly rendered.
  */
-export async function readEmergencyContactPersonIdRow(page: Page): Promise<string> {
+export async function readEmergencyContactPersonIdRow(page: Page): Promise<string | null> {
   const personIdEl = emergencyContactSelectors.personIdText(page);
-  if ((await personIdEl.count().catch(() => 0)) === 0) return "";
+  if ((await personIdEl.count()) === 0) return null;
   return (await personIdEl.locator("..").innerText({ timeout: 3_000 })).trim(); // allow-inline-selector
 }
 
