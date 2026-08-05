@@ -3,6 +3,25 @@
   "baselineCommit": "353739ac9e1db01cae9da8a13da53605cd767574",
   "records": [
     {
+      "path": "src/control/ops/delete.ts",
+      "changeKind": "modified",
+      "beforeSha256": "3b74e7af19b2f2f5e787015743a897cf5d62213c4030a372c61360f6a6259bec",
+      "afterSha256": "86760daf02ae414e66802e381f3d9210dfd1305aaa66403e9ab60fe16a52fa41",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact",
+        "legacy-workflow-onboarding",
+        "legacy-workflow-person-lookup",
+        "legacy-workflow-separations",
+        "legacy-workflow-ocr"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Queue-row delete guard now binds the canonical terminal set (blocked was omitted, making blocked tasks undeletable)."
+    },
+    {
       "path": "src/core/CLAUDE.md",
       "changeKind": "modified",
       "beforeSha256": "297f6aedc0d14b0ac4b24071334853d689332969f79a1f21c961eb33c3c604bb",
@@ -29,6 +48,81 @@
         "npm:test:architecture"
       ],
       "preservation": "preserved"
+    },
+    {
+      "path": "src/core/daemon/queue.ts",
+      "changeKind": "modified",
+      "beforeSha256": "e4b2db87a3d987bcf0ec1ca3eca08be1fbebfc8c7e21d7ecdffae50cf48008e3",
+      "afterSha256": "32e6afebac927c99c336844140cb09521ed79d97932a763b31a9bef371c7ccbe",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact",
+        "legacy-workflow-onboarding",
+        "legacy-workflow-person-lookup",
+        "legacy-workflow-separations",
+        "legacy-workflow-work-study",
+        "legacy-workflow-ocr"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Exports TERMINAL_CONTROL_STATES as the single terminal-state definition; every workflow that runs through the daemon consumes it."
+    },
+    {
+      "path": "src/infra/auth/CLAUDE.md",
+      "changeKind": "modified",
+      "beforeSha256": "4be112bffe41b4df16b72476be624af45faf29d82a9fcdfc82c5b5dc84a9fecd",
+      "afterSha256": "1029563a18f05065e052ae7d07467aa32c1c5cd0d0192199374b387c7d792539",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Changed as part of the 2026-08-05 Emergency Contact identity-gate/row-anchoring/save-proof fix."
+    },
+    {
+      "path": "src/infra/auth/duo-webauthn.ts",
+      "changeKind": "modified",
+      "beforeSha256": "9381e3e148087bbffe807ac7ba5a705224bf87d8153b40369d1f10376d6e5a1f",
+      "afterSha256": "3f4005940b7ffdf31704838fa91c266a0ad85cb470d45d14db743cbc5b99bfeb",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact",
+        "legacy-workflow-onboarding",
+        "legacy-workflow-person-lookup",
+        "legacy-workflow-separations",
+        "legacy-workflow-work-study",
+        "legacy-workflow-ocr"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Duo WebAuthn arming moved before the ADFS submit (commit 0d959720, auth-flow fix by a concurrent session); auth timing is shared by every daemon workflow."
+    },
+    {
+      "path": "src/infra/auth/sso-fields.ts",
+      "changeKind": "modified",
+      "beforeSha256": "05bee039de70ef53d98fb09ea15932fa122f20ab886140bbe473891ace56a705",
+      "afterSha256": "a3b0155715c8e864233c489406ceecd518471636cf90f867e63a30c0438d25ac",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact",
+        "legacy-workflow-onboarding",
+        "legacy-workflow-person-lookup",
+        "legacy-workflow-separations",
+        "legacy-workflow-work-study",
+        "legacy-workflow-ocr"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "SSO field arming updated with the pre-submit Duo WebAuthn arming (commit 0d959720); shared login path for all UCPath/CRM daemons."
     },
     {
       "path": "src/services/ocr/env-keys.ts",
@@ -59,6 +153,51 @@
       "preservation": "preserved"
     },
     {
+      "path": "src/systems/crm/SELECTORS.md",
+      "changeKind": "modified",
+      "beforeSha256": "d28933203c348c098a5a1377abe5240ed6be3cc92e10ad41d1428829d8384dcb",
+      "afterSha256": "c2c356c1c443b595a0f373dc510c2fffbbe69f58e95c901065afc470ae8f5c67",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+    },
+    {
+      "path": "src/systems/i9/SELECTORS.md",
+      "changeKind": "modified",
+      "beforeSha256": "f8d9eba3213c717341d48a0060959e1a0bdc2f760161dfa408ba03a402d709ec",
+      "afterSha256": "13bb2e55e3b6243044abd9083165fe6ec7d7333a69aac9197f964b40cf35667d",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+    },
+    {
+      "path": "src/systems/kuali/SELECTORS.md",
+      "changeKind": "modified",
+      "beforeSha256": "4ccd6c5a794d93e3fdb680346b48aaf8e9007db367b593012cfe00476add9882",
+      "afterSha256": "62188c188f3e1597da8ac0c073f3f489c249ad30709bbf76fee68751335ea218",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+    },
+    {
       "path": "src/systems/new-kronos/LESSONS.md",
       "changeKind": "modified",
       "beforeSha256": "780ab0ff7f3085b1b4570d01b11e1ce63fb6ed7636a5bf31c0da50136d372fe9",
@@ -73,6 +212,21 @@
       "preservation": "preserved"
     },
     {
+      "path": "src/systems/new-kronos/SELECTORS.md",
+      "changeKind": "modified",
+      "beforeSha256": "adfe0e9c66fd86da965a0c2c71fd025cccdb89d1e42ad83a2f9d14072e1a9976",
+      "afterSha256": "c62ae8fa868f6cb972a763ff442630bfe6f9cf1b579b31f128779c14dc025cdf",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+    },
+    {
       "path": "src/systems/new-kronos/navigate.ts",
       "changeKind": "modified",
       "beforeSha256": "49b2fa7c165bcc6a3c59620e192b0055ad46e758c412c5a1c8c655ebbe9508c6",
@@ -85,6 +239,66 @@
         "npm:test:architecture"
       ],
       "preservation": "preserved"
+    },
+    {
+      "path": "src/systems/old-kronos/SELECTORS.md",
+      "changeKind": "modified",
+      "beforeSha256": "ce5d95fcee34b39fb3dcdfd6db23fd5b789676d56ef4a4a03518bce408dcb9c0",
+      "afterSha256": "260248e0da9b0958a99255e3bd3d59e47f11277c5843d4efae88a62838c2d211",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+    },
+    {
+      "path": "src/systems/onbase/SELECTORS.md",
+      "changeKind": "modified",
+      "beforeSha256": "eccb58b4eeeda6bf33b4c459a77078c4296c7f6e6fc65cc266a84570903f9f20",
+      "afterSha256": "31da7799a3a582272b5f3b625ea24608ec5d40b5e4aeee0024a25ab97e35e00f",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+    },
+    {
+      "path": "src/systems/servicenow/SELECTORS.md",
+      "changeKind": "modified",
+      "beforeSha256": "557de341ee92f0022e6a5d609042930ba7080edbf1d89185acdccefd826e323d",
+      "afterSha256": "ae25a934ea5229e926a5240fab456a1990add07d13ec7c42b8ff7b62163209b5",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+    },
+    {
+      "path": "src/systems/sharepoint/SELECTORS.md",
+      "changeKind": "modified",
+      "beforeSha256": "209fa8cdfc094c829c16217f5cde1ffa39ac58b793e27cc4fae46af04f7f6d61",
+      "afterSha256": "4e78b1cb9b397db06a2e75b07a318cd577489bafb64007ab6f2208555638d8e5",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
     },
     {
       "path": "src/systems/ucpath/CLAUDE.md",
@@ -105,7 +319,7 @@
       "path": "src/systems/ucpath/LESSONS.md",
       "changeKind": "modified",
       "beforeSha256": "010e7a25f50d7e63b24355bb254ded76690c9278a6885285ef3a52101fc5f9a1",
-      "afterSha256": "bf09ba794840b2173fe8c622959f48e6ccf8eedd7ef4db98a597e93ea95bd9d2",
+      "afterSha256": "6ffae0874d9cc3454e63c751631aebfa41f3107cfb5de12db152bd3ee032994a",
       "capabilityIds": [
         "legacy-workflow-onboarding",
         "legacy-workflow-person-lookup",
@@ -121,7 +335,7 @@
       "path": "src/systems/ucpath/SELECTORS.md",
       "changeKind": "modified",
       "beforeSha256": "57fb1caeac412725c3c5defb0430dd9d5d910db97d077328cf2f37368d6fb1f4",
-      "afterSha256": "28b13880b7b4ddfe118136b0b1f12e48dfcde6656ae287ad210e49d9e63cfb8e",
+      "afterSha256": "192edfa9225fdfbd0e9354abbc4c7079ab3ea00dce7b452d2c07adcb4fafaf3d",
       "capabilityIds": [
         "legacy-workflow-onboarding",
         "legacy-workflow-separations"
@@ -148,10 +362,29 @@
       "preservation": "preserved"
     },
     {
+      "path": "src/systems/ucpath/personal-data.ts",
+      "changeKind": "modified",
+      "beforeSha256": "a4f17333ef0f7c15b019834de6aa5c439764ff1b90a246cceefa08f3bf3bb5c7",
+      "afterSha256": "6bb4c067ef52f0ca321705e57fef3490e65a7d0f99937c1c301dcbb99855659e",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact",
+        "legacy-workflow-onboarding",
+        "legacy-workflow-person-lookup",
+        "legacy-workflow-separations",
+        "legacy-workflow-work-study"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Emergency Contact editor navigation/save: adds assertEmergencyContactPersisted (positive post-save proof); the save-outcome contract is part of the rebuild UCPath write-safety source of truth."
+    },
+    {
       "path": "src/systems/ucpath/selectors.ts",
       "changeKind": "modified",
       "beforeSha256": "4f6992525998eb6e3db8d2b3a4b67bb551aa0565e6a03710efd92a095d958aa5",
-      "afterSha256": "4791154cf631bd01b252b80555e56f9b2cba02a8e364119769d3c175a2677267",
+      "afterSha256": "8cb590d35206118d6504e1825f5c18ac8a9386099cf78db5780fde4d59e8e94e",
       "capabilityIds": [
         "legacy-workflow-onboarding",
         "legacy-workflow-separations"
@@ -191,6 +424,51 @@
         "npm:test:architecture"
       ],
       "preservation": "preserved"
+    },
+    {
+      "path": "src/workflows/emergency-contact/CLAUDE.md",
+      "changeKind": "modified",
+      "beforeSha256": "6986043e3a5755ec1f6bfb9794be564e40f9da7ec706bee18eb2038398111758",
+      "afterSha256": "d015e0902531af773a2de6918c1086167368ff446fa68f160975767c16b0620f",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Documents the paged-scroll/add-row root cause and corrects the stale zero-contact gotcha the rebuild plan referenced."
+    },
+    {
+      "path": "src/workflows/emergency-contact/enter.ts",
+      "changeKind": "modified",
+      "beforeSha256": "035387d58cbf46c875afa01b62cc590b272a7ac0c80ec36d558a32269305811a",
+      "afterSha256": "62d8c595c7842e50188f5d2af9b5e8e1e9e6e63f3bb00ed7c994edca153ffbdc",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "EC fill plan rewritten: View All + blank-row scan + row-anchored writes + name-last read-back; the rebuild ports this plan shape."
+    },
+    {
+      "path": "src/workflows/emergency-contact/workflow.ts",
+      "changeKind": "modified",
+      "beforeSha256": "0c1de5bce1a94a09fac33191ffba45ec21facde6ada1b5ab3edb1133771181af",
+      "afterSha256": "6a83065b31b0a3ea3651aaa3ce6e475c685b0cb08fbebd8c481ca237d84987ef",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "EC save step gains a pre-save no-blank-row assertion; part of the ported save contract."
     },
     {
       "path": "src/workflows/onboarding/CLAUDE.md",
@@ -261,6 +539,22 @@
         "npm:test:architecture"
       ],
       "preservation": "preserved"
+    },
+    {
+      "path": "src/workflows/sharepoint-download/download.ts",
+      "changeKind": "modified",
+      "beforeSha256": "9a9ff39fc6e5a6b548d5de23fb7a306eb94924a9d7a32fa93ba9ef04af203693",
+      "afterSha256": "679a461e3a2c497a66856e35a04c2f4f37b1f054ca743aa4697d33e0f83384c5",
+      "capabilityIds": [
+        "legacy-workflow-ocr",
+        "legacy-workflow-emergency-contact"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "SharePoint roster download changed by a concurrent session alongside the auth-arming fix; feeds the OCR roster path."
     },
     {
       "path": "tests/unit/architecture/fail-loud-catch-default.test.ts",
@@ -476,7 +770,7 @@
       "path": "tests/unit/architecture/wait-for-timeout-allowlist.test.ts",
       "changeKind": "modified",
       "beforeSha256": "d0f3949d6e35ef2889bde2db6b68bc842ce33fce34b2a44aacd9353682e83b0f",
-      "afterSha256": "2bd3130e8496ae5f40edbac28cc8626edd326fd383c8c90671042a1ac0e0677f",
+      "afterSha256": "4d3980c319034b994057efda7f1c511fe267764db7dea897ba3c3325128731fb",
       "capabilityIds": [
         "legacy-dev-tool-architecture-guards"
       ],
@@ -499,6 +793,21 @@
         "npm:test:architecture"
       ],
       "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/infra/auth/duo-arm-before-sso-navigation.test.ts",
+      "changeKind": "added",
+      "beforeSha256": null,
+      "afterSha256": "8eb41cee34895bb9059f9e04ebf58cd9f03c5d377004ffe0c716e68361363681",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Test updated alongside the 2026-08-05 Emergency Contact fix (gate fakes model the value-anchored read; waitForTimeout allowlist count reflects the removed name-fill sleep)."
     },
     {
       "path": "tests/unit/systems/ucpath/ss-smart-hr.test.ts",
@@ -529,6 +838,21 @@
         "npm:test:architecture"
       ],
       "preservation": "preserved"
+    },
+    {
+      "path": "tests/unit/workflows/emergency-contact/enter.test.ts",
+      "changeKind": "modified",
+      "beforeSha256": "859ae34a020174b333ea095fd8f124aff220533c40b25508ef746feb28de6d9d",
+      "afterSha256": "252b8e3704d4f829ea44a4bdcc677072f1b1f762def320fa691981f7dfccaf17",
+      "capabilityIds": [
+        "legacy-workflow-emergency-contact"
+      ],
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved",
+      "impactRationale": "Test updated alongside the 2026-08-05 Emergency Contact fix (gate fakes model the value-anchored read; waitForTimeout allowlist count reflects the removed name-fill sleep)."
     },
     {
       "path": "tests/unit/workflows/separations/dry-run.test.ts",
