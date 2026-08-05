@@ -39,8 +39,8 @@ const SCAN_ROOTS = [join(ROOT, "src", "workflows"), join(ROOT, "src", "systems")
 /** file (relative to repo root) -> { count, reason } */
 const ALLOWLIST: CountAllowlist = {
   "src/workflows/emergency-contact/enter.ts": {
-    count: 2,
-    reason: "TODO(live-verify)-marked: no detectable post-fill DOM condition for a plain text field / the Phone field specifically — see inline comments.",
+    count: 1,
+    reason: "Phone-field settle only — no detectable post-fill DOM condition. (Was 2: the Contact Name settle was removed 2026-08-05 when the name fill gained a read-back verify instead of a sleep.)",
   },
   "src/workflows/old-kronos-reports/workflow.ts": {
     count: 1,

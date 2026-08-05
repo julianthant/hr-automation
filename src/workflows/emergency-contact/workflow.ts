@@ -12,6 +12,7 @@ import {
 } from "../../systems/ucpath/personal-data.js";
 import { assertDisplayedIdentity } from "../../systems/common/index.js";
 import {
+  assertContactNameStillPresent,
   buildEmergencyContactPlan,
   extractEmployeeName,
   findExistingContactDuplicate,
@@ -277,6 +278,12 @@ export const emergencyContactWorkflow = defineWorkflow({
         log.success(`Dry run complete for ${effectiveRecord.employee.name} — UCPath Save was skipped.`);
         return;
       }
+      // A postback between the name fill and Save (above all the Edit Address
+      // modal) can silently clear the required Contact Name — that is exactly
+      // how the 2026-08-05 batch reached Save with a blank field and got
+      // "Highlighted fields are required. (15,30)". Re-assert immediately
+      // before the click so the failure is loud and attributable.
+      await assertContactNameStillPresent(page, effectiveRecord.emergencyContact.name);
       try {
         await saveEmergencyContactWithPrimaryRecovery(page, effectiveRecord.emergencyContact.name);
       } catch (err) {

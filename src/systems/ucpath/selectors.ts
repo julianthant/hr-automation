@@ -1689,6 +1689,76 @@ export const emergencyContact = {
   addNewRowButton: (page: Page): Locator =>
     page.getByRole("button", { name: /add a new row/i }).first(),
 
+  // ── Row-anchored editor selectors (View All mode) ─────────────────────────
+  //
+  // The Emergency Contact scroll pages ONE ROW AT A TIME by default; after
+  // "Add a new row" the counter reads "2 of 2" and role-based `.first()`
+  // selectors interact with whichever row happens to be rendered — which is
+  // how the 2026-08-05 batch scattered its fills across two rows and always
+  // reached Save with a blank required row. The fix drives the editor in
+  // View All mode and anchors every field to the PeopleSoft `RECORD_FIELD$row`
+  // id, so a postback re-render can never silently retarget a write. Attribute
+  // form (`[id="..."]`) is used because `#` CSS ids would need `$` escaping.
+  // All ids live-verified 2026-08-05 on EID 10889904.
+
+  /**
+   * "View All" toggle link on the contact scroll. Reads "View All" in paged
+   * mode and "View 1" once expanded; absent on some single-row renders. Click
+   * only when it reads "View All". verified 2026-08-05 (live probe, id
+   * `$ICField2$hviewall$0`)
+   * @tags view-all, scroll, link, emergency-contact
+   */
+  viewAllLink: (page: Page): Locator =>
+    page.getByRole("link", { name: /^View All$/i }).first(),
+
+  /**
+   * Contact Name textbox at a specific scroll row. verified 2026-08-05
+   * @tags contact, name, textbox, row, emergency-contact
+   */
+  contactNameAt: (page: Page, row: number): Locator =>
+    page.locator(`input[id="EMERGENCY_CNTCT_CONTACT_NAME$${row}"]`),
+
+  /**
+   * Primary Contact checkbox at a specific scroll row. `input[type=checkbox]`
+   * keeps PeopleSoft's hidden `$chk$` twin out (2026-07-28 lesson).
+   * verified 2026-08-05
+   * @tags primary, contact, checkbox, row, emergency-contact
+   */
+  primaryContactAt: (page: Page, row: number): Locator =>
+    page.locator(`input[type="checkbox"][id="EMERGENCY_CNTCT_PRIMARY_CONTACT$${row}"]`),
+
+  /**
+   * Relationship dropdown at a specific scroll row. Note a blank row DEFAULTS
+   * to value "O", whose label is literally "(Invalid Value)". verified 2026-08-05
+   * @tags relationship, select, row, emergency-contact
+   */
+  relationshipAt: (page: Page, row: number): Locator =>
+    page.locator(`select[id="EMERGENCY_CNTCT_RELATIONSHIP$${row}"]`),
+
+  /**
+   * Same Address as Employee checkbox at a specific scroll row.
+   * verified 2026-08-05
+   * @tags same, address, checkbox, row, emergency-contact
+   */
+  sameAddressAt: (page: Page, row: number): Locator =>
+    page.locator(`input[type="checkbox"][id="EMERGENCY_CNTCT_SAME_ADDRESS_EMPL$${row}"]`),
+
+  /**
+   * Edit Address button at a specific scroll row (opens the shared
+   * DERIVED_ADDRESS modal). verified 2026-08-05 (id
+   * `DERIVED_ADDR_UPDATE_ADDRESS$<row>`)
+   * @tags edit, address, button, row, emergency-contact
+   */
+  editAddressButtonAt: (page: Page, row: number): Locator =>
+    page.locator(`input[id="DERIVED_ADDR_UPDATE_ADDRESS$${row}"]`),
+
+  /**
+   * Phone textbox at a specific scroll row. verified 2026-08-05
+   * @tags phone, textbox, row, emergency-contact
+   */
+  phoneAt: (page: Page, row: number): Locator =>
+    page.locator(`input[id="EMERGENCY_CNTCT_PHONE$${row}"]`),
+
   /**
    * "Relationship to Employee" dropdown on the editor's newly-added row.
    * verified 2026-07-08 (inherited from working production code — same
@@ -1766,15 +1836,36 @@ export const emergencyContact = {
   phoneInput: (page: Page): Locator =>
     page.getByRole("textbox", { name: "Phone", exact: true }).first(),
 
+  // Editor header identity. PeopleSoft splits every display-only field into a
+  // LABEL div (`win0div<RECORD>_<FIELD>lbl`) and a separate VALUE div/span
+  // (`<RECORD>_<FIELD>`). They are siblings, NOT parent/child — so anchoring on
+  // the label text and walking to its parent can never reach the value. The
+  // previous `getByText("Person ID").first().locator("..")` did exactly that and
+  // always yielded the bare string "Person ID"; see the 2026-08-05 lesson.
+  // The editor renders at TOP LEVEL — no iframe (live-probed 2026-08-05), so
+  // these take `Page`, not a FrameLocator.
+
   /**
-   * "Person ID" label text in the editor header row — the anchor used to
-   * read the header's containing element for employee-name extraction.
-   * verified 2026-07-08 (inherited from working production code — same
-   * locator, moved)
-   * @tags person, id, text, header, emergency-contact
+   * Employee ID VALUE in the editor header ("Person ID <emplId>"). The `.or()`
+   * arm is PeopleSoft's wrapper div around the same span; both were read live
+   * and both return the bare EID. verified 2026-08-05 (live probe, EID
+   * 10888510 — span `#PERSON_NPC_VW_EMPLID` and div
+   * `#win0divPERSON_NPC_VW_EMPLID` each returned "10888510")
+   * @tags person, id, emplid, value, header, emergency-contact
    */
-  personIdText: (page: Page): Locator =>
-    page.getByText("Person ID").first(),
+  personIdValue: (page: Page): Locator =>
+    page.locator("#PERSON_NPC_VW_EMPLID").or(page.locator("#win0divPERSON_NPC_VW_EMPLID")).first(),
+
+  /**
+   * Employee NAME VALUE in the editor header. Note the record differs from the
+   * EID's (`PERSON_NAME` vs `PERSON_NPC_VW`) — do not derive one id from the
+   * other. verified 2026-08-05 (live probe, EID 10888510 — span
+   * `#PERSON_NAME_NAME` and div `#win0divPERSON_NAME_NAME` each returned
+   * "Melany Licon"; `PERSON_NPC_VW_NAME` does NOT exist)
+   * @tags person, name, value, header, emergency-contact
+   */
+  personNameValue: (page: Page): Locator =>
+    page.locator("#PERSON_NAME_NAME").or(page.locator("#win0divPERSON_NAME_NAME")).first(),
 };
 
 // ─── Person Profiles → Oath Signature (standalone deep-link URL) ──────────
