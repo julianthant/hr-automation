@@ -10,6 +10,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { openStateDb } from "../../tracker/state/db.js";
 import { transaction } from "../../infra/sqlite/index.js";
 import { listTaskTreeByRunIds } from "../../core/task-store/queries.js";
+import { TERMINAL_CONTROL_STATES } from "../../core/daemon/queue.js";
 import { persistDeletionManifest } from "../../tracker/deletions/store.js";
 import {
   rowFilePath,
@@ -385,14 +386,19 @@ function findActiveTaskForDelete(
 ): { workflow: string; itemId: string; state: string } | null {
   if (taskIds.length === 0) return null;
   const placeholders = taskIds.map(() => "?").join(",");
+  // 2026-08-05: terminal states come from the daemon's canonical list. A
+  // hand-rolled copy here omitted 'blocked' — which queue.ts treats as
+  // TERMINAL — so a row whose task got stuck 'blocked' (e.g. watchChildRuns
+  // blocked by a vanished parent) returned 409 on every delete, forever.
+  const terminal = TERMINAL_CONTROL_STATES.map(() => "?").join(",");
   const row = db.prepare(`
     SELECT workflow, item_id, control_state
     FROM tasks
     WHERE id IN (${placeholders})
-      AND (control_state IS NULL OR control_state NOT IN ('done', 'failed', 'cancelled'))
+      AND (control_state IS NULL OR control_state NOT IN (${terminal}))
     ORDER BY COALESCE(enqueued_at, created_at) ASC, id ASC
     LIMIT 1
-  `).get(...taskIds) as { workflow: string; item_id: string; control_state: string | null } | undefined;
+  `).get(...taskIds, ...TERMINAL_CONTROL_STATES) as { workflow: string; item_id: string; control_state: string | null } | undefined;
   return row
     ? {
         workflow: row.workflow,

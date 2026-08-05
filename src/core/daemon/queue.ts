@@ -39,8 +39,14 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
-/** Terminal `control_state` values excluded from the hot `readQueueState` path. */
-const TERMINAL_CONTROL_STATES = ['done', 'failed', 'cancelled', 'blocked'] as const
+/**
+ * Terminal `control_state` values excluded from the hot `readQueueState` path.
+ * Exported so other task-state consumers (e.g. the queue-row delete guard in
+ * `src/control/ops/delete.ts`) share ONE definition of "terminal" — a private
+ * copy over there silently omitted `blocked`, which made a blocked task
+ * permanently undeletable (2026-08-05).
+ */
+export const TERMINAL_CONTROL_STATES = ['done', 'failed', 'cancelled', 'blocked'] as const
 
 export async function readQueueState(workflow: string, trackerDir?: string): Promise<QueueState> {
   return readQueueStateInternal(workflow, trackerDir, { activeOnly: true })
