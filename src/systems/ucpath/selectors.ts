@@ -1300,36 +1300,60 @@ export const payPathActions = {
 // Transactions, surfacing in-flight self-service hires/changes for review.
 // Find-an-Existing-Value search form keyed on Transaction ID, Empl ID,
 // Action, Approval Status, and Business Unit. Distinct from the standard
-// Smart HR Transactions page (which is `smartHR.*`). verified 2026-04-24
+// Smart HR Transactions page (which is `smartHR.*`). verified 2026-08-05
+// (search-form arms re-probed live after the `$op` accessible-name drift)
 
 export const ssSmartHRTransactions = {
+  // Search-input accessible names are "<Label> begins with" (the operator
+  // <select>, `<field>$op`, is folded in via aria-labelledby:
+  // `<FIELD>_LBL$star <FIELD>_LBL <FIELD>$op`) — the same PeopleSoft
+  // Find-an-Existing-Value change that broke personOrgSummary (see the
+  // 2026-08-04 LESSONS.md entry). Every old `exact: true` arm matched zero
+  // elements (separations transaction-check died on the Empl ID fill timeout,
+  // doc 4493, 2026-08-05). Anchored `^<Label>\b` regexes + the live-probed
+  // record.field element ids replace them; both arms verified on the same
+  // 2026-08-05 probe.
+
   /**
-   * Transaction ID textbox. verified 2026-04-24
+   * Transaction ID textbox (accessible name "Transaction ID begins with").
+   * verified 2026-08-05 (live probe; id `UC_SS_TBH_DVW_UC_TRANSACT_ID`)
    * @tags transaction, id, textbox, ss-smart-hr
    */
   txnNumberTextbox: (f: FrameLocator): Locator =>
-    f.getByRole("textbox", { name: "Transaction ID" }),
+    f.getByRole("textbox", { name: /^Transaction ID\b/ })
+      .or(f.locator("#UC_SS_TBH_DVW_UC_TRANSACT_ID"))
+      .first(),
 
   /**
-   * Name textbox. verified 2026-04-24
+   * Name textbox (accessible name "Name begins with"). verified 2026-08-05
+   * (live probe; id `UC_SS_TBH_DVW_NAME`)
    * @tags name, textbox, ss-smart-hr
    */
   nameInput: (f: FrameLocator): Locator =>
-    f.getByRole("textbox", { name: "Name", exact: true }),
+    f.getByRole("textbox", { name: /^Name\b/ })
+      .or(f.locator("#UC_SS_TBH_DVW_NAME"))
+      .first(),
 
   /**
-   * Empl ID textbox. verified 2026-04-24
+   * Empl ID textbox (accessible name "Empl ID begins with"). verified
+   * 2026-08-05 (live probe; id `UC_SS_TBH_DVW_EMPLID`)
    * @tags empl, id, employee, textbox, ss-smart-hr
    */
   emplIdInput: (f: FrameLocator): Locator =>
-    f.getByRole("textbox", { name: "Empl ID", exact: true }),
+    f.getByRole("textbox", { name: /^Empl ID\b/ })
+      .or(f.locator("#UC_SS_TBH_DVW_EMPLID"))
+      .first(),
 
   /**
-   * Action textbox (PeopleSoft action code, e.g. HIR, REH). verified 2026-04-24
+   * Action textbox (PeopleSoft action code, e.g. HIR, REH; accessible name
+   * "Action begins with"). verified 2026-08-05 (live probe; id
+   * `UC_SS_TBH_DVW_ACTION`)
    * @tags action, code, textbox, ss-smart-hr
    */
   actionInput: (f: FrameLocator): Locator =>
-    f.getByRole("textbox", { name: "Action", exact: true }),
+    f.getByRole("textbox", { name: /^Action\b/ })
+      .or(f.locator("#UC_SS_TBH_DVW_ACTION"))
+      .first(),
 
   /**
    * Action lookup button. verified 2026-04-24
@@ -1339,19 +1363,26 @@ export const ssSmartHRTransactions = {
     f.getByRole("button", { name: "Look up Action" }),
 
   /**
-   * Approval Status combobox. Options: Approved, Denied, Error, Manually
-   * Processed, Pending, Pushed Back. verified 2026-04-24
+   * Approval Status combobox (accessible name "Approval Status =" — the `=`
+   * operator select is folded in). Options: Approved, Denied, Error, Manually
+   * Processed, Pending, Pushed Back. verified 2026-08-05 (live probe; id
+   * `UC_SS_TBH_DVW_APPR_STATUS`)
    * @tags approval, status, combobox, ss-smart-hr
    */
   approvalStatusSelect: (f: FrameLocator): Locator =>
-    f.getByRole("combobox", { name: "Approval Status" }),
+    f.getByRole("combobox", { name: /^Approval Status\b/ })
+      .or(f.locator("select#UC_SS_TBH_DVW_APPR_STATUS"))
+      .first(),
 
   /**
-   * Business Unit textbox. verified 2026-04-24
+   * Business Unit textbox (accessible name "Business Unit begins with").
+   * verified 2026-08-05 (live probe; id `UC_SS_TBH_DVW_BUSINESS_UNIT`)
    * @tags business-unit, textbox, ss-smart-hr
    */
   businessUnitInput: (f: FrameLocator): Locator =>
-    f.getByRole("textbox", { name: "Business Unit", exact: true }),
+    f.getByRole("textbox", { name: /^Business Unit\b/ })
+      .or(f.locator("#UC_SS_TBH_DVW_BUSINESS_UNIT"))
+      .first(),
 
   /**
    * Business Unit lookup button. verified 2026-04-24

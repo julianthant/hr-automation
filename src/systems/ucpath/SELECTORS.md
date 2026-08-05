@@ -1134,37 +1134,37 @@ Initiator's Comments textbox on the Additional Pay Data tab.
 
 **Source:** [`src/systems/ucpath/selectors.ts:1293`](./selectors.ts#L1293)
 
-## `ssSmartHRTransactions.txnNumberTextbox()` — verified 2026-04-24
+## `ssSmartHRTransactions.txnNumberTextbox()` — verified 2026-08-05
 
-Transaction ID textbox.
+Transaction ID textbox (accessible name "Transaction ID begins with").
 
 **Tags:** transaction, id, textbox, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1310`](./selectors.ts#L1310)
+**Source:** [`src/systems/ucpath/selectors.ts:1322`](./selectors.ts#L1322)
 
-## `ssSmartHRTransactions.nameInput()` — verified 2026-04-24
+## `ssSmartHRTransactions.nameInput()` — verified 2026-08-05
 
-Name textbox.
+Name textbox (accessible name "Name begins with").
 
 **Tags:** name, textbox, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1317`](./selectors.ts#L1317)
+**Source:** [`src/systems/ucpath/selectors.ts:1332`](./selectors.ts#L1332)
 
-## `ssSmartHRTransactions.emplIdInput()` — verified 2026-04-24
+## `ssSmartHRTransactions.emplIdInput()` — verified 2026-08-05
 
-Empl ID textbox.
+Empl ID textbox (accessible name "Empl ID begins with").
 
 **Tags:** empl, id, employee, textbox, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1324`](./selectors.ts#L1324)
+**Source:** [`src/systems/ucpath/selectors.ts:1342`](./selectors.ts#L1342)
 
-## `ssSmartHRTransactions.actionInput()` — verified 2026-04-24
+## `ssSmartHRTransactions.actionInput()` — verified 2026-08-05
 
-Action textbox (PeopleSoft action code, e.g. HIR, REH).
+Action textbox (PeopleSoft action code, e.g. HIR, REH; accessible name "Action begins with").
 
 **Tags:** action, code, textbox, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1331`](./selectors.ts#L1331)
+**Source:** [`src/systems/ucpath/selectors.ts:1353`](./selectors.ts#L1353)
 
 ## `ssSmartHRTransactions.actionLookupButton()` — verified 2026-04-24
 
@@ -1172,23 +1172,23 @@ Action lookup button.
 
 **Tags:** action, lookup, button, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1338`](./selectors.ts#L1338)
+**Source:** [`src/systems/ucpath/selectors.ts:1362`](./selectors.ts#L1362)
 
-## `ssSmartHRTransactions.approvalStatusSelect()` — verified 2026-04-24
+## `ssSmartHRTransactions.approvalStatusSelect()` — verified 2026-08-05
 
-Approval Status combobox. Options: Approved, Denied, Error, Manually Processed, Pending, Pushed Back.
+Approval Status combobox (accessible name "Approval Status =" — the `=` operator select is folded in). Options: Approved, Denied, Error, Manually Processed, Pending, Pushed Back.
 
 **Tags:** approval, status, combobox, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1346`](./selectors.ts#L1346)
+**Source:** [`src/systems/ucpath/selectors.ts:1372`](./selectors.ts#L1372)
 
-## `ssSmartHRTransactions.businessUnitInput()` — verified 2026-04-24
+## `ssSmartHRTransactions.businessUnitInput()` — verified 2026-08-05
 
-Business Unit textbox.
+Business Unit textbox (accessible name "Business Unit begins with").
 
 **Tags:** business-unit, textbox, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1353`](./selectors.ts#L1353)
+**Source:** [`src/systems/ucpath/selectors.ts:1382`](./selectors.ts#L1382)
 
 ## `ssSmartHRTransactions.businessUnitLookupButton()` — verified 2026-04-24
 
@@ -1196,7 +1196,7 @@ Business Unit lookup button.
 
 **Tags:** business-unit, lookup, button, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1360`](./selectors.ts#L1360)
+**Source:** [`src/systems/ucpath/selectors.ts:1391`](./selectors.ts#L1391)
 
 ## `ssSmartHRTransactions.caseSensitiveCheckbox()` — verified 2026-04-24
 
@@ -1204,7 +1204,7 @@ Case Sensitive checkbox.
 
 **Tags:** case, sensitive, checkbox, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1367`](./selectors.ts#L1367)
+**Source:** [`src/systems/ucpath/selectors.ts:1398`](./selectors.ts#L1398)
 
 ## `ssSmartHRTransactions.searchButton()` — verified 2026-04-24
 
@@ -1212,7 +1212,7 @@ Search submit button (`#PTS_CFG_CL_WRK_PTS_SRCH_BTN`).
 
 **Tags:** search, submit, button, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1374`](./selectors.ts#L1374)
+**Source:** [`src/systems/ucpath/selectors.ts:1405`](./selectors.ts#L1405)
 
 ## `ssSmartHRTransactions.clearButton()` — verified 2026-04-24
 
@@ -1220,7 +1220,7 @@ Clear search criteria button.
 
 **Tags:** clear, button, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1381`](./selectors.ts#L1381)
+**Source:** [`src/systems/ucpath/selectors.ts:1412`](./selectors.ts#L1412)
 
 ## `ssSmartHRTransactions.transactionResultRow()` — verified 2026-06-24
 
@@ -1228,7 +1228,7 @@ Drill into a specific transaction from the results grid by its Transaction ID �
 
 **Tags:** transaction, drill-in, row, result, detail, effdt, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1396`](./selectors.ts#L1396)
+**Source:** [`src/systems/ucpath/selectors.ts:1427`](./selectors.ts#L1427)
 
 ## `ssSmartHRTransactions.transactionDetailTxnId()` — verified 2026-08-04
 
@@ -1236,7 +1236,7 @@ Transaction DETAIL page — the receipt's Transaction ID display span (`#UC_SS_T
 
 **Tags:** transaction, id, receipt, detail, span, record-field, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1428`](./selectors.ts#L1428)
+**Source:** [`src/systems/ucpath/selectors.ts:1459`](./selectors.ts#L1459)
 
 ## `ssSmartHRTransactions.transactionDetailApprovalStatus()` — verified 2026-08-04
 
@@ -1244,7 +1244,7 @@ Transaction DETAIL page — the receipt's Approval Status display span (`#UC_SS_
 
 **Tags:** approval, status, receipt, detail, span, record-field, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1443`](./selectors.ts#L1443)
+**Source:** [`src/systems/ucpath/selectors.ts:1474`](./selectors.ts#L1474)
 
 ## `smartHRTransactionStatus.hrReviewStatusSelect()` — verified 2026-04-24
 
@@ -1252,7 +1252,7 @@ HR Review Status combobox — top filter. Options: All, Cancelled, My Transactio
 
 **Tags:** hr-review, status, combobox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1464`](./selectors.ts#L1464)
+**Source:** [`src/systems/ucpath/selectors.ts:1495`](./selectors.ts#L1495)
 
 ## `smartHRTransactionStatus.businessUnitInput()` — verified 2026-04-24
 
@@ -1260,7 +1260,7 @@ Business Unit textbox filter.
 
 **Tags:** business-unit, textbox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1471`](./selectors.ts#L1471)
+**Source:** [`src/systems/ucpath/selectors.ts:1502`](./selectors.ts#L1502)
 
 ## `smartHRTransactionStatus.businessUnitLookupButton()` — verified 2026-04-24
 
@@ -1268,7 +1268,7 @@ Business Unit lookup button.
 
 **Tags:** business-unit, lookup, button, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1478`](./selectors.ts#L1478)
+**Source:** [`src/systems/ucpath/selectors.ts:1509`](./selectors.ts#L1509)
 
 ## `smartHRTransactionStatus.transactionTypeSelect()` — verified 2026-04-24
 
@@ -1276,7 +1276,7 @@ Transaction Type combobox. Options: All, Change Job Data, Change Job and Profile
 
 **Tags:** transaction-type, combobox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1489`](./selectors.ts#L1489)
+**Source:** [`src/systems/ucpath/selectors.ts:1520`](./selectors.ts#L1520)
 
 ## `smartHRTransactionStatus.emplIdInput()` — verified 2026-04-24
 
@@ -1284,7 +1284,7 @@ Empl ID textbox filter.
 
 **Tags:** empl, id, employee, textbox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1496`](./selectors.ts#L1496)
+**Source:** [`src/systems/ucpath/selectors.ts:1527`](./selectors.ts#L1527)
 
 ## `smartHRTransactionStatus.transactionStatusSelect()` — verified 2026-04-24
 
@@ -1292,7 +1292,7 @@ Transaction Status combobox. Options: Action Required, All, Cancel, Completed, D
 
 **Tags:** transaction-status, combobox, status, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1504`](./selectors.ts#L1504)
+**Source:** [`src/systems/ucpath/selectors.ts:1535`](./selectors.ts#L1535)
 
 ## `smartHRTransactionStatus.firstNameInput()` — verified 2026-04-24
 
@@ -1300,7 +1300,7 @@ First Name textbox filter.
 
 **Tags:** first-name, name, textbox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1511`](./selectors.ts#L1511)
+**Source:** [`src/systems/ucpath/selectors.ts:1542`](./selectors.ts#L1542)
 
 ## `smartHRTransactionStatus.startDateFromInput()` — verified 2026-04-24
 
@@ -1308,7 +1308,7 @@ Start Date From textbox (MM/DD/YYYY). Defaults to ~10 days before today.
 
 **Tags:** start-date, from, date, textbox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1519`](./selectors.ts#L1519)
+**Source:** [`src/systems/ucpath/selectors.ts:1550`](./selectors.ts#L1550)
 
 ## `smartHRTransactionStatus.startDateFromCalendarButton()` — verified 2026-04-24
 
@@ -1316,7 +1316,7 @@ Calendar picker for Start Date From.
 
 **Tags:** start-date, from, calendar, button, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1526`](./selectors.ts#L1526)
+**Source:** [`src/systems/ucpath/selectors.ts:1557`](./selectors.ts#L1557)
 
 ## `smartHRTransactionStatus.toDateInput()` — verified 2026-04-24
 
@@ -1324,7 +1324,7 @@ Calendar picker for Start Date From.
 
 **Tags:** to-date, end-date, date, textbox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1534`](./selectors.ts#L1534)
+**Source:** [`src/systems/ucpath/selectors.ts:1565`](./selectors.ts#L1565)
 
 ## `smartHRTransactionStatus.toDateCalendarButton()` — verified 2026-04-24
 
@@ -1332,7 +1332,7 @@ Calendar picker for the To date.
 
 **Tags:** to-date, end-date, calendar, button, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1541`](./selectors.ts#L1541)
+**Source:** [`src/systems/ucpath/selectors.ts:1572`](./selectors.ts#L1572)
 
 ## `smartHRTransactionStatus.lastNameInput()` — verified 2026-04-24
 
@@ -1340,7 +1340,7 @@ Last Name textbox filter.
 
 **Tags:** last-name, name, textbox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1548`](./selectors.ts#L1548)
+**Source:** [`src/systems/ucpath/selectors.ts:1579`](./selectors.ts#L1579)
 
 ## `smartHRTransactionStatus.downloadButton()` — verified 2026-04-24
 
@@ -1348,7 +1348,7 @@ Download button — stays disabled until a Refresh has populated rows.
 
 **Tags:** download, button, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1556`](./selectors.ts#L1556)
+**Source:** [`src/systems/ucpath/selectors.ts:1587`](./selectors.ts#L1587)
 
 ## `smartHRTransactionStatus.refreshButton()` — verified 2026-04-24
 
@@ -1356,7 +1356,7 @@ Refresh button — runs the filter and populates the results grid.
 
 **Tags:** refresh, button, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1564`](./selectors.ts#L1564)
+**Source:** [`src/systems/ucpath/selectors.ts:1595`](./selectors.ts#L1595)
 
 ## `smartHRTransactionStatus.clearButton()` — verified 2026-04-24
 
@@ -1364,7 +1364,7 @@ Clear button — resets all filter fields to defaults.
 
 **Tags:** clear, button, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1571`](./selectors.ts#L1571)
+**Source:** [`src/systems/ucpath/selectors.ts:1602`](./selectors.ts#L1602)
 
 ## `smartHRTransactionStatus.downloadToExcelButton()` — verified 2026-04-24
 
@@ -1372,7 +1372,7 @@ Toolbar button: "Download Transaction Status Table to Excel" — exports the res
 
 **Tags:** download, excel, export, button, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1579`](./selectors.ts#L1579)
+**Source:** [`src/systems/ucpath/selectors.ts:1610`](./selectors.ts#L1610)
 
 ## `smartHRTransactionStatus.returnToSmartHRLink()` — verified 2026-04-24
 
@@ -1380,7 +1380,7 @@ Toolbar button: "Download Transaction Status Table to Excel" — exports the res
 
 **Tags:** return, smart-hr, link, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1588`](./selectors.ts#L1588)
+**Source:** [`src/systems/ucpath/selectors.ts:1619`](./selectors.ts#L1619)
 
 ## `emergencyContact.emplIdInput()` — verified 2026-04-14
 
@@ -1388,7 +1388,7 @@ Empl ID textbox at page top level.
 
 **Tags:** empl, id, employee, textbox, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1599`](./selectors.ts#L1599)
+**Source:** [`src/systems/ucpath/selectors.ts:1630`](./selectors.ts#L1630)
 
 ## `emergencyContact.searchButton()` — verified 2026-04-14
 
@@ -1396,7 +1396,7 @@ Search button (exact: true).
 
 **Tags:** search, button, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1606`](./selectors.ts#L1606)
+**Source:** [`src/systems/ucpath/selectors.ts:1637`](./selectors.ts#L1637)
 
 ## `emergencyContact.noMatchMessage()` — verified 2026-04-14
 
@@ -1404,7 +1404,7 @@ Search button (exact: true).
 
 **Tags:** no-match, message, emergency-contact, search
 
-**Source:** [`src/systems/ucpath/selectors.ts:1613`](./selectors.ts#L1613)
+**Source:** [`src/systems/ucpath/selectors.ts:1644`](./selectors.ts#L1644)
 
 ## `emergencyContact.drillInLink()` — verified 2026-04-14
 
@@ -1412,7 +1412,7 @@ Drill-in link in multi-result grid.
 
 **Tags:** drill-in, link, results, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1620`](./selectors.ts#L1620)
+**Source:** [`src/systems/ucpath/selectors.ts:1651`](./selectors.ts#L1651)
 
 ## `emergencyContact.contactNameInputs()` — verified 2026-04-14
 
@@ -1420,7 +1420,7 @@ Every Contact Name textbox on the editor (for duplicate checking).
 
 **Tags:** contact, name, textbox, emergency-contact, duplicate
 
-**Source:** [`src/systems/ucpath/selectors.ts:1628`](./selectors.ts#L1628)
+**Source:** [`src/systems/ucpath/selectors.ts:1659`](./selectors.ts#L1659)
 
 ## `emergencyContact.primaryContactCheckboxes()` — verified 2026-04-28
 
@@ -1428,7 +1428,7 @@ Every Primary Contact checkbox on the editor — one per row, in document order,
 
 **Tags:** primary, contact, checkbox, emergency-contact, demote
 
-**Source:** [`src/systems/ucpath/selectors.ts:1639`](./selectors.ts#L1639)
+**Source:** [`src/systems/ucpath/selectors.ts:1670`](./selectors.ts#L1670)
 
 ## `emergencyContact.saveButton()` — verified 2026-04-14
 
@@ -1436,7 +1436,7 @@ Save button at the bottom of the editor.
 
 **Tags:** save, button, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1646`](./selectors.ts#L1646)
+**Source:** [`src/systems/ucpath/selectors.ts:1677`](./selectors.ts#L1677)
 
 ## `emergencyContact.messageDialog()` — verified 2026-07-08
 
@@ -1444,7 +1444,7 @@ PeopleSoft "Message" alert dialog raised after a failed editor save (e.g. the (1
 
 **Tags:** message, dialog, alert, error, save, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1657`](./selectors.ts#L1657)
+**Source:** [`src/systems/ucpath/selectors.ts:1688`](./selectors.ts#L1688)
 
 ## `emergencyContact.messageDialogOkButton()` — verified 2026-07-08
 
@@ -1452,7 +1452,7 @@ OK button inside the "Message" alert dialog — dismisses the save error. NEEDS 
 
 **Tags:** ok, button, message, dialog, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1667`](./selectors.ts#L1667)
+**Source:** [`src/systems/ucpath/selectors.ts:1698`](./selectors.ts#L1698)
 
 ## `emergencyContact.saveErrorBanner()` — verified 2026-07-08
 
@@ -1460,7 +1460,7 @@ Page-level PeopleSoft error banner on the emergency contact editor (same class/i
 
 **Tags:** error, banner, alert, save, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1680`](./selectors.ts#L1680)
+**Source:** [`src/systems/ucpath/selectors.ts:1711`](./selectors.ts#L1711)
 
 ## `emergencyContact.addNewRowButton()` — verified 2026-07-08
 
@@ -1468,7 +1468,7 @@ Page-level PeopleSoft error banner on the emergency contact editor (same class/i
 
 **Tags:** add, new, row, button, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1689`](./selectors.ts#L1689)
+**Source:** [`src/systems/ucpath/selectors.ts:1720`](./selectors.ts#L1720)
 
 ## `emergencyContact.viewAllLink()` — verified 2026-08-05
 
@@ -1476,7 +1476,7 @@ Page-level PeopleSoft error banner on the emergency contact editor (same class/i
 
 **Tags:** view-all, scroll, link, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1711`](./selectors.ts#L1711)
+**Source:** [`src/systems/ucpath/selectors.ts:1742`](./selectors.ts#L1742)
 
 ## `emergencyContact.contactNameAt()` — verified 2026-08-05
 
@@ -1484,7 +1484,7 @@ Contact Name textbox at a specific scroll row.
 
 **Tags:** contact, name, textbox, row, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1718`](./selectors.ts#L1718)
+**Source:** [`src/systems/ucpath/selectors.ts:1749`](./selectors.ts#L1749)
 
 ## `emergencyContact.primaryContactAt()` — verified 2026-08-05
 
@@ -1492,7 +1492,7 @@ Primary Contact checkbox at a specific scroll row. `input[type=checkbox]` keeps 
 
 **Tags:** primary, contact, checkbox, row, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1727`](./selectors.ts#L1727)
+**Source:** [`src/systems/ucpath/selectors.ts:1758`](./selectors.ts#L1758)
 
 ## `emergencyContact.relationshipAt()` — verified 2026-08-05
 
@@ -1500,7 +1500,7 @@ Relationship dropdown at a specific scroll row. Note a blank row DEFAULTS to val
 
 **Tags:** relationship, select, row, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1735`](./selectors.ts#L1735)
+**Source:** [`src/systems/ucpath/selectors.ts:1766`](./selectors.ts#L1766)
 
 ## `emergencyContact.sameAddressAt()` — verified 2026-08-05
 
@@ -1508,7 +1508,7 @@ Same Address as Employee checkbox at a specific scroll row.
 
 **Tags:** same, address, checkbox, row, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1743`](./selectors.ts#L1743)
+**Source:** [`src/systems/ucpath/selectors.ts:1774`](./selectors.ts#L1774)
 
 ## `emergencyContact.editAddressButtonAt()` — verified 2026-08-05
 
@@ -1516,7 +1516,7 @@ Edit Address button at a specific scroll row (opens the shared DERIVED_ADDRESS m
 
 **Tags:** edit, address, button, row, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1752`](./selectors.ts#L1752)
+**Source:** [`src/systems/ucpath/selectors.ts:1783`](./selectors.ts#L1783)
 
 ## `emergencyContact.phoneAt()` — verified 2026-08-05
 
@@ -1524,7 +1524,7 @@ Phone textbox at a specific scroll row.
 
 **Tags:** phone, textbox, row, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1759`](./selectors.ts#L1759)
+**Source:** [`src/systems/ucpath/selectors.ts:1790`](./selectors.ts#L1790)
 
 ## `emergencyContact.relationshipComboBox()` — verified 2026-07-08
 
@@ -1532,7 +1532,7 @@ Phone textbox at a specific scroll row.
 
 **Tags:** relationship, combobox, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1768`](./selectors.ts#L1768)
+**Source:** [`src/systems/ucpath/selectors.ts:1799`](./selectors.ts#L1799)
 
 ## `emergencyContact.sameAddressAsEmployeeCheckbox()` — verified 2026-07-08
 
@@ -1540,7 +1540,7 @@ Phone textbox at a specific scroll row.
 
 **Tags:** same, address, employee, checkbox, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1777`](./selectors.ts#L1777)
+**Source:** [`src/systems/ucpath/selectors.ts:1808`](./selectors.ts#L1808)
 
 ## `emergencyContact.editAddressButton()` — verified 2026-07-08
 
@@ -1548,7 +1548,7 @@ Phone textbox at a specific scroll row.
 
 **Tags:** edit, address, button, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1786`](./selectors.ts#L1786)
+**Source:** [`src/systems/ucpath/selectors.ts:1817`](./selectors.ts#L1817)
 
 ## `emergencyContact.address1Input()` — verified 2026-07-08
 
@@ -1556,7 +1556,7 @@ Address 1 textbox inside the Edit Address modal.
 
 **Tags:** address, street, textbox, modal, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1794`](./selectors.ts#L1794)
+**Source:** [`src/systems/ucpath/selectors.ts:1825`](./selectors.ts#L1825)
 
 ## `emergencyContact.cityInput()` — verified 2026-07-08
 
@@ -1564,7 +1564,7 @@ City textbox inside the Edit Address modal.
 
 **Tags:** address, city, textbox, modal, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1802`](./selectors.ts#L1802)
+**Source:** [`src/systems/ucpath/selectors.ts:1833`](./selectors.ts#L1833)
 
 ## `emergencyContact.stateInput()` — verified 2026-07-08
 
@@ -1572,7 +1572,7 @@ State textbox inside the Edit Address modal.
 
 **Tags:** address, state, textbox, modal, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1810`](./selectors.ts#L1810)
+**Source:** [`src/systems/ucpath/selectors.ts:1841`](./selectors.ts#L1841)
 
 ## `emergencyContact.postalInput()` — verified 2026-07-08
 
@@ -1580,7 +1580,7 @@ Postal textbox inside the Edit Address modal.
 
 **Tags:** address, postal, zip, textbox, modal, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1818`](./selectors.ts#L1818)
+**Source:** [`src/systems/ucpath/selectors.ts:1849`](./selectors.ts#L1849)
 
 ## `emergencyContact.editAddressOkButton()` — verified 2026-07-08
 
@@ -1588,7 +1588,7 @@ OK button inside the Edit Address modal (exact match — disambiguates from othe
 
 **Tags:** ok, button, modal, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1827`](./selectors.ts#L1827)
+**Source:** [`src/systems/ucpath/selectors.ts:1858`](./selectors.ts#L1858)
 
 ## `emergencyContact.phoneInput()` — verified 2026-07-08
 
@@ -1596,7 +1596,7 @@ Phone textbox (exact match) on the Contact Address/Phone tab.
 
 **Tags:** phone, textbox, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1836`](./selectors.ts#L1836)
+**Source:** [`src/systems/ucpath/selectors.ts:1867`](./selectors.ts#L1867)
 
 ## `emergencyContact.personIdValue()` — verified 2026-08-05
 
@@ -1604,7 +1604,7 @@ Employee ID VALUE in the editor header ("Person ID <emplId>"). The `.or()` arm i
 
 **Tags:** person, id, emplid, value, header, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1856`](./selectors.ts#L1856)
+**Source:** [`src/systems/ucpath/selectors.ts:1887`](./selectors.ts#L1887)
 
 ## `emergencyContact.personNameValue()` — verified 2026-08-05
 
@@ -1612,7 +1612,7 @@ Employee NAME VALUE in the editor header. Note the record differs from the EID's
 
 **Tags:** person, name, value, header, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1867`](./selectors.ts#L1867)
+**Source:** [`src/systems/ucpath/selectors.ts:1898`](./selectors.ts#L1898)
 
 ## `oathSignature.getPersonProfileFrame()` — verified 2026-04-22
 
@@ -1620,7 +1620,7 @@ Person Profiles content iframe FrameLocator. Distinct from Smart HR's `#main_tar
 
 **Tags:** iframe, frame, person-profile, oath
 
-**Source:** [`src/systems/ucpath/selectors.ts:1888`](./selectors.ts#L1888)
+**Source:** [`src/systems/ucpath/selectors.ts:1919`](./selectors.ts#L1919)
 
 ## `oathSignature.emplIdInput()` — verified 2026-04-22
 
@@ -1628,7 +1628,7 @@ Empl ID textbox on the Find-an-Existing-Value search form.
 
 **Tags:** empl, id, employee, textbox, person-profile, search
 
-**Source:** [`src/systems/ucpath/selectors.ts:1895`](./selectors.ts#L1895)
+**Source:** [`src/systems/ucpath/selectors.ts:1926`](./selectors.ts#L1926)
 
 ## `oathSignature.searchButton()` — verified 2026-04-22
 
@@ -1636,7 +1636,7 @@ Search button (exact: true disambiguates from "Save Search").
 
 **Tags:** search, button, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1902`](./selectors.ts#L1902)
+**Source:** [`src/systems/ucpath/selectors.ts:1933`](./selectors.ts#L1933)
 
 ## `oathSignature.clearSearchButton()` — verified 2026-04-22
 
@@ -1644,7 +1644,7 @@ Clear button on the search form — clears Empl ID between iterations.
 
 **Tags:** clear, button, person-profile, search
 
-**Source:** [`src/systems/ucpath/selectors.ts:1909`](./selectors.ts#L1909)
+**Source:** [`src/systems/ucpath/selectors.ts:1940`](./selectors.ts#L1940)
 
 ## `oathSignature.addNewOathLink()` — verified 2026-04-22
 
@@ -1652,7 +1652,7 @@ Clear button on the search form — clears Empl ID between iterations.
 
 **Tags:** add, new, oath, signature, link, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1920`](./selectors.ts#L1920)
+**Source:** [`src/systems/ucpath/selectors.ts:1951`](./selectors.ts#L1951)
 
 ## `oathSignature.noOathSentinel()` — verified 2026-04-22
 
@@ -1660,7 +1660,7 @@ Clear button on the search form — clears Empl ID between iterations.
 
 **Tags:** no, existing, oath, sentinel, text, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1932`](./selectors.ts#L1932)
+**Source:** [`src/systems/ucpath/selectors.ts:1963`](./selectors.ts#L1963)
 
 ## `oathSignature.oathDateInput()` — verified 2026-07-01
 
@@ -1668,7 +1668,7 @@ Oath Signature Date textbox inside the "Add New Oath Signature Date" sub-form. D
 
 **Tags:** oath, signature, date, textbox, person-profile, effdt
 
-**Source:** [`src/systems/ucpath/selectors.ts:1945`](./selectors.ts#L1945)
+**Source:** [`src/systems/ucpath/selectors.ts:1976`](./selectors.ts#L1976)
 
 ## `oathSignature.oathOkButton()` — verified 2026-04-22
 
@@ -1676,7 +1676,7 @@ OK button on the oath-detail sub-form — applies the row and returns to the pro
 
 **Tags:** ok, button, oath, sub-form, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1956`](./selectors.ts#L1956)
+**Source:** [`src/systems/ucpath/selectors.ts:1987`](./selectors.ts#L1987)
 
 ## `oathSignature.oathCancelButton()` — verified 2026-04-22
 
@@ -1684,7 +1684,7 @@ Cancel button on the oath-detail sub-form — used by test/dry paths.
 
 **Tags:** cancel, button, oath, sub-form, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1963`](./selectors.ts#L1963)
+**Source:** [`src/systems/ucpath/selectors.ts:1994`](./selectors.ts#L1994)
 
 ## `oathSignature.saveButton()` — verified 2026-04-22
 
@@ -1692,7 +1692,7 @@ Save button at the bottom of the Person Profile form — commits the staged oath
 
 **Tags:** save, button, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1971`](./selectors.ts#L1971)
+**Source:** [`src/systems/ucpath/selectors.ts:2002`](./selectors.ts#L2002)
 
 ## `oathSignature.returnToSearchButton()` — verified 2026-04-22
 
@@ -1700,7 +1700,7 @@ Return to Search button shown after save — clears the profile and returns to t
 
 **Tags:** return, search, button, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1979`](./selectors.ts#L1979)
+**Source:** [`src/systems/ucpath/selectors.ts:2010`](./selectors.ts#L2010)
 
 ## `oathSignature.employeeNameDisplay()` — verified 2026-07-01
 
@@ -1708,7 +1708,7 @@ Employee name display on the loaded Person Profile — visible near the Empl ID 
 
 **Tags:** employee, name, display, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1991`](./selectors.ts#L1991)
+**Source:** [`src/systems/ucpath/selectors.ts:2022`](./selectors.ts#L2022)
 
 ## `oathSignature.existingOathDate()` — verified 2026-07-02
 
@@ -1716,7 +1716,7 @@ The EXISTING (already-saved) Oath Signature Date on the loaded profile — a dis
 
 **Tags:** existing, oath, signature, date, display, person-profile, effdt
 
-**Source:** [`src/systems/ucpath/selectors.ts:2008`](./selectors.ts#L2008)
+**Source:** [`src/systems/ucpath/selectors.ts:2039`](./selectors.ts#L2039)
 
 ## `oathSignature.emplIdDisplay()` — verified 2026-07-08
 
@@ -1724,4 +1724,4 @@ The Empl ID displayed on the loaded Person Profile header — display-only span 
 
 **Tags:** empl-id, display, person-profile, identity, gate
 
-**Source:** [`src/systems/ucpath/selectors.ts:2021`](./selectors.ts#L2021)
+**Source:** [`src/systems/ucpath/selectors.ts:2052`](./selectors.ts#L2052)

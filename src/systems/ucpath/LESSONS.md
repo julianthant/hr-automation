@@ -319,20 +319,43 @@ exactly one textbox selector, `emplIdInput`, written **non-exact**
 (`getByRole("textbox", { name: "Empl ID" })`), so `"Empl ID"` still matches
 `"Empl ID begins with"` by substring — the same accident that kept
 `personOrgSummary.lastNameInput` alive. Its only `exact: true` is the Search
-BUTTON, which has no `$op` sibling. `payPathActions` still carries the fragile
-`exact: true` textbox shape on a `$op`-bearing search grid and would break the
-same way, but no current workflow drives it (operator confirmed 2026-08-04:
-"don't use paypath actions, use workforce job summary"), so it is left as-is
-rather than edited unverified. **The rule to carry forward: on a PeopleSoft
-Find-an-Existing-Value form, never pin a search textbox with `exact: true` on
-the bare label — the operator text is part of the accessible name.**
+BUTTON, which has no `$op` sibling. **This blast-radius sweep MISSED
+`ssSmartHRTransactions` — a production-driven Find-an-Existing-Value form with
+the same fragile shape — and it broke the next separations run (doc 4493,
+2026-08-05):** `emplIdInput` (`exact: true`) died on the `transaction-check`
+Empl ID fill (`Timed out waiting for element`), and `nameInput` /
+`actionInput` / `businessUnitInput` were equally dead (onboarding's
+`readSubmittedHireReceipt` / hire-duplicate guard drive `nameInput`). Fixed
+2026-08-05 with the same anchored-regex + record.field-id pattern
+(`/^Empl ID\b/` + `#UC_SS_TBH_DVW_EMPLID`, etc.; `approvalStatusSelect`'s
+accessible name is `"Approval Status ="` — the `=` operator folds in on
+comboboxes too); all arms live-probed on the real search form, and the
+downstream results grid (`trPTS_CFG_CL_STD_RSL` rows) confirmed unchanged on
+the same probe. `payPathActions` still carries the fragile `exact: true`
+textbox shape on a `$op`-bearing search grid and would break the same way, but
+no current workflow drives it (operator confirmed 2026-08-04: "don't use
+paypath actions, use workforce job summary"), so it is left as-is rather than
+edited unverified. `smartHRTransactionStatus` (`HR_TBH_STATUS.GBL`) keeps its
+`exact: true` filter arms — it is a filter dashboard, NOT a
+Find-an-Existing-Value form, so its inputs carry no `$op` operator. **The rule
+to carry forward: on a PeopleSoft Find-an-Existing-Value form, never pin a
+search textbox with `exact: true` on the bare label — the operator text is
+part of the accessible name. When one form of this type drifts, sweep EVERY
+registry group whose section comment says "Find-an-Existing-Value" in the same
+pass — the drift is platform-wide, not per-page.**
 **Selector:** `personOrgSummary.emplIdInput`, `personOrgSummary.lastNameInput`,
-`personOrgSummary.nameInput`
-**Tags:** person-org-summary, search, accessible-name, aria-labelledby, operator,
-begins-with, exact, strict-mode, getbyrole, peoplesoft, person-lookup, selector-drift
-**References:** Live-probed 2026-08-04 via `npm run sel:browser` + Duo Autopilot
-(read-only). Related: `#2026-07-08` and `#2026-07-13`, the other two cases where a
-Person-Org/person-search chain was dead live while looking verified in the registry.
+`personOrgSummary.nameInput`, `ssSmartHRTransactions.emplIdInput`,
+`ssSmartHRTransactions.nameInput`, `ssSmartHRTransactions.txnNumberTextbox`,
+`ssSmartHRTransactions.actionInput`, `ssSmartHRTransactions.approvalStatusSelect`,
+`ssSmartHRTransactions.businessUnitInput`
+**Tags:** person-org-summary, ss-smart-hr, search, accessible-name, aria-labelledby,
+operator, begins-with, exact, strict-mode, getbyrole, peoplesoft, person-lookup,
+separations, transaction-check, selector-drift
+**References:** Live-probed 2026-08-04 (`personOrgSummary`) and 2026-08-05
+(`ssSmartHRTransactions`, separations doc 4493 failure) via `npm run sel:browser`
++ Duo Autopilot (read-only). Related: `#2026-07-08` and `#2026-07-13`, the other
+two cases where a Person-Org/person-search chain was dead live while looking
+verified in the registry.
 
 ## 2026-08-04 — A UCPath name-search "Not found" is usually a MISREAD FIRST NAME, not a missing record; and an EID-mode "Not found" can be a plain false negative
 
