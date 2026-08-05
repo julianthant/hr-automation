@@ -1902,7 +1902,7 @@
       "src/systems/ucpath/navigate.ts": "138772d16f32488512cc32d3057f13da215e2af978f11c60c593b73451b69b58",
       "src/systems/ucpath/person-org-summary.ts": "456505e908a86bf9f3fd547746bcbed76e1b1ca8924c7e018f54993b8986b804",
       "src/systems/ucpath/personal-data.ts": "6bb4c067ef52f0ca321705e57fef3490e65a7d0f99937c1c301dcbb99855659e",
-      "src/systems/ucpath/selectors.ts": "8cb590d35206118d6504e1825f5c18ac8a9386099cf78db5780fde4d59e8e94e",
+      "src/systems/ucpath/selectors.ts": "8776bafd1cdfd3509e117cbdff8baf51e44abba1fa566251a1b4630eff103a85",
       "src/systems/ucpath/ss-smart-hr.ts": "059dc4e3ac10a82317492618ea2c8d8baa8414f69a3376c8b6bafdddec904f32",
       "src/systems/ucpath/transaction.ts": "9cb55871baed0f7d22c42373f650920a4bdd8adfd7612bbaa07e2c4ae8adc155",
       "src/systems/ucpath/types.ts": "9c2ac682e5bd6609451052538c4122f76bf3e42cbbe7d984b1c7527dcd58f434",
