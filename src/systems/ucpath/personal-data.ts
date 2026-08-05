@@ -3,6 +3,7 @@ import { log } from "../../utils/log.js";
 import { dismissPeopleSoftModalMask } from "../common/modal.js";
 import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
 import { emergencyContact } from "./selectors.js";
+import { normalizePersonNameForCompare } from "../../domain/identity/person-name.js";
 
 /**
  * UCPath standalone Emergency Contact component.
@@ -333,6 +334,46 @@ export async function saveEmergencyContactWithPrimaryRecovery(
   if (errorText) {
     throw new Error(
       `Emergency contact save failed after primary-contact recovery: ${errorText}`,
+    );
+  }
+  await assertEmergencyContactPersisted(page, contactName);
+}
+
+/**
+ * POSITIVE proof that the save landed — read the contact name back off the
+ * editor after the save round-trip.
+ *
+ * 2026-08-05: the only post-save check used to be "did an error dialog
+ * appear?", via `emergencyContact.messageDialog` — a selector whose own JSDoc
+ * still says NEEDS LIVE VERIFY. It did not match UCPath's real
+ * "Highlighted fields are required. (15,30)" dialog, so `readVisible…SaveError`
+ * returned null, absence-of-error was read as success, and a record whose save
+ * UCPath had REFUSED was reported `done`. Absence of a signal you cannot prove
+ * you can detect is not evidence. Assert the fact instead: after a genuine
+ * save the row persists and still carries the contact name; when the save was
+ * rejected the required field is blank (or the row is gone) and this throws.
+ */
+async function assertEmergencyContactPersisted(page: Page, contactName: string): Promise<void> {
+  const fields = emergencyContact.contactNameInputs(page);
+  if ((await fields.count()) === 0) {
+    throw new Error(
+      `Emergency contact save could not be confirmed for "${contactName}" — no contact rows are present after Save. ` +
+        `Treating an unconfirmable save as a FAILURE rather than reporting success.`,
+    );
+  }
+  const values = (await fields.allInnerTexts().catch(() => [] as string[])).map((v) => v.trim());
+  const inputValues = await Promise.all(
+    Array.from({ length: await fields.count() }, (_, i) =>
+      fields.nth(i).inputValue({ timeout: 3_000 }).catch(() => ""),
+    ),
+  );
+  const all = [...values, ...inputValues].map((v) => v.trim()).filter(Boolean);
+  const want = normalizePersonNameForCompare(contactName);
+  if (!all.some((v) => normalizePersonNameForCompare(v) === want)) {
+    throw new Error(
+      `Emergency contact save could not be confirmed for "${contactName}" — after Save the editor shows ` +
+        `[${all.join(", ") || "no contact names"}]. UCPath most likely rejected the save. ` +
+        `Failing loud so this is not recorded as a successful write.`,
     );
   }
 }
