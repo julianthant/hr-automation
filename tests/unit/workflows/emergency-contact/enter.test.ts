@@ -44,8 +44,28 @@ describe("readEmergencyContactPersonIdRow", () => {
     );
   });
 
-  it("returns empty string when the Person ID header is absent", async () => {
-    assert.equal(await readEmergencyContactPersonIdRow(fakePage({ count: 0 })), "");
+  // `null` (not "") means "not rendered YET" — a retryable state the identity
+  // gate polls on. Returning "" made a still-painting header indistinguishable
+  // from a genuine miss, which is how the 2026-08-05 batch failed all 13 records
+  // with "expected identity was not found" against correctly-loaded pages.
+  it("returns null when the Person ID header has not rendered yet", async () => {
+    assert.equal(await readEmergencyContactPersonIdRow(fakePage({ count: 0 })), null);
+  });
+
+  it("propagates a count() exception instead of reporting the header absent", async () => {
+    const page = {
+      getByText: (_t: string) => ({
+        first: () => ({
+          count: async () => {
+            throw new Error("frame detached");
+          },
+          locator: (_sel: string) => ({ innerText: async () => "" }),
+        }),
+      }),
+    } as unknown as Page;
+    // A swallowed count() would read as "no header" and fail the gate with the
+    // WRONG reason ("not found" rather than "could not read").
+    await assert.rejects(() => readEmergencyContactPersonIdRow(page), /frame detached/);
   });
 
   it("propagates an innerText exception (so the gate fails loud, not false-miss)", async () => {

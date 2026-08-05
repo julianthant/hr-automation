@@ -191,10 +191,16 @@ export const emergencyContactWorkflow = defineWorkflow({
       // existing primary contact or add a new one. A stale/wrong page here would
       // otherwise write this contact onto the wrong person's record. Fail loud on
       // a mismatch, naming the id actually displayed.
+      // `pollMs` is load-bearing, not politeness: PeopleSoft paints this header
+      // AFTER the editor's own "loaded" signal, so a single sample races the
+      // render and reports a hard identity MISMATCH for the right person. That
+      // is what failed all 13 records of the 2026-08-05 batch. Bound-wait for
+      // the fact instead of sampling it once.
       await assertDisplayedIdentity({
         expected: effectiveRecord.employee.employeeId,
         context: `Emergency Contact (${effectiveRecord.employee.name || "employee"})`,
         extract: () => readEmergencyContactPersonIdRow(page),
+        pollMs: 15_000,
       });
 
       const discoveredCtx: EmergencyContactContext = { employeeName: effectiveRecord.employee.name };
