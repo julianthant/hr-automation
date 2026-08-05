@@ -33,6 +33,7 @@ import fs from "node:fs";
 import type { Download, Page } from "playwright";
 import { launchBrowser } from "../../infra/browser/launch.js";
 import { fillSsoCredentials, clickSsoSubmit } from "../../infra/auth/sso-fields.js";
+import { armDuoBeforeSsoNavigation } from "../../infra/auth/duo-webauthn.js";
 import { pollDuoApproval } from "../../infra/auth/duo-poll.js";
 import { requestDuoApproval } from "../../tracker/sessions/duo-queue.js";
 import { validateEnv } from "../../utils/env.js";
@@ -103,7 +104,10 @@ async function dismissStaySignedIn(page: Page): Promise<void> {
  * password). The username field is usually pre-populated via the `?username=`
  * URL parameter Microsoft passes along, but we re-fill defensively.
  */
-async function handleAdfsLogin(page: Page): Promise<void> {
+async function handleAdfsLogin(
+  page: Page,
+  opts: { abortSignal?: AbortSignal } = {},
+): Promise<void> {
   const { password } = validateEnv();
 
   log.step("UCSD ADFS detected — filling password...");
@@ -124,6 +128,17 @@ async function handleAdfsLogin(page: Page): Promise<void> {
     timeout: 5_000,
   });
   await page.waitForTimeout(300);
+  // Hands-off Duo: arm BEFORE this click navigates to the Duo prompt, exactly as
+  // the Shibboleth path does in `clickSsoSubmit`. Omitting it here is what made
+  // SharePoint dead-end in manual Duo while UCPath / CRM / Kuali stayed
+  // hands-off — the prompt auto-fires a security-key ceremony on load, Chrome
+  // raises its native (page-undismissable) dialog when no authenticator exists,
+  // and the arm that `pollDuoApproval` does later cannot answer a request that
+  // is already pending. See `armDuoBeforeSsoNavigation`.
+  await armDuoBeforeSsoNavigation(page, {
+    label: "ADFS submit",
+    ...(opts.abortSignal ? { abortSignal: opts.abortSignal } : {}),
+  });
   await safeClick(adfs.submitButton(page).first(), {
     label: "sharepoint adfs submit",
     timeout: 5_000,
@@ -210,7 +225,7 @@ export async function loginToSharePoint(
     await fillSsoCredentials(page);
     await clickSsoSubmit(page, { abortSignal: opts.abortSignal });
   } else if (onAdfs) {
-    await handleAdfsLogin(page);
+    await handleAdfsLogin(page, { ...(opts.abortSignal ? { abortSignal: opts.abortSignal } : {}) });
   }
 
   // Run Duo polling whenever we aren't already at a recognized success URL.
