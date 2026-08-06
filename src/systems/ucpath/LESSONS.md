@@ -404,3 +404,14 @@ compound-surname, campus-email, transcription, ocr, emergency-contact, onbase
 **References:** Companion to the `#2026-08-04` `$op` accessible-name entry above
 (that one made these searches fail at all; this one is about interpreting their
 results). Live batch: 216 EC forms, 208 filed.
+
+## 2026-08-05 — HR-Tasks person search: the #PT_SIDE activity-guide sidebar overlays the new configurable-search Search button and swallows its click
+
+**Tried:** `searchPerson` (HR-Tasks Search/Match) exactly as it had run since July: goto `SMART_HR_URL` → select `Search Type=Person` → fill `PERSON_SEARCH` → `safeClick(personSearch.loadFormButton)` (`#PTS_CFG_CL_WRK_PTS_SRCH_BTN`). Every call timed out at that click (`locator.click: Timeout 10000ms exceeded`, deterministic 2/2 fresh-login runs), which initially read as the selector having died in the 2026-08 UCPath update.
+
+**Failed because:** The 2026-08 configurable-search shell keeps EVERY legacy DOM id — `#HCR_SM_PARM_VW_SM_TYPE`, `#HCR_SM_PARM_VW_SM_PARM_CD`, and the Search button id are all present, visible, and enabled — but the `#PT_SIDE` activity-guide step panel (`win4divPTGP_STEP_DVW_PTGP_STEP_BTN_GB$6`, "Step 7 of 7") now overlays the button's hit region at the automation viewport and "subtree intercepts pointer events" (Playwright's own call log named it). A headless playwright-cli session at a different layout clicked the same button fine, which is what proved the element itself was alive. Cosmetic changes in the same shell that do NOT break the flow but will look unfamiliar: criteria fields gained `$op` operator dropdowns (same wave as the `#2026-08-04` `$op` lesson), results render INLINE on the same page ("Nothing yet — Your search results will appear here" placeholder replaces the separate results navigation), and a floating "Ask PathPal" chat widget exists bottom-right.
+
+**Fix:** `collapseSidebar(page, { onlyIfExpanded: true })` in `searchPerson` immediately after the SMART_HR goto settles — the exact pattern Smart HR transactions and Person Org Summary already use (`transaction.ts:137`, `person-org-summary.ts:364`). Verified live 2026-08-05: "Sidebar collapsed" → "Person search form loaded" → "Search criteria filled" → outcome signal `duplicate-dialog` read cleanly across a 23-person collector run. When a click times out on an id that snapshots as visible+enabled, read the Playwright call log's "intercepts pointer events" line before concluding the selector is dead.
+
+**Tags:** person-search, sidebar, pt-side, activity-guide, intercepts-pointer-events, click-timeout, configurable-search, pathpal, inline-results, smart-hr
+**References:** Commit `7a866af3`. Companion to `#2026-08-04` (`$op` accessible-name drift — same UCPath update wave). Interception evidence preserved in the run-1 collector output (`.tracker/i9-shred/` audit trail, 2026-08-05).
