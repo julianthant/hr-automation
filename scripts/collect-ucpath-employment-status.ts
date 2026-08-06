@@ -321,53 +321,82 @@ async function main() {
     }
     if (!ok) throw new Error("UCPath authentication failed after 4 attempts");
 
-    for (const person of people) {
-      let finding: PersonFinding | null = null;
-      // Re-run every negative once (2026-08-04 lesson) before recording it.
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          const result = await checkPerson(page, person);
-          finding = { ...result, attempts: attempt };
-          // Retry negatives once, and retry when the DOB factor errored (transient
-          // HR-Tasks flake) so the second pass can restore the missing factor.
-          if (result.status !== "not-found" && !result.searchMatchError) break;
-        } catch (err) {
-          if (finding) {
-            // A completed earlier attempt beats a crashed retry — keep it and
-            // note the retry error without destroying real data.
-            finding = { ...finding, attempts: attempt, error: `retry attempt ${attempt} threw: ${String(err)}` };
-            break;
-          }
-          finding = {
-            key: person.key,
-            name: person.name,
-            attempts: attempt,
-            identityFactors: [],
-            resolvedEmplId: "",
-            searchMatchEmplIds: [],
-            nameLookupCandidateEids: [],
-            hireDateGate: null,
-            conflict: "",
-            searchMatchError: "",
-            rows: [],
-            anyActive: null,
-            latestTerminationDate: "",
-            fiveYearsElapsed: null,
-            status: "error",
-            error: String(err),
-          };
-        }
-      }
-      if (!finding) throw new Error(`No finding produced for "${person.name}"`);
-      findings.push(finding);
-      console.log(
-        `[shred-audit] ${person.key} "${person.name}" → ${finding.status}` +
-          (finding.resolvedEmplId ? ` (EID ${finding.resolvedEmplId})` : "") +
-          (finding.latestTerminationDate ? ` term ${finding.latestTerminationDate}` : "") +
-          (finding.fiveYearsElapsed !== null ? ` 5y=${finding.fiveYearsElapsed}` : ""),
-      );
-      writeFileSync(outputPath, JSON.stringify({ generatedAt: new Date().toISOString(), findings }, null, 2));
+    // Worker pool: ONE login, N tabs in the same authenticated context — the
+    // same shared-context pattern the production person-lookup pool uses. The
+    // Duo ceremony itself must stay single-flight; tabs after auth are safe.
+    const workerCount = Math.max(1, Math.min(4, Number(process.env.SHRED_AUDIT_WORKERS ?? "3")));
+    const context = page.context();
+    const workerPages = [page];
+    for (let i = 1; i < workerCount && i < people.length; i++) {
+      workerPages.push(await context.newPage());
     }
+
+    const slots: (PersonFinding | null)[] = people.map(() => null);
+    let nextIndex = 0;
+    const save = () =>
+      writeFileSync(
+        outputPath,
+        JSON.stringify(
+          { generatedAt: new Date().toISOString(), findings: slots.filter(Boolean) },
+          null,
+          2,
+        ),
+      );
+
+    const worker = async (wpage: typeof page) => {
+      for (;;) {
+        const i = nextIndex++;
+        if (i >= people.length) return;
+        const person = people[i];
+        let finding: PersonFinding | null = null;
+        // Re-run every negative once (2026-08-04 lesson) before recording it.
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            const result = await checkPerson(wpage, person);
+            finding = { ...result, attempts: attempt };
+            // Retry negatives once, and retry when the DOB factor errored
+            // (transient HR-Tasks flake) so the second pass can restore it.
+            if (result.status !== "not-found" && !result.searchMatchError) break;
+          } catch (err) {
+            if (finding) {
+              // A completed earlier attempt beats a crashed retry.
+              finding = { ...finding, attempts: attempt, error: `retry attempt ${attempt} threw: ${String(err)}` };
+              break;
+            }
+            finding = {
+              key: person.key,
+              name: person.name,
+              attempts: attempt,
+              identityFactors: [],
+              resolvedEmplId: "",
+              searchMatchEmplIds: [],
+              nameLookupCandidateEids: [],
+              hireDateGate: null,
+              conflict: "",
+              searchMatchError: "",
+              rows: [],
+              anyActive: null,
+              latestTerminationDate: "",
+              fiveYearsElapsed: null,
+              status: "error",
+              error: String(err),
+            };
+          }
+        }
+        if (!finding) throw new Error(`No finding produced for "${person.name}"`);
+        slots[i] = finding;
+        console.log(
+          `[shred-audit] ${person.key} "${person.name}" → ${finding.status}` +
+            (finding.resolvedEmplId ? ` (EID ${finding.resolvedEmplId})` : "") +
+            (finding.latestTerminationDate ? ` term ${finding.latestTerminationDate}` : "") +
+            (finding.fiveYearsElapsed !== null ? ` 5y=${finding.fiveYearsElapsed}` : ""),
+        );
+        save();
+      }
+    };
+
+    await Promise.all(workerPages.map((p) => worker(p)));
+    findings.push(...(slots.filter(Boolean) as PersonFinding[]));
   } finally {
     await browser?.close();
   }
