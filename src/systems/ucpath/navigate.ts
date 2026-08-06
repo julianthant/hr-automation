@@ -271,6 +271,13 @@ export async function searchPerson(
   // networkidle alone guards the transition; the preceding sleep was redundant.
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
 
+  // The HR-Tasks activity-guide sidebar (#PT_SIDE step panel) overlays the
+  // configurable-search Search button and swallows its click (proven live
+  // 2026-08-05: "win4divPTGP_STEP_DVW_PTGP_STEP_BTN_GB$6 … intercepts pointer
+  // events" — every searchPerson call timed out there). Same fix as Smart HR
+  // and Person Org Summary: collapse it before touching the form.
+  await collapseSidebar(page, { onlyIfExpanded: true });
+
   const frame = page.frameLocator("#main_target_win0"); // allow-inline-selector -- see selectors.ts getContentFrame
 
   // PAGE 1: Search Type = Person, Parameter = PERSON_SEARCH
