@@ -407,7 +407,10 @@ export const personSearch = {
     f.locator("#HCR_SM_PARM_VW_SM_PARM_CD"),
 
   /**
-   * Search button on page 1 (loads the search form). verified 2026-03-16
+   * Search button on page 1 (loads the search form). The 2026-08 configurable-
+   * search shell moved it into the "Search Criteria" section with inline
+   * results below; the id is unchanged, but the #PT_SIDE activity-guide
+   * sidebar overlays it — searchPerson collapses the sidebar first. verified 2026-08-05
    * @tags search, load, form, button, person
    */
   loadFormButton: (f: FrameLocator): Locator =>
