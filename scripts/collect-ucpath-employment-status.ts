@@ -116,7 +116,15 @@ async function checkPerson(
   if (person.dob && person.firstName && person.lastName) {
     try {
       const match = await searchPerson(page, "", person.firstName, person.lastName, person.dob);
-      searchMatchEmplIds = (match.matches ?? []).map((m) => m.emplId).filter(Boolean);
+      // Search/Match's selective rules key on DOB with FUZZY first names and
+      // IGNORE the last name entirely (proven live 2026-08-06: "Chong, Cameron"
+      // → Cameron CLARK; "Calub, Joseph" → Joshua ARCIA). A returned match only
+      // counts when its surname actually matches the person we searched.
+      const surname = person.lastName.trim().toLowerCase();
+      searchMatchEmplIds = (match.matches ?? [])
+        .filter((m) => (m.lastName ?? "").trim().toLowerCase() === surname)
+        .map((m) => m.emplId)
+        .filter(Boolean);
     } catch (err) {
       // Recorded loudly on the finding as a MISSING factor (never as "no match");
       // it does not veto resolution via the remaining factors.

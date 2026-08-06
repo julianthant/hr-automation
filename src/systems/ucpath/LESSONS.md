@@ -415,3 +415,14 @@ results). Live batch: 216 EC forms, 208 filed.
 
 **Tags:** person-search, sidebar, pt-side, activity-guide, intercepts-pointer-events, click-timeout, configurable-search, pathpal, inline-results, smart-hr
 **References:** Commit `7a866af3`. Companion to `#2026-08-04` (`$op` accessible-name drift — same UCPath update wave). Interception evidence preserved in the run-1 collector output (`.tracker/i9-shred/` audit trail, 2026-08-05).
+
+## 2026-08-06 — HR-Tasks Search/Match matches on DOB with FUZZY first names and IGNORES the last name — a `matches[0]` result can be a different person at another campus
+
+**Tried:** Treating an HR-Tasks Search/Match (PERSON_SEARCH) hit as an identity resolution for "<last>, <first>" + DOB: `searchPerson` returns `matches` and callers (the I-9 shred-audit collector, and `runPersonMatch` in `src/workflows/i9-check/check.ts`) took `matches[0].emplId` as the found person.
+
+**Failed because:** The component's selective search orders key on the DOB (with the NID absent) and treat the first name fuzzily while the LAST NAME does not participate at all. Live 2026-08-06, systemwide results: searching "Chong, Cameron" + DOB returned EID 10594146 = **Cameron CLARK** (SBCMP); "Calub, Joseph" + DOB returned 10692329 = **Joshua ARCIA**; "Alon, Joshua" + DOB returned 10293668 = **Josselyn THOMAS**. All three were wrong-person hits that Person Org Summary then contradicted (no rows / different name). Search/Match is also SYSTEMWIDE (all UC campuses), unlike the SDCMP-scoped Person Org name search, so a hit can be a different campus's person even when the name does agree.
+
+**Fix:** Never accept a Search/Match hit without verifying the returned surname against the searched surname (`match.lastName` comes back via the `HTML4$<n>` grid cells — compare normalized). The shred-audit collector now filters `matches` to surname-equal hits (`scripts/collect-ucpath-employment-status.ts`); `runPersonMatch` in i9-check still takes `matches[0]` unverified and should get the same guard before its next production run. Cross-check every positive against Person Org Summary by EID — a Search/Match EID whose Person Org read shows a different name (or no rows) is a false hit, not a data error.
+
+**Tags:** person-search, search-match, dob, fuzzy-first-name, last-name-ignored, wrong-person, cross-campus, sbcmp, i9-check, identity-gate
+**References:** `src/workflows/i9-check/check.ts` (`runPersonMatch`, unguarded as of this date). Live evidence in `.tracker/i9-shred/` (2026-08-05 audit). Companion to `#2026-08-05` (sidebar intercept — same audit).
