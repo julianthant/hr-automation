@@ -892,6 +892,7 @@ export async function clickSaveAndSubmit(
   page: Page,
   frame: FrameLocator,
   employeeId?: string,
+  opts: { personName?: string } = {},
 ): Promise<TransactionResult> {
   log.step("Clicking Save and Submit...");
   await dismissPeopleSoftModalMask(page);
@@ -1119,8 +1120,13 @@ export async function clickSaveAndSubmit(
         );
       }
 
-      if (!transactionNumber && employeeId) {
-        transactionNumber = await readLatestTransactionNumber(page, employeeId);
+      // New hires have no EID, so the readback matches the Transactions in
+      // Progress row by NAME. This is the path that actually yields the
+      // T-number: row link -> Continue -> the id below the action bar.
+      if (!transactionNumber && (employeeId || opts.personName)) {
+        transactionNumber = await readLatestTransactionNumber(page, employeeId ?? "", {
+          ...(opts.personName ? { personName: opts.personName } : {}),
+        });
       }
     } else {
       log.warn(
@@ -1161,6 +1167,7 @@ export async function clickSaveAndSubmit(
 export async function readLatestTransactionNumber(
   page: Page,
   employeeId: string,
+  opts: { personName?: string } = {},
 ): Promise<string> {
   log.step("Re-navigating to Smart HR Transactions...");
   await navigateToSmartHR(page);
@@ -1168,10 +1175,14 @@ export async function readLatestTransactionNumber(
   // clickSmartHRTransactions already awaits networkidle — no extra sleep needed.
   const txnFrame = getContentFrame(page);
 
-  if (!employeeId) {
-    log.warn("[Txn Readback] No EID provided — cannot locate the submitted transaction");
+  // A new hire has no EID (Person ID renders "NEW"), so the Transactions in
+  // Progress row is located by NAME instead. Only a run with neither is stuck.
+  const personName = opts.personName?.trim() ?? "";
+  if (!employeeId && !personName) {
+    log.warn("[Txn Readback] No EID and no name provided — cannot locate the submitted transaction");
     return "";
   }
+  const rowKey = employeeId || personName;
 
   const deadline = Date.now() + 15_000;
   let linkText = "";
@@ -1182,18 +1193,18 @@ export async function readLatestTransactionNumber(
     // findExistingTerminationTransaction's pre-submit duplicate guard, a
     // failure here does not risk a duplicate create.
     try {
-      linkText = (await findTransactionRowLinkByEid(txnFrame, employeeId)) ?? "";
+      linkText = (await findTransactionRowLinkByEid(txnFrame, employeeId, { personName })) ?? "";
     } catch (e) {
-      log.warn(`[Txn Readback] Row scan threw while polling for EID ${employeeId} — retrying: ${e instanceof Error ? e.message : String(e)}`);
+      log.warn(`[Txn Readback] Row scan threw while polling for ${rowKey} — retrying: ${e instanceof Error ? e.message : String(e)}`);
     }
     if (!linkText) await page.waitForTimeout(1_500);
   }
   if (!linkText) {
-    log.step(`Transaction row for EID ${employeeId} not found after 15s poll`);
+    log.step(`Transaction row for ${rowKey} not found after 15s poll`);
     return "";
   }
 
-  log.step(`Clicking transaction row for EID ${employeeId} (link='${linkText}')`);
+  log.step(`Clicking transaction row for ${rowKey} (link='${linkText}')`);
   const link = txnFrame.getByRole("link", { name: linkText }); // allow-inline-selector -- dynamic matched-name link
   if (!(await clickIfPresent(link, {
     timeout: 5_000,
@@ -1705,20 +1716,24 @@ export async function scrollToTransactionReadbackArea(frame: FrameLocator): Prom
 async function findTransactionRowLinkByEid(
   frame: FrameLocator,
   employeeId: string,
-  opts?: { effectiveDate?: string; requireTerminationAction?: boolean },
+  opts?: { effectiveDate?: string; requireTerminationAction?: boolean; personName?: string },
 ): Promise<string | null> {
   return await frame.locator("body").evaluate( // allow-inline-selector -- body scan for smart-hr-transactions list
-    (body, { eid, date, requireTerm }: { eid: string; date?: string; requireTerm?: boolean }) => {
+    (body, { eid, date, requireTerm, name }: { eid: string; date?: string; requireTerm?: boolean; name?: string }) => {
       const tables = body.querySelectorAll("table");
       for (const table of Array.from(tables)) {
         for (const row of Array.from((table).rows)) {
           const rowText = row.textContent ?? "";
           if (date && !rowText.includes(date)) continue;
           if (requireTerm && !/Terminat/i.test(rowText)) continue;
-          const hasEidCell = Array.from(row.cells).some(
-            (c) => (c.textContent ?? "").trim() === eid,
-          );
-          if (!hasEidCell) continue;
+          const cells = Array.from(row.cells).map((c) => (c.textContent ?? "").trim());
+          // A brand-new hire's Person ID renders "NEW", so there is no EID to
+          // match — fall back to the Name cell, which the Transactions in
+          // Progress grid always carries.
+          const matched = eid
+            ? cells.some((c) => c === eid)
+            : Boolean(name) && cells.some((c) => c.toUpperCase() === (name ?? "").toUpperCase());
+          if (!matched) continue;
           const link = row.querySelector("a");
           const linkText = (link?.textContent ?? "").trim();
           if (!linkText) continue;
@@ -1727,7 +1742,12 @@ async function findTransactionRowLinkByEid(
       }
       return null;
     },
-    { eid: employeeId, date: opts?.effectiveDate, requireTerm: opts?.requireTerminationAction },
+    {
+      eid: employeeId,
+      date: opts?.effectiveDate,
+      requireTerm: opts?.requireTerminationAction,
+      name: opts?.personName,
+    },
   );
 }
 

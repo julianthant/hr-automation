@@ -419,7 +419,7 @@
       "path": "src/systems/ucpath/transaction.ts",
       "changeKind": "modified",
       "beforeSha256": "1edbfd04c254d3a9a780431899ec30569b746536b45e53c1e1194ad84237bf94",
-      "afterSha256": "390194d87f2b05fbaff3c94435d82ffa6d49d7577ba38ab635d066882ed6b095",
+      "afterSha256": "0877822035fdb5322d98180b54ee04ca9b4cddeb1ed1f0915bac4a4e92143946",
       "capabilityIds": [
         "legacy-workflow-onboarding",
         "legacy-workflow-separations"
@@ -494,7 +494,7 @@
       "path": "src/workflows/onboarding/workflow.ts",
       "changeKind": "modified",
       "beforeSha256": "3fdbf1d1ed90700c5ad7aeaa93024083e6a319ecf778bdaf0874e8648c98b8a8",
-      "afterSha256": "ee8655b7ec49497306a1f2e73261613300b2d4fea216509d5d95ba894447184b",
+      "afterSha256": "b6f1a87936d4f836940a1067c7ac8b25c20b0c7403f8a678d429a4dd65ac662a",
       "capabilityIds": [
         "legacy-workflow-onboarding"
       ],
@@ -1024,7 +1024,7 @@
       "path": "src/workflows/onboarding/enter.ts",
       "changeKind": "modified",
       "beforeSha256": "60def469803c032799e46f1aab66267bec2a592b857a04da7fb1e9a0796bc25b",
-      "afterSha256": "e0dbd84ea9f61cd5cb47c99caa4aa727a6c4d0da3c8080707d4dc84df52100d5",
+      "afterSha256": "951f66634993f4ddcbe12088b461e751103a990b855fccc0e9e17009bd86ad34",
       "capabilityIds": [
         "legacy-workflow-onboarding"
       ],

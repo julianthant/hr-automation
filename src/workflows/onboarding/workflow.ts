@@ -664,8 +664,17 @@ export const onboardingWorkflow = defineWorkflow({
         }
 
         try {
+          // The SUBMIT itself reads the transaction number back via the
+          // Transactions-in-Progress row -> Continue -> "Transaction ID:" path.
+          // That is the authoritative source for a NEW HIRE; the SS Smart HR
+          // list does not carry an unprocessed hire, so deriving it from there
+          // produced a false "submittedWithoutTxnNumber" on every successful
+          // hire (2026-08-18: T002214808/810/812 were all read fine here while
+          // the SS lookup found nothing).
+          let submittedTxnNumber = "";
           const plan = buildTransactionPlan(data, ucpathPage, i9ProfileId, {
             dryRun: input.dryRun === true,
+            onTransactionNumber: (txn) => { submittedTxnNumber = txn; },
           });
           log.step("Executing Smart HR transaction plan...");
           await plan.execute();
@@ -709,16 +718,33 @@ export const onboardingWorkflow = defineWorkflow({
           // "couldn't read the number", so the operator was told to look up a
           // number for a transaction UCPath had rejected.
           //
-          // Poll a few attempts: the list can take a beat to show the new row.
+          // Prefer the number the submit already read back. Only fall back to
+          // the SS Smart HR receipt when the submit could not read one — that
+          // list is keyed on processed transactions and legitimately does not
+          // hold a brand-new pending hire.
           let receipt = { transactionId: "", approvalStatus: "", effectiveDate: "" };
-          for (let attempt = 1; attempt <= 3 && !receipt.transactionId; attempt++) {
-            if (attempt > 1) await ucpathPage.waitForTimeout(5_000);
-            receipt = await readSubmittedHireReceipt(ucpathPage, {
-              firstName: data.firstName,
-              lastName: data.lastName,
+          if (submittedTxnNumber) {
+            log.success(
+              `[Onboarding Txn] Transaction number read from the submit itself: ${submittedTxnNumber}`,
+            );
+            receipt = {
+              transactionId: submittedTxnNumber,
+              // A freshly submitted hire enters the approval queue as Pending;
+              // the submit page shows it under the HIRE routing box. We do not
+              // invent a status beyond that, and the operator sees the number.
+              approvalStatus: "Pending",
               effectiveDate: data.effectiveDate,
-              templateId: TEMPLATE_ID,
-            });
+            };
+          } else {
+            for (let attempt = 1; attempt <= 3 && !receipt.transactionId; attempt++) {
+              if (attempt > 1) await ucpathPage.waitForTimeout(5_000);
+              receipt = await readSubmittedHireReceipt(ucpathPage, {
+                firstName: data.firstName,
+                lastName: data.lastName,
+                effectiveDate: data.effectiveDate,
+                templateId: TEMPLATE_ID,
+              });
+            }
           }
           const stamp = interpretPostSubmitTxnReadback(
             receipt.transactionId,
