@@ -83,6 +83,30 @@ export async function dismissPeopleSoftDialog(page: Page): Promise<boolean> {
  * NOT click). Used to RACE the dialog against the results grid when classifying a
  * person-search outcome, so we don't dismiss the dialog before we've decided.
  */
+/**
+ * Read the message text of a PeopleSoft #ICOK dialog WITHOUT dismissing it.
+ *
+ * The message lives in the modal container, not in an ancestor of the OK
+ * button, so walk the ptMod* containers. Returns "" when no dialog is up.
+ */
+export async function readPeopleSoftDialogText(page: Page): Promise<string> {
+  for (const f of page.frames()) {
+    const text = await f.evaluate(() => {
+      if (!document.getElementById("#ICOK")) return "";
+      for (const sel of ["[id^=ptModContainer]", "[id^=ptMod]", "[role=dialog]", ".ps-modal"]) {
+        for (const el of Array.from(document.querySelectorAll(sel))) {
+          const t = ((el as HTMLElement).innerText ?? "").replace(/\s+/g, " ").trim();
+          // Ignore the bare button label; we want the message.
+          if (t && t.toUpperCase() !== "OK") return t.slice(0, 300);
+        }
+      }
+      return "";
+    }).catch(() => "");
+    if (text) return text;
+  }
+  return "";
+}
+
 export async function isPeopleSoftDialogPresent(page: Page): Promise<boolean> {
   for (const f of page.frames()) {
     const present = await f

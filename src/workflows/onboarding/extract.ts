@@ -34,6 +34,17 @@ const FIELD_MAP: Record<string, string[]> = {
     "Effective Date",
     "Start Date",
   ],
+  // The UCPath Entry Sheet carries the real end date per hire — it is NOT a
+  // per-fiscal-year constant. Reading it here removes an entire class of bug:
+  // a stale hardcoded default made UCPath reject the whole transaction with
+  // "Expected Job End Date cannot be before Job Effective Date" (live
+  // 2026-08-18: a 09/11/2026 hire against a 06/30/2026 default). Label is
+  // "Expected Job End Date (if applicable):" and can legitimately be blank.
+  expectedJobEndDate: [
+    "Expected Job End Date (if applicable)",
+    "Expected Job End Date",
+    "Job End Date",
+  ],
 };
 
 /**

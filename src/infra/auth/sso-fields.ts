@@ -1,4 +1,4 @@
-import type { Page } from "playwright";
+import type { Locator, Page } from "playwright";
 import { validateEnv } from "../../utils/env.js";
 import { log } from "../../utils/log.js";
 import { armDuoBeforeSsoNavigation } from "./duo-webauthn.js";
@@ -6,29 +6,113 @@ import { armDuoBeforeSsoNavigation } from "./duo-webauthn.js";
 /**
  * Fill UCSD Shibboleth SSO credentials (username + password) on the current page.
  *
- * Builds 3-level .or() fallback chains for both fields, then calls validateEnv()
- * to retrieve credentials from environment and fills them.
+ * Resolves each field through an ordered candidate list anchored on the
+ * live-mapped UCSD TritON ids, proves the two are distinct (and that the
+ * password box really is a password input), fills them, and reads the values
+ * back. Any mis-resolution fails loud rather than submitting a password as a
+ * username.
  *
  * @param page - Playwright page instance (must already be on the SSO login page)
  */
+
+/**
+ * First candidate locator that actually resolves to exactly one element on the
+ * page, tried in CHAIN ORDER. Unlike `a.or(b).or(c).first()` — which resolves
+ * in DOM order and can silently return a different field than intended — this
+ * honours the precedence the caller wrote.
+ *
+ * Throws naming every candidate when none is present, rather than returning a
+ * locator that will fail later with an opaque timeout.
+ */
+async function firstPresent(candidates: Locator[], label: string): Promise<Locator> {
+  const seen: string[] = [];
+  for (const candidate of candidates) {
+    const count = await candidate.count().catch(() => 0);
+    seen.push(String(count));
+    if (count === 1) return candidate;
+    if (count > 1) return candidate.first();
+  }
+  throw new Error(
+    `${label} field not found on the SSO form — none of the ${candidates.length} known anchors matched `
+    + `(match counts: ${seen.join(", ")}). The login form markup has changed; re-map it before retrying.`,
+  );
+}
+
 export async function fillSsoCredentials(page: Page): Promise<void> {
   const { userId, password } = validateEnv();
 
   log.step("Entering credentials...");
 
-  const usernameField =
-    page.getByLabel("User name (or email address)")
-      .or(page.getByLabel("Username"))
-      .or(page.locator('input[name="j_username"]'));
-  await usernameField.first().fill(userId, { timeout: 5_000 });
+  // LIVE-MAPPED 2026-08-18 (playwright-cli against the real UCSD TritON form):
+  //   username: id="ssousername"  name="urn:mace:ucsd.edu:sso:username"  label "Account ID or email address"
+  //   password: id="ssopassword"  name="urn:mace:ucsd.edu:sso:password"  label "Password:"
+  //
+  // The previous chain used `.or()` + `.first()`, which is a trap here for two
+  // reasons: (1) `.or()` resolves in DOM ORDER, not chain order, so a loose
+  // match can hand back the USERNAME box when resolving the password — which is
+  // exactly the "both values typed into the username slot, password left empty"
+  // failure; and (2) none of its username anchors actually matched this form
+  // ("User name (or email address)" / "Username" / input[name=j_username] are
+  // all absent), so it was relying on incidental matches.
+  //
+  // Resolve each field in CHAIN ORDER instead, and prove the two are distinct
+  // before typing a password anywhere.
+  const usernameCandidates: Locator[] = [
+    page.locator("#ssousername"),
+    page.locator('input[name="urn:mace:ucsd.edu:sso:username"]'),
+    page.getByLabel("Account ID or email address"),
+    page.getByLabel("User name (or email address)"),
+    page.getByLabel("Username"),
+    page.locator('input[name="j_username"]'),
+  ];
+  const passwordCandidates: Locator[] = [
+    page.locator("#ssopassword"),
+    page.locator('input[name="urn:mace:ucsd.edu:sso:password"]'),
+    page.locator('input[type="password"]'),
+    page.getByLabel("Password:"),
+    page.locator('input[name="j_password"]'),
+  ];
 
-  const passwordField =
-    page.getByLabel("Password:")
-      .or(page.getByLabel("Password"))
-      .or(page.locator('input[name="j_password"]'));
-  await passwordField.first().fill(password, { timeout: 5_000 });
+  const usernameField = await firstPresent(usernameCandidates, "SSO username");
+  const passwordField = await firstPresent(passwordCandidates, "SSO password");
+
+  // The password field must really be a password input, and must not be the
+  // same node as the username field. Typing a password into a text box that is
+  // about to be submitted as a username is the failure this guards.
+  const passwordType = await passwordField.getAttribute("type").catch(() => null);
+  if (passwordType !== "password") {
+    throw new Error(
+      `SSO password field resolved to an input of type '${passwordType ?? "unknown"}', not 'password' `
+      + `— refusing to type the password into it.`,
+    );
+  }
+  const [userId_, passId] = await Promise.all([
+    usernameField.evaluate((el) => el.id || el.getAttribute("name") || "").catch(() => ""),
+    passwordField.evaluate((el) => el.id || el.getAttribute("name") || "").catch(() => ""),
+  ]);
+  if (userId_ && passId && userId_ === passId) {
+    throw new Error(
+      `SSO username and password resolved to the SAME field ('${userId_}') — refusing to type both `
+      + `into one box (this leaves the password empty and sends it as the username).`,
+    );
+  }
+
+  await usernameField.fill(userId, { timeout: 5_000 });
+  await passwordField.fill(password, { timeout: 5_000 });
   await page.waitForTimeout(500);
-  log.step("SSO: credentials filled via 3-level fallback chain");
+
+  // Positive read-back: the username must hold the user id, and the password
+  // field must be non-empty. A silent mis-fill is what this whole block exists
+  // to prevent, so verify rather than assume.
+  const filledUser = await usernameField.inputValue().catch(() => "");
+  const filledPassLen = (await passwordField.inputValue().catch(() => "")).length;
+  if (filledUser !== userId || filledPassLen === 0) {
+    throw new Error(
+      `SSO credential fill did not take: username field reads '${filledUser}' (expected the configured `
+      + `user id) and the password field holds ${filledPassLen} character(s).`,
+    );
+  }
+  log.step(`SSO: credentials filled (username='${userId_ || "?"}', password='${passId || "?"}')`);
 }
 
 const SSO_SUBMIT_SELECTOR = 'button[name="_eventId_proceed"]';

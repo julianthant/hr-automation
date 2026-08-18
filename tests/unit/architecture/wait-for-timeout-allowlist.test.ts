@@ -123,8 +123,8 @@ const ALLOWLIST: CountAllowlist = {
     reason: "Smart HR transaction submit settle waits (the 6th is readSubmittedHireReceipt's post-search settle, mirroring findExistingHireTransaction's).",
   },
   "src/systems/ucpath/transaction.ts": {
-    count: 18,
-    reason: "PeopleSoft transaction save/submit is the heaviest, most PeopleSoft-processing-dependent UI in the codebase; no consistent completion signal across its many save/readback steps.",
+    count: 19,
+    reason: "PeopleSoft transaction save/submit is the heaviest, most PeopleSoft-processing-dependent UI in the codebase; no consistent completion signal across its many save/readback steps. The 2026-08-18 additions are POLL cadences, not stand-ins for a readiness check: fillVerified re-reads the field it just wrote (its own condition), and the post-submit loop polls until the transaction id resolves — both terminate on the real signal and only sleep between attempts.",
   },
 };
 

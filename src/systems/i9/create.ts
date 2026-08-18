@@ -313,13 +313,20 @@ async function fillEmployeeProfile(page: Page, input: I9EmployeeInput): Promise<
   });
   log.step(`Last Name: filled`);
 
-  // SSN: 9 digits, no dashes
-  const ssnDigits = input.ssn.replace(/-/g, "");
+  // SSN: 9 digits, no dashes. A person with no SSN yet (CRM's all-9s
+  // placeholder, or an ITIN in the 900-999 range) gets the field LEFT BLANK —
+  // I-9 Complete rejects such a value outright ("The SSN number is not valid or
+  // is not entered correctly"), and a blank is the honest representation.
+  const ssnDigits = input.ssn ? input.ssn.replace(/-/g, "") : "";
+  if (!ssnDigits) {
+    log.step("SSN: none on file — leaving the I-9 SSN field blank");
+  } else {
   await safeFill(profile.ssn(page), ssnDigits, {
     timeout: 5_000,
     label: "i9 ssn",
   });
   log.step(`SSN: filled`);
+  }
 
   await safeFill(profile.dob(page), input.dob, {
     timeout: 5_000,

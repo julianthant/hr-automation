@@ -2,7 +2,9 @@ export interface I9EmployeeInput {
   firstName: string;
   middleName?: string;
   lastName: string;
-  ssn: string;        // 9 digits, no dashes
+  /** 9 digits, no dashes. OMIT when the person has no SSN yet — CRM's
+   *  all-9s placeholder / an ITIN is NOT an SSN and must be left blank. */
+  ssn?: string;
   dob: string;        // MM/DD/YYYY
   email: string;
   departmentNumber: string; // 6-digit dept number, e.g. "000412"
