@@ -671,6 +671,68 @@ export interface JobDataInput {
 }
 
 /**
+ * Fill a PeopleSoft field and PROVE the value stuck, retrying on a freshly
+ * resolved locator.
+ *
+ * Why this exists: `safeFill` only proves the `.fill()` call succeeded. On the
+ * Job Data grid that is not enough — filling Comp Rate Code blurs into a
+ * PeopleSoft round-trip that REPLACES the pay-components row, so the very next
+ * fill can land on a detached node. The call returns clean, the log says
+ * "Job Data filled", and the field is actually EMPTY. UCPath then refuses to
+ * enable Save and Submit with "Please fill the highlighted Compensation Related
+ * fields", and the run dies later at the save with a misleading "tab walk
+ * likely incomplete" message (live 2026-08-18, Alnasser + Campos).
+ *
+ * Re-resolving and re-filling is a retry of the SAME operation — it never
+ * substitutes a different value — and an unverifiable field THROWS rather than
+ * letting a half-filled transaction reach a submit.
+ *
+ * @param resolve - resolves the locator fresh on every attempt (grid ids mutate)
+ * @param equals - value comparison; defaults to exact string match after trim
+ */
+export async function fillVerified(
+  page: Page,
+  resolve: () => Locator,
+  value: string,
+  opts: {
+    label: string;
+    attempts?: number;
+    settleMs?: number;
+    equals?: (actual: string, expected: string) => boolean;
+  },
+): Promise<void> {
+  const { label, attempts = 3, settleMs = 1_500 } = opts;
+  const equals = opts.equals ?? ((a, b) => a.trim() === b.trim());
+
+  let lastSeen = "";
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const target = resolve();
+    await safeFill(target, value, { timeout: 10_000, label });
+    await page.waitForTimeout(500);
+    // Blur so PeopleSoft commits + validates the value.
+    await page.keyboard.press("Tab");
+    await page.waitForTimeout(settleMs);
+
+    // Re-resolve: the blur round-trip may have replaced the node.
+    lastSeen = await resolve().inputValue().catch(() => "");
+    if (equals(lastSeen, value)) {
+      if (attempt > 1) log.success(`${label}: value confirmed on attempt ${attempt}`);
+      return;
+    }
+    log.warn(
+      `${label}: value did not stick (wanted "${value}", field reads "${lastSeen}") — `
+      + `attempt ${attempt}/${attempts}, re-resolving and refilling.`,
+    );
+  }
+
+  throw new Error(
+    `${label}: could not set the field to "${value}" after ${attempts} attempts — it still reads `
+    + `"${lastSeen}". PeopleSoft would refuse the transaction ("Please fill the highlighted ... `
+    + `fields") and Save and Submit would stay disabled, so this fails here rather than at the save.`,
+  );
+}
+
+/**
  * Fill Job Data tab fields: position number, employee classification,
  * comp rate code, compensation rate, expected job end date.
  *
@@ -720,14 +782,19 @@ export async function fillJobData(
   await page.waitForTimeout(2_000);
 
   log.step("Filling compensation rate...");
-  await safeFill(jobDataSelectors.compensationRateInput(frame), data.compensationRate, {
-    timeout: 10_000,
+  // VERIFIED fill: the Comp Rate Code blur above round-trips and replaces this
+  // grid row, so a plain safeFill can silently land on a detached node and
+  // leave the field empty. PeopleSoft echoes the rate back padded
+  // ("17.75" -> "17.750000"), so compare numerically, not textually.
+  await fillVerified(page, () => jobDataSelectors.compensationRateInput(frame), data.compensationRate, {
     label: "ucpath compensation rate",
+    settleMs: 2_000,
+    equals: (actual, expected) => {
+      const a = Number(actual.replace(/,/g, ""));
+      const b = Number(expected.replace(/,/g, ""));
+      return Number.isFinite(a) && Number.isFinite(b) && a === b;
+    },
   });
-  await page.waitForTimeout(1_000);
-  // Blur to trigger PeopleSoft validation + auto-fill Compensation Frequency
-  await page.keyboard.press("Tab");
-  await page.waitForTimeout(2_000);
 
   // Fill Compensation Frequency ("H" for Hourly) — required field, sometimes not auto-populated
   log.step("Filling compensation frequency: H (Hourly)...");
@@ -746,8 +813,10 @@ export async function fillJobData(
   }
 
   log.step("Filling expected job end date...");
-  await safeFill(jobDataSelectors.expectedJobEndDateInput(frame), data.expectedJobEndDate, {
-    timeout: 10_000,
+  // Also verified: this field sits in the same validation group PeopleSoft
+  // highlights, and it was flagged red alongside the empty rate on the live
+  // failure — so prove it committed rather than assuming.
+  await fillVerified(page, () => jobDataSelectors.expectedJobEndDateInput(frame), data.expectedJobEndDate, {
     label: "ucpath expected job end date",
   });
 
@@ -1545,7 +1614,7 @@ export function parsePayRate(wage: string): string {
  *   "New Dining Student Hire Effective {date}. Job number #{num}."
  *
  * When SSN is missing (international student):
- *   "New Dining Student Hire Effective {date}. Job number #{num}. International Student. NO SSN."
+ *   "New Dining Student Hire Effective {date}. Job number #{num}. EE does not have an SSN yet, we will add it as soon as it is provided."
  */
 export function buildCommentsText(
   effectiveDate: string,
@@ -1554,7 +1623,7 @@ export function buildCommentsText(
 ): string {
   const base = `New Dining Student Hire Effective ${effectiveDate}. Job number #${recruitmentNumber}.`;
   if (!hasSsn) {
-    return `${base} International Student. NO SSN.`;
+    return `${base} EE does not have an SSN yet, we will add it as soon as it is provided.`;
   }
   return base;
 }
