@@ -33,34 +33,79 @@ function cleanupWorkflow(workflow: string) {
   }
 }
 
-test("onboarding dry run stops before every system-of-record write", () => {
+test("onboarding dry run runs every step but withholds both form submissions", () => {
   const source = readFileSync(
     new URL("../../../../src/workflows/onboarding/workflow.ts", import.meta.url),
     "utf8",
   );
   const personSearch = source.indexOf('ctx.step("person-search"');
-  const boundary = source.indexOf('label: "onboarding-dry-run-before-writes"');
   const i9Step = source.indexOf('ctx.step("i9-creation"');
+  const i9Search = source.indexOf("searchI9Employee(i9Page");
+  const i9DryRunFill = source.indexOf("fillI9EmployeeProfileWithoutSaving(i9Page");
+  const i9Abandon = source.indexOf("abandonI9ProfileForm(i9Page");
   const i9Create = source.indexOf("createI9Employee(i9Page");
   const transactionStep = source.indexOf('ctx.step("transaction"');
-  const smartHrSubmit = source.indexOf("await plan.execute()");
+  const duplicateProbe = source.indexOf("findExistingHireTransaction(ucpathPage");
+  const dryRunTerminal = source.indexOf('label: "onboarding-dry-run-transaction-filled"');
+  const receiptReadback = source.indexOf("readSubmittedHireReceipt(ucpathPage");
 
   for (const [label, index] of [
     ["person search", personSearch],
-    ["dry-run boundary", boundary],
     ["I-9 step", i9Step],
+    ["I-9 search", i9Search],
+    ["I-9 dry-run fill", i9DryRunFill],
+    ["I-9 abandon", i9Abandon],
     ["I-9 create", i9Create],
     ["Smart HR step", transactionStep],
-    ["Smart HR submit", smartHrSubmit],
+    ["duplicate-hire probe", duplicateProbe],
+    ["dry-run transaction terminal", dryRunTerminal],
+    ["receipt readback", receiptReadback],
   ] as const) {
     assert.notEqual(index, -1, `${label} marker must remain present`);
   }
 
-  assert.ok(personSearch < boundary, "the rehearsal still performs the read-only identity check");
-  assert.ok(boundary < i9Step, "the boundary must precede the combined I-9 search/create step");
-  assert.ok(boundary < i9Create, "a dry run must never create an I-9 profile");
-  assert.ok(boundary < transactionStep, "a dry run must never enter the Smart HR transaction step");
-  assert.ok(boundary < smartHrSubmit, "a dry run must never reach the Smart HR submit");
+  // A rehearsal must still exercise every READ: the identity check, the I-9 SSN
+  // search, and the duplicate-hire probe are the checks it exists to prove.
+  assert.ok(personSearch < i9Step, "the rehearsal performs the read-only identity check first");
+  assert.ok(i9Search < i9DryRunFill, "the I-9 SSN search must run before the dry-run fill");
+  assert.ok(duplicateProbe < dryRunTerminal, "the duplicate-hire probe must run before the dry-run terminal");
+
+  // ...and must withhold BOTH form submissions.
+  assert.ok(
+    i9DryRunFill < i9Create,
+    "a dry run must reach the fill-without-saving path before the live createI9Employee call",
+  );
+  assert.ok(
+    i9Abandon < i9Create,
+    "a dry run must abandon the I-9 profile form instead of saving it",
+  );
+  assert.ok(
+    dryRunTerminal < receiptReadback,
+    "a dry run must terminate before the post-submit receipt readback (nothing was submitted)",
+  );
+});
+
+test("buildTransactionPlan omits Save and Submit in dry run, and asserts the button is enabled", () => {
+  const source = readFileSync(
+    new URL("../../../../src/workflows/onboarding/enter.ts", import.meta.url),
+    "utf8",
+  );
+  const dryRunGuard = source.indexOf("if (options.dryRun)");
+  const enabledCheck = source.indexOf("Verify Save and Submit is enabled");
+  const submitStep = source.indexOf('"Save and Submit transaction"');
+
+  assert.notEqual(dryRunGuard, -1, "dry-run guard must remain present");
+  assert.notEqual(enabledCheck, -1, "dry run must verify the submit button is enabled");
+  assert.notEqual(submitStep, -1, "the live Save and Submit step must remain present");
+
+  assert.ok(
+    dryRunGuard < submitStep,
+    "the dry-run guard must return before Save and Submit is ever added to the plan",
+  );
+  assert.ok(
+    enabledCheck < submitStep,
+    "the enabled-button assertion belongs to the dry-run branch, before the live submit step",
+  );
 });
 
 test("runWorkflowBatch (pool): onboarding-shaped onPreEmitPending paired with runId per email", async (t) => {
