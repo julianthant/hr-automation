@@ -1,5 +1,9 @@
 export { loginToI9 } from "./login.js";
-export { createI9Employee } from "./create.js";
+export {
+  createI9Employee,
+  fillI9EmployeeProfileWithoutSaving,
+  abandonI9ProfileForm,
+} from "./create.js";
 export { searchI9Employee } from "./search.js";
 export { lookupSection2Signer } from "./signer.js";
 export type { Section2SignerResult } from "./signer.js";

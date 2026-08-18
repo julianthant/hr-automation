@@ -29,7 +29,13 @@ import {
   readSubmittedHireReceipt,
 } from "../../systems/ucpath/index.js";
 import { interpretPostSubmitTxnReadback } from "../../systems/ucpath/transaction.js";
-import { loginToI9, createI9Employee, searchI9Employee } from "../../systems/i9/index.js";
+import {
+  loginToI9,
+  createI9Employee,
+  searchI9Employee,
+  fillI9EmployeeProfileWithoutSaving,
+  abandonI9ProfileForm,
+} from "../../systems/i9/index.js";
 import { extractRawFields, extractRecordPageFields } from "./extract.js";
 import { validateEmployeeData } from "./schema.js";
 import type { EmployeeData } from "./schema.js";
@@ -38,9 +44,33 @@ import { TEMPLATE_ID } from "./config.js";
 import {
   buildCrmDocumentDownloadPath,
   downloadCrmIdocsDocuments,
+  readCrmIdocsViewerInfo,
+  zipCrmDocumentFolder,
+  type CrmIdocsViewerInfo,
 } from "../../systems/crm/idocs-download.js";
 import { OnboardingInputSchema } from "./schema.js";
-import { maskSsn } from "../../domain/identity/ssn.js";
+import { maskSsn, isUcpathRejectedSsn } from "../../domain/identity/ssn.js";
+
+/**
+ * Synthetic "Tracker Profile ID" used ONLY by a dry run.
+ *
+ * A rehearsal never saves an I-9 profile, so no real id exists — but the Smart
+ * HR personal-data fill writes that field only when it is truthy, and leaving
+ * it blank keeps the transaction incomplete (Save and Submit stays greyed out),
+ * which would hide exactly what the rehearsal is meant to prove.
+ *
+ * NUMERIC on purpose. Real I-9 profile ids are digits only (`create.ts`'s
+ * `extractProfileId` reads `/employee/profile/(\d+)`), and UCPath's Tracker
+ * Profile ID field rejects anything else — a `DRYRUN…` prefixed value left Save
+ * disabled through the whole tab walk (live 2026-08-18). Random so two
+ * rehearsals never collide.
+ *
+ * It is never persisted anywhere: a dry run stops before Save and Submit, so
+ * this value only ever exists on an unsubmitted draft.
+ */
+export function buildDryRunPlaceholderProfileId(): string {
+  return String(Math.floor(Math.random() * 9_000_000 + 1_000_000));
+}
 
 const onboardingSteps = [
   "crm-auth",
@@ -168,6 +198,13 @@ export const onboardingWorkflow = defineWorkflow({
       recruitmentNumber: null,
     };
 
+    // Captured on the CRM record page during `crm-search` and consumed by
+    // `pdf-download` after the run has navigated away. Exactly one of these is
+    // set; `idocsViewerError` carries the real failure reason so the download
+    // step never reports a misleading cause.
+    let idocsViewerInfo: CrmIdocsViewerInfo | null = null;
+    let idocsViewerError: string | null = null;
+
     await ctx.step("crm-search", async () => {
       await ctx.retry(
         async () => {
@@ -188,6 +225,25 @@ export const onboardingWorkflow = defineWorkflow({
       );
       if (crmRecordFields.departmentNumber) ctx.updateData({ departmentNumber: crmRecordFields.departmentNumber });
       if (crmRecordFields.recruitmentNumber) ctx.updateData({ recruitmentNumber: crmRecordFields.recruitmentNumber });
+
+      // ── Capture the iDocs viewer hash BEFORE leaving the record page ──
+      // The PDF.js viewer is a Salesforce Canvas iframe that exists ONLY on the
+      // onboarding record page. `navigateToSection` below is a full `page.goto`
+      // to the UCPath Entry Sheet, which tears that iframe down — so the later
+      // `pdf-download` step could never find it and every run logged
+      // "iDocs PDF.js viewer did not load within 30000ms" (fixed 2026-08-18).
+      // Only hash DISCOVERY needs this page; the document fetch itself is a
+      // cookie-authenticated request that works from anywhere.
+      try {
+        idocsViewerInfo = await readCrmIdocsViewerInfo(crmPage);
+        log.step(`iDocs viewer hash captured on the record page (totalDocs=${idocsViewerInfo.totalDocs})`);
+      } catch (err) {
+        // Not fatal — PDFs are auxiliary to the hire. But do NOT swallow it:
+        // carry the real reason forward so pdf-download reports THIS cause
+        // instead of a misleading "viewer did not load" from the wrong page.
+        idocsViewerError = errorMessage(err);
+        log.error(`iDocs viewer hash capture failed on the record page: ${idocsViewerError}`);
+      }
 
       await ctx.retry(
         () => navigateToSection(crmPage, "UCPath Entry Sheet"),
@@ -256,6 +312,12 @@ export const onboardingWorkflow = defineWorkflow({
       log.debug("[Step: pdf-download] START");
       if (!data) throw new Error("extraction did not produce data");
       try {
+        if (!idocsViewerInfo) {
+          throw new Error(
+            idocsViewerError
+              ?? "iDocs viewer hash was never captured on the CRM record page (crm-search did not run?)",
+          );
+        }
         const folderPath = buildCrmDocumentDownloadPath({
           firstName: data.firstName,
           lastName: data.lastName,
@@ -265,11 +327,23 @@ export const onboardingWorkflow = defineWorkflow({
           workflow: "onboarding",
           itemId: email,
           runId: ctx.runId,
+          // Record page is long gone by now — use the hash captured back then.
+          viewerInfo: idocsViewerInfo,
         });
-        ctx.updateData({
-          pdfDownload: `${saved.length} file(s)`,
-          pdfFolder: folderPath,
-        });
+        if (saved.length === 0) {
+          // Already-archived short-circuit: the zip is on disk from a prior run.
+          ctx.updateData({
+            pdfDownload: "Already archived",
+            pdfArchive: `${folderPath}.zip`,
+          });
+        } else {
+          // Deliver ONE archive per person rather than a folder tree.
+          const archive = await zipCrmDocumentFolder(folderPath, saved);
+          ctx.updateData({
+            pdfDownload: `${archive.entries.length} file(s) — ${archive.filename}`,
+            pdfArchive: archive.path,
+          });
+        }
       } catch (err) {
         const downloadErr = errorMessage(err);
         log.error(`PDF download failed (continuing without PDFs): ${downloadErr}`);
@@ -384,23 +458,13 @@ export const onboardingWorkflow = defineWorkflow({
     log.success("No duplicate found — proceeding with I-9 creation");
     ctx.updateData({ rehire: "No" });
 
-    // A rehearsal stops before the first possible system-of-record mutation.
-    // I-9 search and creation currently share one step, so the whole step stays
-    // below the boundary: dry run means no profile create and no Smart HR submit.
-    if (input.dryRun) {
-      await ctx.screenshot({ kind: "step", label: "onboarding-dry-run-before-writes" });
-      ctx.updateData({
-        status: "Dry Run Complete",
-        dryRun: true,
-        i9ProfileId: "Not created — dry run",
-      });
-      log.success(
-        "DRY RUN: read-only onboarding checks complete — I-9 profile creation and Smart HR submit skipped",
-      );
-      return;
-    }
-
     // --- Phase 4: I-9 search (existing) or creation (new) ---
+    //
+    // DRY RUN (2026-08-18): a rehearsal now walks the WHOLE workflow. Every
+    // SEARCH still runs for real (I-9 SSN search below, duplicate-hire probe in
+    // the transaction step) — searches are read-only and are exactly what a
+    // rehearsal needs to exercise. Only the two FORM SUBMISSIONS are withheld:
+    // `createI9Employee` here, and Save-and-Submit in the transaction step.
 
     const i9ProfileId = await ctx.step("i9-creation", async () => {
       const t0 = Date.now();
@@ -408,6 +472,33 @@ export const onboardingWorkflow = defineWorkflow({
       let mode: "existing" | "created" | "pending" = "pending";
       try {
         if (!data) throw new Error("extraction did not produce data");
+
+        // ── No usable SSN → no I-9 profile (2026-08-18) ──
+        // A National ID in the 900-999 range is an ITIN or CRM's all-9s
+        // "no SSN on file yet" placeholder. UCPath refuses it outright, and
+        // I-9 Complete refuses it on SAVE too ("The SSN number is not valid or
+        // is not entered correctly"), so a profile CANNOT be created for this
+        // person yet. That is a real, expected state for a new international
+        // student — not an error to fail the hire on. Skip the profile, leave
+        // the Smart HR Tracker Profile ID blank, and let the transaction
+        // proceed carrying the "EE does not have an SSN yet, we will add it as
+        // soon as it is provided" comment (built from the same SSN check in
+        // enter.ts). The I-9 is created later, once the real SSN arrives.
+        if (isUcpathRejectedSsn(data.ssn)) {
+          log.warn(
+            `I-9 profile NOT created for ${data.firstName} ${data.lastName}: the National ID on `
+            + `file begins 900-999 (ITIN range / "no SSN yet" placeholder), which both UCPath and `
+            + `I-9 Complete reject. Proceeding with the hire; Tracker Profile ID left blank and the `
+            + `transaction comment records that the SSN is still outstanding.`,
+          );
+          ctx.updateData({
+            i9ProfileId: "Not created — no valid SSN on file",
+            i9BlockedByMissingSsn: "true",
+          });
+          mode = "pending";
+          return "";
+        }
+
         if (!data.ssn) throw new Error("Cannot create I-9 without SSN");
         if (!data.dob) throw new Error("Cannot create I-9 without DOB");
         if (!data.departmentNumber) throw new Error("Cannot create I-9 without department number");
@@ -441,6 +532,46 @@ export const onboardingWorkflow = defineWorkflow({
         // Close search dialog before navigating to create flow
         await i9Page.keyboard.press("Escape");
         await i9Page.waitForTimeout(500);
+
+        // DRY RUN: the authoritative SSN search above HAS run (read-only) and
+        // found nothing. Fill the Employee Profile form exactly as a live run
+        // would — that is the part worth rehearsing — then abandon it WITHOUT
+        // clicking "Save & Continue". The profile record is created by that
+        // Save, so an abandoned form leaves nothing behind.
+        if (input.dryRun) {
+          await fillI9EmployeeProfileWithoutSaving(i9Page, {
+            firstName: data.firstName,
+            middleName: data.middleName,
+            lastName: data.lastName,
+            ssn: data.ssn,
+            dob: data.dob,
+            email: data.email ?? email,
+            departmentNumber: data.departmentNumber,
+            startDate: data.effectiveDate,
+          });
+          await ctx.screenshot({ kind: "form", label: "onboarding-dry-run-i9-profile-filled" });
+          await abandonI9ProfileForm(i9Page);
+
+          // The real profile id only exists after a Save. Downstream, the Smart
+          // HR "Tracker Profile ID" field is filled only `if (i9ProfileId)`, so
+          // a blank would leave the form incomplete and Submit could stay
+          // greyed out — defeating the point of the rehearsal. Use an obviously
+          // synthetic placeholder so the form reaches a complete, submittable
+          // state while never being mistaken for a real profile id.
+          const placeholderProfileId = buildDryRunPlaceholderProfileId();
+          log.warn(
+            `DRY RUN: I-9 profile NOT created (form filled then abandoned). Using placeholder `
+            + `Tracker Profile ID '${placeholderProfileId}' for the Smart HR form so it reaches a `
+            + `complete, submittable state. This is NOT a real I-9 profile id.`,
+          );
+          ctx.updateData({
+            i9ProfileId: `Not created — dry run (placeholder ${placeholderProfileId})`,
+            i9DryRunPlaceholderProfileId: placeholderProfileId,
+          });
+          mode = "pending";
+          resultPid = placeholderProfileId;
+          return placeholderProfileId;
+        }
 
         // Create is deliberately single-attempt. If the remote mutation lands
         // but its callback/redirect cannot be verified, retrying here could
@@ -526,9 +657,31 @@ export const onboardingWorkflow = defineWorkflow({
         }
 
         try {
-          const plan = buildTransactionPlan(data, ucpathPage, i9ProfileId);
+          const plan = buildTransactionPlan(data, ucpathPage, i9ProfileId, {
+            dryRun: input.dryRun === true,
+          });
           log.step("Executing Smart HR transaction plan...");
           await plan.execute();
+
+          // DRY RUN terminal: the form is now fully filled but NOT submitted.
+          // Screenshot it so the operator can inspect exactly what would have
+          // been sent, then stop before the receipt readback (there is no
+          // receipt — nothing was submitted).
+          if (input.dryRun) {
+            txnExit = "<dry-run: filled, not submitted>";
+            await ctx.screenshot({ kind: "form", label: "onboarding-dry-run-transaction-filled" });
+            log.success(
+              "DRY RUN COMPLETE: Smart HR transaction form filled across all tabs and NOT submitted. "
+              + "An unsubmitted draft remains in UCPath — delete it there if you do not intend to submit.",
+            );
+            ctx.updateData({
+              status: "Dry Run Complete",
+              dryRun: true,
+              transactionDraftLeftInUcpath: true,
+            });
+            return;
+          }
+
           await ctx.screenshot({ kind: 'form', label: 'onboarding-transaction-submitted' });
           log.success("Transaction created successfully in UCPath");
           ctx.updateData({ status: "Done" });

@@ -69,6 +69,71 @@ async function waitForI9CreateOutcome(
  * @param input - Employee data from CRM extraction
  * @returns I9Result with profileId on success
  */
+/**
+ * DRY-RUN counterpart to `createI9Employee`: perform steps 1-2 only — open the
+ * Employee Profile form and fill it exactly as a live run would — then ABANDON
+ * it without ever clicking "Save & Continue".
+ *
+ * Nothing is persisted: the I-9 profile record is created by the Save, so an
+ * unsaved form that is navigated away from leaves NO record behind. There is no
+ * mapped "Cancel" control on this form, so the abandon is done by navigating
+ * back to the dashboard, which is equivalent in effect (and avoids clicking an
+ * unverified selector).
+ *
+ * Returns the abandoned state so the caller can log/stamp it. Throws if the
+ * form could not be opened or filled — a dry run that silently failed to
+ * exercise the form would defeat the whole point of the rehearsal.
+ *
+ * verified 2026-08-18 (fill path shared verbatim with the live create)
+ */
+export async function fillI9EmployeeProfileWithoutSaving(
+  page: Page,
+  input: I9EmployeeInput,
+): Promise<{ filled: true }> {
+  log.step("DRY RUN: opening the I-9 Employee Profile form (will fill, then abandon without saving)...");
+  await closeAllKendoWindows(page);
+  await clickWithKendoRecovery(page, dashboard.createNewI9Link(page), "create new I-9");
+  await page.waitForURL("**/employee/profile", { timeout: 10_000 });
+  log.step("Employee Profile form loaded");
+
+  // Identical fill to the live path — this is what the rehearsal is proving.
+  await fillEmployeeProfile(page, input);
+  log.success("DRY RUN: I-9 Employee Profile form filled (Save & Continue deliberately NOT clicked)");
+
+  return { filled: true };
+}
+
+/**
+ * Leave the filled-but-unsaved I-9 profile form.
+ *
+ * Uses history BACK rather than a hardcoded dashboard path: the profile form is
+ * reached by clicking `dashboard.createNewI9Link`, so the previous history entry
+ * IS the dashboard that link lives on. (A guessed `${I9_APP_URL}/dashboard`
+ * deep-link is NOT a real route — it fails with
+ * `net::ERR_HTTP_RESPONSE_CODE_FAILURE`.) Playwright auto-dismisses any
+ * beforeunload prompt, so this cannot hang on a modal.
+ *
+ * Fails loud if the form is still open afterwards. This matters for daemon
+ * reuse: the next item starts by clicking the create link on the DASHBOARD, so
+ * a browser left parked on a filled profile form would break that item — and a
+ * silent "cleanup didn't work" is exactly the class of failure that then looks
+ * like an unrelated selector bug one run later.
+ *
+ * verified 2026-08-18
+ */
+export async function abandonI9ProfileForm(page: Page): Promise<void> {
+  await page.goBack({ waitUntil: "domcontentloaded", timeout: 20_000 });
+  const url = page.url();
+  if (/\/employee\/profile/.test(url)) {
+    throw new Error(
+      `I-9 profile form was not abandoned — still on ${url} after going back. `
+      + `The browser is parked on a filled, unsaved profile form; the next item's `
+      + `"Create New I-9" click would fail.`,
+    );
+  }
+  log.step(`DRY RUN: I-9 profile form abandoned, back on ${url} (no profile created)`);
+}
+
 export async function createI9Employee(
   page: Page,
   input: I9EmployeeInput,
@@ -284,25 +349,53 @@ async function fillEmployeeProfile(page: Page, input: I9EmployeeInput): Promise<
  * Worksite options are formatted as "6-{deptNum} DESCRIPTION".
  */
 async function selectWorksite(page: Page, departmentNumber: string): Promise<void> {
-  const worksiteDropdown = profile.worksiteListbox(page);
-  await safeClick(worksiteDropdown, { timeout: 5_000, label: "i9 worksite dropdown" });
-
-  // Find and click the option matching the department number prefix
   const optionPattern = new RegExp(`6-${departmentNumber}`);
-  const option = profile.worksiteOption(page, optionPattern);
 
-  const optionCount = await option.count();
-  if (optionCount === 0) {
-    // Close dropdown and throw
-    await page.keyboard.press("Escape");
-    throw new Error(`No worksite found matching department number: ${departmentNumber}`);
+  // The Worksite list is a Kendo dropdown that ANIMATES open. Clicking an option
+  // while that animation is in flight fails with "element is not stable", and if
+  // the list has already collapsed again it fails with "element is not visible"
+  // (live 2026-08-18: the option resolved to the right <li> and the click still
+  // timed out at 5s). Re-opening the dropdown and clicking again clears it.
+  //
+  // This is a transient RETRY of the same operation — it re-runs the open+click,
+  // it never substitutes a different worksite. A genuinely absent department
+  // still throws on the last attempt.
+  const attempts = 3;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const worksiteDropdown = profile.worksiteListbox(page);
+    await safeClick(worksiteDropdown, { timeout: 5_000, label: "i9 worksite dropdown" });
+
+    const option = profile.worksiteOption(page, optionPattern);
+    if ((await option.count()) === 0) {
+      await page.keyboard.press("Escape");
+      throw new Error(`No worksite found matching department number: ${departmentNumber}`);
+    }
+
+    const target = option.first();
+    try {
+      // Wait for the animation to settle so the click lands on a stable node.
+      await target.waitFor({ state: "visible", timeout: 5_000 });
+      await target.scrollIntoViewIfNeeded({ timeout: 3_000 });
+      await target.click({ timeout: 8_000 });
+      log.step(`Worksite selected: dept ${departmentNumber}`);
+      return;
+    } catch (err) {
+      if (attempt === attempts) {
+        throw new Error(
+          `Worksite option "6-${departmentNumber}" was present but could not be clicked after `
+          + `${attempts} attempts (Kendo dropdown animation): ${errorMessage(err)}`,
+          { cause: err },
+        );
+      }
+      log.warn(
+        `Worksite option click failed (attempt ${attempt}/${attempts}) — reopening the dropdown and retrying: `
+        + errorMessage(err),
+      );
+      // Collapse the half-open list so the next attempt starts from a clean state.
+      await page.keyboard.press("Escape").catch(() => {});
+      await sleep(750);
+    }
   }
-
-  await safeClick(option.first(), {
-    timeout: 5_000,
-    label: "i9 worksite option",
-  });
-  log.step(`Worksite selected: dept ${departmentNumber}`);
 }
 
 /**
