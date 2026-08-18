@@ -94,7 +94,16 @@ export function buildTransactionPlan(
   data: EmployeeData,
   page: Page,
   i9ProfileId?: string,
-  options: { dryRun?: boolean } = {},
+  options: {
+    dryRun?: boolean;
+    /**
+     * Receives the transaction number the SUBMIT itself read back (via the
+     * Transactions-in-Progress row -> Continue -> "Transaction ID:" path).
+     * This is the authoritative number for a new hire — do NOT re-derive it
+     * from the SS Smart HR list, which does not carry an unprocessed hire.
+     */
+    onTransactionNumber?: (txnNumber: string) => void;
+  } = {},
 ): ActionPlan {
   const plan = new ActionPlan();
 
@@ -390,10 +399,17 @@ export function buildTransactionPlan(
   plan.add(
     "Save and Submit transaction",
     async () => {
-      const result = await clickSaveAndSubmit(page, getContentFrame(page));
+      // Pass the person's name: a new hire has no EID, so the post-submit
+      // readback locates its Transactions-in-Progress row by the Name cell.
+      const result = await clickSaveAndSubmit(page, getContentFrame(page), undefined, {
+        personName: `${data.firstName} ${data.lastName}`.trim(),
+      });
       await captureStage(page, 7, "after-save-and-submit");
       if (!result.success) {
         throw new Error(result.error ?? "Save and Submit failed");
+      }
+      if (result.transactionNumber) {
+        options.onTransactionNumber?.(result.transactionNumber);
       }
     },
   );
