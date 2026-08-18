@@ -897,6 +897,39 @@ export async function clickSaveAndSubmit(
   await dismissPeopleSoftModalMask(page);
 
   const btn = smartHR.saveAndSubmitButton(frame);
+
+  // Identify the control we are about to click. The transaction landing in
+  // "Transactions in Progress" (saved, not submitted) means the click behaved
+  // like Save-for-Later, so prove WHICH element this resolves to rather than
+  // assuming the role-name match picked the right one.
+  const btnCount = await btn.count().catch(() => -1);
+  const btnInfo = await btn.evaluate((el) => ({
+    id: (el as HTMLElement).id,
+    name: (el as HTMLInputElement).name ?? "",
+    value: (el as HTMLInputElement).value ?? "",
+    text: ((el as HTMLElement).innerText ?? "").replace(/\s+/g, " ").trim(),
+    tag: el.tagName,
+  })).catch(() => null);
+  log.step(
+    `[Submit] resolved save control: matches=${btnCount} `
+    + (btnInfo
+      ? `tag=${btnInfo.tag} id='${btnInfo.id}' name='${btnInfo.name}' value='${btnInfo.value}' text='${btnInfo.text}'`
+      : "<could not read>"),
+  );
+  // Also enumerate every button on the action bar, so a mis-resolution is
+  // obvious from the log alone.
+  const allButtons = await frame.locator("input[type=button], input[type=submit], button, a[role=button]") // allow-inline-selector -- diagnostic enumeration of the transaction action bar
+    .evaluateAll((els) => els
+      .map((el) => ({
+        id: (el as HTMLElement).id,
+        value: (el as HTMLInputElement).value ?? "",
+        text: ((el as HTMLElement).innerText ?? "").replace(/\s+/g, " ").trim(),
+      }))
+      .filter((b) => /save|submit|cancel/i.test(`${b.value} ${b.text}`)))
+    .catch(() => []);
+  for (const b of allButtons) {
+    log.step(`[Submit]   action-bar button: id='${b.id}' value='${b.value}' text='${b.text}'`);
+  }
   // Any ad-hoc save-disabled screenshot lives on the handler side via
   // ctx.screenshot() — keeping this module ctx-free means separations /
   // onboarding / etc can attach their own labeling + kind without

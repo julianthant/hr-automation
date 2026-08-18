@@ -500,20 +500,28 @@ export const onboardingWorkflow = defineWorkflow({
 
         const i9Page = await ctx.page("i9");
 
-        // Search for existing profile first — avoids duplicate creation on
-        // re-runs. Only possible when there IS an SSN to search by; with none,
-        // go straight to create (the operator accepts that a no-SSN person
-        // cannot be de-duplicated by SSN).
-        const searchResults = usableSsn
-          ? await ctx.retry(
-              () => searchI9Employee(i9Page, {
+        // Search for an existing profile FIRST — this is the only thing standing
+        // between a re-run and a duplicate I-9. Prefer SSN (unique); with no SSN
+        // fall back to first+last NAME rather than skipping the search, because
+        // skipping means every re-run creates another profile for the same
+        // person (2026-08-18: a no-SSN hire would have accumulated one profile
+        // per attempt).
+        const searchResults = await ctx.retry(
+          () => usableSsn
+            ? searchI9Employee(i9Page, {
                 ssn: usableSsn.replace(/(\d{3})(\d{2})(\d{4})/, "$1-$2-$3"),
+              })
+            : searchI9Employee(i9Page, {
+                firstName: data!.firstName,
+                lastName: data!.lastName,
               }),
-              { attempts: 2 },
-            )
-          : [];
+          { attempts: 2 },
+        );
         if (!usableSsn) {
-          log.step("No SSN on file — skipping the I-9 SSN search and creating the profile directly");
+          log.step(
+            `No SSN on file — searched I-9 by name instead `
+            + `("${data.firstName} ${data.lastName}"): ${searchResults.length} match(es)`,
+          );
         }
 
         if (searchResults.length > 0 && searchResults[0].profileId) {
