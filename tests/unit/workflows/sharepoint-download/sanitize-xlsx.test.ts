@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import JSZip from "jszip";
 
-import { sanitizeDownloadedXlsx } from "../../../../src/workflows/sharepoint-download/sanitize-xlsx.js";
+import { sanitizeDownloadedXlsx } from "../../../../src/workflows/sharepoint-download/download.js";
 
 /** Build a minimal .xlsx-shaped zip with the given table parts. */
 async function writeFixture(
