@@ -29,9 +29,13 @@ export {
   ensureCrmDocumentDownloadFolder,
   parseCrmDocumentFilename,
   downloadCrmIdocsDocuments,
+  readCrmIdocsViewerInfo,
+  zipCrmDocumentFolder,
 } from "./idocs-download.js";
 export type {
   CrmDocumentDownloadSubject,
   DownloadedCrmDocument,
   CrmIdocsDownloadOptions,
+  CrmIdocsViewerInfo,
+  CrmDocumentArchive,
 } from "./idocs-download.js";

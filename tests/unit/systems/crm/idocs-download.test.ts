@@ -11,6 +11,7 @@ import {
   isCrmPdfResponse,
   DEFAULT_CRM_DOC_INDICES,
   defaultCrmDocumentName,
+  CRM_DOC_DEFAULT_NAMES,
 } from "../../../../src/systems/crm/idocs-download.js";
 
 test("DEFAULT_CRM_DOC_INDICES downloads Doc 1 and Doc 3", () => {
@@ -138,4 +139,44 @@ test("isCrmPdfResponse rejects HTTP 200 html bodies", () => {
     isCrmPdfResponse({ "content-type": "text/html" }, Buffer.from("<!doctype html><html>login</html>")),
     false,
   );
+});
+
+test("buildCrmDocumentFolderName title-cases ALL-CAPS CRM records", () => {
+  // CRM stores some records fully capitalised. The folder/zip name must look
+  // the same either way — `Alnasser, Ali Anwar EID`, never `ALNASSER, ALI ...`.
+  assert.equal(
+    buildCrmDocumentFolderName({ firstName: "ALI", lastName: "ALNASSER", middleName: "ANWAR" }),
+    "Alnasser, Ali Anwar EID",
+  );
+  // ...and an already well-cased record is unchanged (idempotent).
+  assert.equal(
+    buildCrmDocumentFolderName({ firstName: "Jaden", lastName: "Campos", middleName: "Everhett" }),
+    "Campos, Jaden Everhett EID",
+  );
+});
+
+test("buildCrmDocumentFolderName title-cases across hyphens, apostrophes, and multi-word surnames", () => {
+  assert.equal(
+    buildCrmDocumentFolderName({ firstName: "MARY-JANE", lastName: "O'BRIEN" }),
+    "O'Brien, Mary-Jane EID",
+  );
+  assert.equal(
+    buildCrmDocumentFolderName({
+      firstName: "VEE",
+      lastName: "SALAS NEVAREZ",
+      livedName: "VEE SALAS",
+    }),
+    "Salas Nevarez, Vee (Vee Salas) EID",
+  );
+});
+
+test("known document positions get canonical names, not CRM's opaque id", () => {
+  // CRM sends Content-Disposition names like "iDocs-2026-6-49682.pdf", which
+  // identify nothing. Position 0 and 2 have known identities.
+  assert.equal(CRM_DOC_DEFAULT_NAMES[0], "Signed Offer Letter");
+  assert.equal(CRM_DOC_DEFAULT_NAMES[2], "EE Data Gathering Form");
+  assert.equal(defaultCrmDocumentName(0), "Signed Offer Letter.pdf");
+  assert.equal(defaultCrmDocumentName(2), "EE Data Gathering Form.pdf");
+  // An unknown position still falls back to a positional name.
+  assert.equal(defaultCrmDocumentName(4), "document-5.pdf");
 });
