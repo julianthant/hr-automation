@@ -1,72 +1,62 @@
-/**
- * Unit tests for src/domain/identity/ssn.ts
- *
- * Covers:
- *   - maskSsn: normal case masks all but last 4 digits
- *   - SSNs with fewer than 4 digits return "***"
- *   - Dashes are stripped before masking
- *   - Empty string, undefined, and null guards
- */
-import { describe, it } from "vitest";
+import { test } from "vitest";
 import assert from "node:assert/strict";
-import { maskSsn } from "../../../../src/domain/identity/ssn.js";
 
-describe("maskSsn — normal 9-digit SSN", () => {
-  it("masks all digits except the last 4 for a 9-digit SSN without dashes", () => {
-    assert.equal(maskSsn("123456789"), "***-**-6789");
-  });
+import { maskSsn, isUcpathRejectedSsn, ssnForUcpathEntry } from "../../../../src/domain/identity/ssn.js";
 
-  it("masks a standard dashed SSN (NNN-NN-NNNN)", () => {
-    assert.equal(maskSsn("123-45-6789"), "***-**-6789");
-  });
-
-  it("correctly shows only the last 4 digits after dashes are stripped", () => {
-    assert.equal(maskSsn("987-65-4321"), "***-**-4321");
-  });
+test("maskSsn keeps only the last four digits", () => {
+  assert.equal(maskSsn("123-45-6789"), "***-**-6789");
+  assert.equal(maskSsn("123456789"), "***-**-6789");
+  assert.equal(maskSsn(""), "");
+  assert.equal(maskSsn(undefined), "");
+  assert.equal(maskSsn("12"), "***");
 });
 
-describe("maskSsn — exactly 4 digits", () => {
-  it("shows those 4 digits (minimum valid last-4 case)", () => {
-    assert.equal(maskSsn("1234"), "***-**-1234");
-  });
-
-  it("shows last 4 of a 5-digit number", () => {
-    assert.equal(maskSsn("12345"), "***-**-2345");
-  });
+test("isUcpathRejectedSsn flags the 900-999 area range UCPath refuses", () => {
+  // The live rejection (2026-08-18): "cannot begin with 9 ... 900-999 in 1 to 3 Positions".
+  assert.equal(isUcpathRejectedSsn("999-99-9999"), true, "all-9s placeholder");
+  assert.equal(isUcpathRejectedSsn("900-00-0000"), true, "bottom of the range");
+  assert.equal(isUcpathRejectedSsn("912-34-5678"), true, "a real ITIN");
+  assert.equal(isUcpathRejectedSsn("999999999"), true, "undashed still detected");
 });
 
-describe("maskSsn — fewer than 4 digits returns '***'", () => {
-  it("returns '***' for a 3-digit string", () => {
-    assert.equal(maskSsn("123"), "***");
-  });
-
-  it("returns '***' for a 2-digit string", () => {
-    assert.equal(maskSsn("12"), "***");
-  });
-
-  it("returns '***' for a single digit", () => {
-    assert.equal(maskSsn("1"), "***");
-  });
+test("isUcpathRejectedSsn leaves ordinary SSNs alone", () => {
+  assert.equal(isUcpathRejectedSsn("123-45-6789"), false);
+  assert.equal(isUcpathRejectedSsn("899-99-9999"), false, "just below the range");
+  assert.equal(isUcpathRejectedSsn("089-99-9999"), false, "a 9 that is not in the AREA digits");
+  // A trailing 9999 alone must NOT trip it — only positions 1-3 matter.
+  assert.equal(isUcpathRejectedSsn("123-45-9999"), false);
 });
 
-describe("maskSsn — empty / null / undefined guards", () => {
-  it("returns empty string for empty string input", () => {
-    assert.equal(maskSsn(""), "");
-  });
-
-  it("returns empty string for undefined", () => {
-    assert.equal(maskSsn(undefined), "");
-  });
-
-  it("returns empty string for null", () => {
-    assert.equal(maskSsn(null), "");
-  });
+test("isUcpathRejectedSsn is false for absent or malformed input rather than guessing", () => {
+  assert.equal(isUcpathRejectedSsn(undefined), false);
+  assert.equal(isUcpathRejectedSsn(null), false);
+  assert.equal(isUcpathRejectedSsn(""), false);
+  assert.equal(isUcpathRejectedSsn("999-99"), false, "too short to judge");
+  assert.equal(isUcpathRejectedSsn("999-99-99999"), false, "too long to judge");
 });
 
-describe("maskSsn — whitespace handling", () => {
-  it("does not strip whitespace (spaces are not dashes)", () => {
-    // The implementation only strips dashes, not spaces.
-    // A string like "   " has 3 chars after the (no-op) dash-strip → "***".
-    assert.equal(maskSsn("   "), "***");
-  });
+test("ssnForUcpathEntry drops a rejected SSN and never substitutes another value", () => {
+  assert.equal(ssnForUcpathEntry("999-99-9999"), undefined);
+  assert.equal(ssnForUcpathEntry("912-34-5678"), undefined);
+  // An enterable SSN passes through byte-identical.
+  assert.equal(ssnForUcpathEntry("123-45-6789"), "123-45-6789");
+  assert.equal(ssnForUcpathEntry(undefined), undefined);
+  assert.equal(ssnForUcpathEntry(""), undefined);
+});
+
+// ── Transaction comment wording (operator-specified, 2026-08-18) ──
+// Lives here because the no-SSN sentence and the SSN-rejection rule are one
+// behaviour: a rejected SSN must produce the "no SSN yet" comment.
+test("buildCommentsText: base line, and the no-SSN sentence appended", async () => {
+  const { buildCommentsText } = await import("../../../../src/systems/ucpath/transaction.js");
+
+  assert.equal(
+    buildCommentsText("09/11/2026", "1169086", true),
+    "New Dining Student Hire Effective 09/11/2026. Job number #1169086.",
+  );
+  assert.equal(
+    buildCommentsText("09/11/2026", "1169086", false),
+    "New Dining Student Hire Effective 09/11/2026. Job number #1169086."
+      + " EE does not have an SSN yet, we will add it as soon as it is provided.",
+  );
 });

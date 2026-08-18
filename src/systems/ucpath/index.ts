@@ -24,6 +24,7 @@ export {
   clickEarnsDistTab,
   clickEmployeeExperienceTab,
   clickSaveAndSubmit,
+  waitForSaveEnabled,
   readLatestTransactionNumber,
   findExistingTerminationTransaction,
   deletePendingTransaction,
