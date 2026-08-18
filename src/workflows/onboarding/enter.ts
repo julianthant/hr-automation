@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import { mkdir } from "node:fs/promises";
 import { log } from "../../utils/log.js";
 import { ActionPlan } from "../../systems/ucpath/action-plan.js";
 import {
@@ -50,6 +51,45 @@ import { ssnForUcpathEntry } from "../../domain/identity/ssn.js";
  *  12. Click Employee Experience tab
  *  13. Save and Submit
  */
+
+/**
+ * Stage capture for the Smart HR transaction walk.
+ *
+ * Opt-in via `HR_ONBOARDING_CAPTURE_STEPS=1` so production runs are unaffected.
+ * Writes numbered PNGs the operator can review as a filmstrip of what the
+ * automation actually did on each tab.
+ */
+async function captureStage(page: Page, order: number, label: string): Promise<void> {
+  if (process.env.HR_ONBOARDING_CAPTURE_STEPS !== "1") return;
+  const dir = ".screenshots/onboarding-process";
+  await mkdir(dir, { recursive: true });
+  const name = `${String(order).padStart(2, "0")}-${label}.png`;
+  await page.screenshot({ path: `${dir}/${name}`, fullPage: true }).catch(() => {});
+  log.step(`[Capture] ${name}`);
+}
+
+
+/**
+ * Is `candidate` (MM/DD/YYYY) on or after `floor` (MM/DD/YYYY)?
+ *
+ * Returns false when either date is unparseable — an unreadable date must not
+ * pass a safety check by accident.
+ */
+export function isOnOrAfter(candidate: string, floor: string): boolean {
+  const parse = (value: string): number | null => {
+    const m = value.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!m) return null;
+    const [, mm, dd, yyyy] = m;
+    const month = Number(mm), day = Number(dd), year = Number(yyyy);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    return Date.UTC(year, month - 1, day);
+  };
+  const a = parse(candidate);
+  const b = parse(floor);
+  if (a === null || b === null) return false;
+  return a >= b;
+}
+
 export function buildTransactionPlan(
   data: EmployeeData,
   page: Page,
@@ -91,6 +131,11 @@ export function buildTransactionPlan(
         throw new Error(result.error ?? "Transaction creation failed");
       }
     },
+  );
+
+  plan.add(
+    "Capture: transaction-created",
+    () => captureStage(page, 1, "transaction-created"),
   );
 
   // Step 6: Reason code
@@ -136,6 +181,11 @@ export function buildTransactionPlan(
     () => fillPersonalData(page, getContentFrame(page), personalData),
   );
 
+  plan.add(
+    "Capture: personal-data-filled",
+    () => captureStage(page, 2, "personal-data-filled"),
+  );
+
   // Step 8: Comments on Personal Data page
   // Keyed on what actually got ENTERED, not on what CRM held — a rejected
   // 900-999 value means the National ID is blank, so the comment must say so.
@@ -170,17 +220,50 @@ export function buildTransactionPlan(
       + `for ${data.firstName} ${data.lastName}`,
     );
   }
+  // Expected Job End Date comes from the CRM UCPath Entry Sheet when present —
+  // it is a PER-HIRE value, not a per-fiscal-year constant. `JOB_END_DATE` is
+  // only a fallback for a record where CRM left it blank ("if applicable").
+  //
+  // This is load-bearing: a stale constant made UCPath reject the entire
+  // transaction with a BLOCKING modal — "Expected Job End Date cannot be before
+  // Job Effective Date" — which the automation then acknowledged as though it
+  // were the submit confirmation, so the hire silently never filed (live
+  // 2026-08-18: effdt 09/11/2026 against a 06/30/2026 default).
+  const crmJobEndDate = data.expectedJobEndDate?.trim();
+  const expectedJobEndDate = crmJobEndDate || JOB_END_DATE;
+  if (crmJobEndDate) {
+    log.step(`Expected Job End Date from CRM: ${crmJobEndDate}`);
+  } else {
+    log.step(`CRM had no Expected Job End Date — using the configured default ${JOB_END_DATE}`);
+  }
+  // Fail loud BEFORE building a transaction UCPath will refuse. Comparing the
+  // two MM/DD/YYYY dates here turns a silent, mis-read dialog into a legible
+  // error naming both values.
+  if (!isOnOrAfter(expectedJobEndDate, data.effectiveDate)) {
+    throw new Error(
+      `Expected Job End Date ${expectedJobEndDate} is BEFORE the effective date ${data.effectiveDate} `
+      + `for ${data.firstName} ${data.lastName}. UCPath rejects this outright, so the transaction is `
+      + `not attempted. Fix "Expected Job End Date" on the CRM UCPath Entry Sheet, or roll the `
+      + `ANNUAL_DATES_END / Settings job-end-date default if CRM left it blank.`,
+    );
+  }
+
   const jobData: JobDataInput = {
     positionNumber: data.positionNumber,
     employeeClassification: data.appointment,
     compRateCode: COMP_RATE_CODE,
     compensationRate: parsePayRate(data.wage),
-    expectedJobEndDate: JOB_END_DATE,
+    expectedJobEndDate,
   };
 
   plan.add(
     "Fill job data (position, classification, comp rate, end date)",
     () => fillJobData(page, getContentFrame(page), jobData),
+  );
+
+  plan.add(
+    "Capture: job-data-filled",
+    () => captureStage(page, 3, "job-data-filled"),
   );
 
   // Step 11: Earns Dist tab
@@ -192,6 +275,11 @@ export function buildTransactionPlan(
     },
   );
 
+  plan.add(
+    "Capture: earns-dist",
+    () => captureStage(page, 4, "earns-dist"),
+  );
+
   // Step 12: Employee Experience tab
   plan.add(
     "Click Employee Experience tab",
@@ -199,6 +287,11 @@ export function buildTransactionPlan(
       await clickEmployeeExperienceTab(page, getContentFrame(page));
       log.step(`[TabWalk] Employee Experience loaded (tabs visited: Personal Data \u2713, Job Data \u2713, Earns Dist \u2713, Employee Experience \u2713)`);
     },
+  );
+
+  plan.add(
+    "Capture: employee-experience",
+    () => captureStage(page, 5, "employee-experience"),
   );
 
   // Step 13: Initiator comments (fill on last tab before submit)
@@ -255,6 +348,11 @@ export function buildTransactionPlan(
     },
   );
 
+  plan.add(
+    "Capture: before submit (back on Personal Data)",
+    () => captureStage(page, 6, "before-submit-personal-data"),
+  );
+
   // Step 15: Save and Submit
   //
   // DRY-RUN BOUNDARY (2026-08-18). A dry run walks every step above — it opens
@@ -293,6 +391,7 @@ export function buildTransactionPlan(
     "Save and Submit transaction",
     async () => {
       const result = await clickSaveAndSubmit(page, getContentFrame(page));
+      await captureStage(page, 7, "after-save-and-submit");
       if (!result.success) {
         throw new Error(result.error ?? "Save and Submit failed");
       }

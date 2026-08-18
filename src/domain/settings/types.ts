@@ -229,7 +229,7 @@ export type OperatorSettingsOverride = {
 export const DEFAULT_OPERATOR_SETTINGS: OperatorSettings = {
   operator: { timekeeperName: "" },
   annualDates: {
-    jobEndDate: "06/30/2026",
+    jobEndDate: "06/30/2027",
     kronosDefaultEndDate: "2/1/2026",
     kronosDefaultStartDate: "1/1/2017",
   },

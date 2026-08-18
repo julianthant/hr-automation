@@ -6,6 +6,7 @@ import {
   navigateToSmartHR,
   collapseSidebar,
   dismissPeopleSoftDialog,
+  readPeopleSoftDialogText,
 } from "./navigate.js";
 import {
   smartHR,
@@ -956,21 +957,143 @@ export async function clickSaveAndSubmit(
   //   4. Enter Transaction Information → "Transaction ID:" shows actual number (e.g. T002114817)
   let transactionNumber = "";
   try {
-    // Step 1: Click OK on confirmation page
-    const okButton = smartHR.confirmationOkButton(frame);
-    await okButton.waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
+    // Step 1: Acknowledge the post-submit confirmation dialog.
+    //
+    // This MUST go through the `#ICOK` evaluate escape hatch, not a Playwright
+    // click. Live 2026-08-18 the role-based click failed every time for two
+    // independent reasons: (a) `pt_modalMask` sits over the page and
+    // "intercepts pointer events", which is the documented PeopleSoft overlay
+    // problem; and (b) `getByRole("button", { name: "OK" }).first()` resolved
+    // to the WRONG element entirely — the `Look up Legal Suffix` prompt anchor
+    // (`HR_TBH_SCR_WRK_TBH_SH_PROMPT2$prompt$1`), not the confirmation button.
+    // The submit was left unacknowledged, no transaction number could be read,
+    // and the hire did not appear on the SS Smart HR list afterwards.
+    //
+    // `dismissPeopleSoftDialog` clicks `#ICOK` inside `frame.evaluate`, which
+    // is unaffected by the mask — the same escape hatch `deletePendingTransaction`
+    // already relies on.
     await page.waitForTimeout(2_000);
 
-    if (await clickIfPresent(okButton, {
-      timeout: 5_000,
-      label: "ucpath save confirmation ok button",
-    })) {
-      log.step("Clicked OK on confirmation page...");
-      await page.waitForTimeout(3_000);
+    // Diagnostic: name the dialog we are about to acknowledge. A submit that
+    // "succeeds" and leaves Transaction ID = NEW means we acknowledged the
+    // wrong thing (a validation warning rather than the submit confirmation),
+    // and without this the logs cannot tell those apart.
+    for (const f of page.frames()) {
+      const info = await f.evaluate(() => {
+        const ok = document.getElementById("#ICOK");
+        if (!ok) return null;
+        // PeopleSoft renders its modal in a ptMod* container, not in an
+        // ancestor of the OK button — walk out far enough to find real text.
+        const candidates: string[] = [];
+        for (const sel of ["[id^=ptModContainer]", "[id^=ptMod]", "[role=dialog]", ".ps-modal"]) {
+          for (const el of Array.from(document.querySelectorAll(sel))) {
+            const t = ((el as HTMLElement).innerText ?? "").replace(/\s+/g, " ").trim();
+            if (t) candidates.push(t.slice(0, 400));
+          }
+        }
+        let node: HTMLElement | null = ok.parentElement;
+        for (let i = 0; i < 8 && node; i++) {
+          const t = (node.innerText ?? "").replace(/\s+/g, " ").trim();
+          if (t) { candidates.push(`ancestor${i}: ${t.slice(0, 400)}`); break; }
+          node = node.parentElement;
+        }
+        // Any visible PeopleSoft error/warning banner on the page.
+        for (const sel of [".PSERROR", "#ALERTMSG", ".ps_alert-error", "[id^=win0divPSERROR]"]) {
+          for (const el of Array.from(document.querySelectorAll(sel))) {
+            const t = ((el as HTMLElement).innerText ?? "").replace(/\s+/g, " ").trim();
+            if (t) candidates.push(`banner: ${t.slice(0, 400)}`);
+          }
+        }
+        return { okValue: (ok as HTMLInputElement).value ?? "", candidates };
+      }).catch(() => null);
+      if (info) {
+        log.step(`[Submit] confirmation dialog present — OK='${info.okValue}'`);
+        for (const c of info.candidates.slice(0, 6)) log.step(`[Submit]   ${c}`);
+        if (info.candidates.length === 0) log.step("[Submit]   (no readable dialog text found)");
+        break;
+      }
+    }
 
-      if (employeeId) {
+    // DRAIN the dialog chain. PeopleSoft can raise more than one #ICOK in
+    // sequence here (save confirmation, then submit confirmation); dismissing
+    // only the first leaves the second one up, and the caller then navigates
+    // away with the submit never committed — the page keeps reading
+    // "Transaction ID: NEW" (live 2026-08-18).
+    // READ the dialog before acknowledging it. UCPath raises BLOCKING error
+    // modals here that are indistinguishable from a submit confirmation on the
+    // automation's side — live 2026-08-18 the dialog said "Expected Job End
+    // Date cannot be before Job Effective Date", we clicked OK, and reported a
+    // successful submit for a transaction that never left "Transaction ID: NEW".
+    // A refusal must fail loud, not be clicked past.
+    const dialogText = await readPeopleSoftDialogText(page);
+    if (dialogText) {
+      log.step(`[Submit] dialog text: "${dialogText}"`);
+      if (/cannot|invalid|must be|required|error|not valid/i.test(dialogText)) {
+        await dismissPeopleSoftDialog(page);
+        throw new Error(
+          `UCPath REFUSED the Smart HR submit with a blocking dialog: "${dialogText}". `
+          + `The transaction was NOT filed (it stays at Transaction ID: NEW).`,
+        );
+      }
+    }
+
+    let acknowledged = false;
+    for (let round = 1; round <= 5; round++) {
+      const clicked = await dismissPeopleSoftDialog(page);
+      if (!clicked) break;
+      acknowledged = true;
+      log.step(`[Submit] acknowledged confirmation dialog (round ${round})`);
+      await page.waitForTimeout(2_500);
+      await waitForPeopleSoftProcessing(frame, 20_000).catch(() => {});
+    }
+
+    if (!acknowledged) {
+      // Fall back to the role-based button only if no #ICOK dialog exists.
+      const okButton = smartHR.confirmationOkButton(frame);
+      await okButton.waitFor({ state: "visible", timeout: 10_000 }).catch(() => {});
+      acknowledged = await clickIfPresent(okButton, {
+        timeout: 5_000,
+        label: "ucpath save confirmation ok button",
+      });
+    }
+
+    if (acknowledged) {
+      log.step("Acknowledged the post-submit confirmation dialog...");
+
+      // The #ICOK click fires the actual submit POST. Let PeopleSoft finish it
+      // BEFORE anything navigates away — the caller drives straight off to the
+      // SS Smart HR list next, and leaving mid-round-trip abandons the submit:
+      // live 2026-08-18 the post-submit page still read "Transaction ID: NEW"
+      // and the hire never appeared on the list. Poll the readback area until
+      // the id resolves to a real T-number.
+      await waitForPeopleSoftProcessing(frame, 30_000);
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        await scrollToTransactionReadbackArea(frame).catch(() => false);
+        const seen = await readTxnNumberFromDetailPage(frame);
+        if (seen) {
+          transactionNumber = seen;
+          log.success(`[Submit] transaction id resolved after submit: ${seen}`);
+          break;
+        }
+        await page.waitForTimeout(2_000);
+      }
+      if (!transactionNumber) {
+        log.warn(
+          "[Submit] the transaction id still had not resolved 30s after acknowledging the "
+          + "confirmation — the submit may not have committed (the page can still read "
+          + "'Transaction ID: NEW').",
+        );
+      }
+
+      if (!transactionNumber && employeeId) {
         transactionNumber = await readLatestTransactionNumber(page, employeeId);
       }
+    } else {
+      log.warn(
+        "No post-submit confirmation dialog could be acknowledged — the submit may not have been "
+        + "committed. Verify the transaction in UCPath before treating this hire as filed.",
+      );
     }
 
     if (!transactionNumber) {

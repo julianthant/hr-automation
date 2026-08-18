@@ -49,7 +49,7 @@ import {
   type CrmIdocsViewerInfo,
 } from "../../systems/crm/idocs-download.js";
 import { OnboardingInputSchema } from "./schema.js";
-import { maskSsn, isUcpathRejectedSsn } from "../../domain/identity/ssn.js";
+import { maskSsn, ssnForUcpathEntry } from "../../domain/identity/ssn.js";
 
 /**
  * Synthetic "Tracker Profile ID" used ONLY by a dry run.
@@ -473,49 +473,48 @@ export const onboardingWorkflow = defineWorkflow({
       try {
         if (!data) throw new Error("extraction did not produce data");
 
-        // ── No usable SSN → no I-9 profile (2026-08-18) ──
+        // ── SSN that is not really an SSN (2026-08-18) ──
         // A National ID in the 900-999 range is an ITIN or CRM's all-9s
-        // "no SSN on file yet" placeholder. UCPath refuses it outright, and
-        // I-9 Complete refuses it on SAVE too ("The SSN number is not valid or
-        // is not entered correctly"), so a profile CANNOT be created for this
-        // person yet. That is a real, expected state for a new international
-        // student — not an error to fail the hire on. Skip the profile, leave
-        // the Smart HR Tracker Profile ID blank, and let the transaction
-        // proceed carrying the "EE does not have an SSN yet, we will add it as
-        // soon as it is provided" comment (built from the same SSN check in
-        // enter.ts). The I-9 is created later, once the real SSN arrives.
-        if (isUcpathRejectedSsn(data.ssn)) {
+        // "no SSN on file yet" placeholder. It is NOT an SSN: UCPath refuses it
+        // outright, and I-9 Complete refuses it on save ("The SSN number is not
+        // valid or is not entered correctly"). Operator rule: that means the
+        // person has no SSN, so the I-9 is still created — just with the SSN
+        // field LEFT BLANK. Never substitute the placeholder.
+        const usableSsn = ssnForUcpathEntry(data.ssn);
+        const hasNoSsn = !usableSsn;
+        if (hasNoSsn && data.ssn) {
           log.warn(
-            `I-9 profile NOT created for ${data.firstName} ${data.lastName}: the National ID on `
-            + `file begins 900-999 (ITIN range / "no SSN yet" placeholder), which both UCPath and `
-            + `I-9 Complete reject. Proceeding with the hire; Tracker Profile ID left blank and the `
-            + `transaction comment records that the SSN is still outstanding.`,
+            `National ID on file for ${data.firstName} ${data.lastName} begins 900-999 (ITIN range / `
+            + `"no SSN yet" placeholder) — treating it as NO SSN: the I-9 profile is created with the `
+            + `SSN field blank.`,
           );
-          ctx.updateData({
-            i9ProfileId: "Not created — no valid SSN on file",
-            i9BlockedByMissingSsn: "true",
-          });
-          mode = "pending";
-          return "";
         }
 
-        if (!data.ssn) throw new Error("Cannot create I-9 without SSN");
         if (!data.dob) throw new Error("Cannot create I-9 without DOB");
         if (!data.departmentNumber) throw new Error("Cannot create I-9 without department number");
 
         log.debug(
-          `[Step: i9-creation] START ssnLast4='${data.ssn.replace(/-/g, "").slice(-4)}' `
+          `[Step: i9-creation] START ssnLast4='${usableSsn ? usableSsn.replace(/-/g, "").slice(-4) : "<none>"}' `
           + `dept='${data.departmentNumber}'`,
         );
 
         const i9Page = await ctx.page("i9");
 
-        // Search for existing profile first — avoids duplicate creation on re-runs.
-        const ssnWithDashes = data.ssn.replace(/(\d{3})(\d{2})(\d{4})/, "$1-$2-$3");
-        const searchResults = await ctx.retry(
-          () => searchI9Employee(i9Page, { ssn: ssnWithDashes }),
-          { attempts: 2 },
-        );
+        // Search for existing profile first — avoids duplicate creation on
+        // re-runs. Only possible when there IS an SSN to search by; with none,
+        // go straight to create (the operator accepts that a no-SSN person
+        // cannot be de-duplicated by SSN).
+        const searchResults = usableSsn
+          ? await ctx.retry(
+              () => searchI9Employee(i9Page, {
+                ssn: usableSsn.replace(/(\d{3})(\d{2})(\d{4})/, "$1-$2-$3"),
+              }),
+              { attempts: 2 },
+            )
+          : [];
+        if (!usableSsn) {
+          log.step("No SSN on file — skipping the I-9 SSN search and creating the profile directly");
+        }
 
         if (searchResults.length > 0 && searchResults[0].profileId) {
           const pid = searchResults[0].profileId;
@@ -543,7 +542,7 @@ export const onboardingWorkflow = defineWorkflow({
             firstName: data.firstName,
             middleName: data.middleName,
             lastName: data.lastName,
-            ssn: data.ssn,
+            ...(usableSsn ? { ssn: usableSsn } : {}),
             dob: data.dob,
             email: data.email ?? email,
             departmentNumber: data.departmentNumber,
@@ -581,7 +580,7 @@ export const onboardingWorkflow = defineWorkflow({
           firstName: data.firstName,
           middleName: data.middleName,
           lastName: data.lastName,
-          ssn: data.ssn,
+          ...(usableSsn ? { ssn: usableSsn } : {}),
           dob: data.dob,
           email: data.email ?? email,
           departmentNumber: data.departmentNumber,

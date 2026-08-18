@@ -37,6 +37,15 @@ export const EmployeeDataSchema = z.object({
     /^\d{2}\/\d{2}\/\d{4}$/,
     "Effective date must be in MM/DD/YYYY format",
   ),
+  /**
+   * "Expected Job End Date (if applicable)" from the CRM UCPath Entry Sheet.
+   * Optional — the CRM label itself says "if applicable" — but when present it
+   * is authoritative and beats the configured fiscal-year default.
+   */
+  expectedJobEndDate: z.string().regex(
+    /^\d{2}\/\d{2}\/\d{4}$/,
+    "Expected job end date must be in MM/DD/YYYY format",
+  ).optional().or(z.literal("")),
 });
 
 export type EmployeeData = z.infer<typeof EmployeeDataSchema>;

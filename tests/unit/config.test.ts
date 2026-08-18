@@ -43,15 +43,17 @@ describe("ANNUAL_DATES", () => {
     delete process.env.KRONOS_DEFAULT_START_DATE;
 
     const mod = await import("../../src/config.js");
-    assert.equal(mod.ANNUAL_DATES.jobEndDate, "06/30/2026");
+    assert.equal(mod.ANNUAL_DATES.jobEndDate, "06/30/2027");
     assert.equal(mod.ANNUAL_DATES.kronosDefaultEndDate, "2/1/2026");
     assert.equal(mod.ANNUAL_DATES.kronosDefaultStartDate, "1/1/2017");
   });
 
   it("ANNUAL_DATES_END overrides jobEndDate", async () => {
-    process.env.ANNUAL_DATES_END = "06/30/2027";
+    // Deliberately NOT the current default — an override test that matches the
+    // default proves nothing once the fiscal year rolls.
+    process.env.ANNUAL_DATES_END = "06/30/2028";
     const mod = await import("../../src/config.js");
-    assert.equal(mod.ANNUAL_DATES.jobEndDate, "06/30/2027");
+    assert.equal(mod.ANNUAL_DATES.jobEndDate, "06/30/2028");
   });
 
   it("KRONOS_DEFAULT_END_DATE overrides kronosDefaultEndDate", async () => {
