@@ -79,6 +79,7 @@
     "exceljs": "^4.4.0",
     "heic2any": "^0.0.4",
     "hono": "^4.12.16",
+    "jszip": "^3.10.1",
     "lucide-react": "^1.8.0",
     "papaparse": "^5.5.4",
     "pdf-lib": "^1.17.1",

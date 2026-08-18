@@ -47,6 +47,7 @@ import {
   fileMenu,
 } from "../../systems/sharepoint/selectors.js";
 import { safeClick, safeFill } from "../../systems/common/index.js";
+import { sanitizeDownloadedXlsx } from "./sanitize-xlsx.js";
 
 export interface DownloadSharePointOptions {
   /** URL of the SharePoint file to open (e.g. a shared Excel Online link) */
@@ -403,6 +404,15 @@ export async function captureExcelDownload(
   }
   const outPath = path.resolve(outDir, filename);
   await result.saveAs(outPath);
+
+  // Excel Online writes table-filter elements (colorFilter/iconFilter) that
+  // ExcelJS's table parser throws on, which made the saved workbook unreadable
+  // by roster-loader.ts — a good download landing on disk as an unusable file.
+  // Strip them here so the artifact is always readable. Only .xlsx has tables.
+  if (outPath.toLowerCase().endsWith(".xlsx")) {
+    await sanitizeDownloadedXlsx(outPath);
+  }
+
   log.success(`Saved: ${outPath}`);
   return { path: outPath, filename };
 }
