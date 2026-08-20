@@ -666,6 +666,21 @@
    "preservation": "preserved"
   },
   {
+   "path": "src/tracker/dashboard/hono/manifest.ts",
+   "changeKind": "modified",
+   "beforeSha256": "52d3b5b1a757ee028f3c5d14fabf61744d68424cd31a783b3b075da39bd31c46",
+   "afterSha256": "6f7e084d4e9da9ac2c741cd7be46fd5f2a3cbff1cf7ab58765a01e8115665b32",
+   "capabilityIds": [
+    "legacy-dashboard-log-panel",
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Route manifest entry for POST /api/eid-approval/not-this-person (the identity-review card's 'Not this person — run as new hire' action); the manifest-sync unit test pins it.",
+   "rebuildRecheckIds": [
+    "npm:test"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "src/tracker/dashboard/hono/request-schemas.ts",
    "changeKind": "modified",
    "beforeSha256": "ecd9394f8235e7fcc54fff55c7d445eb0af32c145d35cbdaa1491b6377d20b05",
