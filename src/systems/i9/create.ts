@@ -200,7 +200,7 @@ export async function createI9Employee(
         if (await okBtn.isVisible().catch(() => false)) { isOk = true; break; }
         const routeId = extractProfileId(page.url());
         if (routeId && routeId !== "0") { savedRouteId = routeId; break; }
-        await page.waitForTimeout(500);
+        await sleep(500);
       }
     }
 
@@ -242,7 +242,7 @@ export async function createI9Employee(
         `I-9 profile route resolved (${page.url()}) without a confirmation dialog — treating the `
         + `saved route as the confirmation (profile ${savedRouteId}).`,
       );
-      await page.waitForTimeout(1_000);
+      await sleep(1_000);
       profileId = savedRouteId;
       log.step(`Profile saved: ${profileId}`);
     } else {
