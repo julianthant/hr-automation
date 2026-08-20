@@ -157,6 +157,15 @@ export const eidDismissBody = z.object({
   date: optionalDate,
 });
 
+/** "Not this person — run as a new hire" (onboarding): the rejected proposed EID. */
+export const eidNotThisPersonBody = z.object({
+  workflow: requiredString,
+  id: requiredString,
+  runId: optionalString,
+  eid: requiredString,
+  date: optionalDate,
+});
+
 export const saveDataBody = z.object({
   workflow: requiredString,
   id: requiredString,

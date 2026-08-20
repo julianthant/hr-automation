@@ -80,7 +80,12 @@ file" button reads). Gated so it never overwrites a human-loaded credential, and
 silent no-op when the file is absent (it's gitignored) or `autoImport` is off.
 
 On auto-import the `signCount` is stamped to the current unix time (seconds) if
-the packaged value is lower. This is the automated equivalent of "Resync
+the packaged value is lower. **`npm run sel:browser` therefore wipes
+`.auth/<session>-profile` on every launch** (2026-08-20): a profile reused
+across days keeps the extension's stored counter, which Duo has already seen,
+and the next assertion fails as a cloned key (`passkey → auth_fail`, "Couldn't
+use security key — canceled or timed out"). A fresh profile re-imports with a
+fresh timestamp and the login clears hands-off again (verified 2026-08-20). This is the automated equivalent of "Resync
 signCount": the packaged counter is usually far behind Duo's server-observed
 value, so without it Duo rejects the first assertion as a cloned key and the
 prompt hangs. A unix timestamp is monotonic across fresh browser profiles (a
