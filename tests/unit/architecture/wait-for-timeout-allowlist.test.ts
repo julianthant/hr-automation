@@ -103,8 +103,8 @@ const ALLOWLIST: CountAllowlist = {
     reason: "OnBase Unity Client form settle waits; no consistent processing indicator.",
   },
   "src/systems/ucpath/job-summary.ts": {
-    count: 3,
-    reason: "PeopleSoft Job Summary tab/grid settle; see the 2026-06-22 CLAUDE.md lesson on this grid not reliably raising the processing spinner.",
+    count: 2,
+    reason: "PeopleSoft Job Summary tab/grid settle; see the 2026-06-22 CLAUDE.md lesson on this grid not reliably raising the processing spinner. Net -1 on 2026-08-20 (3→2): the Job Information / Work Location grid-scan polls now sleep via node:timers/promises (the frozen-grid rewrite), so only the tab-click settle waits remain.",
   },
   "src/systems/ucpath/navigate.ts": {
     count: 6,

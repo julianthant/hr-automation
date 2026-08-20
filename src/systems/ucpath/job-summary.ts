@@ -1,4 +1,5 @@
 import type { Page, Locator } from "playwright";
+import { setTimeout as sleep } from "node:timers/promises";
 import { log } from "../../utils/log.js";
 import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import { jobSummary } from "./selectors.js";
@@ -319,9 +320,194 @@ async function ensureJobSummaryDetailPage(
   );
 }
 
+// ─── Frozen-column grid reading (Workforce Job Summary) ──────────────────────
+
+/**
+ * Raw dump of a PeopleSoft FROZEN-COLUMN grid. PeopleSoft renders such a grid as
+ * TWO row-aligned data tables: `tdgbl<GRID>` (LEFT, the frozen columns —
+ * Organizational Relationship · Empl Record · Effective Date · Seq) and
+ * `tdgbr<GRID>` (RIGHT, the active tab's columns: Job Information → Job Code ·
+ * Description · … · Expected Job End Date; Work Location → Position Number ·
+ * Description · Company · Dept ID · Department Description · …). One `<tr>` per
+ * job row in EACH table, same count, same order. Live-verified 2026-08-20 on
+ * `WF_JOB_SUMM` (`tdgblWF_JOB_SUMM$0` / `tdgbrWF_JOB_SUMM$0`, 16–17 rows).
+ */
+export interface FrozenGridDump {
+  left: Array<{ id: string; rows: string[][] }>;
+  right: Array<{ id: string; rows: string[][] }>;
+}
+
+/** One paired frozen-grid row: the LEFT table's Effective Date + the RIGHT table's cells. */
+export interface FrozenGridRow {
+  effectiveDate: string;
+  cells: string[];
+}
+
+const MMDDYYYY_CELL = /^\d{1,2}\/\d{1,2}\/\d{4}$/;
+
+/**
+ * Dump the frozen-grid data tables of the current Workforce Job Summary tab.
+ * Reads the PeopleSoft content document (the `#main_target_win0` iframe when
+ * present, else the page itself — the direct `psc` URL has no iframe). Returns
+ * empty arrays while the grid has not rendered yet (callers poll).
+ */
+async function readFrozenGridDump(page: Page): Promise<FrozenGridDump> {
+  return page.evaluate(() => {
+    // NOTE: no NAMED const helpers in here (tsx keepNames → `__name` is
+    // undefined in the page context); anonymous callbacks only.
+    const frame = document.querySelector<HTMLIFrameElement>("#main_target_win0");
+    const doc = (frame && frame.contentDocument) || document;
+    const tables = Array.from(doc.querySelectorAll("table"));
+    return {
+      left: tables
+        .filter((t) => /^tdgbl/.test(t.id))
+        .map((t) => ({
+          id: t.id,
+          rows: Array.from(t.rows).map((tr) =>
+            Array.from(tr.cells).map((c) => (c.textContent ?? "").replace(/\s+/g, " ").trim()),
+          ),
+        })),
+      right: tables
+        .filter((t) => /^tdgbr/.test(t.id))
+        .map((t) => ({
+          id: t.id,
+          rows: Array.from(t.rows).map((tr) =>
+            Array.from(tr.cells).map((c) => (c.textContent ?? "").replace(/\s+/g, " ").trim()),
+          ),
+        })),
+    };
+  });
+}
+
+/**
+ * Pair the LEFT (frozen) and RIGHT data tables of a Workforce Job Summary grid
+ * row-by-row and read each row's Effective Date from the LEFT table. Pure +
+ * unit-pinned against dumps captured from the live grid (2026-08-20).
+ *
+ * Why this exists: the right-table row carries its own date column(s) —
+ * "Expected Job End Date" on Job Information — and a "first date-looking cell
+ * in the row" read mistook that for the Effective Date (separations docs
+ * 4540/4541, 2026-08-20: every STDT 3 row read as eff 06/30/2026 — its END
+ * date — so the picker fell back to an older STDT 2 row and Kuali got the wrong
+ * Payroll Title Code/Title). The ONLY source of truth for a row's Effective Date
+ * is the frozen left table, zipped by index.
+ *
+ * Fail-loud contract (a wrong row must never reach the HDH gate or Kuali):
+ *   - no left table, or a left table with no rows → `[]` (grid not rendered
+ *     yet — callers poll; an empty final scan is judged by the caller).
+ *   - more than one populated left table → THROW (ambiguous grid).
+ *   - no right table with the matching `<GRID>` id suffix → `[]` (half-rendered
+ *     grid — keep polling; a persistent miss surfaces as the caller's empty-scan
+ *     failure).
+ *   - left/right row counts differ → THROW (misaligned zip would pair a date
+ *     with the wrong job row).
+ *   - the left table has no single all-dates column → THROW (Effective Date
+ *     column not where the frozen layout puts it — re-map, don't guess).
+ */
+export function pairFrozenGridRows(dump: FrozenGridDump): FrozenGridRow[] {
+  const lefts = dump.left.filter((t) => t.rows.length > 0);
+  if (lefts.length === 0) return [];
+  if (lefts.length > 1) {
+    throw new Error(
+      `pairFrozenGridRows: expected ONE frozen-left grid table, found ${lefts.length} ` +
+        `(${lefts.map((t) => t.id).join(", ")}) — ambiguous Workforce Job Summary grid; re-map before trusting any row.`,
+    );
+  }
+  const left = lefts[0];
+  const suffix = left.id.replace(/^tdgbl/, "");
+  const right = dump.right.find((t) => t.id.replace(/^tdgbr/, "") === suffix);
+  if (!right || right.rows.length === 0) return [];
+  if (right.rows.length !== left.rows.length) {
+    throw new Error(
+      `pairFrozenGridRows: frozen-left table '${left.id}' has ${left.rows.length} row(s) but right table ` +
+        `'${right.id}' has ${right.rows.length} — cannot zip Effective Dates onto job rows; refusing to guess.`,
+    );
+  }
+  const width = Math.max(...left.rows.map((r) => r.length));
+  const dateCols: number[] = [];
+  for (let c = 0; c < width; c++) {
+    if (left.rows.every((r) => MMDDYYYY_CELL.test(r[c] ?? ""))) dateCols.push(c);
+  }
+  if (dateCols.length !== 1) {
+    throw new Error(
+      `pairFrozenGridRows: expected exactly ONE all-dates (Effective Date) column in frozen-left table ` +
+        `'${left.id}', found ${dateCols.length} (first row: ${JSON.stringify(left.rows[0])}) — ` +
+        `the frozen column layout moved; re-map before trusting any row.`,
+    );
+  }
+  const dateCol = dateCols[0];
+  return left.rows.map((l, i) => ({ effectiveDate: l[dateCol], cells: right.rows[i] }));
+}
+
+/**
+ * Project paired frozen-grid rows of the WORK LOCATION tab onto
+ * `WorkLocationRow`s. Each right row is anchored by its Position Number cell
+ * (7–8 digits); Dept ID = +3, Department Description = +4 (proven offsets).
+ * Throws when a row has no Position Number anchor — layout drift, not a row
+ * to guess at.
+ */
+export function workLocationRowsFromGrid(rows: FrozenGridRow[]): WorkLocationRow[] {
+  const POS = /^\d{7,8}$/;
+  return rows.map((row, i) => {
+    const p = row.cells.findIndex((c) => POS.test(c));
+    if (p < 0 || row.cells.length < p + 5) {
+      throw new Error(
+        `workLocationRowsFromGrid: Work Location row ${i + 1} has no Position Number anchor ` +
+          `(cells: ${JSON.stringify(row.cells)}) — grid layout drift; re-map before trusting any row.`,
+      );
+    }
+    return {
+      effectiveDate: row.effectiveDate,
+      deptId: row.cells[p + 3] ?? "",
+      departmentDescription: row.cells[p + 4] ?? "",
+      positionNumber: row.cells[p],
+    };
+  });
+}
+
+/**
+ * Project paired frozen-grid rows of the JOB INFORMATION tab onto
+ * `JobInfoRow`s: Job Code = cells[0] (6 digits), Description = cells[1].
+ * Throws when cells[0] is not a job code — layout drift, not a row to guess at.
+ */
+export function jobInfoRowsFromGrid(rows: FrozenGridRow[]): JobInfoRow[] {
+  const JOBCODE = /^\d{6}$/;
+  return rows.map((row, i) => {
+    if (!JOBCODE.test(row.cells[0] ?? "")) {
+      throw new Error(
+        `jobInfoRowsFromGrid: Job Information row ${i + 1} does not start with a 6-digit Job Code ` +
+          `(cells: ${JSON.stringify(row.cells)}) — grid layout drift; re-map before trusting any row.`,
+      );
+    }
+    return {
+      effectiveDate: row.effectiveDate,
+      jobCode: row.cells[0],
+      jobDescription: row.cells[1] ?? "",
+    };
+  });
+}
+
+/**
+ * Generic poll for a lazily rendered grid scan: re-run `scan` until `ready`
+ * accepts the result or the attempt budget is spent (returns the last scan).
+ * `pollForJobInfoScan` is the Job Information specialisation.
+ */
+export async function pollForGridScan<T>(
+  scan: () => Promise<T>,
+  ready: (scan: T) => boolean,
+  opts: { attempts: number; intervalMs: number; sleep: (ms: number) => Promise<void> },
+): Promise<T> {
+  let last = await scan();
+  for (let attempt = 1; attempt < opts.attempts && !ready(last); attempt++) {
+    await opts.sleep(opts.intervalMs);
+    last = await scan();
+  }
+  return last;
+}
+
 /** One effective-dated row of the Workforce Job Summary Work Location grid. */
 export interface WorkLocationRow {
-  /** Effective Date as MM/DD/YYYY, or "" when it could not be read in-row. */
+  /** Effective Date as MM/DD/YYYY (from the frozen LEFT grid table). */
   effectiveDate: string;
   /** Dept ID, e.g. "000414". */
   deptId: string;
@@ -477,78 +663,24 @@ export async function extractWorkLocation(
   await waitForPeopleSoftProcessing(psFrame, 15_000);
 
   // Scan EVERY effective-dated row of the Work Location grid (not just the
-  // first), so we can pick the one in effect as of the separation date. Each
-  // job row is anchored by its Position Number cell; Dept ID = +3, Dept
-  // Description = +4 (proven offsets). The Effective Date is read in-row, with a
-  // count-exact frozen-column zip as a fallback (see extractWorkLocation docs).
+  // first), so we can pick the one in effect as of the separation date. The
+  // grid is a PeopleSoft FROZEN-COLUMN grid: the Effective Date lives in the
+  // LEFT table (`tdgbl…`), the Position/Dept cells in the row-aligned RIGHT
+  // table (`tdgbr…`) — see `pairFrozenGridRows`. Each right row is anchored by
+  // its Position Number cell; Dept ID = +3, Dept Description = +4 (proven
+  // offsets, live-verified 2026-08-20). The tab's grid renders lazily, so the
+  // scan is polled (same budget as the Job Information scan).
   log.step("[Job Summary] Extracting department (all Work Location rows)...");
 
-  const rows: WorkLocationRow[] = await page.evaluate(() => {
-    // NOTE: do NOT define a `const norm = (...) => ...` helper in here — tsx's
-    // esbuild keepNames instruments named functions with `__name(...)`, which is
-    // undefined in the browser page context → "ReferenceError: __name is not
-    // defined" at runtime. Inline the whitespace-collapse instead (anonymous
-    // callbacks passed to .map/.find are fine — only NAMED bindings get __name).
-    const POS = /^\d{7,8}$/;
-    const DATE = /^\d{1,2}\/\d{1,2}\/\d{4}$/;
-
-    // Pass 1 — job rows (Position Number anchored), capturing an in-row date.
-    const jobRows: Array<{
-      effectiveDate: string;
-      deptId: string;
-      departmentDescription: string;
-      positionNumber: string;
-    }> = [];
-    for (const tr of Array.from(document.querySelectorAll("tr"))) {
-      const cells = Array.from(tr.querySelectorAll("td")).map((td) =>
-        (td.textContent ?? "").replace(/\s+/g, " ").trim(),
-      );
-      const p = cells.findIndex((c) => POS.test(c));
-      if (p < 0 || cells.length < p + 5) continue;
-      let effectiveDate = "";
-      if (p - 2 >= 0 && DATE.test(cells[p - 2])) effectiveDate = cells[p - 2];
-      else {
-        const d = cells.find((c) => DATE.test(c));
-        if (d) effectiveDate = d;
-      }
-      jobRows.push({
-        effectiveDate,
-        deptId: cells[p + 3] ?? "",
-        departmentDescription: cells[p + 4] ?? "",
-        positionNumber: cells[p],
-      });
-    }
-
-    // Pass 2 — frozen-column fallback. If no job row carried an in-row date,
-    // PeopleSoft likely rendered the left columns (incl. Effective Date) in a
-    // parallel, row-aligned table. Read an "Effective Date" column and zip by
-    // index — but ONLY when its date count EXACTLY matches the job-row count, so
-    // a mismatched/unrelated table can never produce a wrong date↔dept pairing.
-    if (jobRows.length > 0 && !jobRows.some((r) => r.effectiveDate)) {
-      for (const table of Array.from(document.querySelectorAll("table"))) {
-        const trs = Array.from((table).rows);
-        let col = -1;
-        for (const tr of trs) {
-          const idx = Array.from(tr.cells).findIndex((c) =>
-            /effective date/i.test((c.textContent ?? "").replace(/\s+/g, " ").trim()),
-          );
-          if (idx >= 0) { col = idx; break; }
-        }
-        if (col < 0) continue;
-        const dates: string[] = [];
-        for (const tr of trs) {
-          const t = tr.cells[col] ? (tr.cells[col].textContent ?? "").replace(/\s+/g, " ").trim() : "";
-          if (DATE.test(t)) dates.push(t);
-        }
-        if (dates.length === jobRows.length) {
-          for (let i = 0; i < jobRows.length; i++) jobRows[i].effectiveDate = dates[i];
-          break;
-        }
-      }
-    }
-
-    return jobRows;
-  });
+  const rows: WorkLocationRow[] = await pollForGridScan(
+    async () => workLocationRowsFromGrid(pairFrozenGridRows(await readFrozenGridDump(page))),
+    (scan) => scan.length > 0,
+    {
+      attempts: JOB_INFO_POLL_ATTEMPTS,
+      intervalMs: JOB_INFO_POLL_INTERVAL_MS,
+      sleep: (ms) => sleep(ms),
+    },
+  );
 
   for (const r of rows) {
     log.debug(
@@ -578,7 +710,7 @@ export interface JobInfoScan {
 
 /** One effective-dated row of the Job Information grid. */
 export interface JobInfoRow extends JobInfoScan {
-  /** Effective Date as MM/DD/YYYY, or "" when it could not be read in-row. */
+  /** Effective Date as MM/DD/YYYY (from the frozen LEFT grid table). */
   effectiveDate: string;
 }
 
@@ -614,13 +746,7 @@ export async function pollForJobInfoScan(
     sleep: (ms: number) => Promise<void>;
   },
 ): Promise<JobInfoRow[]> {
-  let last: JobInfoRow[] = [];
-  for (let attempt = 0; attempt < opts.attempts; attempt++) {
-    last = await scan();
-    if (last.some((r) => r.jobCode)) return last;
-    if (attempt < opts.attempts - 1) await opts.sleep(opts.intervalMs);
-  }
-  return last;
+  return pollForGridScan(scan, (rows) => rows.some((r) => r.jobCode), opts);
 }
 
 /**
@@ -676,73 +802,18 @@ export async function extractJobInfo(
   log.step("[Job Summary] Extracting job code (all Job Information rows)...");
 
   // Scan EVERY job-coded row (not just the first) with its effective date, so
-  // the picker can choose the one in effect as of the separation date. Job
-  // Information grid columns: Job Code(0), Description(1), Classified Ind(2),
-  // Empl Status(3), Full/Part Time(4), Standard Hours(5), FTE(6), ... The
-  // Effective Date is read in-row, with a count-exact frozen-column zip as a
-  // fallback (mirrors extractWorkLocation — see its inline notes).
+  // the picker can choose the one in effect as of the separation date. Same
+  // frozen-grid pairing as Work Location: Effective Date from the LEFT table,
+  // Job Code(0) + Description(1) from the row-aligned RIGHT table. NEVER read a
+  // date out of the right-table row — its only in-row date is "Expected Job
+  // End Date", which is what the pre-2026-08-20 scan mistook for the Effective
+  // Date (separations docs 4540/4541 → STDT 2 filled where STDT 3 was in effect).
   const rows = await pollForJobInfoScan(
-    () =>
-      page.evaluate(() => {
-        // Do NOT define a NAMED `const fn = () => ...` helper here — tsx's
-        // esbuild keepNames adds `__name(...)` which is undefined in the page
-        // context. Anonymous .map/.find callbacks are fine.
-        const JOBCODE = /^\d{6}$/;
-        const DATE = /^\d{1,2}\/\d{1,2}\/\d{4}$/;
-
-        // Pass 1 — job-coded rows (cells[0] = job code), capturing an in-row date.
-        const jobRows: Array<{
-          jobCode: string;
-          jobDescription: string;
-          effectiveDate: string;
-        }> = [];
-        for (const tr of Array.from(document.querySelectorAll("tr"))) {
-          const cells = Array.from(tr.querySelectorAll("td")).map((td) =>
-            (td.textContent ?? "").replace(/\s+/g, " ").trim(),
-          );
-          if (cells.length < 2 || !JOBCODE.test(cells[0])) continue;
-          const inRowDate = cells.find((c) => DATE.test(c)) ?? "";
-          jobRows.push({
-            jobCode: cells[0],
-            jobDescription: cells[1] ?? "",
-            effectiveDate: inRowDate,
-          });
-        }
-
-        // Pass 2 — frozen-column fallback. If no job row carried an in-row date,
-        // PeopleSoft likely rendered the left columns (incl. Effective Date) in a
-        // parallel, row-aligned table. Read an "Effective Date" column and zip by
-        // index — but ONLY when its date count EXACTLY matches the job-row count,
-        // so a mismatched/unrelated table can never produce a wrong date↔job pairing.
-        if (jobRows.length > 0 && !jobRows.some((r) => r.effectiveDate)) {
-          for (const table of Array.from(document.querySelectorAll("table"))) {
-            const trs = Array.from((table).rows);
-            let col = -1;
-            for (const tr of trs) {
-              const idx = Array.from(tr.cells).findIndex((c) =>
-                /effective date/i.test((c.textContent ?? "").replace(/\s+/g, " ").trim()),
-              );
-              if (idx >= 0) { col = idx; break; }
-            }
-            if (col < 0) continue;
-            const dates: string[] = [];
-            for (const tr of trs) {
-              const t = tr.cells[col] ? (tr.cells[col].textContent ?? "").replace(/\s+/g, " ").trim() : "";
-              if (DATE.test(t)) dates.push(t);
-            }
-            if (dates.length === jobRows.length) {
-              for (let i = 0; i < jobRows.length; i++) jobRows[i].effectiveDate = dates[i];
-              break;
-            }
-          }
-        }
-
-        return jobRows;
-      }),
+    async () => jobInfoRowsFromGrid(pairFrozenGridRows(await readFrozenGridDump(page))),
     {
       attempts: JOB_INFO_POLL_ATTEMPTS,
       intervalMs: JOB_INFO_POLL_INTERVAL_MS,
-      sleep: (ms) => page.waitForTimeout(ms),
+      sleep: (ms) => sleep(ms),
     },
   );
 
