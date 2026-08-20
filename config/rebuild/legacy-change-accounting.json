@@ -22,6 +22,23 @@
    "impactRationale": "Queue-row delete guard now binds the canonical terminal set (blocked was omitted, making blocked tasks undeletable)."
   },
   {
+   "path": "src/control/ops/eid-approval.ts",
+   "changeKind": "modified",
+   "beforeSha256": "b21292c664ae52d99f150cc9902d79dca3d8615edda66f5f02e825f582b80a62",
+   "afterSha256": "e48e7bb4afd54e6c26b264428f1c9a2a35a348596a0389ecef2f9eff93a02fad",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-separations",
+    "legacy-dashboard-log-panel"
+   ],
+   "impactRationale": "Adds buildNotThisPersonHandler + mergeNotMatchEids + NOT_THIS_PERSON_WORKFLOWS (onboarding only): the identity-review card's 'Not this person — run as new hire' action re-enqueues the original input with accumulated prefilledData.notMatchEids and stamps the row dismissed. Approve/dismiss handlers unchanged (separations unaffected).",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "src/core/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "297f6aedc0d14b0ac4b24071334853d689332969f79a1f21c961eb33c3c604bb",
@@ -68,6 +85,51 @@
    ],
    "preservation": "preserved",
    "impactRationale": "Exports TERMINAL_CONTROL_STATES as the single terminal-state definition; every workflow that runs through the daemon consumes it."
+  },
+  {
+   "path": "src/dashboard/CLAUDE.md",
+   "changeKind": "modified",
+   "beforeSha256": "60199c6673bfd904b52c8a9f9e87ec4752bf0232bb03a9ab2174ea472e5a0349",
+   "afterSha256": "8c251aeb95c5910b4bbb5bc656a1f1859f6081db972d6a673d2431210dad589f",
+   "capabilityIds": [
+    "legacy-dashboard-log-panel"
+   ],
+   "impactRationale": "Documents the third review-card action (2026-08-20).",
+   "rebuildRecheckIds": [
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/dashboard/components/log-panel/EidApprovalBanner.tsx",
+   "changeKind": "modified",
+   "beforeSha256": "45a36d5202b9c2c78be12247c5217f699bf9535b613d4240732d6e18cb5a9dee",
+   "afterSha256": "36133673d27ab6b84ebf105d7b828f0763a28cacd9e7e40898a28ae62bea0314",
+   "capabilityIds": [
+    "legacy-dashboard-log-panel",
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Third action on the identity-review card, onboarding only: 'Not this person — run as new hire' → /api/eid-approval/not-this-person. Verified headless on a seeded eidApproval:pending onboarding row.",
+   "rebuildRecheckIds": [
+    "npm:typecheck:dashboard",
+    "npm:build:dashboard"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/domain/identity-approval.ts",
+   "changeKind": "modified",
+   "beforeSha256": "16222a735ff26e631b8e52eab63d82e5a3dc7acca0a5abeed8810e1d84bd78f4",
+   "afterSha256": "d6cfd70ae63f4a805fb49c802c4db365b32e50c27e425f6ca3bdf0d201ddcede",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "Doc comment only: names the third (onboarding-only) review action and where it is documented.",
+   "rebuildRecheckIds": [
+    "npm:test"
+   ],
+   "preservation": "preserved"
   },
   {
    "path": "src/domain/identity/eid.ts",
@@ -246,6 +308,20 @@
    "preservation": "preserved"
   },
   {
+   "path": "src/systems/i9/LESSONS.md",
+   "changeKind": "modified",
+   "beforeSha256": "5b1bc0d8b204c3b36a1e2eeefbd9637fa812048df0f1c619e4d31bc9ff09332f",
+   "afterSha256": "db26b3c419b6e1dbdc89d6166c7469a0f43dcae1de82449c9588a2fa3727d9d2",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Lesson: Employee Profile Save & Continue confirmation can render late while the profile is saved; createI9Employee now polls named outcomes incl. the saved-profile route.",
+   "rebuildRecheckIds": [
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "src/systems/i9/SELECTORS.md",
    "changeKind": "modified",
    "beforeSha256": "f8d9eba3213c717341d48a0060959e1a0bdc2f760161dfa408ba03a402d709ec",
@@ -264,11 +340,11 @@
    "path": "src/systems/i9/create.ts",
    "changeKind": "modified",
    "beforeSha256": "25f01825ad5b547bdf7b8a3243bd91e6e3966ac0649fcb03a10bee6f7152adb8",
-   "afterSha256": "41152aa4e55ba670e5a825b9142cc25ac96771ebea191cf1c7dff67ea7d353ab",
+   "afterSha256": "0fdff2f9949ca07830b76b3ea9e0fb75fbedb03fd32ca6c169ec95328ca8dc74",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
-   "impactRationale": "SSN is now optional on the I-9 profile: a National ID in the 900-999 range (ITIN / CRM's all-9s placeholder) means NO SSN, so the field is left blank rather than rejected on save. Adds the dry-run fill/abandon helpers and hardens the Kendo worksite dropdown with a re-open retry.",
+   "impactRationale": "SSN is now optional on the I-9 profile: a National ID in the 900-999 range (ITIN / CRM's all-9s placeholder) means NO SSN, so the field is left blank rather than rejected on save. Adds the dry-run fill/abandon helpers and hardens the Kendo worksite dropdown with a re-open retry. 2026-08-20 (pm): post-save outcome poll (validation/duplicate/OK/saved-route) replaces one-shot checks; late OK no longer a false failure.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -457,7 +533,7 @@
    "path": "src/systems/ucpath/LESSONS.md",
    "changeKind": "modified",
    "beforeSha256": "010e7a25f50d7e63b24355bb254ded76690c9278a6885285ef3a52101fc5f9a1",
-   "afterSha256": "eeaa40618d131f36b8184b1b3b0edb1bdc1cbba08f21b717fe6f1f8ad3b5dbb2",
+   "afterSha256": "f3f9a096c620714a69caed23cd6d6fa0e2ec401574678bbc1f2c0252fe57600f",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-person-lookup",
@@ -468,7 +544,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "2026-08-05 (aba05c65): corrected the 2026-08-04 $op accessible-name lesson's blast-radius paragraph — it had declared production immune while the production-driven ssSmartHRTransactions group carried the same fragile shape (the doc 4493 failure); adds the sweep-every-Find-an-Existing-Value-group rule. 2026-08-20: lesson — Save and Submit can land on the Person Match Found review page the outcome poll never watched."
+   "impactRationale": "2026-08-05 (aba05c65): corrected the 2026-08-04 $op accessible-name lesson's blast-radius paragraph — it had declared production immune while the production-driven ssSmartHRTransactions group carried the same fragile shape (the doc 4493 failure); adds the sweep-every-Find-an-Existing-Value-group rule. 2026-08-20: lesson — Save and Submit can land on the Person Match Found review page the outcome poll never watched. 2026-08-20 (pm): lesson — SS Smart HR Name box is First Last; single match auto-opens the detail page."
   },
   {
    "path": "src/systems/ucpath/SELECTORS.md",
@@ -561,7 +637,7 @@
    "path": "src/systems/ucpath/ss-smart-hr.ts",
    "changeKind": "modified",
    "beforeSha256": "6524118fb49e244442824d134484709530bf2a80a5be73bf183fd7d5cac847f2",
-   "afterSha256": "059dc4e3ac10a82317492618ea2c8d8baa8414f69a3376c8b6bafdddec904f32",
+   "afterSha256": "f389133cbe5b13484d272baf48ab2bb8d056ddc757500e7d17e482e7f9fd6ff9",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -570,7 +646,8 @@
     "npm:test",
     "npm:test:architecture"
    ],
-   "preservation": "preserved"
+   "preservation": "preserved",
+   "impactRationale": " 2026-08-20 (pm): buildHireSearchName → First Last (live-verified; Last,First never matched); readSsSmartHrSearchOutcome handles the single-match auto-opened detail page for both the pre-submit hire probe and the receipt readback."
   },
   {
    "path": "src/systems/ucpath/transaction.ts",
@@ -585,6 +662,38 @@
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/tracker/dashboard/hono/request-schemas.ts",
+   "changeKind": "modified",
+   "beforeSha256": "ecd9394f8235e7fcc54fff55c7d445eb0af32c145d35cbdaa1491b6377d20b05",
+   "afterSha256": "1d0ea841e374e86111bf7d45022fff704bbbb62adcf5bc1ea8dc0bd72cbfa423",
+   "capabilityIds": [
+    "legacy-dashboard-log-panel",
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Adds eidNotThisPersonBody for POST /api/eid-approval/not-this-person.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:typecheck"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/tracker/dashboard/hono/routes/ops.ts",
+   "changeKind": "modified",
+   "beforeSha256": "8eec09a86939cd6d6398658725766794d53706f6d9240a5251c17e1904b4162e",
+   "afterSha256": "2e7b9b2c72865cf863ef88cca749cea2e1d69d9f09ef0ddbb26b234f8ec9806b",
+   "capabilityIds": [
+    "legacy-dashboard-log-panel",
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Registers POST /api/eid-approval/not-this-person (202) beside approve/dismiss.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:typecheck"
    ],
    "preservation": "preserved"
   },
@@ -637,7 +746,7 @@
    "path": "src/workflows/onboarding/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "f7c38194ca9ef657840af3a87e56bc5dbae307f5e471d0605e729ff0e01872c2",
-   "afterSha256": "cf551547780c090eeac1b2f9f87da211ff739d2806ffc5ca9506620e8562f37c",
+   "afterSha256": "5d053334e49b2c9eb4071a60d4726e69c35ec06d7454c44b7fbed30825119da0",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
@@ -646,7 +755,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": " 2026-08-20: documents the Person Match Found page handling and the notMatchEids channel. 2026-08-20 (pm): documents are per-day plain folders."
+   "impactRationale": " 2026-08-20: documents the Person Match Found page handling and the notMatchEids channel. 2026-08-20 (pm): documents are per-day plain folders. 2026-08-20 (pm): probe live-verified (First Last, detail page), not-this-person action."
   },
   {
    "path": "src/workflows/onboarding/enter.ts",
@@ -1007,6 +1116,21 @@
    "preservation": "preserved"
   },
   {
+   "path": "tests/unit/control/eid-approval.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "e1387250dfe3b8f29853bc6a6ed82ae4467e6c9fc29dcfcee938150cf6178caa",
+   "afterSha256": "c76fe395c0a24fa6d86020c422e2197e85e39f35bd9d62f1cf585e61cb0e5b6f",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "Pins NOT_THIS_PERSON_WORKFLOWS (onboarding only), the not-this-person validation guards, and mergeNotMatchEids accumulation.",
+   "rebuildRecheckIds": [
+    "npm:test"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "tests/unit/core/daemon.test.ts",
    "changeKind": "modified",
    "beforeSha256": "b9366fe7cb01c84f977a8948777d361c5b5f6ec69ff01655f20f04ca689d7012",
@@ -1087,7 +1211,7 @@
    "path": "tests/unit/systems/ucpath/ss-smart-hr.test.ts",
    "changeKind": "modified",
    "beforeSha256": "57506848064063459502da280dc9cb31d8a5dc6c5e9f44bc42bbf5be8b098f43",
-   "afterSha256": "d125f66d150d0febad496c36fb734211b1e051910a1e62e35d88932cbbaaa00a",
+   "afterSha256": "73291d2779f6fd4b1a3e55a4424c8912a3ec404694b0066906ebd6c6809b58a4",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -1096,7 +1220,8 @@
     "npm:test",
     "npm:test:architecture"
    ],
-   "preservation": "preserved"
+   "preservation": "preserved",
+   "impactRationale": " 2026-08-20 (pm): First Last key + detail-page readers pinned on live page text."
   },
   {
    "path": "tests/unit/systems/ucpath/transaction.test.ts",
