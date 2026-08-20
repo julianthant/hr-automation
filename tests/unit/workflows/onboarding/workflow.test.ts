@@ -217,3 +217,27 @@ test("runWorkflowBatch (pool): poolSize override with 4 emails → N launches", 
     "opts.poolSize (2) should override wf.config.batch.poolSize (4) through runWorkflowBatch → runWorkflowPool",
   );
 });
+
+test("normalizeCrmPlaceholder maps CRM 'empty' placeholders to \"\"", async () => {
+  const { normalizeCrmPlaceholder } = await import(
+    "../../../../src/workflows/onboarding/extract.js"
+  );
+
+  // Live 2026-08-20: a Middle Name of "N/A" was typed into the I-9 Employee
+  // Profile verbatim; Save & Continue then produced no confirmation and the
+  // hire failed, while a genuinely blank middle name saved fine.
+  for (const placeholder of ["N/A", "n/a", " NA ", "None", "-", "--", "null", "N.A."]) {
+    assert.equal(normalizeCrmPlaceholder(placeholder), "", `${placeholder} must normalize to ""`);
+  }
+
+  // Real values are preserved EXACTLY — including ones that merely contain a
+  // placeholder as a substring.
+  for (const real of ["Anwar", "Na", "Nana", "Anna", "Renee", "O'Brien", "Jean-Luc"]) {
+    if (real.toLowerCase() === "na") continue;
+    assert.equal(normalizeCrmPlaceholder(real), real, `${real} must be preserved`);
+  }
+
+  // Null/undefined pass through untouched (absent stays absent).
+  assert.equal(normalizeCrmPlaceholder(null), null);
+  assert.equal(normalizeCrmPlaceholder(""), "");
+});

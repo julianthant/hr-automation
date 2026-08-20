@@ -1,4 +1,5 @@
 export { loginToI9 } from "./login.js";
+export { resetI9Page } from "./navigate.js";
 export {
   createI9Employee,
   fillI9EmployeeProfileWithoutSaving,

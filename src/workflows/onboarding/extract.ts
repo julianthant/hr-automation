@@ -48,6 +48,25 @@ const FIELD_MAP: Record<string, string[]> = {
 };
 
 /**
+ * CRM placeholder strings that mean "this field is empty".
+ *
+ * Operators type "N/A" into optional CRM fields rather than leaving them blank.
+ * Passing that through verbatim writes the literal text into the downstream
+ * system: live 2026-08-20 an I-9 Employee Profile was submitted with Middle Name
+ * "N/A" and Save & Continue produced no confirmation, failing both affected
+ * hires, while an genuinely-blank middle name saved fine.
+ *
+ * Matched case-insensitively after trimming; anything else is preserved exactly.
+ */
+const CRM_EMPTY_PLACEHOLDERS = new Set(["n/a", "na", "n.a.", "none", "-", "--", "null"]);
+
+/** "" when the scraped value is a CRM placeholder for empty; otherwise unchanged. */
+export function normalizeCrmPlaceholder(value: string | null): string | null {
+  if (value == null) return value;
+  return CRM_EMPTY_PLACEHOLDERS.has(value.trim().toLowerCase()) ? "" : value;
+}
+
+/**
  * Parses just the appointment number out of a scraped Appointment label
  * (e.g. "Casual/Restricted 5" → "5"). The result becomes `data.appointment`,
  * which `enter.ts` fills verbatim into UCPath's live "Employee Classification"
@@ -90,6 +109,14 @@ export async function extractRawFields(
         matchedLabel = label;
         break;
       }
+    }
+
+    // "N/A" and friends are how operators write "empty" in CRM. Normalise them
+    // to "" so the placeholder is never typed into a downstream system.
+    const beforeNormalize = value;
+    value = normalizeCrmPlaceholder(value);
+    if (beforeNormalize && !value) {
+      log.step(`CRM field "${field}": placeholder ${JSON.stringify(beforeNormalize)} treated as empty`);
     }
 
     if (field === "appointment" && value) {

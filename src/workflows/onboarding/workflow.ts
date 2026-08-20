@@ -35,6 +35,7 @@ import {
   searchI9Employee,
   fillI9EmployeeProfileWithoutSaving,
   abandonI9ProfileForm,
+  resetI9Page,
 } from "../../systems/i9/index.js";
 import { extractRawFields, extractRecordPageFields } from "./extract.js";
 import { validateEmployeeData } from "./schema.js";
@@ -499,6 +500,12 @@ export const onboardingWorkflow = defineWorkflow({
         );
 
         const i9Page = await ctx.page("i9");
+
+        // The daemon reuses one I-9 browser across every queued person, and the
+        // app leaves stale hidden Kendo dialogs behind whose overlays intercept
+        // the next item's clicks. Reset the page per item so item N+1 never
+        // inherits item N's modal wreckage (live 2026-08-20: five hires lost).
+        await resetI9Page(i9Page);
 
         // Search for an existing profile FIRST — this is the only thing standing
         // between a re-run and a duplicate I-9. Prefer SSN (unique); with no SSN
