@@ -32,8 +32,24 @@ export {
   scrollToTransactionReadbackArea,
   parsePayRate,
   buildCommentsText,
+  // Submit-time "Person Match Found" page (2026-08-20)
+  classifySubmitSignals,
+  decidePersonMatchContinue,
+  candidateExcludedByHardIdentifier,
+  readPersonMatchCandidates,
+  formatPersonMatchCandidate,
+  normalizeNationalIdLast4,
+  normalizeDobMonthDay,
+  ssnLast4,
 } from "./transaction.js";
-export type { PersonalDataInput, JobDataInput, ExistingTerminationResult } from "./transaction.js";
+export type {
+  PersonalDataInput,
+  JobDataInput,
+  ExistingTerminationResult,
+  PersonMatchCandidate,
+  PersonMatchHireIdentity,
+  PersonMatchDecision,
+} from "./transaction.js";
 export {
   navigateToSsSmartHrTransactions,
   findTerminationTransactionStatus,

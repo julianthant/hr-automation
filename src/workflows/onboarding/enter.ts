@@ -22,6 +22,7 @@ import {
   clickEarnsDistTab,
   clickEmployeeExperienceTab,
   clickSaveAndSubmit,
+  ssnLast4,
   parsePayRate,
   buildCommentsText,
   waitForPeopleSoftProcessing,
@@ -103,6 +104,12 @@ export function buildTransactionPlan(
      * from the SS Smart HR list, which does not carry an unprocessed hire.
      */
     onTransactionNumber?: (txnNumber: string) => void;
+    /**
+     * Operator-reviewed "NOT this person" UCPath EIDs (`data.notMatchEids`).
+     * Consulted only if Save and Submit lands on the "Person Match Found"
+     * page — see `decidePersonMatchContinue` in `systems/ucpath/transaction.ts`.
+     */
+    notMatchEids?: readonly string[];
   } = {},
 ): ActionPlan {
   const plan = new ActionPlan();
@@ -401,8 +408,15 @@ export function buildTransactionPlan(
     async () => {
       // Pass the person's name: a new hire has no EID, so the post-submit
       // readback locates its Transactions-in-Progress row by the Name cell.
+      // hireIdentity feeds the Person-Match-Found exclusion rule ONLY: the
+      // hire's real SSN last-4 (none for a 900-999 placeholder) and DOB.
       const result = await clickSaveAndSubmit(page, getContentFrame(page), undefined, {
         personName: `${data.firstName} ${data.lastName}`.trim(),
+        hireIdentity: {
+          ssnLast4: ssnLast4(ssnForUcpathEntry(data.ssn)),
+          dob: data.dob,
+        },
+        notMatchEids: options.notMatchEids ?? [],
       });
       await captureStage(page, 7, "after-save-and-submit");
       if (!result.success) {

@@ -8,7 +8,7 @@ import { buildCliAdapter } from "../../core/cli-adapter.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
-import { isUcpathEmployeeId } from "../../domain/identity/eid.js";
+import { isUcpathEmployeeId, parseEidList } from "../../domain/identity/eid.js";
 import { classifyNameSimilarity } from "../../services/matching/match.js";
 import {
   buildIdentityApprovalPauseData,
@@ -175,6 +175,25 @@ export const onboardingWorkflow = defineWorkflow({
     const approvedEid =
       typeof ctx.data.eidApproved === "string" ? ctx.data.eidApproved.trim() : "";
     const eidPreApproved = isUcpathEmployeeId(approvedEid);
+
+    // Operator-reviewed "NOT this person" UCPath EIDs (`prefilledData.notMatchEids`,
+    // comma-separated). Two gates consult it, both wrong-person guards that
+    // otherwise stop the run: (1) the person-search identity gate below — a
+    // `different`-name Search/Match hit whose EVERY matched EID the operator has
+    // reviewed and rejected proceeds as a NEW hire instead of re-pausing
+    // (Search/Match keys on DOB with fuzzy first names and ignores the surname,
+    // so the same false match recurs on every plain re-run — 2026-08-20: Mia
+    // Perez→Mia McKrell, Juliana Romano→Julian Davey, Maria Renee Santos→Mariana
+    // Herrera); (2) the submit-time "Person Match Found" page — a candidate the
+    // operator reviewed is excluded alongside hard-identifier mismatches (see
+    // `decidePersonMatchContinue`). An EID NOT in the list never gets a pass.
+    const notMatchEids = parseEidList(ctx.data.notMatchEids);
+    if (notMatchEids.length > 0) {
+      log.step(
+        `[identity] operator-reviewed NOT-this-person EIDs for this run: ${notMatchEids.join(", ")} `
+        + `(a Search/Match hit or Person Match candidate limited to these proceeds as a new hire)`,
+      );
+    }
 
     // Stamp dryRun onto every running row's data (initialData stamps the
     // pending pre-emit; this carries it to subsequent live rows so the
@@ -389,7 +408,26 @@ export const onboardingWorkflow = defineWorkflow({
       return result;
     });
 
-    if (searchResult.found) {
+    const matchedEids = (searchResult.matches ?? []).map((m) => m.emplId).filter(Boolean);
+    const everyMatchReviewedNotThisPerson =
+      searchResult.found
+      && matchedEids.length > 0
+      && matchedEids.every((eid) => notMatchEids.includes(eid));
+
+    if (searchResult.found && everyMatchReviewedNotThisPerson) {
+      // ── Operator-reviewed false match → proceed as a NEW hire ──
+      // Every EID Search/Match returned is one the operator already reviewed
+      // (via the identity-approval card / Person Org Summary) and confirmed is
+      // NOT this hire. Recording it as a rehire would be the wrong person, and
+      // re-pausing would loop forever (the DOB-keyed fuzzy match is
+      // deterministic), so fall through to the new-hire path. The override is
+      // exact-EID scoped: a hit on any EID NOT in the list still pauses below.
+      log.warn(
+        `[person-search] UCPath matched ${matchedEids.join(", ")} — every one is operator-reviewed `
+        + `NOT this person (notMatchEids) — proceeding as a NEW hire, not a rehire.`,
+      );
+      ctx.updateData({ personSearchOverride: `not-this-person:${matchedEids.join(",")}` });
+    } else if (searchResult.found) {
       // ── Identity-approval gate (wrong-person guard) ──
       // person-search matched an existing UCPath person by SSN/DOB/name. If that
       // matched person's name is confidently the SAME (or a close spelling
@@ -682,6 +720,7 @@ export const onboardingWorkflow = defineWorkflow({
           const plan = buildTransactionPlan(data, ucpathPage, i9ProfileId, {
             dryRun: input.dryRun === true,
             onTransactionNumber: (txn) => { submittedTxnNumber = txn; },
+            notMatchEids,
           });
           log.step("Executing Smart HR transaction plan...");
           await plan.execute();

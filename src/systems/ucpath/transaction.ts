@@ -66,6 +66,206 @@ export async function waitForTransactionOutcome(
   return "timeout";
 }
 
+// ─── Submit-time "Person Match Found" page (PeopleSoft Search/Match review) ──
+//
+// Save and Submit can land on UCPath's own Search/Match review page instead of
+// the confirmation dialog when the hire's name/DOB/SSN resembles an existing
+// person. Until 2026-08-20 the automation had no signal for it: the submit
+// "timed out with no error banner and no confirmation OK dialog" (live runs
+// 99d5012c Hao Sun — 10 same-surname candidates; ebd5d59e Emily Robles — one
+// namesake with a different SSN + DOB). Nothing is persisted on that page, so
+// the hire simply never filed.
+//
+// The decision is deliberately narrow and fail-loud. We click "Not a Match -
+// Continue with Hire" ONLY when EVERY listed candidate is excluded by one of:
+//   (1) a HARD identifier that is known on both sides and DIFFERS — the
+//       Date of Birth month/day (UCPath masks the year) or the National ID
+//       last-4 (UCPath masks the rest); a name is never evidence (Search/Match
+//       is fuzzy on names by design, see LESSONS.md 2026-08-06), or
+//   (2) the operator having REVIEWED that exact Person ID and confirmed it is
+//       not this hire (`notMatchEids`, supplied via the `prefilledData`
+//       channel — `data.notMatchEids`, comma-separated EIDs).
+// Anything else (a candidate with no comparable identifier, or one the operator
+// never saw) refuses to continue: the run fails with the candidate table in the
+// error so the operator can review and re-run with the reviewed EIDs. A
+// candidate that merely "looks different by name" is NOT excluded — that is the
+// wrong-person risk this page exists to catch.
+
+export interface PersonMatchCandidate {
+  /** UCPath Person ID (EID) of the possible match. */
+  personId: string;
+  firstName: string;
+  lastName: string;
+  /** Last 4 digits of the masked National ID (`*****9035` → `9035`); "" when unknown (`*****XXXX`/blank). */
+  nationalIdLast4: string;
+  /** Masked Date of Birth as shown (`10/8/****`) normalized to `M/D`; "" when blank. */
+  dobMonthDay: string;
+}
+
+/** The hire's own comparable identifiers (from CRM), as known to this run. */
+export interface PersonMatchHireIdentity {
+  /** Last 4 of the hire's REAL SSN; "" / undefined when the hire has no SSN. */
+  ssnLast4?: string;
+  /** The hire's DOB in any `M/D/YYYY` / `MM/DD/YYYY` form; "" / undefined when unknown. */
+  dob?: string;
+}
+
+/** `*****9035` → `9035`; `*****XXXX`, blank, or anything without 4 trailing digits → "". */
+export function normalizeNationalIdLast4(raw: string | null | undefined): string {
+  const m = /(\d{4})\s*$/.exec((raw ?? "").trim());
+  return m ? m[1] : "";
+}
+
+/** `10/8/****`, `08/26/2007`, `8/26` → `8/26`; anything unparseable → "". */
+export function normalizeDobMonthDay(raw: string | null | undefined): string {
+  const m = /^\s*(\d{1,2})\/(\d{1,2})(?:\/|\s|$)/.exec(raw ?? "");
+  if (!m) return "";
+  const month = Number(m[1]);
+  const day = Number(m[2]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return "";
+  return `${month}/${day}`;
+}
+
+/** Last 4 digits of an SSN in any punctuation (`123-45-6789` → `6789`); "" when absent. */
+export function ssnLast4(raw: string | null | undefined): string {
+  const digits = (raw ?? "").replace(/\D/g, "");
+  return digits.length >= 4 ? digits.slice(-4) : "";
+}
+
+/**
+ * A candidate is excluded by a HARD identifier when a comparable value is known
+ * on BOTH sides and differs. Unknown on either side → not excluded (we cannot
+ * tell them apart, so we must not continue blind). Names are never consulted.
+ */
+export function candidateExcludedByHardIdentifier(
+  candidate: PersonMatchCandidate,
+  hire: PersonMatchHireIdentity,
+): boolean {
+  const hireDob = normalizeDobMonthDay(hire.dob);
+  const candDob = normalizeDobMonthDay(candidate.dobMonthDay);
+  if (hireDob && candDob && hireDob !== candDob) return true;
+  const hireSsn4 = ssnLast4(hire.ssnLast4);
+  const candSsn4 = normalizeNationalIdLast4(candidate.nationalIdLast4);
+  if (hireSsn4 && candSsn4 && hireSsn4 !== candSsn4) return true;
+  return false;
+}
+
+export interface PersonMatchDecision {
+  /** true ⇢ click "Not a Match - Continue with Hire"; false ⇢ fail loud for review. */
+  proceed: boolean;
+  /** Candidates that nothing excluded (empty when `proceed`). */
+  unresolved: PersonMatchCandidate[];
+  /** Per-candidate reason, for the log/tracker. */
+  reasons: Array<{ personId: string; reason: "hard-identifier-mismatch" | "operator-reviewed" | "unresolved" }>;
+}
+
+/**
+ * Pure decision for the Person Match Found page. `proceed` requires at least one
+ * candidate (an empty grid is an unexpected page state → review) AND every
+ * candidate excluded by a hard identifier or by an operator-reviewed EID.
+ * Unit-pinned.
+ */
+export function decidePersonMatchContinue(
+  candidates: readonly PersonMatchCandidate[],
+  hire: PersonMatchHireIdentity,
+  notMatchEids: readonly string[],
+): PersonMatchDecision {
+  const reviewed = new Set(notMatchEids.map((e) => e.trim()).filter(Boolean));
+  const reasons: PersonMatchDecision["reasons"] = [];
+  const unresolved: PersonMatchCandidate[] = [];
+  for (const c of candidates) {
+    if (candidateExcludedByHardIdentifier(c, hire)) {
+      reasons.push({ personId: c.personId, reason: "hard-identifier-mismatch" });
+    } else if (c.personId && reviewed.has(c.personId)) {
+      reasons.push({ personId: c.personId, reason: "operator-reviewed" });
+    } else {
+      reasons.push({ personId: c.personId, reason: "unresolved" });
+      unresolved.push(c);
+    }
+  }
+  return { proceed: candidates.length > 0 && unresolved.length === 0, unresolved, reasons };
+}
+
+/** One-line, log/tracker-friendly rendering of a candidate. */
+export function formatPersonMatchCandidate(c: PersonMatchCandidate): string {
+  return `${c.personId || "<no id>"} ${c.firstName} ${c.lastName}`.trim()
+    + ` (NID ***${c.nationalIdLast4 || "????"}, DOB ${c.dobMonthDay || "?"})`;
+}
+
+/**
+ * Pure per-tick classification of the three submit signals. The error banner
+ * wins, then the Person Match Found page, then the confirmation OK marker. The
+ * confirmation OK locator (`getByRole("button", { name: "OK" })`) can resolve to
+ * unrelated OK-named controls on a busy page, so the named review page must be
+ * checked BEFORE the generic success marker. Unit-pinned.
+ */
+export function classifySubmitSignals(
+  errorVisible: boolean,
+  personMatchVisible: boolean,
+  successVisible: boolean,
+): "error" | "person-match" | "success" | "pending" {
+  if (errorVisible) return "error";
+  if (personMatchVisible) return "person-match";
+  if (successVisible) return "success";
+  return "pending";
+}
+
+/**
+ * Read the "Possible Person Matches" grid off the Person Match Found page.
+ * Columns are mapped by HEADER TEXT (Person ID / Legal First Name / Legal Last
+ * Name / National ID / Date of Birth) so a column reorder cannot silently shift
+ * a value into the wrong field; a data row is any row in that table whose first
+ * cell holds the "Select" button. Throws when the header row cannot be found —
+ * an unreadable grid must never be mistaken for "no candidates".
+ */
+export async function readPersonMatchCandidates(frame: FrameLocator): Promise<PersonMatchCandidate[]> {
+  const rows = await smartHR.personMatchCandidateRows(frame).evaluateAll((trs) => {
+    // No named bindings in here: esbuild keep-names would wrap them in
+    // `__name(...)`, undefined inside the page (architecture guard).
+    if (trs.length === 0) return { error: "no candidate rows (no row with a Select button)", rows: [] as string[][] };
+    const table = (trs[0] as HTMLElement).closest("table");
+    if (!table) return { error: "candidate row has no enclosing table", rows: [] as string[][] };
+    // Header row: the first row in this table whose cells include "Person ID".
+    let headers: string[] | null = null;
+    for (const tr of Array.from(table.querySelectorAll("tr"))) {
+      const cells = Array.from(tr.children).map((c) => ((c as HTMLElement).innerText ?? "").replace(/\s+/g, " ").trim());
+      if (cells.some((c) => /^Person ID$/i.test(c)) && cells.some((c) => /Legal Last/i.test(c))) {
+        headers = cells;
+        break;
+      }
+    }
+    if (!headers) return { error: "header row with 'Person ID' + 'Legal Last Name' not found", rows: [] as string[][] };
+    const data: string[][] = [];
+    for (const tr of trs) {
+      const cells = Array.from((tr as HTMLElement).children).map((c) => ((c as HTMLElement).innerText ?? "").replace(/\s+/g, " ").trim());
+      data.push(cells);
+    }
+    return { error: "", headers, rows: data };
+  });
+  if (rows.error) throw new Error(`Person Match Found grid unreadable: ${rows.error}`);
+  const headers = rows.headers as string[];
+  const col = (re: RegExp) => headers.findIndex((h) => re.test(h));
+  const iPid = col(/^Person ID$/i);
+  const iFirst = col(/Legal First/i);
+  const iLast = col(/Legal Last/i);
+  const iNid = col(/National ID/i);
+  const iDob = col(/Date of Birth/i);
+  if (iPid < 0 || iFirst < 0 || iLast < 0 || iNid < 0 || iDob < 0) {
+    throw new Error(
+      `Person Match Found grid headers unexpected: [${headers.join(" | ")}] — refusing to map columns by guess`,
+    );
+  }
+  return rows.rows
+    .map((cells) => ({
+      personId: (cells[iPid] ?? "").trim(),
+      firstName: (cells[iFirst] ?? "").trim(),
+      lastName: (cells[iLast] ?? "").trim(),
+      nationalIdLast4: normalizeNationalIdLast4(cells[iNid]),
+      dobMonthDay: normalizeDobMonthDay(cells[iDob]),
+    }))
+    .filter((c) => c.personId.length > 0);
+}
+
 /**
  * Bounded best-effort wait for a NAMED page condition — a specific element
  * becoming visible (default) or hidden (`state: "hidden"`, e.g. "the wizard
@@ -892,7 +1092,17 @@ export async function clickSaveAndSubmit(
   page: Page,
   frame: FrameLocator,
   employeeId?: string,
-  opts: { personName?: string } = {},
+  opts: {
+    personName?: string;
+    /**
+     * The hire's own comparable identifiers, used ONLY if the submit lands on
+     * the "Person Match Found" page — see `decidePersonMatchContinue`. Omitted
+     * (separations / EID-bearing flows) ⇒ any Person Match page fails loud.
+     */
+    hireIdentity?: PersonMatchHireIdentity;
+    /** Operator-reviewed "not this person" EIDs (`data.notMatchEids`). */
+    notMatchEids?: readonly string[];
+  } = {},
 ): Promise<TransactionResult> {
   log.step("Clicking Save and Submit...");
   await dismissPeopleSoftModalMask(page);
@@ -945,6 +1155,63 @@ export async function clickSaveAndSubmit(
   // confirmation OK dialog vs. the error banner — is the waitForTransactionOutcome
   // poll below (20s cap, the real success marker for this irreversible submit).
   await waitForPeopleSoftProcessing(frame, 30_000);
+
+  // ── "Person Match Found" (Search/Match review) can replace the confirmation ──
+  // Poll the three named signals together: error banner, the Person Match
+  // heading, the confirmation OK. Before 2026-08-20 only the first and last
+  // were watched, so a submit that reached the review page timed out blind.
+  {
+    const personMatchHeading = smartHR.personMatchFoundHeading(frame);
+    const errorLoc = smartHR.errorBanner(frame);
+    const okLoc = smartHR.confirmationOkButton(frame);
+    const deadline = Date.now() + 30_000;
+    let signal: ReturnType<typeof classifySubmitSignals> = "pending";
+    while (Date.now() < deadline) {
+      const errorVisible = (await errorLoc.count().catch(() => 0)) > 0;
+      const matchVisible = await personMatchHeading.first().isVisible().catch(() => false);
+      const okVisible = await okLoc.first().isVisible().catch(() => false);
+      signal = classifySubmitSignals(errorVisible, matchVisible, okVisible);
+      if (signal !== "pending") break;
+      await sleep(500);
+    }
+    if (signal === "person-match") {
+      const candidates = await readPersonMatchCandidates(frame);
+      log.warn(
+        `[Submit] UCPath raised "Person Match Found" — ${candidates.length} possible person match(es) `
+        + `for ${opts.personName ?? employeeId ?? "<unknown>"}:`,
+      );
+      for (const c of candidates) log.warn(`[Submit]   ${formatPersonMatchCandidate(c)}`);
+      const decision = decidePersonMatchContinue(candidates, opts.hireIdentity ?? {}, opts.notMatchEids ?? []);
+      for (const r of decision.reasons) log.step(`[Submit]   ${r.personId}: ${r.reason}`);
+      if (!decision.proceed) {
+        const unresolved = decision.unresolved.map(formatPersonMatchCandidate).join("; ");
+        const unresolvedEids = decision.unresolved.map((c) => c.personId).join(",");
+        // Nothing is persisted on this page (live 2026-08-20: no Transactions-in-
+        // Progress row after it) — leave it; a re-run recreates the transaction.
+        return {
+          success: false,
+          error:
+            `UCPath raised "Person Match Found" on submit and ${decision.unresolved.length} of `
+            + `${candidates.length} candidate(s) could not be excluded by a hard identifier `
+            + `(DOB month/day or SSN last-4): ${unresolved || "<none>"}. The hire was NOT filed. `
+            + `Review each in UCPath (Person Org Summary); if none is this person, re-run with `
+            + `prefilledData.notMatchEids="${unresolvedEids}" (comma-separated EIDs the operator `
+            + `confirmed are NOT this hire); if one IS this person, this is a rehire — do not file.`,
+        };
+      }
+      log.success(
+        `[Submit] every Person Match candidate is excluded (hard-identifier mismatch or operator-reviewed) `
+        + `— clicking "Not a Match - Continue with Hire".`,
+      );
+      await dismissPeopleSoftModalMask(page);
+      await safeClick(smartHR.personMatchNotAMatchButton(frame), {
+        timeout: 10_000,
+        label: "ucpath person match: not a match - continue with hire",
+      });
+      await waitForPeopleSoftProcessing(frame, 30_000);
+      // Fall through to the ordinary error-vs-confirmation outcome wait below.
+    }
+  }
 
   // Decide on a DEFINITIVE outcome — error banner vs the post-submit confirmation
   // OK dialog — rather than sampling errorBanner.count() once after a fixed sleep

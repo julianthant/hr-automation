@@ -12,6 +12,14 @@ import {
   assertTerminationLastDateWorkedReadback,
   requirePeopleSoftControlRefresh,
   fillTerminationLastDateWorked,
+  classifySubmitSignals,
+  decidePersonMatchContinue,
+  candidateExcludedByHardIdentifier,
+  normalizeNationalIdLast4,
+  normalizeDobMonthDay,
+  ssnLast4,
+  formatPersonMatchCandidate,
+  type PersonMatchCandidate,
 } from "../../../../src/systems/ucpath/transaction.js";
 
 describe("requirePeopleSoftControlRefresh", () => {
@@ -527,5 +535,141 @@ describe("interpretPostSubmitTxnReadback", () => {
       assert.equal(r.outcome, "unknown");
       assert.equal(r.accepted, false);
     }
+  });
+});
+
+// ─── Submit-time "Person Match Found" page (2026-08-20) ──────────────────────
+//
+// Candidate tables below are the LIVE ones from the two blind timeouts that
+// motivated this guard (runs ebd5d59e Emily Robles / 99d5012c Hao Sun).
+
+const ROBLES_HIRE = { ssnLast4: "4267", dob: "08/26/2007" };
+const ROBLES_CANDIDATES: PersonMatchCandidate[] = [
+  { personId: "10773675", firstName: "Emily", lastName: "Robles", nationalIdLast4: "9035", dobMonthDay: "10/8" },
+];
+
+const SUN_HIRE = { ssnLast4: "", dob: "08/24/2003" }; // no SSN (CRM 999-99-9999 placeholder)
+const SUN_CANDIDATES: PersonMatchCandidate[] = [
+  { personId: "10197468", firstName: "Haoyuan", lastName: "Sun", nationalIdLast4: "2188", dobMonthDay: "9/30" },
+  { personId: "10291151", firstName: "Haojun", lastName: "Sun", nationalIdLast4: "9960", dobMonthDay: "1/2" },
+  { personId: "10416504", firstName: "Haotian", lastName: "Sun", nationalIdLast4: "3380", dobMonthDay: "" },
+  { personId: "10489194", firstName: "Haochen", lastName: "Sun", nationalIdLast4: "1919", dobMonthDay: "8/22" },
+  { personId: "10568124", firstName: "Haoran", lastName: "Sun", nationalIdLast4: "6160", dobMonthDay: "7/10" },
+  { personId: "10682951", firstName: "Hao Yu", lastName: "Sun", nationalIdLast4: "4488", dobMonthDay: "1/29" },
+  { personId: "10690473", firstName: "Haoran", lastName: "Sun", nationalIdLast4: "9778", dobMonthDay: "1/15" },
+  { personId: "10743545", firstName: "Haowen", lastName: "Sun", nationalIdLast4: "", dobMonthDay: "" },
+  { personId: "10823228", firstName: "Haotian", lastName: "Sun", nationalIdLast4: "5916", dobMonthDay: "4/10" },
+  { personId: "10839930", firstName: "Hao", lastName: "Sun", nationalIdLast4: "", dobMonthDay: "11/24" },
+];
+
+describe("Person Match Found — normalizers", () => {
+  test("normalizeNationalIdLast4 keeps only a trailing 4-digit group", () => {
+    assert.equal(normalizeNationalIdLast4("*****9035"), "9035");
+    assert.equal(normalizeNationalIdLast4("*****XXXX"), "");
+    assert.equal(normalizeNationalIdLast4(""), "");
+    assert.equal(normalizeNationalIdLast4(undefined), "");
+  });
+
+  test("normalizeDobMonthDay accepts masked and full dates and canonicalizes M/D", () => {
+    assert.equal(normalizeDobMonthDay("10/8/****"), "10/8");
+    assert.equal(normalizeDobMonthDay("08/26/2007"), "8/26");
+    assert.equal(normalizeDobMonthDay("8/26"), "8/26");
+    assert.equal(normalizeDobMonthDay(""), "");
+    assert.equal(normalizeDobMonthDay("13/40/2000"), "");
+    assert.equal(normalizeDobMonthDay("not a date"), "");
+  });
+
+  test("ssnLast4 reads the last 4 digits in any punctuation, '' when absent", () => {
+    assert.equal(ssnLast4("123-45-6789"), "6789");
+    assert.equal(ssnLast4("4267"), "4267");
+    assert.equal(ssnLast4(""), "");
+    assert.equal(ssnLast4(undefined), "");
+  });
+});
+
+describe("candidateExcludedByHardIdentifier", () => {
+  test("DOB month/day known on both sides and different → excluded", () => {
+    assert.equal(candidateExcludedByHardIdentifier(ROBLES_CANDIDATES[0], ROBLES_HIRE), true);
+  });
+
+  test("SSN last-4 known on both sides and different → excluded even when DOB is unknown", () => {
+    const c: PersonMatchCandidate = { personId: "10000001", firstName: "A", lastName: "B", nationalIdLast4: "1111", dobMonthDay: "" };
+    assert.equal(candidateExcludedByHardIdentifier(c, { ssnLast4: "2222", dob: "" }), true);
+  });
+
+  test("identifier unknown on either side → NOT excluded (cannot tell them apart)", () => {
+    // Haowen Sun: no DOB, no SSN shown; hire has no SSN → nothing comparable.
+    assert.equal(candidateExcludedByHardIdentifier(SUN_CANDIDATES[7], SUN_HIRE), false);
+    // Haotian 10416504: has SSN but the hire has none; DOB blank on the candidate.
+    assert.equal(candidateExcludedByHardIdentifier(SUN_CANDIDATES[2], SUN_HIRE), false);
+  });
+
+  test("same DOB and same SSN last-4 → NOT excluded (this may well be the person)", () => {
+    const c: PersonMatchCandidate = { personId: "10000002", firstName: "Emily", lastName: "Robles", nationalIdLast4: "4267", dobMonthDay: "8/26" };
+    assert.equal(candidateExcludedByHardIdentifier(c, ROBLES_HIRE), false);
+  });
+
+  test("a different NAME alone is never evidence", () => {
+    const c: PersonMatchCandidate = { personId: "10000003", firstName: "Zelda", lastName: "Qwerty", nationalIdLast4: "", dobMonthDay: "" };
+    assert.equal(candidateExcludedByHardIdentifier(c, ROBLES_HIRE), false);
+  });
+});
+
+describe("decidePersonMatchContinue", () => {
+  test("Emily Robles live case: the lone namesake differs on DOB and SSN → proceed automatically", () => {
+    const d = decidePersonMatchContinue(ROBLES_CANDIDATES, ROBLES_HIRE, []);
+    assert.equal(d.proceed, true);
+    assert.deepEqual(d.unresolved, []);
+    assert.deepEqual(d.reasons, [{ personId: "10773675", reason: "hard-identifier-mismatch" }]);
+  });
+
+  test("Hao Sun live case, no operator review: two candidates lack any comparable identifier → refuse", () => {
+    const d = decidePersonMatchContinue(SUN_CANDIDATES, SUN_HIRE, []);
+    assert.equal(d.proceed, false);
+    assert.deepEqual(d.unresolved.map((c) => c.personId), ["10416504", "10743545"]);
+    // The exact-name one (Hao Sun 10839930) is excluded by DOB 11/24 ≠ 8/24, not by name.
+    assert.deepEqual(d.reasons.find((r) => r.personId === "10839930"), { personId: "10839930", reason: "hard-identifier-mismatch" });
+  });
+
+  test("Hao Sun live case with the two unresolved EIDs operator-reviewed → proceed", () => {
+    const d = decidePersonMatchContinue(SUN_CANDIDATES, SUN_HIRE, ["10416504", "10743545"]);
+    assert.equal(d.proceed, true);
+    assert.deepEqual(d.reasons.filter((r) => r.reason === "operator-reviewed").map((r) => r.personId), ["10416504", "10743545"]);
+  });
+
+  test("operator review of OTHER EIDs does not cover an unreviewed, unexcluded candidate", () => {
+    const d = decidePersonMatchContinue(SUN_CANDIDATES, SUN_HIRE, ["10416504"]);
+    assert.equal(d.proceed, false);
+    assert.deepEqual(d.unresolved.map((c) => c.personId), ["10743545"]);
+  });
+
+  test("an operator-reviewed EID that ALSO matches on hard identifiers is still honoured (operator decision wins)", () => {
+    const c: PersonMatchCandidate = { personId: "10000004", firstName: "Emily", lastName: "Robles", nationalIdLast4: "4267", dobMonthDay: "8/26" };
+    assert.equal(decidePersonMatchContinue([c], ROBLES_HIRE, ["10000004"]).proceed, true);
+    assert.equal(decidePersonMatchContinue([c], ROBLES_HIRE, []).proceed, false);
+  });
+
+  test("an empty candidate grid is an unexpected page state → refuse", () => {
+    assert.equal(decidePersonMatchContinue([], ROBLES_HIRE, []).proceed, false);
+  });
+
+  test("formatPersonMatchCandidate renders id, name, masked NID and DOB", () => {
+    assert.equal(formatPersonMatchCandidate(ROBLES_CANDIDATES[0]), "10773675 Emily Robles (NID ***9035, DOB 10/8)");
+    assert.equal(formatPersonMatchCandidate(SUN_CANDIDATES[7]), "10743545 Haowen Sun (NID ***????, DOB ?)");
+  });
+});
+
+describe("classifySubmitSignals", () => {
+  test("error banner wins over everything", () => {
+    assert.equal(classifySubmitSignals(true, true, true), "error");
+  });
+  test("Person Match Found is checked before the generic OK marker", () => {
+    assert.equal(classifySubmitSignals(false, true, true), "person-match");
+  });
+  test("confirmation OK alone → success", () => {
+    assert.equal(classifySubmitSignals(false, false, true), "success");
+  });
+  test("nothing → pending", () => {
+    assert.equal(classifySubmitSignals(false, false, false), "pending");
   });
 });
