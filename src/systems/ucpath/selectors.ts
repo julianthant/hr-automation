@@ -135,6 +135,52 @@ export const smartHR = {
   errorBanner: (f: FrameLocator): Locator =>
     f.locator(".PSERROR, #ALERTMSG, .ps_alert-error"),
 
+  // ── Submit-time "Person Match Found" page ──────────────────────────────
+  //
+  // Save and Submit can land on PeopleSoft's own Search/Match review page
+  // ("Person Match Found" — `HR_TBH` match page) instead of the confirmation
+  // dialog when the hire's name/DOB/SSN resembles an existing person. It lists
+  // "Possible Person Matches" (Person ID, Name Type, Name Effective Date,
+  // Legal First Name, Legal Last Name, National ID, Date of Birth, Gender,
+  // Per Org Summary) with a Select button per row and three actions below:
+  // "Not a Match - Continue with Hire", "Save for Later", "Cancel". Until
+  // 2026-08-20 the automation had no locator for it, so a submit that reached
+  // this page timed out blind ("no error banner and no confirmation OK dialog",
+  // live runs 99d5012c/ebd5d59e). Mapped 2026-08-20 from those runs' failure
+  // screenshots (`.tracker/screenshots/*-error-transaction-ucpath-*.png`):
+  // role/name locators on the rendered text; first live exercise is the next
+  // submit that hits the page (it fails loud, never silent, if these drift).
+
+  /**
+   * "Person Match Found" page heading — the DEFINITIVE signal that the submit
+   * landed on the Search/Match review page rather than the confirmation
+   * dialog. mapped 2026-08-20 (live failure screenshots, runs 99d5012c/ebd5d59e)
+   * @tags person-match, search-match, heading, submit, smart-hr
+   */
+  personMatchFoundHeading: (f: FrameLocator): Locator =>
+    f.getByText("Person Match Found", { exact: true }),
+
+  /**
+   * "Not a Match - Continue with Hire" action on the Person Match Found page —
+   * proceeds with the hire as a NEW person. Only clicked when every listed
+   * candidate is excluded (hard-identifier mismatch or operator-reviewed EID);
+   * see `decidePersonMatchContinue`. mapped 2026-08-20 (live failure screenshots)
+   * @tags person-match, not-a-match, continue, button, submit, smart-hr
+   */
+  personMatchNotAMatchButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Not a Match - Continue with Hire" }),
+
+  /**
+   * "Possible Person Matches" grid rows on the Person Match Found page — every
+   * data row carries a "Select" button in its first cell; header cells name the
+   * columns (Person ID / Legal First Name / Legal Last Name / National ID /
+   * Date of Birth). `readPersonMatchCandidates` maps the cells by header text
+   * inside the frame. mapped 2026-08-20 (live failure screenshots)
+   * @tags person-match, candidates, grid, row, select, submit, smart-hr
+   */
+  personMatchCandidateRows: (f: FrameLocator): Locator =>
+    f.getByRole("row").filter({ has: f.getByRole("button", { name: "Select", exact: true }) }),
+
   /**
    * "Delete Selected Transactions" button under the Smart HR Transactions page's
    * "Transactions in Progress" grid — deletes the rows whose Select checkbox is
