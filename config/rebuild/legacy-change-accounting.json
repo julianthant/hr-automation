@@ -494,11 +494,11 @@
       "path": "src/workflows/onboarding/workflow.ts",
       "changeKind": "modified",
       "beforeSha256": "3fdbf1d1ed90700c5ad7aeaa93024083e6a319ecf778bdaf0874e8648c98b8a8",
-      "afterSha256": "b6f1a87936d4f836940a1067c7ac8b25c20b0c7403f8a678d429a4dd65ac662a",
+      "afterSha256": "47909bdda85cafd652420ef99358dbd88d6a8159d18e59fd3905c6c43a93703a",
       "capabilityIds": [
         "legacy-workflow-onboarding"
       ],
-      "impactRationale": "Dry run now walks the whole workflow, withholding only the two form submissions; adds the numeric placeholder Tracker Profile ID, the no-usable-SSN I-9 skip, and consumes the iDocs viewer hash captured during crm-search.",
+      "impactRationale": "Resets the I-9 page once per item so item N+1 never inherits item N's modal wreckage; uses the transaction number the submit itself read back.",
       "rebuildRecheckIds": [
         "npm:test",
         "npm:test:architecture"
@@ -1009,11 +1009,11 @@
       "path": "src/systems/i9/index.ts",
       "changeKind": "modified",
       "beforeSha256": "1eb686b35ad72a94482eb08a095599f43da9f5a26a0015a95882f9a4c05e5108",
-      "afterSha256": "1e905fc32f534cd93a9dab152ec04988e3970e777a6df422e20ef224ed5d8f00",
+      "afterSha256": "b21a9c4664fed372973b76848d43f2e2f51c699ab04061a44212f0c0b6822ccd",
       "capabilityIds": [
         "legacy-workflow-onboarding"
       ],
-      "impactRationale": "Exports the two dry-run I-9 helpers.",
+      "impactRationale": "Exports resetI9Page.",
       "rebuildRecheckIds": [
         "npm:test",
         "npm:test:architecture"
@@ -1039,11 +1039,11 @@
       "path": "tests/unit/workflows/onboarding/workflow.test.ts",
       "changeKind": "modified",
       "beforeSha256": "73cfea57e2cd6b9ed2f82ee457417209d472773dc257587d6a22db406af7bac6",
-      "afterSha256": "d24ccdfdb82e8326ece70a6c362bf30963a04734e7dab1366c416922174079f8",
+      "afterSha256": "d43875880d983f9ebf4d34ca53ffb574ba3a3be9080f61e45bbc187070f9cf76",
       "capabilityIds": [
         "legacy-workflow-onboarding"
       ],
-      "impactRationale": "Replaces the old 'stops before every write' boundary test with the new contract: every search runs, both submits are withheld, and buildTransactionPlan omits Save and Submit in dry run.",
+      "impactRationale": "Pins the CRM placeholder normalization, including that real names containing a placeholder as a substring are preserved.",
       "rebuildRecheckIds": [
         "npm:test",
         "npm:test:architecture"
@@ -1084,11 +1084,11 @@
       "path": "src/workflows/onboarding/extract.ts",
       "changeKind": "modified",
       "beforeSha256": "0d36017cf1088472308b14fdba0f16cde8422c0fe5209ded99fb15e7854a3a6b",
-      "afterSha256": "4c9d2724985291b2ad8ea45c1e14ecd9150b27a86ce303307d5fbe6cc71c2cb0",
+      "afterSha256": "eff003d48915dfd3605132f10b85cb81b0594e107fdeaa846c23019343fb0d95",
       "capabilityIds": [
         "legacy-workflow-onboarding"
       ],
-      "impactRationale": "Extracts the CRM UCPath Entry Sheet's 'Expected Job End Date (if applicable)' \u2014 a per-hire value that replaces the per-fiscal-year constant.",
+      "impactRationale": "Adds normalizeCrmPlaceholder and applies it to every extracted CRM field: operators type 'N/A' to mean empty, and passing it through verbatim wrote the literal text downstream \u2014 an I-9 Employee Profile submitted with Middle Name 'N/A' produced no confirmation on Save & Continue and failed the hire, while a blank middle name saved fine.",
       "rebuildRecheckIds": [
         "npm:test",
         "npm:test:architecture"
@@ -1119,6 +1119,21 @@
         "legacy-workflow-onboarding"
       ],
       "impactRationale": "Pins the rolled 06/30/2027 default and makes the ANNUAL_DATES_END override test use a value distinct from the default.",
+      "rebuildRecheckIds": [
+        "npm:test",
+        "npm:test:architecture"
+      ],
+      "preservation": "preserved"
+    },
+    {
+      "path": "src/systems/i9/navigate.ts",
+      "changeKind": "modified",
+      "beforeSha256": "bd1be3f086aa96a67354f75f5f3230777e6fdff3b6f52f63d2260a5a32637f14",
+      "afterSha256": "95b55268c1ba4fa6e8c8db80d68e1fbfd3e0b1aa0d4081ff503777daba8fdbc0",
+      "capabilityIds": [
+        "legacy-workflow-onboarding"
+      ],
+      "impactRationale": "Adds resetI9Page: a hard navigation reset of the I-9 page between items. The daemon reuses one I-9 browser across every queued person and the app leaves stale hidden Kendo dialogs behind whose overlays intercept the next item's clicks (live 2026-08-20: k-windows=15, five hires lost to opaque timeouts). closeAllKendoWindows cannot fix it \u2014 it clicks close buttons hidden windows do not expose.",
       "rebuildRecheckIds": [
         "npm:test",
         "npm:test:architecture"

@@ -1,6 +1,7 @@
 import type { Locator, Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { classifyPlaywrightError } from "../../utils/errors.js";
+import { I9_APP_URL } from "../../config.js";
 
 /**
  * Force-close every visible Kendo UI window modal on the page. Idempotent.
@@ -23,6 +24,38 @@ export async function closeAllKendoWindows(page: Page): Promise<void> {
   }).catch(() => {});
   await page.keyboard.press("Escape").catch(() => {});
   await page.waitForTimeout(250);
+}
+
+/**
+ * HARD-reset the I-9 page between items.
+ *
+ * The daemon reuses one long-lived I-9 browser across every queued person, and
+ * the app's Kendo windows are never fully torn down: after a few items the page
+ * carries a pile of stale hidden dialogs ("Session Time Out Warning",
+ * "Create I-9 Wizard", "Worksite Required", "Duplicate Employee Record", …).
+ * Their overlays still intercept pointer events, so the next item's
+ * "Search Options" click is blocked and every remaining item on that worker
+ * fails with an opaque timeout (live 2026-08-20: k-windows=15, five hires lost
+ * this way).
+ *
+ * `closeAllKendoWindows` cannot fix this — it clicks close buttons, which
+ * hidden windows do not reliably expose. A navigation destroys the DOM outright,
+ * which is the only reliable reset.
+ *
+ * Cheap (one page load) and idempotent. Throws if the dashboard does not come
+ * back, because continuing on a poisoned page just produces the same opaque
+ * failure one step later.
+ *
+ * verified 2026-08-20
+ */
+export async function resetI9Page(page: Page): Promise<void> {
+  await page.goto(I9_APP_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  const stale = await page.evaluate(() => document.querySelectorAll(".k-window").length).catch(() => -1);
+  if (stale > 0) {
+    log.warn(`[I9] ${stale} Kendo window(s) still present after reset navigation`);
+  }
+  log.step("[I9] page reset for this item (stale dialogs cleared)");
 }
 
 /**
