@@ -76,3 +76,14 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Failed because:** The definitive alert was dismissed before inspection, hidden structure did not prove a record existed, and a server-side success with a lost callback could be created again by the inner retry. Live-loaded production `employee.profile.js` showed the real callback: POST `/form-remoteaccess/create-newhire`, errors bound through `.ErrorMessage`, exact email(s)/message(s) success alerts, then redirect to the same profile after OK.
 **Fix:** Observe error/success first with error precedence; accept only the two anchored success strings; click OK only after success; require `/employee/profile/{sameId}` (or the documented mobile query). Remove the hidden-button fallback and make onboarding creation single-attempt so a later retry repeats the authoritative SSN search.
 **Tags:** i9, remote, create, callback, confirmation, redirect, idempotency, retry, fail-loud, live-verified
+
+## 2026-08-20 — Employee Profile "Save & Continue": the OK confirmation can render late, and the profile is saved either way
+
+**Tried:** `createI9Employee` clicked Save & Continue, then checked `okButtonFirst.isVisible({ timeout: 5_000 })` and `duplicateDialog.isVisible({ timeout: 2_000 })` once each, failing with "No confirmation dialog found after Save & Continue" when neither showed.
+
+**Failed because:** Live (Maria Renee Santos): the worksite Kendo dropdown needed a retry, the OK confirmation rendered after the 5 s window, the run FAILED at I-9 — yet the profile HAD been saved (the retry's search-first SSN lookup found profile 2209408 and reused it). A one-shot visibility check after a remote mutation read a late confirmation as "nothing happened"; the run then reported a false failure and only the duplicate guard kept it from creating a second profile.
+
+**Fix:** Poll up to 15 s for a NAMED post-save outcome in priority order — validation error summary → Duplicate Employee Record dialog → OK dialog → the saved profile ROUTE itself (`/employee/profile/<id>` with a non-zero id, which the app only navigates to after a successful save; treated as the confirmation with a `log.warn`). Only when none appears does it return the (now descriptive) unknown-outcome error, which is still safe to retry because the next run searches by SSN/name before creating.
+
+**Tags:** i9, employee-profile, save-and-continue, confirmation, late-dialog, poll, false-failure, duplicate-guard
+**References:** `src/systems/i9/create.ts` (`createI9Employee` post-save poll); companion to the 2026-08-20 `resetI9Page` / stale-Kendo-window lesson.

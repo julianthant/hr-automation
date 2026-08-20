@@ -9,6 +9,7 @@ import {
   buildDeleteEntryHandler,
   buildApproveEidHandler,
   buildDismissEidHandler,
+  buildNotThisPersonHandler,
   buildDrainWorkerHandler,
   buildEntryReEnqueueHandler,
   buildFindPriorByKeyHandler,
@@ -44,6 +45,7 @@ import {
   deleteEntryBody,
   eidApproveBody,
   eidDismissBody,
+  eidNotThisPersonBody,
   queueBumpBody,
   retryBody,
   retryBulkBody,
@@ -192,6 +194,13 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
 
   app.post("/api/eid-approval/dismiss", async (c) => {
     return postJson(c, zodParse(eidDismissBody), buildDismissEidHandler(deps.dir));
+  });
+
+  // "Not this person — run as a new hire" (onboarding only): re-queues the item
+  // with the rejected EID in prefilledData.notMatchEids and stamps the row
+  // dismissed. Dismiss alone would re-pause on the same fuzzy Search/Match hit.
+  app.post("/api/eid-approval/not-this-person", async (c) => {
+    return postJson(c, zodParse(eidNotThisPersonBody), buildNotThisPersonHandler(deps.dir), 202);
   });
 
   app.post("/api/save-data", async (c) => {

@@ -267,17 +267,27 @@ export function decideHireDuplicateSkip(
 }
 
 /**
- * Build the PeopleSoft "Name" search key (`Last,First`) for the SS Smart HR
- * Transactions search page. New hires have no Empl ID yet (the Person ID column
- * renders "NEW" until the transaction is processed — see `clickSaveAndSubmit`),
- * so onboarding's hire probe must search by name rather than EID. Pure +
- * unit-pinned. Returns just the last (or first) name when only one is present,
- * `""` when neither is.
+ * Build the PeopleSoft "Name" search key for the SS Smart HR Transactions
+ * search page: the DISPLAY name, `First Last` (e.g. `Ali Alnasser`).
+ *
+ * LIVE-VERIFIED 2026-08-20: `Ali Alnasser` → 1 of 1 (auto-opened its detail
+ * page, T002214646 Approved); `Hao Sun` → 1-2 of 2 (grid: T002216675 HIR
+ * **Pending** + an older TER for a different Hao Sun); `Lenny Salazar` /
+ * `Jaden Campos` → 1 of 1. Every `Last,First` / `LAST,FIRST` / `Last`-only
+ * variant returned "No matching values were found" — so from 2026-07-01 to
+ * 2026-08-20 the hire probe ALWAYS fell open (never found anything) and the
+ * "SS Smart HR cannot see an unprocessed hire" belief was an artefact of the
+ * wrong key: with the right key the list DOES carry a Requested/Pending hire.
+ *
+ * New hires have no Empl ID yet (the Person ID column renders "NEW" until the
+ * transaction is processed — see `clickSaveAndSubmit`), so onboarding's hire
+ * probe must search by name rather than EID. Pure + unit-pinned. Returns just
+ * the last (or first) name when only one is present, `""` when neither is.
  */
 export function buildHireSearchName(firstName: string, lastName: string): string {
   const last = (lastName ?? "").trim();
   const first = (firstName ?? "").trim();
-  if (last && first) return `${last},${first}`;
+  if (last && first) return `${first} ${last}`;
   return last || first;
 }
 
@@ -483,12 +493,86 @@ export async function findTerminationTransactionStatus(
  * the audit trail (the results grid exposes no template column).
  *
  * NEEDS LIVE VERIFICATION: that the SS Smart HR "Name" search returns a pending
- * hire, that the `Last,First` key format ({@link buildHireSearchName}) is the
+ * hire, that the `First Last` key format ({@link buildHireSearchName}, live-verified 2026-08-20) is the
  * right one for that search box, and that a HIR row drills into a detail page
  * exposing `Effdt:` (the drill-in ROW selector + `Effdt:` read were live-verified
  * for a TER on 2026-06-24; a HIR row uses the same grid + detail shape but the
  * HIR path itself is not yet live-exercised).
  */
+/**
+ * What the SS Smart HR Name search landed on. PeopleSoft's Find-an-Existing-Value
+ * opens the single match's Transaction Details page DIRECTLY (no grid) when
+ * exactly one row matches — live 2026-08-20: `Ali Alnasser` / `Lenny Salazar` /
+ * `Jaden Campos` each auto-opened their detail page, `Hao Sun` (2 matches)
+ * rendered the results grid. The detail page carries the Transaction ID and
+ * Approval Status spans plus the routing strip's `Effdt: YYYY-MM-DD`, and its
+ * "Hire Details" grid shows the action (`HIR`).
+ */
+export interface SsSmartHrSearchOutcome {
+  kind: "grid" | "detail" | "none";
+  /** Grid rows (kind === "grid"). */
+  rows: SsSmartHrRow[];
+  /** The auto-opened transaction (kind === "detail"). */
+  detail?: { transactionId: string; approvalStatus: string; effectiveDate: string; action: string };
+}
+
+/**
+ * Pure: derive the hire action from the detail page's visible text. The
+ * "Hire Details" grid renders the action code (`HIR`/`REH`) and the approval
+ * strip starts with the action family (`HIRE …`). Returns "" when neither is
+ * present so the caller's hire-only gate fails open (no skip).
+ */
+export function detailPageHireAction(bodyText: string): string {
+  const t = (bodyText ?? "").replace(/\s+/g, " ");
+  if (/\bREH\b/.test(t) || /\bREHIRE\b/i.test(t)) return "REH";
+  if (/\bHIR\b/.test(t) || /\bHIRE\b/.test(t)) return "HIR";
+  return "";
+}
+
+/** Pure: ISO `Effdt: YYYY-MM-DD` from the routing strip, else the first US date, else "". */
+export function detailPageEffdt(bodyText: string): string {
+  const text = bodyText ?? "";
+  const iso = text.match(/Effdt:\s*(\d{4}-\d{1,2}-\d{1,2})/i);
+  if (iso) return iso[1];
+  const us = text.match(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/);
+  return us ? us[1] : "";
+}
+
+async function readSsSmartHrSearchOutcome(
+  page: Page,
+  frame: FrameLocator,
+  label: string,
+): Promise<SsSmartHrSearchOutcome> {
+  // Detail page first: its Transaction ID span exists ONLY there (exactly one
+  // node). An unknown/no-match search re-renders the plain search form.
+  for (const root of [page, frame] as Array<Page | FrameLocator>) {
+    const idLoc = ssSmartHRTransactions.transactionDetailTxnId(root);
+    const count = await idLoc.count().catch(() => 0);
+    if (count !== 1) continue;
+    const transactionId = (await idLoc.innerText({ timeout: 5_000 }).catch(() => "")).replace(/\s+/g, " ").trim().toUpperCase();
+    if (!transactionId) continue;
+    const approvalStatus = (await ssSmartHRTransactions.transactionDetailApprovalStatus(root).innerText({ timeout: 5_000 }).catch(() => ""))
+      .replace(/\s+/g, " ").trim();
+    const bodyText = await frame
+      .locator("body") // allow-inline-selector -- body text read for the auto-opened transaction detail page
+      .evaluate((b) => (b as HTMLElement).innerText ?? "")
+      .catch(() => "");
+    const detail = {
+      transactionId,
+      approvalStatus,
+      effectiveDate: detailPageEffdt(bodyText),
+      action: detailPageHireAction(bodyText),
+    };
+    log.step(
+      `[SS Smart HR] ${label}: single match auto-opened its detail page — txn='${detail.transactionId}' ` +
+      `status='${detail.approvalStatus || "<blank>"}' action='${detail.action || "<none>"}' effdt='${detail.effectiveDate || "<none>"}'`,
+    );
+    return { kind: "detail", rows: [], detail };
+  }
+  const rows = await scanSsSmartHrResults(frame);
+  return rows.length > 0 ? { kind: "grid", rows } : { kind: "none", rows: [] };
+}
+
 export async function findExistingHireTransaction(
   page: Page,
   opts: { firstName: string; lastName: string; effectiveDate?: string; templateId?: string },
@@ -519,7 +603,29 @@ export async function findExistingHireTransaction(
     await waitForPeopleSoftProcessing(frame, 15_000);
     await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
 
-    const rows = await scanSsSmartHrResults(frame);
+    const outcome = await readSsSmartHrSearchOutcome(page, frame, "hire probe");
+    if (outcome.kind === "detail" && outcome.detail) {
+      // Single match → PeopleSoft auto-opened the detail page; everything the
+      // grid path drills in for is already on screen.
+      const d = outcome.detail;
+      const candidate = { transactionId: d.transactionId, action: d.action, approvalStatus: d.approvalStatus };
+      const decision = decideHireDuplicateSkip(candidate, d.effectiveDate, opts.effectiveDate);
+      if (!decision.skip) {
+        log.step(
+          `[SS Smart HR] Single match ${d.transactionId} (${d.action || "?"}/${d.approvalStatus || "?"}, ` +
+          `effdt '${d.effectiveDate || "<unreadable>"}') for name='${searchName}' is NOT a high-confidence ` +
+          `duplicate of this run (${decision.reason}) — safe to submit`,
+        );
+        return none;
+      }
+      log.warn(
+        `[SS Smart HR] High-confidence existing hire for name='${searchName}': txn='${d.transactionId}' ` +
+        `action='${d.action}' status='${d.approvalStatus}' effdt='${d.effectiveDate}' (${decision.reason}) ` +
+        `— skipping submit to avoid a duplicate hire`,
+      );
+      return { found: true, transactionId: d.transactionId, approvalStatus: d.approvalStatus, effectiveDate: d.effectiveDate };
+    }
+    const rows = outcome.rows;
     log.debug(
       `[SS Smart HR] Hire probe scanned ${rows.length} row(s): ` +
       (rows.map((r) => `${r.transactionId}=${r.action}/${r.approvalStatus}`).join(", ") || "<none>"),
@@ -744,7 +850,25 @@ export async function readSubmittedHireReceipt(
     await waitForPeopleSoftProcessing(frame, 15_000);
     await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
 
-    const rows = await scanSsSmartHrResults(frame);
+    const outcome = await readSsSmartHrSearchOutcome(page, frame, "hire receipt readback");
+    if (outcome.kind === "detail" && outcome.detail) {
+      const d = outcome.detail;
+      if (!new Set<string>(HIRE_ACTION_CODES).has(d.action)) {
+        log.warn(`[SS Smart HR] Single match ${d.transactionId} for name='${searchName}' is not a hire (action '${d.action || "<none>"}') — not this run's receipt`);
+        return none;
+      }
+      if (opts.effectiveDate && !hireEffectiveDateMatches(d.effectiveDate, opts.effectiveDate)) {
+        log.warn(
+          `[SS Smart HR] Single match ${d.transactionId} has effdt '${d.effectiveDate || "<unreadable>"}', which does not ` +
+          `exactly match this run's effective date '${opts.effectiveDate}' — NOT this run's receipt`,
+        );
+        return none;
+      }
+      if (!d.transactionId || !d.approvalStatus) return none;
+      log.step(`[SS Smart HR] Hire receipt (detail page) for name='${searchName}': txn='${d.transactionId}' status='${d.approvalStatus}' effdt='${d.effectiveDate}'`);
+      return { transactionId: d.transactionId, approvalStatus: d.approvalStatus, effectiveDate: d.effectiveDate };
+    }
+    const rows = outcome.rows;
     log.debug(
       `[SS Smart HR] Hire receipt readback scanned ${rows.length} row(s): ` +
       (rows.map((r) => `${r.transactionId}=${r.action}/${r.approvalStatus}`).join(", ") || "<none>"),

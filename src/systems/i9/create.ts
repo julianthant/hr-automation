@@ -177,8 +177,32 @@ export async function createI9Employee(
     const okBtn = profile.okButtonFirst(page);
     const duplicateDialog = profile.duplicateDialog(page);
 
-    const isOk = await okBtn.isVisible({ timeout: 5_000 }).catch(() => false);
-    const isDuplicate = await duplicateDialog.isVisible({ timeout: 2_000 }).catch(() => false);
+    // Poll for a NAMED post-save outcome rather than two one-shot visibility
+    // checks (5 s OK + 2 s duplicate). Live 2026-08-20 (Maria Renee Santos):
+    // the OK confirmation rendered late, the run reported "No confirmation
+    // dialog found" and FAILED — yet the profile HAD been saved (the retry's SSN
+    // search found it, 2209408). The save is a remote mutation; a late
+    // confirmation must not be read as "nothing happened". Outcomes, in
+    // priority order: validation error → duplicate dialog → OK dialog → the
+    // profile route itself (`/employee/profile/<id>` with a real id — the app
+    // only navigates there after a successful save).
+    let isOk = false;
+    let isDuplicate = false;
+    let savedRouteId: string | null = null;
+    {
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        if (await errorSummary.isVisible().catch(() => false)) {
+          const errorText = await errorSummary.locator("..").locator("div").textContent().catch(() => "Unknown validation error"); // allow-inline-selector -- DOM traversal for error readback
+          return { success: false, profileId: null, error: `Validation error: ${errorText}` };
+        }
+        if (await duplicateDialog.isVisible().catch(() => false)) { isDuplicate = true; break; }
+        if (await okBtn.isVisible().catch(() => false)) { isOk = true; break; }
+        const routeId = extractProfileId(page.url());
+        if (routeId && routeId !== "0") { savedRouteId = routeId; break; }
+        await page.waitForTimeout(500);
+      }
+    }
 
     let profileId: string | null = null;
 
@@ -210,8 +234,26 @@ export async function createI9Employee(
         return { success: false, profileId: null, error: "Could not extract profile ID from URL" };
       }
       log.step(`Profile saved: ${profileId}`);
+    } else if (savedRouteId) {
+      // The app navigated to the saved profile's own route without a visible
+      // OK dialog (or we missed it). The route id is positive evidence of the
+      // save; continue exactly as the OK branch would have.
+      log.warn(
+        `I-9 profile route resolved (${page.url()}) without a confirmation dialog — treating the `
+        + `saved route as the confirmation (profile ${savedRouteId}).`,
+      );
+      await page.waitForTimeout(1_000);
+      profileId = savedRouteId;
+      log.step(`Profile saved: ${profileId}`);
     } else {
-      return { success: false, profileId: null, error: "No confirmation dialog found after Save & Continue" };
+      return {
+        success: false,
+        profileId: null,
+        error:
+          "No confirmation dialog, duplicate dialog, validation error, or saved-profile route appeared "
+          + `within 15 s after Save & Continue (still at ${page.url()}). The save outcome is unknown — `
+          + "a retry is safe because the next run searches by SSN/name before creating.",
+      };
     }
 
     // Step 5: Select Remote - Section 1 Only

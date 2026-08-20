@@ -4,6 +4,8 @@ import {
   pickTerminationRow,
   pickHireRow,
   buildHireSearchName,
+  detailPageHireAction,
+  detailPageEffdt,
   parseSsSmartHrRows,
   isWithinSeparationWindow,
   SEPARATION_TERMINATION_WINDOW_DAYS,
@@ -131,12 +133,16 @@ describe("pickHireRow", () => {
 });
 
 describe("buildHireSearchName", () => {
-  it("builds the PeopleSoft Last,First key", () => {
-    assert.equal(buildHireSearchName("Jane", "Doe"), "Doe,Jane");
+  // LIVE-VERIFIED 2026-08-20: the SS Smart HR "Name" box matches the DISPLAY
+  // name ("Ali Alnasser" → 1 of 1; "Hao Sun" → 2 incl. the Pending hire);
+  // every Last,First / LAST,FIRST / Last-only variant returned no rows.
+  it("builds the PeopleSoft display-name key (First Last)", () => {
+    assert.equal(buildHireSearchName("Jane", "Doe"), "Jane Doe");
+    assert.equal(buildHireSearchName("Ali", "Alnasser"), "Ali Alnasser");
   });
 
   it("trims surrounding whitespace on each part", () => {
-    assert.equal(buildHireSearchName("  Jane ", " Doe  "), "Doe,Jane");
+    assert.equal(buildHireSearchName("  Jane ", " Doe  "), "Jane Doe");
   });
 
   it("falls back to the last name alone when first is missing", () => {
@@ -421,5 +427,23 @@ describe("receiptMatchesRequestedTransaction", () => {
     for (const blank of ["", "   ", null, undefined]) {
       assert.equal(receiptMatchesRequestedTransaction("T002204014", blank), false);
     }
+  });
+});
+
+
+describe("SS Smart HR auto-opened detail page readers (live page text, 2026-08-20)", () => {
+  // Ali Alnasser's detail page (single match): routing strip + Hire Details grid.
+  const ALI = "Transaction Details Transaction Status Approved Transaction ID T002214646 Hire Details "
+    + "Name Type of Hire Start Date Action Country 1 ALI ALNASSER Employee 09/11/2026 HIR USA "
+    + "HIRE Expand Transaction: T002214646, ID: 10895294, Effdt: 2026-09-11, Unit: SDCMP : Approved";
+  it("reads the hire action from the Hire Details grid / routing strip", () => {
+    assert.equal(detailPageHireAction(ALI), "HIR");
+    assert.equal(detailPageHireAction("Termination Details ... TER ... TERMINATION Expand Transaction"), "");
+    assert.equal(detailPageHireAction("REHIRE Expand Transaction: T1, Effdt: 2026-01-01"), "REH");
+  });
+  it("reads the ISO Effdt from the routing strip, falling back to the first US date", () => {
+    assert.equal(detailPageEffdt(ALI), "2026-09-11");
+    assert.equal(detailPageEffdt("Start Date 09/11/2026 HIR"), "09/11/2026");
+    assert.equal(detailPageEffdt("nothing here"), "");
   });
 });

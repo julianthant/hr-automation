@@ -88,6 +88,92 @@ export function buildApproveEidHandler(dir: string) {
   };
 }
 
+export interface NotThisPersonRequest {
+  workflow: string;
+  id: string;
+  runId?: string;
+  /** The UCPath EID the operator reviewed and confirmed is NOT this person (the proposed match). */
+  eid: string;
+  date?: string;
+}
+
+/**
+ * Workflows whose handler honours `prefilledData.notMatchEids` ("these UCPath
+ * persons were reviewed and are NOT this hire") — onboarding's person-search
+ * identity gate proceeds as a NEW hire when every Search/Match hit is a
+ * reviewed EID, and its submit-time Person Match page excludes reviewed EIDs
+ * (2026-08-20). Separations is deliberately NOT here: a "not this person"
+ * answer there means the input record is wrong, not "proceed".
+ */
+export const NOT_THIS_PERSON_WORKFLOWS = new Set<string>(["onboarding"]);
+
+/**
+ * Pure: append one reviewed EID to an existing `notMatchEids` list (comma /
+ * semicolon / whitespace separated), de-duplicated, comma-joined. A second
+ * review on a later run ACCUMULATES rather than replaces — the earlier reviewed
+ * EIDs must keep their pass or the next run would re-pause on them. Non-string
+ * prior → just the new EID.
+ */
+export function mergeNotMatchEids(prior: unknown, eid: string): string {
+  const priorList = typeof prior === "string" ? prior : "";
+  return Array.from(new Set([...priorList.split(/[\s,;]+/).filter(Boolean), eid])).join(",");
+}
+
+/**
+ * "Not this person — run as a new hire": the operator reviewed the proposed
+ * UCPath match and rejected it. Re-enqueues the item with the reviewed EID in
+ * `prefilledData.notMatchEids` (merged into any EIDs already on the row, so a
+ * second review on a later run accumulates rather than replaces) and stamps the
+ * paused row dismissed. Dismiss alone would only stamp the row — the DOB-keyed
+ * fuzzy Search/Match recurs deterministically, so a plain re-run re-pauses on
+ * the same false match (live 2026-08-20: Mia Perez→Mia McKrell, Juliana
+ * Romano→Julian Davey, Maria Renee Santos→Mariana Herrera).
+ */
+export function buildNotThisPersonHandler(dir: string) {
+  return async (req: NotThisPersonRequest): Promise<EidApprovalResult> => {
+    if (!NOT_THIS_PERSON_WORKFLOWS.has(req.workflow)) {
+      return { ok: false, error: `not-this-person: unsupported workflow "${req.workflow}"` };
+    }
+    const eid = normalizeEid(req.eid ?? "");
+    if (!isUcpathEmployeeId(eid)) {
+      return { ok: false, error: `not-this-person: "${req.eid}" is not a valid 8-digit UCPath EID` };
+    }
+    if (!req.id) return { ok: false, error: "not-this-person: id is required" };
+    const lookup = findEntryInput(req.workflow, req.id, req.runId, dir, req.date);
+    if ("error" in lookup) return { ok: false, error: lookup.error };
+    const prior: Record<string, unknown> = lookup.input;
+    const priorPrefilled = (prior.prefilledData && typeof prior.prefilledData === "object")
+      ? (prior.prefilledData as Record<string, unknown>)
+      : {};
+    const merged = mergeNotMatchEids(priorPrefilled.notMatchEids, eid);
+    const input = { ...prior, prefilledData: { ...priorPrefilled, notMatchEids: merged } };
+    const result = await enqueueFromHttp(req.workflow, [input], { trackerDir: dir });
+    if (!result.ok) return { ok: false, error: result.error ?? "not-this-person: enqueue failed" };
+    try {
+      emitInheritedRow({
+        workflow: req.workflow,
+        trackerDir: dir,
+        id: req.id,
+        runId: req.runId,
+        status: "done",
+        data: {
+          eidApproval: "dismissed",
+          status: "EID Approval Dismissed",
+          notMatchEids: merged,
+        },
+      });
+    } catch (err) {
+      // The re-enqueue already happened; a missing prior row only loses the stamp.
+      if (!(err instanceof PriorTrackerRowNotFoundError)) throw err;
+    }
+    log.step(
+      `[not-this-person] ${req.workflow} item id=${req.id}: EID ${eid} reviewed as NOT this person — ` +
+      `re-queued as a new hire with notMatchEids=${merged}`,
+    );
+    return { ok: true };
+  };
+}
+
 /** Dismiss the review: mark the paused row dismissed (neutral terminal); no re-queue. */
 export function buildDismissEidHandler(dir: string) {
   return (req: DismissEidRequest): Promise<EidApprovalResult> => {

@@ -22,7 +22,7 @@
 //     the extension loads but stays unarmed and Duo falls back to your phone.
 
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,6 +37,15 @@ const url = rest.find((a) => !a.startsWith("--"));
 const configDir = join(repoRoot, ".playwright");
 const profileDir = join(repoRoot, ".auth", `${session}-profile`);
 mkdirSync(configDir, { recursive: true });
+// ALWAYS start from a FRESH scratch profile. The extension self-arms on a fresh
+// profile by importing the packaged credential and stamping its signCount to the
+// current unix time (monotonic, ahead of Duo's view). A profile REUSED across
+// days keeps the extension's storage — and its signCount — from the last run,
+// which Duo has since observed; the next assertion is then rejected as a cloned
+// key ("Couldn't use security key — canceled or timed out", passkey → auth_fail,
+// live 2026-08-20, twice). Nothing in this profile is worth keeping: the whole
+// point of the extension is that login is hands-off every time.
+rmSync(profileDir, { recursive: true, force: true });
 mkdirSync(profileDir, { recursive: true });
 
 // Generated, machine-specific (absolute paths) — gitignored via .playwright/.

@@ -28,6 +28,10 @@
  *      (`src/control/ops/eid-approval.ts`) re-queue the paused run carrying
  *      `prefilledData.eidApproved = <chosen>` (approve) or stamp the row
  *      `dismissed` (dismiss). Wire the workflow into `EID_APPROVAL_WORKFLOWS`.
+ *      Onboarding additionally offers "Not this person — run as new hire"
+ *      (`/api/eid-approval/not-this-person`, `NOT_THIS_PERSON_WORKFLOWS`), which
+ *      re-enqueues with `prefilledData.notMatchEids` — see
+ *      `src/workflows/onboarding/CLAUDE.md` (2026-08-20).
  *
  * ## Adoption recipe (how emergency-contact / onbase / any workflow adopt this)
  *

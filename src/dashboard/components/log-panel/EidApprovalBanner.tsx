@@ -118,6 +118,15 @@ export function EidApprovalBanner({ entry, workflow, date }: EidApprovalBannerPr
     post("/api/eid-approval/dismiss", { workflow, id, runId, date }, "dismiss",
       "Dismissed — fix the input record, then re-run");
 
+  // Onboarding only: the operator reviewed the proposed UCPath match and it is
+  // NOT this hire — re-queue as a NEW hire carrying the reviewed EID
+  // (prefilledData.notMatchEids). Dismiss alone re-pauses on the same fuzzy
+  // DOB-keyed Search/Match hit.
+  const notThisPersonSupported = workflow === "onboarding" && isValidEid(proposedEid);
+  const notThisPerson = () =>
+    post("/api/eid-approval/not-this-person", { workflow, id, runId, eid: proposedEid, date }, "not-this-person",
+      `Re-queued as a new hire — ${proposedEid} marked not this person`);
+
   const manualValid = /^\d{8}$/.test(manualEid.trim());
 
   return (
@@ -208,12 +217,28 @@ export function EidApprovalBanner({ entry, workflow, date }: EidApprovalBannerPr
           {pending === "approve:manual" ? "Re-queuing…" : "Use entered EID"}
           <ArrowRight aria-hidden className="h-3.5 w-3.5" />
         </button>
+        {notThisPersonSupported && (
+          <button
+            type="button"
+            disabled={pending !== null}
+            onClick={notThisPerson}
+            aria-label={`Not this person — run as a new hire (EID ${proposedEid} reviewed)`}
+            title={`Re-queue as a NEW hire; ${proposedEid} is recorded as reviewed and NOT this person (prefilledData.notMatchEids)`}
+            className={cn(
+              "ml-auto inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1.5 text-[12px] font-medium text-foreground",
+              "hover:bg-secondary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+            )}
+          >
+            {pending === "not-this-person" ? "Re-queuing…" : "Not this person — run as new hire"}
+            <ArrowRight aria-hidden className="h-3.5 w-3.5" />
+          </button>
+        )}
         <button
           type="button"
           disabled={pending !== null}
           onClick={dismiss}
           className={cn(
-            "ml-auto rounded-md px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground",
+            notThisPersonSupported ? "rounded-md px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground" : "ml-auto rounded-md px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground",
             "hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
           )}
         >
