@@ -31,6 +31,7 @@ const DASHBOARD_HONO_ROUTE_MANIFEST: readonly DashboardHonoRouteManifestEntry[] 
   { method: "POST", path: "/api/settings/recover" },
   { method: "POST", path: "/api/eid-approval/approve" },
   { method: "POST", path: "/api/eid-approval/dismiss" },
+  { method: "POST", path: "/api/eid-approval/not-this-person" },
   { method: "GET", path: "/api/data-bank" },
   { method: "GET", path: "/api/dates" },
   { method: "GET", path: "/api/entries" },
