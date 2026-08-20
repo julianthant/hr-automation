@@ -624,6 +624,16 @@ export async function verifyTxnNumberFilled(
 }
 
 /**
+ * Read the Transaction Number currently on the open Kuali separation form
+ * (trimmed; "" when the field is empty). Used by the "Skip UCPath transaction"
+ * run mode to PRESERVE the number a prior run already filed, so finalization
+ * re-verifies against the form's own value instead of blanking it.
+ */
+export async function readTransactionNumber(page: Page): Promise<string> {
+  return (await transactionResults.transactionNumber(page).inputValue({ timeout: 5_000 })).trim();
+}
+
+/**
  * Click the Save button in the Kuali form top navbar.
  * Waits for network idle to ensure the AJAX save request completes
  * (critical for batch mode where the process may exit after the last doc).

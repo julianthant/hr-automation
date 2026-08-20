@@ -13,6 +13,7 @@ export {
   updateLastDayWorked,
   updateSeparationDate,
   verifyTxnNumberFilled,
+  readTransactionNumber,
   clickSave,
 } from "./navigate.js";
 

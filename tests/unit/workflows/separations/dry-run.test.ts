@@ -57,6 +57,7 @@ const mocks = vi.hoisted(() => {
     // drives a live Kuali form — stub it). A rejection here must FAIL the run
     // loud (no fallback for the required Timekeeper Name field).
     fillTimekeeperTasks: vi.fn(),
+    readTransactionNumber: vi.fn(),
   };
 });
 
@@ -114,6 +115,7 @@ vi.mock("../../../../src/systems/kuali/index.js", async (importOriginal) => ({
   // path (non-HDH / prefill / preset) — stub it so the fake page isn't driven,
   // and so a test can make it reject to assert the fail-loud path.
   fillTimekeeperTasks: mocks.fillTimekeeperTasks,
+  readTransactionNumber: mocks.readTransactionNumber,
 }));
 
 import { INPUT_RUN_REGISTRY } from "../../../../src/dashboard/lib/input-run-registry.js";
@@ -188,7 +190,7 @@ type DelegateResult = {
 /** A minimal ctx satisfying exactly what the separations handler touches. */
 function makeFakeCtx(
   input: Record<string, unknown>,
-  opts: { delegateResult?: DelegateResult } = {},
+  opts: { delegateResult?: DelegateResult; skipSteps?: readonly string[] } = {},
 ): { ctx: unknown; probe: CtxProbe } {
   const data: Record<string, unknown> = { ...input };
   const skipped: string[] = [];
@@ -213,7 +215,7 @@ function makeFakeCtx(
     skipStep: (name: string) => {
       skipped.push(name);
     },
-    shouldSkipStep: () => false,
+    shouldSkipStep: (name: string) => (opts.skipSteps ?? []).includes(name),
     parallel: async (tasks: Record<string, () => Promise<unknown>>) => {
       // Not reached (kronos-search is mocked), but mirror allSettled shape.
       const out: Record<string, PromiseSettledResult<unknown>> = {};
@@ -970,5 +972,70 @@ describe("INPUT_RUN_REGISTRY dry-run exposure", () => {
     // A toggle on a workflow whose handler has no dry-run guard would mislead
     // operators into thinking a real run is safe. Only guarded workflows opt in.
     assert.notEqual(INPUT_RUN_REGISTRY["person-lookup"].supportsDryRun, true);
+  });
+});
+
+// ─── Run mode "Skip UCPath transaction" (preset `skip-ucpath-transaction`) ───
+// Re-runs the Kuali side (extract → Job Summary → Kronos → finalization) with
+// NO Smart HR lookup/create, preserving the Transaction # already on the form.
+describe("separations handler — run mode 'Skip UCPath transaction'", () => {
+  const SKIP = ["transaction-check", "ucpath-transaction"] as const;
+
+  it("declares the preset with exactly the two transaction steps", async () => {
+    const { separationsWorkflow } = await import("../../../../src/workflows/separations/workflow.js");
+    const preset = separationsWorkflow.config.presets?.find((p) => p.id === "skip-ucpath-transaction");
+    assert.ok(preset, "preset skip-ucpath-transaction must be declared");
+    assert.deepEqual([...preset.skipSteps].sort(), [...SKIP].sort());
+  });
+
+  it("skips transaction-check + ucpath-transaction, never touches Smart HR, preserves the form's txn #", async () => {
+    mocks.readTransactionNumber.mockResolvedValue("T002216868");
+    const { ctx, probe } = makeFakeCtx({ docId: "4540" }, { skipSteps: SKIP });
+    await runHandler(ctx, { docId: "4540" });
+    assert.equal(mocks.runTransactionCheck.mock.calls.length, 0, "no SS Smart HR lookup");
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0, "no Smart HR submit");
+    assert.ok(probe.skipped.includes("transaction-check"));
+    assert.ok(probe.skipped.includes("ucpath-transaction"));
+    assert.equal(probe.data.transactionNumber, "T002216868");
+    const finalizeArgs = mocks.runKualiFinalize.mock.calls[0][1] as { transactionNumber: string };
+    assert.equal(finalizeArgs.transactionNumber, "T002216868", "finalization re-verifies against the PRESERVED number");
+  });
+
+  it("still runs the Job Summary identity gate + Kuali dept/payroll fill (unlike edit-and-resume)", async () => {
+    mocks.readTransactionNumber.mockResolvedValue("T002216868");
+    mocks.getJobSummaryIdentity.mockResolvedValue({
+      found: true,
+      name: "Test Employee",
+      data: { deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
+    });
+    const { ctx, probe } = makeFakeCtx({ docId: "4540" }, { skipSteps: SKIP });
+    await runHandler(ctx, { docId: "4540" });
+    assert.ok(mocks.getJobSummaryIdentity.mock.calls.length >= 1, "Job Summary fetched");
+    assert.equal(mocks.runUcpathJobSummary.mock.calls.length, 1, "Kuali dept/payroll re-filled");
+    assert.equal(probe.data.jobCode, "004920");
+    assert.equal(probe.data.jobDescription, "STDT 3");
+    assert.ok(!probe.skipped.includes("ucpath-job-summary"));
+  });
+
+  it("FAILS LOUD when the Kuali form has no Transaction # and none was prefilled (nothing to preserve)", async () => {
+    mocks.readTransactionNumber.mockResolvedValue("");
+    const { ctx } = makeFakeCtx({ docId: "4540" }, { skipSteps: SKIP });
+    await assert.rejects(
+      () => runHandler(ctx, { docId: "4540" }),
+      /Skip UCPath transaction.*NO Transaction Number/,
+    );
+    assert.equal(mocks.runKualiFinalize.mock.calls.length, 0, "must not finalize (would blank the txn field)");
+  });
+
+  it("a prefilled txn # wins over the form read (no Kuali read needed)", async () => {
+    mocks.readTransactionNumber.mockResolvedValue("T-FORM");
+    const { ctx, probe } = makeFakeCtx(
+      { docId: "4540", transactionNumber: "T-PREFILLED", name: "Test Employee", eid: "10772489",
+        separationDate: "01/16/2026", lastDayWorked: "01/15/2026" },
+      { skipSteps: SKIP },
+    );
+    await runHandler(ctx, { docId: "4540" });
+    assert.equal(probe.data.transactionNumber, "T-PREFILLED");
+    assert.equal(mocks.readTransactionNumber.mock.calls.length, 0);
   });
 });

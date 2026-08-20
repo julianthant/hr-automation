@@ -38,6 +38,7 @@ import {
   updateLastDayWorked,
   updateSeparationDate,
   updateEmployeeName,
+  readTransactionNumber,
 } from "../../systems/kuali/index.js";
 import type { KualiSeparationData } from "../../systems/kuali/index.js";
 
@@ -336,6 +337,13 @@ export const separationsWorkflow = defineWorkflow({
       description:
         "Skips Kronos date verification and UCPath Job Summary. Assumes the Kuali form already has Last Day Worked, Separation Date, Dept, and Payroll Code filled correctly.",
     },
+    {
+      id: "skip-ucpath-transaction",
+      label: "Skip UCPath transaction",
+      skipSteps: ["transaction-check", "ucpath-transaction"],
+      description:
+        "Re-runs everything EXCEPT the UCPath Smart HR transaction: Kuali extraction, identity gate + Job Summary (dept/payroll re-fill), Kronos date verification, and Kuali finalization. Creates NO UCPath transaction and preserves the Transaction # already on the Kuali form (fails loud if the form has none). Use to redo the Kuali side after a fix.",
+    },
   ],
   batch: {
     mode: "sequential",
@@ -403,6 +411,13 @@ export const separationsWorkflow = defineWorkflow({
     const txnNumberPrefilled =
       typeof ctx.data.transactionNumber === "string"
       && (ctx.data.transactionNumber).length > 0;
+    // "Skip UCPath transaction" run mode (preset `skip-ucpath-transaction`):
+    // everything else runs (Job Summary re-fill, Kronos, Kuali finalization)
+    // but NO Smart HR transaction is checked or created; the Transaction #
+    // already on the Kuali form is preserved. Distinct from `txnNumberPrefilled`
+    // (edit-and-resume), which ALSO skips the identity gate / Job Summary.
+    const presetSkippedTransaction =
+      ctx.shouldSkipStep("ucpath-transaction") || ctx.shouldSkipStep("transaction-check");
 
     // ─── Step 1: Extract Kuali data ───
     // Kuali docs are user-editable between runs (e.g. correcting a wrong EID
@@ -711,10 +726,12 @@ export const separationsWorkflow = defineWorkflow({
     // Skipped only when a txn # is already prefilled (edit-resume — UCPath
     // already has the transaction; nothing to check).
     let approvedDuplicateTxn = "";
-    if (txnNumberPrefilled) {
+    if (txnNumberPrefilled || presetSkippedTransaction) {
       ctx.skipStep("transaction-check");
       log.step(
-        `[Step: transaction-check] SKIPPED — txn # prefilled (UCPath transaction already known; no check needed)`,
+        txnNumberPrefilled
+          ? `[Step: transaction-check] SKIPPED — txn # prefilled (UCPath transaction already known; no check needed)`
+          : `[Step: transaction-check] SKIPPED — run mode 'Skip UCPath transaction' (no Smart HR lookup, no pending-delete)`,
       );
     } else {
       const checkResult = await ctx.step("transaction-check", () =>
@@ -1116,6 +1133,24 @@ export const separationsWorkflow = defineWorkflow({
     let transactionNumber = txnNumberPrefilled
       ? (ctx.data.transactionNumber as string)
       : approvedDuplicateTxn; // "" when transaction-check found no approved dup
+    // "Skip UCPath transaction" run mode: PRESERVE the number already on the
+    // Kuali form so finalization re-verifies against it (verifyTxnNumberFilled
+    // would otherwise refill the field to "" — blanking a filed transaction).
+    // No number anywhere (not prefilled, form empty) → fail loud: this mode is
+    // for redoing the Kuali side of an ALREADY-FILED transaction, never for
+    // finalizing a form whose transaction was never created.
+    if (presetSkippedTransaction && !transactionNumber) {
+      transactionNumber = await readTransactionNumber(kualiPage);
+      if (!transactionNumber) {
+        throw new Error(
+          `Run mode 'Skip UCPath transaction' for doc #${docId}: the Kuali form has NO Transaction Number ` +
+          `and none was prefilled — nothing to preserve. Run the full workflow (or prefill the txn # via Edit Data) instead.`,
+        );
+      }
+      log.step(
+        `[Skip UCPath transaction] Preserving Transaction # '${transactionNumber}' already on the Kuali form`,
+      );
+    }
     // Tracks the specific "submit succeeded but no txn # extracted" case.
     // We must abort before kuali-finalization so we don't write a blank
     // transaction number back to the Kuali form. Raised outside the step's
@@ -1124,14 +1159,17 @@ export const separationsWorkflow = defineWorkflow({
     // (so the Kuali form gets its "left blank for manual entry" treatment).
     let submittedWithoutTxnNumber = false;
 
-    if (txnNumberPrefilled || approvedDuplicateTxn) {
+    if (txnNumberPrefilled || approvedDuplicateTxn || presetSkippedTransaction) {
       ctx.skipStep("ucpath-transaction");
       log.step(
         txnNumberPrefilled
           ? `[Step: ucpath-transaction] SKIPPED — using manual input from edit-data ` +
             `(transactionNumber='${transactionNumber}' — UCPath submit not needed)`
-          : `[Step: ucpath-transaction] SKIPPED — reusing APPROVED duplicate termination ` +
-            `(transactionNumber='${transactionNumber}' — UCPath create not needed)`,
+          : approvedDuplicateTxn
+            ? `[Step: ucpath-transaction] SKIPPED — reusing APPROVED duplicate termination ` +
+              `(transactionNumber='${transactionNumber}' — UCPath create not needed)`
+            : `[Step: ucpath-transaction] SKIPPED — run mode 'Skip UCPath transaction' ` +
+              `(preserving transactionNumber='${transactionNumber}' from the Kuali form; no Smart HR submit)`,
       );
       ctx.updateData({ transactionNumber });
     } else {
@@ -1170,7 +1208,9 @@ export const separationsWorkflow = defineWorkflow({
         ? { note: "prefilled (edit-and-resume)" }
         : approvedDuplicateTxn
           ? { note: "reused approved duplicate" }
-          : {}),
+          : presetSkippedTransaction
+            ? { note: "preserved from the Kuali form (run mode: Skip UCPath transaction)" }
+            : {}),
     });
 
     // ─── Step 7: Kuali finalization ───
