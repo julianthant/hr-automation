@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { PATHS } from "../../../../src/config.js";
 import {
   buildCrmDocumentDownloadPath,
+  onboardingDateFolder,
   buildCrmDocumentFolderName,
   sanitizeOnboardingFolderName,
   parseCrmDocumentFilename,
@@ -38,10 +39,19 @@ test("defaultCrmDocumentName feeds parse/sanitize as a clean fallback", () => {
   );
 });
 
-test("buildCrmDocumentDownloadPath lands under data/onboarding by default", () => {
+test("buildCrmDocumentDownloadPath lands under data/onboarding/<YYYY-MM-DD>/ (today's local date) by default", () => {
+  const today = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${today.getFullYear()}-${p(today.getMonth() + 1)}-${p(today.getDate())}`;
+  assert.equal(onboardingDateFolder(today), stamp);
   assert.equal(
     buildCrmDocumentDownloadPath({ firstName: "Jane", lastName: "Doe", middleName: "A" }),
-    join(PATHS.onboardingDocsDir, "Doe, Jane A EID"),
+    join(PATHS.onboardingDocsDir, stamp, "Doe, Jane A EID"),
+  );
+  // An explicit date addresses that day's folder (no zip, plain folder).
+  assert.equal(
+    buildCrmDocumentDownloadPath({ firstName: "Jane", lastName: "Doe" }, { date: new Date(2026, 7, 18) }),
+    join(PATHS.onboardingDocsDir, "2026-08-18", "Doe, Jane EID"),
   );
   assert.match(PATHS.onboardingDocsDir, /data[/\\]onboarding$/);
 });

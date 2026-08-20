@@ -24,6 +24,7 @@ export type {
 export {
   DEFAULT_CRM_DOC_INDICES,
   buildCrmDocumentDownloadPath,
+  onboardingDateFolder,
   buildCrmDocumentFolderName,
   sanitizeOnboardingFolderName,
   ensureCrmDocumentDownloadFolder,

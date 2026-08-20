@@ -109,11 +109,31 @@ export function buildCrmDocumentFolderName(subject: CrmDocumentDownloadSubject):
 }
 
 /**
- * Absolute path to the per-person onboarding folder under
- * `PATHS.onboardingDocsDir` (`data/onboarding` by default).
+ * Local `YYYY-MM-DD` (not UTC) of the day the hire is processed — the
+ * per-day grouping folder the operator reads `data/onboarding/` by
+ * ("which ones were done today", 2026-08-20). Exported so tests can pin the
+ * shape and callers can name the same day's folder.
  */
-export function buildCrmDocumentDownloadPath(subject: CrmDocumentDownloadSubject): string {
-  return join(PATHS.onboardingDocsDir, buildCrmDocumentFolderName(subject));
+export function onboardingDateFolder(date: Date = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
+}
+
+/**
+ * Absolute path to the per-person onboarding folder:
+ * `PATHS.onboardingDocsDir/<YYYY-MM-DD>/<Last, First Middle EID>`
+ * (`data/onboarding/2026-08-20/Robles, Emily EID` by default).
+ *
+ * Documents stay as a plain FOLDER of PDFs inside the day's folder — they are
+ * no longer packed into a sibling `.zip` (operator decision 2026-08-20, which
+ * reversed the 2026-08-18 one-zip-per-person preference). `date` defaults to
+ * today; pass one explicitly only to address an earlier day's folder.
+ */
+export function buildCrmDocumentDownloadPath(
+  subject: CrmDocumentDownloadSubject,
+  opts: { date?: Date } = {},
+): string {
+  return join(PATHS.onboardingDocsDir, onboardingDateFolder(opts.date), buildCrmDocumentFolderName(subject));
 }
 
 /**
@@ -288,8 +308,10 @@ function looksLikeHtml(body: Buffer): boolean {
 
 /**
  * Pack the per-person document folder into a sibling `.zip` and REMOVE the
- * folder, so `data/onboarding/` holds one archive per person rather than a
- * directory tree (operator preference, 2026-08-18).
+ * folder. Was the onboarding default from 2026-08-18 to 2026-08-20; onboarding
+ * now leaves the documents as a plain folder inside the day's folder (operator
+ * decision 2026-08-20) and no longer calls this. Kept for callers that still
+ * want an archive.
  *
  * The archive is named after the folder (`Alnasser, Ali Anwar EID.zip`) and
  * stores the documents at the archive ROOT — unzipping yields the PDFs
@@ -336,9 +358,10 @@ export async function downloadCrmIdocsDocuments(
   const msg = (s: string) => (p ? `${p} ${s}` : s);
   const indices = options.docIndices ?? DEFAULT_CRM_DOC_INDICES;
 
-  // Already-archived check. Since 2026-08-18 a completed download is a sibling
-  // `.zip` (the folder is removed), so the presence of that archive — not loose
-  // PDFs — is what "already done" looks like.
+  // Already-done check. A completed download is the per-person FOLDER holding
+  // every expected PDF (checked below). A sibling `.zip` is the 2026-08-18 →
+  // 2026-08-20 layout; honour it so a re-run for an already-archived person
+  // does not silently re-download behind the archive.
   if (existsSync(`${folderPath}.zip`)) {
     log.warn(msg(`Archive already on disk (${folderPath}.zip) -- skipping re-download`));
     return [];

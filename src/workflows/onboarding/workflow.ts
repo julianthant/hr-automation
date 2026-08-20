@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import { log } from "../../utils/log.js";
 import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import {
@@ -46,7 +47,6 @@ import {
   buildCrmDocumentDownloadPath,
   downloadCrmIdocsDocuments,
   readCrmIdocsViewerInfo,
-  zipCrmDocumentFolder,
   type CrmIdocsViewerInfo,
 } from "../../systems/crm/idocs-download.js";
 import { OnboardingInputSchema } from "./schema.js";
@@ -350,18 +350,23 @@ export const onboardingWorkflow = defineWorkflow({
           // Record page is long gone by now — use the hash captured back then.
           viewerInfo: idocsViewerInfo,
         });
+        // The documents stay as a plain folder of PDFs inside the day's folder
+        // (`data/onboarding/<YYYY-MM-DD>/<Last, First Middle EID>/`) — no zip
+        // (operator decision 2026-08-20; the 2026-08-18 one-zip-per-person
+        // layout is retired). `pdfArchive` keeps its name for older rows /
+        // readers but now points at the folder.
         if (saved.length === 0) {
-          // Already-archived short-circuit: the zip is on disk from a prior run.
+          // Already-done short-circuit: the legacy sibling zip is on disk.
           ctx.updateData({
-            pdfDownload: "Already archived",
+            pdfDownload: "Already archived (legacy zip)",
             pdfArchive: `${folderPath}.zip`,
+            pdfFolder: folderPath,
           });
         } else {
-          // Deliver ONE archive per person rather than a folder tree.
-          const archive = await zipCrmDocumentFolder(folderPath, saved);
           ctx.updateData({
-            pdfDownload: `${archive.entries.length} file(s) — ${archive.filename}`,
-            pdfArchive: archive.path,
+            pdfDownload: `${saved.length} file(s) — ${basename(folderPath)}`,
+            pdfArchive: folderPath,
+            pdfFolder: folderPath,
           });
         }
       } catch (err) {
