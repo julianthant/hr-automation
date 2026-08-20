@@ -27,6 +27,11 @@ import {
   canSkipJobSummaryNavigation,
   navigateToWorkforceJobSummary,
   pollForJobInfoScan,
+  pollForGridScan,
+  pairFrozenGridRows,
+  jobInfoRowsFromGrid,
+  workLocationRowsFromGrid,
+  type FrozenGridDump,
   pickWorkLocationRow,
   pickEffectiveDatedRow,
   effectiveDateKey,
@@ -414,5 +419,220 @@ describe("navigateToWorkforceJobSummary (re-navigation wiring)", () => {
     const page = makeFakePage({ url: "https://ucphrprdpub.universityofcalifornia.edu/psp/ucphrprd/EMPLOYEE/HRMS/h/?tab=DEFAULT", searchBoxCount: 0 });
     await navigateToWorkforceJobSummary(page as unknown as Page);
     assert.strictEqual(page._gotoCalls.length, 1, "off-component — must navigate");
+  });
+});
+
+// ─── Frozen-column grid pairing (live dumps, 2026-08-20) ─────────────────────
+//
+// Fixtures transcribed from the LIVE Workforce Job Summary grids of the two
+// separations docs that exposed the bug (4540 Kim, Jon 10791600 — 17 rows;
+// 4541 Zermeno, Leselie 10769919 — 16 rows). PeopleSoft renders the grid as two
+// row-aligned tables: `tdgblWF_JOB_SUMM$0` (Org Rel · Empl Rec · Effective Date
+// · Seq) and `tdgbrWF_JOB_SUMM$0` (the tab's columns). On Job Information the
+// right row's ONLY date is "Expected Job End Date" — the old "first date cell in
+// the row" scan read THAT as the effective date and shipped STDT 2 to Kuali for
+// employees promoted to STDT 3 months before their separation.
+
+const LEFT_ID = "tdgblWF_JOB_SUMM$0";
+const RIGHT_ID = "tdgbrWF_JOB_SUMM$0";
+
+function leftRows(dates: string[]): string[][] {
+  return dates.map((d, i) => ["EMP", "0", d, i % 7 === 2 ? "1" : "0"]);
+}
+/** Job Information right row (Job Code · Description · … · Expected Job End Date · "" · row-header ""). */
+function jiRight(code: string, desc: string, endDate: string): string[] {
+  return [code, desc, "PSS", "Active", "Variable", "17.60", "0.440000", "Nonexempt", endDate, "", ""];
+}
+/** Work Location right row (Position · Description · Company · Dept ID · Dept Description · Location · BU · Supervisor). */
+function wlRight(pos: string, desc: string, deptId: string, dept: string): string[] {
+  return [pos, desc, "UCS", deptId, dept, "6840-1", "SDCMP", "Panicha Aguilar", ""];
+}
+
+// 4540 — Kim, Jon. Effective dates (left) and Job Information rows (right), in
+// grid order. Promotion to STDT 3 took effect 03/29/2026; separation 06/16/2026.
+const KIM_DATES = [
+  "01/31/2025", "02/15/2025", "02/15/2025", "03/01/2025", "03/01/2025", "06/20/2025",
+  "08/03/2025", "09/14/2025", "09/16/2025", "12/05/2025", "12/05/2025", "12/21/2025",
+  "03/29/2026", "03/29/2026", "04/09/2026", "06/12/2026", "06/21/2026",
+];
+const KIM_JOB_INFO: FrozenGridDump = {
+  left: [{ id: LEFT_ID, rows: leftRows(KIM_DATES) }],
+  right: [{
+    id: RIGHT_ID,
+    rows: [
+      ...Array.from({ length: 5 }, () => jiRight("004921", "STDT 2", "06/30/2025")),
+      ...Array.from({ length: 3 }, () => jiRight("004921", "STDT 2", "09/21/2025")),
+      ...Array.from({ length: 4 }, () => jiRight("004921", "STDT 2", "06/30/2026")),
+      ...Array.from({ length: 3 }, () => jiRight("004920", "STDT 3", "06/30/2026")),
+      ...Array.from({ length: 2 }, () => jiRight("004920", "STDT 3", "09/20/2026")),
+    ],
+  }],
+};
+
+// 4541 — Zermeno, Leselie. STDT 3 from 09/15/2025; separation 06/16/2026.
+const ZERMENO_DATES = [
+  "10/11/2024", "10/11/2024", "12/22/2024", "02/15/2025", "02/15/2025", "06/20/2025",
+  "08/03/2025", "09/14/2025", "09/15/2025", "09/15/2025", "10/12/2025", "11/25/2025",
+  "12/21/2025", "12/21/2025", "06/12/2026", "06/21/2026",
+];
+const ZERMENO_JOB_INFO: FrozenGridDump = {
+  left: [{ id: LEFT_ID, rows: leftRows(ZERMENO_DATES) }],
+  right: [{
+    id: RIGHT_ID,
+    rows: [
+      ...Array.from({ length: 5 }, () => jiRight("004921", "STDT 2", "06/30/2025")),
+      ...Array.from({ length: 3 }, () => jiRight("004921", "STDT 2", "09/21/2025")),
+      ...Array.from({ length: 6 }, () => jiRight("004920", "STDT 3", "06/30/2026")),
+      ...Array.from({ length: 2 }, () => jiRight("004920", "STDT 3", "09/20/2026")),
+    ],
+  }],
+};
+const ZERMENO_WORK_LOCATION: FrozenGridDump = {
+  left: [{ id: LEFT_ID, rows: leftRows(ZERMENO_DATES) }],
+  right: [{
+    id: RIGHT_ID,
+    rows: [
+      ...Array.from({ length: 8 }, () => wlRight("40690430", "STDT 2", "000412", "HOUSING/DINING/HOSPITALITY")),
+      ...Array.from({ length: 8 }, () => wlRight("40700768", "STDT 3", "000412", "HOUSING/DINING/HOSPITALITY")),
+    ],
+  }],
+};
+
+describe("pairFrozenGridRows (Workforce Job Summary frozen-column grid)", () => {
+  it("zips the LEFT table's Effective Date onto the RIGHT table's row by index (Kim, 17 rows)", () => {
+    const rows = pairFrozenGridRows(KIM_JOB_INFO);
+    assert.equal(rows.length, 17);
+    assert.equal(rows[0].effectiveDate, "01/31/2025");
+    assert.deepEqual(rows[0].cells.slice(0, 2), ["004921", "STDT 2"]);
+    assert.equal(rows[12].effectiveDate, "03/29/2026");
+    assert.deepEqual(rows[12].cells.slice(0, 2), ["004920", "STDT 3"]);
+    assert.equal(rows[16].effectiveDate, "06/21/2026");
+  });
+
+  it("NEVER reads the right row's own date (Expected Job End Date) as the Effective Date", () => {
+    const rows = pairFrozenGridRows(KIM_JOB_INFO);
+    // Every right row carries an in-row date (its end date); none of them leaks
+    // into effectiveDate — the 06/30/2026-ending STDT 3 rows are 03/29–04/09/2026.
+    const stdt3 = rows.filter((r) => r.cells[1] === "STDT 3").map((r) => r.effectiveDate);
+    assert.deepEqual(stdt3, ["03/29/2026", "03/29/2026", "04/09/2026", "06/12/2026", "06/21/2026"]);
+    assert.ok(!rows.some((r) => r.effectiveDate === "06/30/2026" || r.effectiveDate === "09/20/2026"));
+  });
+
+  it("returns [] while the grid has not rendered (no left table / empty left / missing right)", () => {
+    assert.deepEqual(pairFrozenGridRows({ left: [], right: [] }), []);
+    assert.deepEqual(pairFrozenGridRows({ left: [{ id: LEFT_ID, rows: [] }], right: [] }), []);
+    assert.deepEqual(
+      pairFrozenGridRows({ left: [{ id: LEFT_ID, rows: leftRows(["01/31/2025"]) }], right: [] }),
+      [],
+    );
+  });
+
+  it("THROWS on a left/right row-count mismatch (a misaligned zip must never pair a date with the wrong job)", () => {
+    const dump: FrozenGridDump = {
+      left: [{ id: LEFT_ID, rows: leftRows(["01/31/2025", "03/29/2026"]) }],
+      right: [{ id: RIGHT_ID, rows: [jiRight("004921", "STDT 2", "06/30/2025")] }],
+    };
+    assert.throws(() => pairFrozenGridRows(dump), /has 2 row\(s\) but right table .* has 1/);
+  });
+
+  it("THROWS when the left table has no single all-dates column (layout drift, not a guess)", () => {
+    const dump: FrozenGridDump = {
+      left: [{ id: LEFT_ID, rows: [["EMP", "0", "not-a-date", "0"], ["EMP", "0", "01/31/2025", "0"]] }],
+      right: [{ id: RIGHT_ID, rows: [jiRight("004921", "STDT 2", "06/30/2025"), jiRight("004921", "STDT 2", "06/30/2025")] }],
+    };
+    assert.throws(() => pairFrozenGridRows(dump), /expected exactly ONE all-dates/);
+  });
+
+  it("THROWS when more than one populated frozen-left table is present (ambiguous grid)", () => {
+    const dump: FrozenGridDump = {
+      left: [
+        { id: "tdgblA$0", rows: leftRows(["01/31/2025"]) },
+        { id: "tdgblB$0", rows: leftRows(["01/31/2025"]) },
+      ],
+      right: [{ id: "tdgbrA$0", rows: [jiRight("004921", "STDT 2", "06/30/2025")] }],
+    };
+    assert.throws(() => pairFrozenGridRows(dump), /expected ONE frozen-left grid table, found 2/);
+  });
+
+  it("pairs left/right by grid-id suffix, ignoring an unrelated right table", () => {
+    const dump: FrozenGridDump = {
+      left: [{ id: LEFT_ID, rows: leftRows(["01/31/2025"]) }],
+      right: [
+        { id: "tdgbrOTHER$0", rows: [["zzz"]] },
+        { id: RIGHT_ID, rows: [jiRight("004920", "STDT 3", "06/30/2026")] },
+      ],
+    };
+    assert.deepEqual(pairFrozenGridRows(dump)[0].cells.slice(0, 2), ["004920", "STDT 3"]);
+  });
+});
+
+describe("jobInfoRowsFromGrid + pickEffectiveDatedRow — the 2026-08-20 regression (docs 4540 / 4541)", () => {
+  it("Kim (4540): the job in effect at separation 06/16/2026 is 004920 STDT 3, not the older STDT 2", () => {
+    const rows = jobInfoRowsFromGrid(pairFrozenGridRows(KIM_JOB_INFO));
+    const picked = pickEffectiveDatedRow(rows, "06/16/2026");
+    assert.ok(picked);
+    assert.equal(picked.effectiveDate, "06/12/2026");
+    assert.equal(picked.jobCode, "004920");
+    assert.equal(picked.jobDescription, "STDT 3");
+  });
+
+  it("Zermeno (4541): the job in effect at separation 06/16/2026 is 004920 STDT 3", () => {
+    const rows = jobInfoRowsFromGrid(pairFrozenGridRows(ZERMENO_JOB_INFO));
+    const picked = pickEffectiveDatedRow(rows, "06/16/2026");
+    assert.ok(picked);
+    assert.equal(picked.effectiveDate, "06/12/2026");
+    assert.deepEqual([picked.jobCode, picked.jobDescription], ["004920", "STDT 3"]);
+  });
+
+  it("a separation BEFORE the promotion still resolves to the old STDT 2 row (Kim, 03/01/2026)", () => {
+    const rows = jobInfoRowsFromGrid(pairFrozenGridRows(KIM_JOB_INFO));
+    const picked = pickEffectiveDatedRow(rows, "03/01/2026");
+    assert.ok(picked);
+    assert.deepEqual([picked.effectiveDate, picked.jobCode, picked.jobDescription], ["12/21/2025", "004921", "STDT 2"]);
+  });
+
+  it("THROWS when a right row does not start with a 6-digit Job Code (layout drift)", () => {
+    const rows = pairFrozenGridRows({
+      left: [{ id: LEFT_ID, rows: leftRows(["01/31/2025"]) }],
+      right: [{ id: RIGHT_ID, rows: [["STDT 2", "004921"]] }],
+    });
+    assert.throws(() => jobInfoRowsFromGrid(rows), /does not start with a 6-digit Job Code/);
+  });
+});
+
+describe("workLocationRowsFromGrid (Work Location tab on the same frozen grid)", () => {
+  it("reads Dept ID/Description at +3/+4 from the Position Number anchor with the LEFT table's Effective Date", () => {
+    const rows = workLocationRowsFromGrid(pairFrozenGridRows(ZERMENO_WORK_LOCATION));
+    assert.equal(rows.length, 16);
+    assert.deepEqual(
+      [rows[0].effectiveDate, rows[0].positionNumber, rows[0].deptId, rows[0].departmentDescription],
+      ["10/11/2024", "40690430", "000412", "HOUSING/DINING/HOSPITALITY"],
+    );
+    const picked = pickWorkLocationRow(rows, "06/16/2026");
+    assert.ok(picked);
+    assert.deepEqual([picked.effectiveDate, picked.positionNumber, picked.deptId], ["06/12/2026", "40700768", "000412"]);
+  });
+
+  it("THROWS when a row has no Position Number anchor (layout drift)", () => {
+    const rows = pairFrozenGridRows({
+      left: [{ id: LEFT_ID, rows: leftRows(["01/31/2025"]) }],
+      right: [{ id: RIGHT_ID, rows: [["STDT 2", "UCS", "000412", "HOUSING/DINING/HOSPITALITY"]] }],
+    });
+    assert.throws(() => workLocationRowsFromGrid(rows), /no Position Number anchor/);
+  });
+});
+
+describe("pollForGridScan", () => {
+  it("re-scans until `ready` accepts and never sleeps after the accepting scan", async () => {
+    const scans = [[] as string[], [] as string[], ["row"]];
+    let i = 0;
+    const sleeps: number[] = [];
+    const out = await pollForGridScan(
+      async () => scans[i++],
+      (s) => s.length > 0,
+      { attempts: 5, intervalMs: 7, sleep: async (ms) => { sleeps.push(ms); } },
+    );
+    assert.deepEqual(out, ["row"]);
+    assert.deepEqual(sleeps, [7, 7]);
   });
 });
