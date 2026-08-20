@@ -1,1144 +1,1178 @@
 {
-  "schemaVersion": 1,
-  "baselineCommit": "353739ac9e1db01cae9da8a13da53605cd767574",
-  "records": [
-    {
-      "path": "src/control/ops/delete.ts",
-      "changeKind": "modified",
-      "beforeSha256": "3b74e7af19b2f2f5e787015743a897cf5d62213c4030a372c61360f6a6259bec",
-      "afterSha256": "86760daf02ae414e66802e381f3d9210dfd1305aaa66403e9ab60fe16a52fa41",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact",
-        "legacy-workflow-onboarding",
-        "legacy-workflow-person-lookup",
-        "legacy-workflow-separations",
-        "legacy-workflow-ocr"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Queue-row delete guard now binds the canonical terminal set (blocked was omitted, making blocked tasks undeletable)."
-    },
-    {
-      "path": "src/core/CLAUDE.md",
-      "changeKind": "modified",
-      "beforeSha256": "297f6aedc0d14b0ac4b24071334853d689332969f79a1f21c961eb33c3c604bb",
-      "afterSha256": "8356f31a3805f30f8185579a105bf99326d5682e80bd309787325e3461bb9ba4",
-      "capabilityIds": [
-        "legacy-cli-daemon"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/core/daemon/daemon.ts",
-      "changeKind": "modified",
-      "beforeSha256": "c533fac92e04406881966948f42c65c25d63f6e06f17febd6acec6b95060387a",
-      "afterSha256": "623d4e6b1eda3fa6283584d0498097a17cc11fdba62d01b7310f8e69aeba67b8",
-      "capabilityIds": [
-        "legacy-cli-daemon"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/core/daemon/queue.ts",
-      "changeKind": "modified",
-      "beforeSha256": "e4b2db87a3d987bcf0ec1ca3eca08be1fbebfc8c7e21d7ecdffae50cf48008e3",
-      "afterSha256": "32e6afebac927c99c336844140cb09521ed79d97932a763b31a9bef371c7ccbe",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact",
-        "legacy-workflow-onboarding",
-        "legacy-workflow-person-lookup",
-        "legacy-workflow-separations",
-        "legacy-workflow-work-study",
-        "legacy-workflow-ocr"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Exports TERMINAL_CONTROL_STATES as the single terminal-state definition; every workflow that runs through the daemon consumes it."
-    },
-    {
-      "path": "src/infra/auth/CLAUDE.md",
-      "changeKind": "modified",
-      "beforeSha256": "4be112bffe41b4df16b72476be624af45faf29d82a9fcdfc82c5b5dc84a9fecd",
-      "afterSha256": "1029563a18f05065e052ae7d07467aa32c1c5cd0d0192199374b387c7d792539",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Changed as part of the 2026-08-05 Emergency Contact identity-gate/row-anchoring/save-proof fix."
-    },
-    {
-      "path": "src/infra/auth/duo-webauthn.ts",
-      "changeKind": "modified",
-      "beforeSha256": "9381e3e148087bbffe807ac7ba5a705224bf87d8153b40369d1f10376d6e5a1f",
-      "afterSha256": "3f4005940b7ffdf31704838fa91c266a0ad85cb470d45d14db743cbc5b99bfeb",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact",
-        "legacy-workflow-onboarding",
-        "legacy-workflow-person-lookup",
-        "legacy-workflow-separations",
-        "legacy-workflow-work-study",
-        "legacy-workflow-ocr"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Duo WebAuthn arming moved before the ADFS submit (commit 0d959720, auth-flow fix by a concurrent session); auth timing is shared by every daemon workflow."
-    },
-    {
-      "path": "src/infra/auth/sso-fields.ts",
-      "changeKind": "modified",
-      "beforeSha256": "05bee039de70ef53d98fb09ea15932fa122f20ab886140bbe473891ace56a705",
-      "afterSha256": "ceb305489d27b22ee17895dd2375efb9814478e234cd5624e8f8ee5646abe56f",
-      "capabilityIds": [
-        "legacy-cli-daemon",
-        "legacy-workflow-onboarding",
-        "legacy-workflow-separations"
-      ],
-      "impactRationale": "SSO credential fill rewritten: resolves username/password through ordered, live-mapped anchors (#ssousername / #ssopassword) instead of `.or()` + `.first()` (which resolves in DOM order and could put the password in the username box), asserts the two fields are distinct and that the password field is type=password, and reads both values back. Shared by every UCSD SSO flow.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/services/ocr/env-keys.ts",
-      "changeKind": "modified",
-      "beforeSha256": "c9213498098dc6ef99904251deddf4d2e83d65cc6155e59a79a59fd8d29b2a8e",
-      "afterSha256": "a69ff1db9a461e773407bf1924bcd4b2ab2bb5ed54f6b7de35a2f405cb7ebc03",
-      "capabilityIds": [
-        "legacy-service-ocr"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/services/ocr/providers/gemini.ts",
-      "changeKind": "modified",
-      "beforeSha256": "3c9911d770894443491c4e2b22fb8e495809bd06128741844c79c4462031b9f0",
-      "afterSha256": "e4021daa23345638a1616cf0f1a42292b74a71f62f420e440b46cacb5605098c",
-      "capabilityIds": [
-        "legacy-service-ocr"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/systems/crm/SELECTORS.md",
-      "changeKind": "modified",
-      "beforeSha256": "d28933203c348c098a5a1377abe5240ed6be3cc92e10ad41d1428829d8384dcb",
-      "afterSha256": "c2c356c1c443b595a0f373dc510c2fffbbe69f58e95c901065afc470ae8f5c67",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
-    },
-    {
-      "path": "src/systems/i9/SELECTORS.md",
-      "changeKind": "modified",
-      "beforeSha256": "f8d9eba3213c717341d48a0060959e1a0bdc2f760161dfa408ba03a402d709ec",
-      "afterSha256": "13bb2e55e3b6243044abd9083165fe6ec7d7333a69aac9197f964b40cf35667d",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
-    },
-    {
-      "path": "src/systems/kuali/SELECTORS.md",
-      "changeKind": "modified",
-      "beforeSha256": "4ccd6c5a794d93e3fdb680346b48aaf8e9007db367b593012cfe00476add9882",
-      "afterSha256": "62188c188f3e1597da8ac0c073f3f489c249ad30709bbf76fee68751335ea218",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
-    },
-    {
-      "path": "src/systems/new-kronos/LESSONS.md",
-      "changeKind": "modified",
-      "beforeSha256": "780ab0ff7f3085b1b4570d01b11e1ce63fb6ed7636a5bf31c0da50136d372fe9",
-      "afterSha256": "e506a3c9e2527bbf4c7954be49b8fe67d0552de8dc47e2fb3d0947a560c32f9f",
-      "capabilityIds": [
-        "legacy-workflow-separations"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/systems/new-kronos/SELECTORS.md",
-      "changeKind": "modified",
-      "beforeSha256": "adfe0e9c66fd86da965a0c2c71fd025cccdb89d1e42ad83a2f9d14072e1a9976",
-      "afterSha256": "c62ae8fa868f6cb972a763ff442630bfe6f9cf1b579b31f128779c14dc025cdf",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
-    },
-    {
-      "path": "src/systems/new-kronos/navigate.ts",
-      "changeKind": "modified",
-      "beforeSha256": "49b2fa7c165bcc6a3c59620e192b0055ad46e758c412c5a1c8c655ebbe9508c6",
-      "afterSha256": "4f6710e71c06f07c620e0c422288729770073ba2ec6b67c10a5c60947164f494",
-      "capabilityIds": [
-        "legacy-workflow-separations"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/systems/old-kronos/SELECTORS.md",
-      "changeKind": "modified",
-      "beforeSha256": "ce5d95fcee34b39fb3dcdfd6db23fd5b789676d56ef4a4a03518bce408dcb9c0",
-      "afterSha256": "260248e0da9b0958a99255e3bd3d59e47f11277c5843d4efae88a62838c2d211",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
-    },
-    {
-      "path": "src/systems/onbase/SELECTORS.md",
-      "changeKind": "modified",
-      "beforeSha256": "eccb58b4eeeda6bf33b4c459a77078c4296c7f6e6fc65cc266a84570903f9f20",
-      "afterSha256": "31da7799a3a582272b5f3b625ea24608ec5d40b5e4aeee0024a25ab97e35e00f",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
-    },
-    {
-      "path": "src/systems/servicenow/SELECTORS.md",
-      "changeKind": "modified",
-      "beforeSha256": "557de341ee92f0022e6a5d609042930ba7080edbf1d89185acdccefd826e323d",
-      "afterSha256": "ae25a934ea5229e926a5240fab456a1990add07d13ec7c42b8ff7b62163209b5",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
-    },
-    {
-      "path": "src/systems/sharepoint/SELECTORS.md",
-      "changeKind": "modified",
-      "beforeSha256": "209fa8cdfc094c829c16217f5cde1ffa39ac58b793e27cc4fae46af04f7f6d61",
-      "afterSha256": "4e78b1cb9b397db06a2e75b07a318cd577489bafb64007ab6f2208555638d8e5",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
-    },
-    {
-      "path": "src/systems/ucpath/CLAUDE.md",
-      "changeKind": "modified",
-      "beforeSha256": "c562816dd0f5b85109c6c6fd7b56703d32703f10c12a5ad5f5a3c834f84d8cff",
-      "afterSha256": "56f89d48a7170006e49e7619eced71d5cd1f3f467f571c0719f33da5d5efcddc",
-      "capabilityIds": [
-        "legacy-workflow-onboarding",
-        "legacy-workflow-separations"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/systems/ucpath/LESSONS.md",
-      "changeKind": "modified",
-      "beforeSha256": "010e7a25f50d7e63b24355bb254ded76690c9278a6885285ef3a52101fc5f9a1",
-      "afterSha256": "b8e98d2cf929a93523648e7acb093eba9bc1a72ef315d644f63ba460707eb317",
-      "capabilityIds": [
-        "legacy-workflow-onboarding",
-        "legacy-workflow-person-lookup",
-        "legacy-workflow-separations"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "2026-08-05 (aba05c65): corrected the 2026-08-04 $op accessible-name lesson's blast-radius paragraph \u2014 it had declared production immune while the production-driven ssSmartHRTransactions group carried the same fragile shape (the doc 4493 failure); adds the sweep-every-Find-an-Existing-Value-group rule."
-    },
-    {
-      "path": "src/systems/ucpath/SELECTORS.md",
-      "changeKind": "modified",
-      "beforeSha256": "57fb1caeac412725c3c5defb0430dd9d5d910db97d077328cf2f37368d6fb1f4",
-      "afterSha256": "1b58855816178aa796e8e01cb95f690d5110774a905316613a6d1a2d7c1b9887",
-      "capabilityIds": [
-        "legacy-workflow-i9-check",
-        "legacy-workflow-onboarding",
-        "legacy-workflow-person-lookup",
-        "legacy-workflow-separations"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "2026-08-05 (aba05c65): regenerated catalog (npm run selectors:catalog) for the ssSmartHRTransactions re-anchoring; generated content only."
-    },
-    {
-      "path": "src/systems/ucpath/index.ts",
-      "changeKind": "modified",
-      "beforeSha256": "799e4d5bdf7bbdc6767abd13469b87d1183a9fb19f1fe00dc8adc07f8df36d2f",
-      "afterSha256": "02b6154bf2e720b01834eae42f46a06be19779a356f1c22dbd7421c312d26e27",
-      "capabilityIds": [
-        "legacy-workflow-onboarding",
-        "legacy-workflow-separations"
-      ],
-      "impactRationale": "Exports waitForSaveEnabled so the onboarding dry run can assert the submit button reached a clickable state without clicking it.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/systems/ucpath/personal-data.ts",
-      "changeKind": "modified",
-      "beforeSha256": "a4f17333ef0f7c15b019834de6aa5c439764ff1b90a246cceefa08f3bf3bb5c7",
-      "afterSha256": "6bb4c067ef52f0ca321705e57fef3490e65a7d0f99937c1c301dcbb99855659e",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact",
-        "legacy-workflow-onboarding",
-        "legacy-workflow-person-lookup",
-        "legacy-workflow-separations",
-        "legacy-workflow-work-study"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Emergency Contact editor navigation/save: adds assertEmergencyContactPersisted (positive post-save proof); the save-outcome contract is part of the rebuild UCPath write-safety source of truth."
-    },
-    {
-      "path": "src/systems/ucpath/selectors.ts",
-      "changeKind": "modified",
-      "beforeSha256": "4f6992525998eb6e3db8d2b3a4b67bb551aa0565e6a03710efd92a095d958aa5",
-      "afterSha256": "26ab3bfff215ec16eff557e494c6f5d5371e1a94757d6e8b4a6e44f7ac520342",
-      "capabilityIds": [
-        "legacy-workflow-i9-check",
-        "legacy-workflow-onboarding",
-        "legacy-workflow-person-lookup",
-        "legacy-workflow-separations"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "2026-08-05 (aba05c65): re-anchored every ssSmartHRTransactions search arm after PeopleSoft folded the Find-an-Existing-Value operator select (<field>$op) into each input's accessible name ('Empl ID begins with', 'Approval Status =', ...), which made all exact:true arms match zero elements and killed separations transaction-check live (doc 4493). Anchored ^Label regex + live-probed record.field id arms, same repair personOrgSummary received 2026-08-04. Locator resolution only; no contract change."
-    },
-    {
-      "path": "src/systems/ucpath/ss-smart-hr.ts",
-      "changeKind": "modified",
-      "beforeSha256": "6524118fb49e244442824d134484709530bf2a80a5be73bf183fd7d5cac847f2",
-      "afterSha256": "059dc4e3ac10a82317492618ea2c8d8baa8414f69a3376c8b6bafdddec904f32",
-      "capabilityIds": [
-        "legacy-workflow-onboarding",
-        "legacy-workflow-separations"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/systems/ucpath/transaction.ts",
-      "changeKind": "modified",
-      "beforeSha256": "1edbfd04c254d3a9a780431899ec30569b746536b45e53c1e1194ad84237bf94",
-      "afterSha256": "0877822035fdb5322d98180b54ee04ca9b4cddeb1ed1f0915bac4a4e92143946",
-      "capabilityIds": [
-        "legacy-workflow-onboarding",
-        "legacy-workflow-separations"
-      ],
-      "impactRationale": "Post-submit handling reads the dialog text and THROWS on a refusal instead of clicking past it (a 'Expected Job End Date cannot be before Job Effective Date' modal was being acknowledged as a successful submit), drains the dialog chain, waits for the transaction id to resolve, and acknowledges via the #ICOK escape hatch rather than a role-based OK click that resolved to an unrelated lookup prompt behind pt_modalMask.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/workflows/emergency-contact/CLAUDE.md",
-      "changeKind": "modified",
-      "beforeSha256": "6986043e3a5755ec1f6bfb9794be564e40f9da7ec706bee18eb2038398111758",
-      "afterSha256": "d015e0902531af773a2de6918c1086167368ff446fa68f160975767c16b0620f",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Documents the paged-scroll/add-row root cause and corrects the stale zero-contact gotcha the rebuild plan referenced."
-    },
-    {
-      "path": "src/workflows/emergency-contact/enter.ts",
-      "changeKind": "modified",
-      "beforeSha256": "035387d58cbf46c875afa01b62cc590b272a7ac0c80ec36d558a32269305811a",
-      "afterSha256": "62d8c595c7842e50188f5d2af9b5e8e1e9e6e63f3bb00ed7c994edca153ffbdc",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "EC fill plan rewritten: View All + blank-row scan + row-anchored writes + name-last read-back; the rebuild ports this plan shape."
-    },
-    {
-      "path": "src/workflows/emergency-contact/workflow.ts",
-      "changeKind": "modified",
-      "beforeSha256": "0c1de5bce1a94a09fac33191ffba45ec21facde6ada1b5ab3edb1133771181af",
-      "afterSha256": "6a83065b31b0a3ea3651aaa3ce6e475c685b0cb08fbebd8c481ca237d84987ef",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "EC save step gains a pre-save no-blank-row assertion; part of the ported save contract."
-    },
-    {
-      "path": "src/workflows/onboarding/CLAUDE.md",
-      "changeKind": "modified",
-      "beforeSha256": "f7c38194ca9ef657840af3a87e56bc5dbae307f5e471d0605e729ff0e01872c2",
-      "afterSha256": "d76dfa4ef0cb5176a4bd3c69d06b0e5cf2a2838116164f27f56368b09a8fc20d",
-      "capabilityIds": [
-        "legacy-workflow-onboarding"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/workflows/onboarding/workflow.ts",
-      "changeKind": "modified",
-      "beforeSha256": "3fdbf1d1ed90700c5ad7aeaa93024083e6a319ecf778bdaf0874e8648c98b8a8",
-      "afterSha256": "47909bdda85cafd652420ef99358dbd88d6a8159d18e59fd3905c6c43a93703a",
-      "capabilityIds": [
-        "legacy-workflow-onboarding"
-      ],
-      "impactRationale": "Resets the I-9 page once per item so item N+1 never inherits item N's modal wreckage; uses the transaction number the submit itself read back.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/workflows/separations/CLAUDE.md",
-      "changeKind": "modified",
-      "beforeSha256": "705842e6a4800e8775cd1b002207bfef73af656070dc1751bf539b1bee018893",
-      "afterSha256": "7187be6b5e61f14754ad47eb845b26b1e309327af180358251a3551d3fbd9f4d",
-      "capabilityIds": [
-        "legacy-workflow-separations"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/workflows/separations/steps/kuali-extract.ts",
-      "changeKind": "modified",
-      "beforeSha256": "8ff930b8618417235d08c2027e5ade6ca4706795be18ff45cb5feb468be68acf",
-      "afterSha256": "5076706e7d9cfd18904796b7e5d2ae736f02d5ae7ce0dcf8f1f7b5d9a6f770a8",
-      "capabilityIds": [
-        "legacy-workflow-separations"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/workflows/separations/workflow.ts",
-      "changeKind": "modified",
-      "beforeSha256": "96a8ec7d7047ac00917d4a04cfdaf32c15d8fa97155ff61bc87a1d6734bdc60e",
-      "afterSha256": "cfb82592c48e466216372600805b6cd22265bf51e999381d535628ee70f8b580",
-      "capabilityIds": [
-        "legacy-workflow-separations"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/workflows/sharepoint-download/download.ts",
-      "changeKind": "modified",
-      "beforeSha256": "9a9ff39fc6e5a6b548d5de23fb7a306eb94924a9d7a32fa93ba9ef04af203693",
-      "afterSha256": "34ce7adf918c8f0e57e13909877c8e8a81d0a03dad89c53a135351863b0deba7",
-      "capabilityIds": [
-        "legacy-workflow-sharepoint-download",
-        "legacy-workflow-emergency-contact"
-      ],
-      "impactRationale": "Downloaded .xlsx is sanitized after saveAs: strips colorFilter/iconFilter/extLst from xl/tables/*.xml, which ExcelJS's FilterColumnXform throws on, aborting the whole workbook read \u2014 a successful roster download landed on disk unreadable by roster-loader.ts (the same wb.xlsx.readFile call emergency-contact matching uses). Allowlisted elements only; a clean workbook is left byte-identical.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/fail-loud-catch-default.test.ts",
-      "changeKind": "modified",
-      "beforeSha256": "9048531e4eaf96e93986f587469b574c2de2f1b8cc2b9217449ce452fa4e49bd",
-      "afterSha256": "f99bdf9bd78097c7b28c827c329f1c89a202a30b9574e5226c5e55c18aece21d",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "rebuildRecheckIds": [
-        "npm:lint:legacy-tests-ratchet",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/gate-coverage.test.ts",
-      "changeKind": "modified",
-      "beforeSha256": "09bc9f5e896dc2865f753bf8ede99b0dc60498fbfb69caef4432e2ed9a10d016",
-      "afterSha256": "f5bc6665064acd3926eed8841d05a2ee36a7db514d6d57bcffadae5ea5309f34",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "rebuildRecheckIds": [
-        "npm:lint:legacy-tests-ratchet",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/guard-manifest.test.ts",
-      "changeKind": "added",
-      "beforeSha256": null,
-      "afterSha256": "a5aec3bd225a9619a9a873c1afb818efb0a8d6be3ab0492569f6bf7089fe61e4",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "rebuildRecheckIds": [
-        "npm:lint:legacy-tests-ratchet",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/helpers/guard-files.ts",
-      "changeKind": "added",
-      "beforeSha256": null,
-      "afterSha256": "8bc5833aea14d17737ceb72924fcc6a05e442b1e3a772941c6ddf1f2ae4b5748",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "rebuildRecheckIds": [
-        "npm:lint:legacy-tests-ratchet",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/helpers/rebuild-ratchet-arms.ts",
-      "changeKind": "added",
-      "beforeSha256": null,
-      "afterSha256": "7a9c3011f66c24b4d517600f840de8d4185ab807f655c6247e7b37bc1b8bbd79",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "rebuildRecheckIds": [
-        "npm:lint:legacy-tests-ratchet",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/helpers/runtime-isolation-audit.ts",
-      "changeKind": "added",
-      "beforeSha256": null,
-      "afterSha256": "fe673bd55a9e1f28515063eff2c4e32c6e44a1cf9f6bada4b6ec8ebed533af0c",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "rebuildRecheckIds": [
-        "npm:lint:legacy-tests-ratchet",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/inline-selectors-workflows.test.ts",
-      "changeKind": "modified",
-      "beforeSha256": "f0626dcc1d3a814e96777784fc32c8a0d00923c5dc4052b61f22563dc65ef7d4",
-      "afterSha256": "923541bbd3393945403e460ddca0aae83ce96fec0dec96d6306454a0488cb1f8",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "rebuildRecheckIds": [
-        "npm:lint:legacy-tests-ratchet",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/legacy-capability-disposition.test.ts",
-      "changeKind": "added",
-      "beforeSha256": null,
-      "afterSha256": "6af6b18d75b78ec9d577971acd6786486b4e1d4db2f3f62320ccd5f20acb9773",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "rebuildRecheckIds": [
-        "npm:lint:legacy-tests-ratchet",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/legacy-change-accounting.test.ts",
-      "changeKind": "added",
-      "beforeSha256": null,
-      "afterSha256": "5f4f9a0ffcb71c723021df4a82e2cc1e879a9dd69a9e1fc0c0d4215fb46dfe23",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "rebuildRecheckIds": [
-        "npm:lint:legacy-tests-ratchet",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/legacy-preservation.test.ts",
-      "changeKind": "added",
-      "beforeSha256": null,
-      "afterSha256": "f0ebd2559153a84dae89fb1cc46348a7c62e7a1366c7278ab44f76613528bb4f",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "rebuildRecheckIds": [
-        "npm:lint:legacy-tests-ratchet",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/legacy-test-disposition.test.ts",
-      "changeKind": "added",
-      "beforeSha256": null,
-      "afterSha256": "675b2523dc28ca2b925023718d2358bd1b6547f820b04e4bbfb7fbd5e133fcd2",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "rebuildRecheckIds": [
-        "npm:lint:legacy-tests-ratchet",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/legacy-test-lint-debt-ratchet.test.ts",
-      "changeKind": "added",
-      "beforeSha256": null,
-      "afterSha256": "d9f6249da11d545d4b54241c570ce39fc273d8e8b33006e0bc092102f1050193",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "rebuildRecheckIds": [
-        "npm:lint:legacy-tests-ratchet",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/nullish-literal-data-fallback.test.ts",
-      "changeKind": "modified",
-      "beforeSha256": "60ca6b0b8644e7367301482a7c9a1cec47f4210d035d262e5b2f219d4805a417",
-      "afterSha256": "d5e81185d0e7132b6f36233132738d87009335bb4884af8433aac162b76c9c57",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "rebuildRecheckIds": [
-        "npm:lint:legacy-tests-ratchet",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/rebuild-gates.test.ts",
-      "changeKind": "added",
-      "beforeSha256": null,
-      "afterSha256": "35086eb59af822973c019ad9f373f7fb712f92e8cc41738616ce1b532f60b860",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "rebuildRecheckIds": [
-        "npm:lint:legacy-tests-ratchet",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/runtime-isolation.test.ts",
-      "changeKind": "added",
-      "beforeSha256": null,
-      "afterSha256": "b8014a3b47d9f31d44a4bcdb26b207eab9711500f207b3b497c40d7d651b936d",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "rebuildRecheckIds": [
-        "npm:lint:legacy-tests-ratchet",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/architecture/wait-for-timeout-allowlist.test.ts",
-      "changeKind": "modified",
-      "beforeSha256": "d0f3949d6e35ef2889bde2db6b68bc842ce33fce34b2a44aacd9353682e83b0f",
-      "afterSha256": "c2607e405f67cb6c0388f30517f370247e5d4d191097f251db2c08676982adfd",
-      "capabilityIds": [
-        "legacy-dev-tool-architecture-guards"
-      ],
-      "impactRationale": "transaction.ts allowlist 18 -> 19; the added sleeps are poll cadences that terminate on a real signal (field read-back / transaction id resolving), not readiness stand-ins.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/core/daemon.test.ts",
-      "changeKind": "modified",
-      "beforeSha256": "b9366fe7cb01c84f977a8948777d361c5b5f6ec69ff01655f20f04ca689d7012",
-      "afterSha256": "2b37d3813a5ce07f3746fe14e10d51bca018d4b1c3f33be22f6119ff1a4ee41a",
-      "capabilityIds": [
-        "legacy-cli-daemon"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/infra/auth/duo-arm-before-sso-navigation.test.ts",
-      "changeKind": "added",
-      "beforeSha256": null,
-      "afterSha256": "8eb41cee34895bb9059f9e04ebf58cd9f03c5d377004ffe0c716e68361363681",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Test updated alongside the 2026-08-05 Emergency Contact fix (gate fakes model the value-anchored read; waitForTimeout allowlist count reflects the removed name-fill sleep)."
-    },
-    {
-      "path": "tests/unit/systems/ucpath/ss-smart-hr.test.ts",
-      "changeKind": "modified",
-      "beforeSha256": "57506848064063459502da280dc9cb31d8a5dc6c5e9f44bc42bbf5be8b098f43",
-      "afterSha256": "d125f66d150d0febad496c36fb734211b1e051910a1e62e35d88932cbbaaa00a",
-      "capabilityIds": [
-        "legacy-workflow-onboarding",
-        "legacy-workflow-separations"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/systems/ucpath/transaction.test.ts",
-      "changeKind": "modified",
-      "beforeSha256": "425eac4dcc2c7ee649533bee1e83fa3670dd51f46a30998600438b5f037dfcdb",
-      "afterSha256": "a12dae87acdb5c1c703e7b0de4bbd9b0045d53e266976082fbdec19d4453fa10",
-      "capabilityIds": [
-        "legacy-workflow-onboarding",
-        "legacy-workflow-separations"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/workflows/emergency-contact/enter.test.ts",
-      "changeKind": "modified",
-      "beforeSha256": "859ae34a020174b333ea095fd8f124aff220533c40b25508ef746feb28de6d9d",
-      "afterSha256": "252b8e3704d4f829ea44a4bdcc677072f1b1f762def320fa691981f7dfccaf17",
-      "capabilityIds": [
-        "legacy-workflow-emergency-contact"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved",
-      "impactRationale": "Test updated alongside the 2026-08-05 Emergency Contact fix (gate fakes model the value-anchored read; waitForTimeout allowlist count reflects the removed name-fill sleep)."
-    },
-    {
-      "path": "tests/unit/workflows/separations/dry-run.test.ts",
-      "changeKind": "modified",
-      "beforeSha256": "be2dc5e08e2d5169f681a85cc2ebf8f672ce777fedac7e01954585062b378a34",
-      "afterSha256": "f83419d349434a2a619dbbac92ae048c33e32ad2d209186f16599b9967c962bf",
-      "capabilityIds": [
-        "legacy-workflow-separations"
-      ],
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/systems/ucpath/navigate.ts",
-      "changeKind": "modified",
-      "beforeSha256": "138772d16f32488512cc32d3057f13da215e2af978f11c60c593b73451b69b58",
-      "afterSha256": "7ea5fe1f136dce4ed2b9d6e54da0fbeb3f314b21345f5d94588841d014e153db",
-      "capabilityIds": [
-        "legacy-workflow-onboarding",
-        "legacy-workflow-separations"
-      ],
-      "impactRationale": "Adds readPeopleSoftDialogText: reads a #ICOK dialog's message WITHOUT dismissing it, so a blocking refusal can be distinguished from a submit confirmation.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/systems/crm/idocs-download.ts",
-      "changeKind": "modified",
-      "beforeSha256": "ec88d824954439e7b22dd0e135acd52a6da978670e6d28f5d8506cefd385aed3",
-      "afterSha256": "15232921126f569951bf1595afbdbf25a6fe2e906c90c798349509ae448b1a58",
-      "capabilityIds": [
-        "legacy-workflow-onboarding",
-        "legacy-workflow-crm-doc-download"
-      ],
-      "impactRationale": "iDocs viewer hash is captured on the CRM record page and threaded to the download via options.viewerInfo; onboarding navigated to the UCPath Entry Sheet first (full page.goto), destroying the Salesforce Canvas iframe, so every run timed out at 30s and saved zero PDFs. Also title-cases the per-person folder name, names documents by known identity, and packs the folder into a sibling .zip. Affects onboarding's in-process pdf-download step and the standalone crm-doc-download daemon.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/systems/crm/index.ts",
-      "changeKind": "modified",
-      "beforeSha256": "2195ed3ec26792ec4f675bd02d950b17ea79bbd733b6f98f511cf28731e5956b",
-      "afterSha256": "af2f1194ab9cbe9b9fa06c07aae6aff527440db1c799b4fb2a03311eca8c6194",
-      "capabilityIds": [
-        "legacy-workflow-onboarding",
-        "legacy-workflow-crm-doc-download"
-      ],
-      "impactRationale": "Exports readCrmIdocsViewerInfo / zipCrmDocumentFolder and the CrmIdocsViewerInfo / CrmDocumentArchive types for the capture-then-download split.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/systems/crm/idocs-download.test.ts",
-      "changeKind": "modified",
-      "beforeSha256": "2fd29c1fecbdb55b256364733837a6598e92dd25be4cbca71c263e102b823cb7",
-      "afterSha256": "84cff73a4032e8644225a4253be9a4de328344de6002866174a06e07c899b9c9",
-      "capabilityIds": [
-        "legacy-workflow-onboarding",
-        "legacy-workflow-crm-doc-download"
-      ],
-      "impactRationale": "Pins title-casing of ALL-CAPS CRM records, hyphen/apostrophe/multi-word surnames, and the canonical document names.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/workflows/sharepoint-download/sanitize-xlsx.test.ts",
-      "changeKind": "added",
-      "beforeSha256": null,
-      "afterSha256": "2112906d0c9a57683b1be8be792856fb866c9c494b7bbefb88f09aec5b96b00e",
-      "capabilityIds": [
-        "legacy-workflow-sharepoint-download",
-        "legacy-workflow-emergency-contact"
-      ],
-      "impactRationale": "Pins removal of self-closing and paired elements across table parts, the no-op path on clean workbooks, and that worksheet cell data is never rewritten.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/domain/identity/ssn.ts",
-      "changeKind": "modified",
-      "beforeSha256": "77b14ed24d4865d9a79831d7fe58412fbd7338865e16930efe17616657c83a1f",
-      "afterSha256": "196a1561919fcfff5bcba3bf6bc42a17b6e32ab5ab17cb3069d9fc244f4627c4",
-      "capabilityIds": [
-        "legacy-workflow-onboarding",
-        "legacy-workflow-separations",
-        "legacy-workflow-i9-check"
-      ],
-      "impactRationale": "Adds isUcpathRejectedSsn / ssnForUcpathEntry: UCPath refuses a National ID with 900-999 in positions 1-3 (ITIN range, and CRM's all-9s 'no SSN yet' placeholder) via a BLOCKING modal that swallows every later click. Shared identity helper, so any UCPath write path filling a National ID inherits it.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/domain/identity/ssn.test.ts",
-      "changeKind": "modified",
-      "beforeSha256": "9da3258d71461292df7af9a94a3b817186115b4a3f835a9ccaaf77fd5656823b",
-      "afterSha256": "489abf648ccc80d6b5bc55c25d559375b43e2db1db197271dc36b60669a9d8a4",
-      "capabilityIds": [
-        "legacy-workflow-onboarding",
-        "legacy-workflow-separations",
-        "legacy-workflow-i9-check"
-      ],
-      "impactRationale": "Pins 900-999 detection including boundaries and 'a 9 outside the area digits', that no substitute value is produced, and the exact no-SSN comment wording.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/systems/i9/create.ts",
-      "changeKind": "modified",
-      "beforeSha256": "25f01825ad5b547bdf7b8a3243bd91e6e3966ac0649fcb03a10bee6f7152adb8",
-      "afterSha256": "41152aa4e55ba670e5a825b9142cc25ac96771ebea191cf1c7dff67ea7d353ab",
-      "capabilityIds": [
-        "legacy-workflow-onboarding"
-      ],
-      "impactRationale": "SSN is now optional on the I-9 profile: a National ID in the 900-999 range (ITIN / CRM's all-9s placeholder) means NO SSN, so the field is left blank rather than rejected on save. Adds the dry-run fill/abandon helpers and hardens the Kendo worksite dropdown with a re-open retry.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/systems/i9/index.ts",
-      "changeKind": "modified",
-      "beforeSha256": "1eb686b35ad72a94482eb08a095599f43da9f5a26a0015a95882f9a4c05e5108",
-      "afterSha256": "b21a9c4664fed372973b76848d43f2e2f51c699ab04061a44212f0c0b6822ccd",
-      "capabilityIds": [
-        "legacy-workflow-onboarding"
-      ],
-      "impactRationale": "Exports resetI9Page.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/workflows/onboarding/enter.ts",
-      "changeKind": "modified",
-      "beforeSha256": "60def469803c032799e46f1aab66267bec2a592b857a04da7fb1e9a0796bc25b",
-      "afterSha256": "951f66634993f4ddcbe12088b461e751103a990b855fccc0e9e17009bd86ad34",
-      "capabilityIds": [
-        "legacy-workflow-onboarding"
-      ],
-      "impactRationale": "buildTransactionPlan takes a dryRun option: fills all four tabs then stops before Save and Submit, asserting the button is ENABLED instead of clicking it. Also drops a UCPath-rejected SSN from the National ID fill and keys the comment on what was actually entered.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/workflows/onboarding/workflow.test.ts",
-      "changeKind": "modified",
-      "beforeSha256": "73cfea57e2cd6b9ed2f82ee457417209d472773dc257587d6a22db406af7bac6",
-      "afterSha256": "d43875880d983f9ebf4d34ca53ffb574ba3a3be9080f61e45bbc187070f9cf76",
-      "capabilityIds": [
-        "legacy-workflow-onboarding"
-      ],
-      "impactRationale": "Pins the CRM placeholder normalization, including that real names containing a placeholder as a substring are preserved.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/domain/settings/types.ts",
-      "changeKind": "modified",
-      "beforeSha256": "36ac055d9c9eee960752060cb00181e779fe4c3003207255b58eabc9ec90fd4c",
-      "afterSha256": "c9f11e4283838ae9d1ba9ded8c1e2d53c8cbe97683bad7eaa190099c3476de05",
-      "capabilityIds": [
-        "legacy-workflow-onboarding"
-      ],
-      "impactRationale": "Fiscal-year roll: default jobEndDate 06/30/2026 -> 06/30/2027. The stale value made UCPath reject every 09/2026 hire with a blocking 'Expected Job End Date cannot be before Job Effective Date' modal.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/systems/i9/types.ts",
-      "changeKind": "modified",
-      "beforeSha256": "1e041226cb5d2d17c51049c8e0a958c617cc91b0dbe446aedfeea23b828f72ad",
-      "afterSha256": "614eef399df87ccccac7ec5dfba13c20dc9e0d2c9c272436505fb391e3c5ab68",
-      "capabilityIds": [
-        "legacy-workflow-onboarding"
-      ],
-      "impactRationale": "I9EmployeeInput.ssn is optional \u2014 a person with no SSN yet gets a profile with the field blank.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/workflows/onboarding/extract.ts",
-      "changeKind": "modified",
-      "beforeSha256": "0d36017cf1088472308b14fdba0f16cde8422c0fe5209ded99fb15e7854a3a6b",
-      "afterSha256": "eff003d48915dfd3605132f10b85cb81b0594e107fdeaa846c23019343fb0d95",
-      "capabilityIds": [
-        "legacy-workflow-onboarding"
-      ],
-      "impactRationale": "Adds normalizeCrmPlaceholder and applies it to every extracted CRM field: operators type 'N/A' to mean empty, and passing it through verbatim wrote the literal text downstream \u2014 an I-9 Employee Profile submitted with Middle Name 'N/A' produced no confirmation on Save & Continue and failed the hire, while a blank middle name saved fine.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/workflows/onboarding/schema.ts",
-      "changeKind": "modified",
-      "beforeSha256": "d4686635e0b9bdfa745163849bc95bb969114e1fdfff097a4249c7bf2df04056",
-      "afterSha256": "e9ea4966afecfc11d0e675d2f331c5abd4071e206ae3029abe8982f89a75abf6",
-      "capabilityIds": [
-        "legacy-workflow-onboarding"
-      ],
-      "impactRationale": "Adds optional expectedJobEndDate (MM/DD/YYYY) to EmployeeData.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "tests/unit/config.test.ts",
-      "changeKind": "modified",
-      "beforeSha256": "c5fd3df73caf85652b8a8451b240918cb2e21009746e692981883e00310f103f",
-      "afterSha256": "9729239d826eb8604b5bd19eddd9c80d4a348afef6e60307c4df6e4f59cf716a",
-      "capabilityIds": [
-        "legacy-workflow-onboarding"
-      ],
-      "impactRationale": "Pins the rolled 06/30/2027 default and makes the ANNUAL_DATES_END override test use a value distinct from the default.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    },
-    {
-      "path": "src/systems/i9/navigate.ts",
-      "changeKind": "modified",
-      "beforeSha256": "bd1be3f086aa96a67354f75f5f3230777e6fdff3b6f52f63d2260a5a32637f14",
-      "afterSha256": "95b55268c1ba4fa6e8c8db80d68e1fbfd3e0b1aa0d4081ff503777daba8fdbc0",
-      "capabilityIds": [
-        "legacy-workflow-onboarding"
-      ],
-      "impactRationale": "Adds resetI9Page: a hard navigation reset of the I-9 page between items. The daemon reuses one I-9 browser across every queued person and the app leaves stale hidden Kendo dialogs behind whose overlays intercept the next item's clicks (live 2026-08-20: k-windows=15, five hires lost to opaque timeouts). closeAllKendoWindows cannot fix it \u2014 it clicks close buttons hidden windows do not expose.",
-      "rebuildRecheckIds": [
-        "npm:test",
-        "npm:test:architecture"
-      ],
-      "preservation": "preserved"
-    }
-  ]
+ "schemaVersion": 1,
+ "baselineCommit": "353739ac9e1db01cae9da8a13da53605cd767574",
+ "records": [
+  {
+   "path": "src/control/ops/delete.ts",
+   "changeKind": "modified",
+   "beforeSha256": "3b74e7af19b2f2f5e787015743a897cf5d62213c4030a372c61360f6a6259bec",
+   "afterSha256": "86760daf02ae414e66802e381f3d9210dfd1305aaa66403e9ab60fe16a52fa41",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact",
+    "legacy-workflow-onboarding",
+    "legacy-workflow-person-lookup",
+    "legacy-workflow-separations",
+    "legacy-workflow-ocr"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Queue-row delete guard now binds the canonical terminal set (blocked was omitted, making blocked tasks undeletable)."
+  },
+  {
+   "path": "src/core/CLAUDE.md",
+   "changeKind": "modified",
+   "beforeSha256": "297f6aedc0d14b0ac4b24071334853d689332969f79a1f21c961eb33c3c604bb",
+   "afterSha256": "8356f31a3805f30f8185579a105bf99326d5682e80bd309787325e3461bb9ba4",
+   "capabilityIds": [
+    "legacy-cli-daemon"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/core/daemon/daemon.ts",
+   "changeKind": "modified",
+   "beforeSha256": "c533fac92e04406881966948f42c65c25d63f6e06f17febd6acec6b95060387a",
+   "afterSha256": "623d4e6b1eda3fa6283584d0498097a17cc11fdba62d01b7310f8e69aeba67b8",
+   "capabilityIds": [
+    "legacy-cli-daemon"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/core/daemon/queue.ts",
+   "changeKind": "modified",
+   "beforeSha256": "e4b2db87a3d987bcf0ec1ca3eca08be1fbebfc8c7e21d7ecdffae50cf48008e3",
+   "afterSha256": "32e6afebac927c99c336844140cb09521ed79d97932a763b31a9bef371c7ccbe",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact",
+    "legacy-workflow-onboarding",
+    "legacy-workflow-person-lookup",
+    "legacy-workflow-separations",
+    "legacy-workflow-work-study",
+    "legacy-workflow-ocr"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Exports TERMINAL_CONTROL_STATES as the single terminal-state definition; every workflow that runs through the daemon consumes it."
+  },
+  {
+   "path": "src/domain/identity/eid.ts",
+   "changeKind": "modified",
+   "beforeSha256": "4a59fb20b4d9e582144926e642f8af171d6bf9b0b5f46ff8a883b3136ecfe358",
+   "afterSha256": "d6ba588d299f6ff6bb7ba1a71cd97794580f96d528c9e6d963048cb296445a2a",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-separations",
+    "legacy-workflow-person-lookup"
+   ],
+   "impactRationale": "Adds parseEidList (strict, de-duplicating parser for an operator-supplied EID list) beside isUcpathEmployeeId; existing exports unchanged. Consumed by onboarding's data.notMatchEids channel (2026-08-20).",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/domain/identity/ssn.ts",
+   "changeKind": "modified",
+   "beforeSha256": "77b14ed24d4865d9a79831d7fe58412fbd7338865e16930efe17616657c83a1f",
+   "afterSha256": "196a1561919fcfff5bcba3bf6bc42a17b6e32ab5ab17cb3069d9fc244f4627c4",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-separations",
+    "legacy-workflow-i9-check"
+   ],
+   "impactRationale": "Adds isUcpathRejectedSsn / ssnForUcpathEntry: UCPath refuses a National ID with 900-999 in positions 1-3 (ITIN range, and CRM's all-9s 'no SSN yet' placeholder) via a BLOCKING modal that swallows every later click. Shared identity helper, so any UCPath write path filling a National ID inherits it.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/domain/settings/types.ts",
+   "changeKind": "modified",
+   "beforeSha256": "36ac055d9c9eee960752060cb00181e779fe4c3003207255b58eabc9ec90fd4c",
+   "afterSha256": "c9f11e4283838ae9d1ba9ded8c1e2d53c8cbe97683bad7eaa190099c3476de05",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Fiscal-year roll: default jobEndDate 06/30/2026 -> 06/30/2027. The stale value made UCPath reject every 09/2026 hire with a blocking 'Expected Job End Date cannot be before Job Effective Date' modal.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/infra/auth/CLAUDE.md",
+   "changeKind": "modified",
+   "beforeSha256": "4be112bffe41b4df16b72476be624af45faf29d82a9fcdfc82c5b5dc84a9fecd",
+   "afterSha256": "1029563a18f05065e052ae7d07467aa32c1c5cd0d0192199374b387c7d792539",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Changed as part of the 2026-08-05 Emergency Contact identity-gate/row-anchoring/save-proof fix."
+  },
+  {
+   "path": "src/infra/auth/duo-webauthn.ts",
+   "changeKind": "modified",
+   "beforeSha256": "9381e3e148087bbffe807ac7ba5a705224bf87d8153b40369d1f10376d6e5a1f",
+   "afterSha256": "3f4005940b7ffdf31704838fa91c266a0ad85cb470d45d14db743cbc5b99bfeb",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact",
+    "legacy-workflow-onboarding",
+    "legacy-workflow-person-lookup",
+    "legacy-workflow-separations",
+    "legacy-workflow-work-study",
+    "legacy-workflow-ocr"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Duo WebAuthn arming moved before the ADFS submit (commit 0d959720, auth-flow fix by a concurrent session); auth timing is shared by every daemon workflow."
+  },
+  {
+   "path": "src/infra/auth/sso-fields.ts",
+   "changeKind": "modified",
+   "beforeSha256": "05bee039de70ef53d98fb09ea15932fa122f20ab886140bbe473891ace56a705",
+   "afterSha256": "ceb305489d27b22ee17895dd2375efb9814478e234cd5624e8f8ee5646abe56f",
+   "capabilityIds": [
+    "legacy-cli-daemon",
+    "legacy-workflow-onboarding",
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "SSO credential fill rewritten: resolves username/password through ordered, live-mapped anchors (#ssousername / #ssopassword) instead of `.or()` + `.first()` (which resolves in DOM order and could put the password in the username box), asserts the two fields are distinct and that the password field is type=password, and reads both values back. Shared by every UCSD SSO flow.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/services/ocr/env-keys.ts",
+   "changeKind": "modified",
+   "beforeSha256": "c9213498098dc6ef99904251deddf4d2e83d65cc6155e59a79a59fd8d29b2a8e",
+   "afterSha256": "a69ff1db9a461e773407bf1924bcd4b2ab2bb5ed54f6b7de35a2f405cb7ebc03",
+   "capabilityIds": [
+    "legacy-service-ocr"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/services/ocr/providers/gemini.ts",
+   "changeKind": "modified",
+   "beforeSha256": "3c9911d770894443491c4e2b22fb8e495809bd06128741844c79c4462031b9f0",
+   "afterSha256": "e4021daa23345638a1616cf0f1a42292b74a71f62f420e440b46cacb5605098c",
+   "capabilityIds": [
+    "legacy-service-ocr"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/crm/SELECTORS.md",
+   "changeKind": "modified",
+   "beforeSha256": "d28933203c348c098a5a1377abe5240ed6be3cc92e10ad41d1428829d8384dcb",
+   "afterSha256": "0c50e3a078c9dfcb47c11fdaabfd2fc225584f8ca710885ac907882c0859ad21",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+  },
+  {
+   "path": "src/systems/crm/idocs-download.ts",
+   "changeKind": "modified",
+   "beforeSha256": "ec88d824954439e7b22dd0e135acd52a6da978670e6d28f5d8506cefd385aed3",
+   "afterSha256": "15232921126f569951bf1595afbdbf25a6fe2e906c90c798349509ae448b1a58",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-crm-doc-download"
+   ],
+   "impactRationale": "iDocs viewer hash is captured on the CRM record page and threaded to the download via options.viewerInfo; onboarding navigated to the UCPath Entry Sheet first (full page.goto), destroying the Salesforce Canvas iframe, so every run timed out at 30s and saved zero PDFs. Also title-cases the per-person folder name, names documents by known identity, and packs the folder into a sibling .zip. Affects onboarding's in-process pdf-download step and the standalone crm-doc-download daemon.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/crm/index.ts",
+   "changeKind": "modified",
+   "beforeSha256": "2195ed3ec26792ec4f675bd02d950b17ea79bbd733b6f98f511cf28731e5956b",
+   "afterSha256": "af2f1194ab9cbe9b9fa06c07aae6aff527440db1c799b4fb2a03311eca8c6194",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-crm-doc-download"
+   ],
+   "impactRationale": "Exports readCrmIdocsViewerInfo / zipCrmDocumentFolder and the CrmIdocsViewerInfo / CrmDocumentArchive types for the capture-then-download split.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/i9/SELECTORS.md",
+   "changeKind": "modified",
+   "beforeSha256": "f8d9eba3213c717341d48a0060959e1a0bdc2f760161dfa408ba03a402d709ec",
+   "afterSha256": "dfc1cd69c54d20e8acd4f0399512937784cc1fdcff62c65fb674de0f5ba27241",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+  },
+  {
+   "path": "src/systems/i9/create.ts",
+   "changeKind": "modified",
+   "beforeSha256": "25f01825ad5b547bdf7b8a3243bd91e6e3966ac0649fcb03a10bee6f7152adb8",
+   "afterSha256": "41152aa4e55ba670e5a825b9142cc25ac96771ebea191cf1c7dff67ea7d353ab",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "SSN is now optional on the I-9 profile: a National ID in the 900-999 range (ITIN / CRM's all-9s placeholder) means NO SSN, so the field is left blank rather than rejected on save. Adds the dry-run fill/abandon helpers and hardens the Kendo worksite dropdown with a re-open retry.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/i9/index.ts",
+   "changeKind": "modified",
+   "beforeSha256": "1eb686b35ad72a94482eb08a095599f43da9f5a26a0015a95882f9a4c05e5108",
+   "afterSha256": "b21a9c4664fed372973b76848d43f2e2f51c699ab04061a44212f0c0b6822ccd",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Exports resetI9Page.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/i9/navigate.ts",
+   "changeKind": "modified",
+   "beforeSha256": "bd1be3f086aa96a67354f75f5f3230777e6fdff3b6f52f63d2260a5a32637f14",
+   "afterSha256": "95b55268c1ba4fa6e8c8db80d68e1fbfd3e0b1aa0d4081ff503777daba8fdbc0",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Adds resetI9Page: a hard navigation reset of the I-9 page between items. The daemon reuses one I-9 browser across every queued person and the app leaves stale hidden Kendo dialogs behind whose overlays intercept the next item's clicks (live 2026-08-20: k-windows=15, five hires lost to opaque timeouts). closeAllKendoWindows cannot fix it — it clicks close buttons hidden windows do not expose.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/i9/types.ts",
+   "changeKind": "modified",
+   "beforeSha256": "1e041226cb5d2d17c51049c8e0a958c617cc91b0dbe446aedfeea23b828f72ad",
+   "afterSha256": "614eef399df87ccccac7ec5dfba13c20dc9e0d2c9c272436505fb391e3c5ab68",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "I9EmployeeInput.ssn is optional — a person with no SSN yet gets a profile with the field blank.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/kuali/SELECTORS.md",
+   "changeKind": "modified",
+   "beforeSha256": "4ccd6c5a794d93e3fdb680346b48aaf8e9007db367b593012cfe00476add9882",
+   "afterSha256": "47bf27efa9b8a304177713f6979b53be2068723294e4f1c1d619e835a8be03c3",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+  },
+  {
+   "path": "src/systems/new-kronos/LESSONS.md",
+   "changeKind": "modified",
+   "beforeSha256": "780ab0ff7f3085b1b4570d01b11e1ce63fb6ed7636a5bf31c0da50136d372fe9",
+   "afterSha256": "e506a3c9e2527bbf4c7954be49b8fe67d0552de8dc47e2fb3d0947a560c32f9f",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/new-kronos/SELECTORS.md",
+   "changeKind": "modified",
+   "beforeSha256": "adfe0e9c66fd86da965a0c2c71fd025cccdb89d1e42ad83a2f9d14072e1a9976",
+   "afterSha256": "faea1c03a6057d38b90d8033281966e32ee8cf55aad658f897c01e42e0a0b433",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+  },
+  {
+   "path": "src/systems/new-kronos/navigate.ts",
+   "changeKind": "modified",
+   "beforeSha256": "49b2fa7c165bcc6a3c59620e192b0055ad46e758c412c5a1c8c655ebbe9508c6",
+   "afterSha256": "4f6710e71c06f07c620e0c422288729770073ba2ec6b67c10a5c60947164f494",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/old-kronos/SELECTORS.md",
+   "changeKind": "modified",
+   "beforeSha256": "ce5d95fcee34b39fb3dcdfd6db23fd5b789676d56ef4a4a03518bce408dcb9c0",
+   "afterSha256": "b580530eea06bebebde783c7463ab4412d9355eced9d1f34a8c281329cd49cf6",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+  },
+  {
+   "path": "src/systems/onbase/SELECTORS.md",
+   "changeKind": "modified",
+   "beforeSha256": "eccb58b4eeeda6bf33b4c459a77078c4296c7f6e6fc65cc266a84570903f9f20",
+   "afterSha256": "2de6048c2e8b72f70757b84649b08fffa5f37856bb3d3a080cb850d772276464",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+  },
+  {
+   "path": "src/systems/servicenow/SELECTORS.md",
+   "changeKind": "modified",
+   "beforeSha256": "557de341ee92f0022e6a5d609042930ba7080edbf1d89185acdccefd826e323d",
+   "afterSha256": "0a9543371ee01429207221a8843ef9513bbba0bf62226093cc3d2db0021df328",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+  },
+  {
+   "path": "src/systems/sharepoint/SELECTORS.md",
+   "changeKind": "modified",
+   "beforeSha256": "209fa8cdfc094c829c16217f5cde1ffa39ac58b793e27cc4fae46af04f7f6d61",
+   "afterSha256": "f4a48b47471cb05e48f12e8c6066773e0e60a56c82c05bfd29abc575d557abae",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+  },
+  {
+   "path": "src/systems/ucpath/CLAUDE.md",
+   "changeKind": "modified",
+   "beforeSha256": "c562816dd0f5b85109c6c6fd7b56703d32703f10c12a5ad5f5a3c834f84d8cff",
+   "afterSha256": "56f89d48a7170006e49e7619eced71d5cd1f3f467f571c0719f33da5d5efcddc",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/ucpath/LESSONS.md",
+   "changeKind": "modified",
+   "beforeSha256": "010e7a25f50d7e63b24355bb254ded76690c9278a6885285ef3a52101fc5f9a1",
+   "afterSha256": "eeaa40618d131f36b8184b1b3b0edb1bdc1cbba08f21b717fe6f1f8ad3b5dbb2",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-person-lookup",
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "2026-08-05 (aba05c65): corrected the 2026-08-04 $op accessible-name lesson's blast-radius paragraph — it had declared production immune while the production-driven ssSmartHRTransactions group carried the same fragile shape (the doc 4493 failure); adds the sweep-every-Find-an-Existing-Value-group rule. 2026-08-20: lesson — Save and Submit can land on the Person Match Found review page the outcome poll never watched."
+  },
+  {
+   "path": "src/systems/ucpath/SELECTORS.md",
+   "changeKind": "modified",
+   "beforeSha256": "57fb1caeac412725c3c5defb0430dd9d5d910db97d077328cf2f37368d6fb1f4",
+   "afterSha256": "0ad50fba2e46c677fedf6fff1fc4010b882a3628d43657a2bf7ed08367ade7cc",
+   "capabilityIds": [
+    "legacy-workflow-i9-check",
+    "legacy-workflow-onboarding",
+    "legacy-workflow-person-lookup",
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "2026-08-05 (aba05c65): regenerated catalog (npm run selectors:catalog) for the ssSmartHRTransactions re-anchoring; generated content only. 2026-08-20: catalog regenerated for the Person Match Found selectors."
+  },
+  {
+   "path": "src/systems/ucpath/index.ts",
+   "changeKind": "modified",
+   "beforeSha256": "799e4d5bdf7bbdc6767abd13469b87d1183a9fb19f1fe00dc8adc07f8df36d2f",
+   "afterSha256": "b54ffa18bce52747f40e666a226205c0dce456e68f6d5298128e146fd1edd1b9",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "Exports waitForSaveEnabled so the onboarding dry run can assert the submit button reached a clickable state without clicking it. 2026-08-20: re-exports the Person Match Found helpers + types.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/ucpath/navigate.ts",
+   "changeKind": "modified",
+   "beforeSha256": "138772d16f32488512cc32d3057f13da215e2af978f11c60c593b73451b69b58",
+   "afterSha256": "7ea5fe1f136dce4ed2b9d6e54da0fbeb3f314b21345f5d94588841d014e153db",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "Adds readPeopleSoftDialogText: reads a #ICOK dialog's message WITHOUT dismissing it, so a blocking refusal can be distinguished from a submit confirmation.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/ucpath/personal-data.ts",
+   "changeKind": "modified",
+   "beforeSha256": "a4f17333ef0f7c15b019834de6aa5c439764ff1b90a246cceefa08f3bf3bb5c7",
+   "afterSha256": "6bb4c067ef52f0ca321705e57fef3490e65a7d0f99937c1c301dcbb99855659e",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact",
+    "legacy-workflow-onboarding",
+    "legacy-workflow-person-lookup",
+    "legacy-workflow-separations",
+    "legacy-workflow-work-study"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Emergency Contact editor navigation/save: adds assertEmergencyContactPersisted (positive post-save proof); the save-outcome contract is part of the rebuild UCPath write-safety source of truth."
+  },
+  {
+   "path": "src/systems/ucpath/selectors.ts",
+   "changeKind": "modified",
+   "beforeSha256": "4f6992525998eb6e3db8d2b3a4b67bb551aa0565e6a03710efd92a095d958aa5",
+   "afterSha256": "4551d6826caa187fefc9b6ffe7227ef6b487b878f12a90d9e95a1e7a15a8a85d",
+   "capabilityIds": [
+    "legacy-workflow-i9-check",
+    "legacy-workflow-onboarding",
+    "legacy-workflow-person-lookup",
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "2026-08-05 (aba05c65): re-anchored every ssSmartHRTransactions search arm after PeopleSoft folded the Find-an-Existing-Value operator select (<field>$op) into each input's accessible name ('Empl ID begins with', 'Approval Status =', ...), which made all exact:true arms match zero elements and killed separations transaction-check live (doc 4493). Anchored ^Label regex + live-probed record.field id arms, same repair personOrgSummary received 2026-08-04. Locator resolution only; no contract change. 2026-08-20: smartHR.personMatchFoundHeading / personMatchNotAMatchButton / personMatchCandidateRows — the Person Match Found review page, mapped from live failure screenshots."
+  },
+  {
+   "path": "src/systems/ucpath/ss-smart-hr.ts",
+   "changeKind": "modified",
+   "beforeSha256": "6524118fb49e244442824d134484709530bf2a80a5be73bf183fd7d5cac847f2",
+   "afterSha256": "059dc4e3ac10a82317492618ea2c8d8baa8414f69a3376c8b6bafdddec904f32",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/ucpath/transaction.ts",
+   "changeKind": "modified",
+   "beforeSha256": "1edbfd04c254d3a9a780431899ec30569b746536b45e53c1e1194ad84237bf94",
+   "afterSha256": "4d4d039a9c76b4544ff2752c1ed7e687c3c713ae6a0819614c2224839eb792a1",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "Post-submit handling reads the dialog text and THROWS on a refusal instead of clicking past it (a 'Expected Job End Date cannot be before Job Effective Date' modal was being acknowledged as a successful submit), drains the dialog chain, waits for the transaction id to resolve, and acknowledges via the #ICOK escape hatch rather than a role-based OK click that resolved to an unrelated lookup prompt behind pt_modalMask. 2026-08-20: clickSaveAndSubmit now watches UCPath's submit-time \"Person Match Found\" page as a third named signal (classifySubmitSignals), reads the candidate grid by header (readPersonMatchCandidates) and continues only via the pure decidePersonMatchContinue (hard-identifier mismatch or operator-reviewed EID); otherwise fails loud naming the candidates. Live: two hires timed out blind on this page.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/emergency-contact/CLAUDE.md",
+   "changeKind": "modified",
+   "beforeSha256": "6986043e3a5755ec1f6bfb9794be564e40f9da7ec706bee18eb2038398111758",
+   "afterSha256": "d015e0902531af773a2de6918c1086167368ff446fa68f160975767c16b0620f",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Documents the paged-scroll/add-row root cause and corrects the stale zero-contact gotcha the rebuild plan referenced."
+  },
+  {
+   "path": "src/workflows/emergency-contact/enter.ts",
+   "changeKind": "modified",
+   "beforeSha256": "035387d58cbf46c875afa01b62cc590b272a7ac0c80ec36d558a32269305811a",
+   "afterSha256": "62d8c595c7842e50188f5d2af9b5e8e1e9e6e63f3bb00ed7c994edca153ffbdc",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "EC fill plan rewritten: View All + blank-row scan + row-anchored writes + name-last read-back; the rebuild ports this plan shape."
+  },
+  {
+   "path": "src/workflows/emergency-contact/workflow.ts",
+   "changeKind": "modified",
+   "beforeSha256": "0c1de5bce1a94a09fac33191ffba45ec21facde6ada1b5ab3edb1133771181af",
+   "afterSha256": "6a83065b31b0a3ea3651aaa3ce6e475c685b0cb08fbebd8c481ca237d84987ef",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "EC save step gains a pre-save no-blank-row assertion; part of the ported save contract."
+  },
+  {
+   "path": "src/workflows/onboarding/CLAUDE.md",
+   "changeKind": "modified",
+   "beforeSha256": "f7c38194ca9ef657840af3a87e56bc5dbae307f5e471d0605e729ff0e01872c2",
+   "afterSha256": "a2d34e2e79ac60560ff3407a766e4d75e75c9ae2d43c64765f6860c351add202",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": " 2026-08-20: documents the Person Match Found page handling and the notMatchEids channel."
+  },
+  {
+   "path": "src/workflows/onboarding/enter.ts",
+   "changeKind": "modified",
+   "beforeSha256": "60def469803c032799e46f1aab66267bec2a592b857a04da7fb1e9a0796bc25b",
+   "afterSha256": "ba2f60d5140bd4759fa4f112b9701b0e26b6c6867e50d4de1e7b083ebbf47127",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "buildTransactionPlan takes a dryRun option: fills all four tabs then stops before Save and Submit, asserting the button is ENABLED instead of clicking it. Also drops a UCPath-rejected SSN from the National ID fill and keys the comment on what was actually entered. 2026-08-20: threads hireIdentity (real SSN last-4 + DOB) and notMatchEids into clickSaveAndSubmit for the Person Match Found decision.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/onboarding/extract.ts",
+   "changeKind": "modified",
+   "beforeSha256": "0d36017cf1088472308b14fdba0f16cde8422c0fe5209ded99fb15e7854a3a6b",
+   "afterSha256": "eff003d48915dfd3605132f10b85cb81b0594e107fdeaa846c23019343fb0d95",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Adds normalizeCrmPlaceholder and applies it to every extracted CRM field: operators type 'N/A' to mean empty, and passing it through verbatim wrote the literal text downstream — an I-9 Employee Profile submitted with Middle Name 'N/A' produced no confirmation on Save & Continue and failed the hire, while a blank middle name saved fine.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/onboarding/schema.ts",
+   "changeKind": "modified",
+   "beforeSha256": "d4686635e0b9bdfa745163849bc95bb969114e1fdfff097a4249c7bf2df04056",
+   "afterSha256": "e9ea4966afecfc11d0e675d2f331c5abd4071e206ae3029abe8982f89a75abf6",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Adds optional expectedJobEndDate (MM/DD/YYYY) to EmployeeData.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/onboarding/workflow.ts",
+   "changeKind": "modified",
+   "beforeSha256": "3fdbf1d1ed90700c5ad7aeaa93024083e6a319ecf778bdaf0874e8648c98b8a8",
+   "afterSha256": "ced98ff69f2ce1d1b2c610422164f876b69c82c71d80270aae8f9544d1499845",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Resets the I-9 page once per item so item N+1 never inherits item N's modal wreckage; uses the transaction number the submit itself read back. 2026-08-20: data.notMatchEids (operator-reviewed NOT-this-person EIDs) — person-search identity gate proceeds as a NEW hire when every Search/Match hit is a reviewed EID (exact-EID scoped) and the list rides into the submit.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/separations/CLAUDE.md",
+   "changeKind": "modified",
+   "beforeSha256": "705842e6a4800e8775cd1b002207bfef73af656070dc1751bf539b1bee018893",
+   "afterSha256": "7187be6b5e61f14754ad47eb845b26b1e309327af180358251a3551d3fbd9f4d",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/separations/steps/kuali-extract.ts",
+   "changeKind": "modified",
+   "beforeSha256": "8ff930b8618417235d08c2027e5ade6ca4706795be18ff45cb5feb468be68acf",
+   "afterSha256": "5076706e7d9cfd18904796b7e5d2ae736f02d5ae7ce0dcf8f1f7b5d9a6f770a8",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/separations/workflow.ts",
+   "changeKind": "modified",
+   "beforeSha256": "96a8ec7d7047ac00917d4a04cfdaf32c15d8fa97155ff61bc87a1d6734bdc60e",
+   "afterSha256": "cfb82592c48e466216372600805b6cd22265bf51e999381d535628ee70f8b580",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/sharepoint-download/download.ts",
+   "changeKind": "modified",
+   "beforeSha256": "9a9ff39fc6e5a6b548d5de23fb7a306eb94924a9d7a32fa93ba9ef04af203693",
+   "afterSha256": "34ce7adf918c8f0e57e13909877c8e8a81d0a03dad89c53a135351863b0deba7",
+   "capabilityIds": [
+    "legacy-workflow-sharepoint-download",
+    "legacy-workflow-emergency-contact"
+   ],
+   "impactRationale": "Downloaded .xlsx is sanitized after saveAs: strips colorFilter/iconFilter/extLst from xl/tables/*.xml, which ExcelJS's FilterColumnXform throws on, aborting the whole workbook read — a successful roster download landed on disk unreadable by roster-loader.ts (the same wb.xlsx.readFile call emergency-contact matching uses). Allowlisted elements only; a clean workbook is left byte-identical.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/fail-loud-catch-default.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "9048531e4eaf96e93986f587469b574c2de2f1b8cc2b9217449ce452fa4e49bd",
+   "afterSha256": "f99bdf9bd78097c7b28c827c329f1c89a202a30b9574e5226c5e55c18aece21d",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "rebuildRecheckIds": [
+    "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/gate-coverage.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "09bc9f5e896dc2865f753bf8ede99b0dc60498fbfb69caef4432e2ed9a10d016",
+   "afterSha256": "f5bc6665064acd3926eed8841d05a2ee36a7db514d6d57bcffadae5ea5309f34",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "rebuildRecheckIds": [
+    "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/guard-manifest.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "a5aec3bd225a9619a9a873c1afb818efb0a8d6be3ab0492569f6bf7089fe61e4",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "rebuildRecheckIds": [
+    "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/helpers/guard-files.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "8bc5833aea14d17737ceb72924fcc6a05e442b1e3a772941c6ddf1f2ae4b5748",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "rebuildRecheckIds": [
+    "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/helpers/rebuild-ratchet-arms.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "7a9c3011f66c24b4d517600f840de8d4185ab807f655c6247e7b37bc1b8bbd79",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "rebuildRecheckIds": [
+    "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/helpers/runtime-isolation-audit.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "fe673bd55a9e1f28515063eff2c4e32c6e44a1cf9f6bada4b6ec8ebed533af0c",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "rebuildRecheckIds": [
+    "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/inline-selectors-workflows.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "f0626dcc1d3a814e96777784fc32c8a0d00923c5dc4052b61f22563dc65ef7d4",
+   "afterSha256": "923541bbd3393945403e460ddca0aae83ce96fec0dec96d6306454a0488cb1f8",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "rebuildRecheckIds": [
+    "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/legacy-capability-disposition.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "6af6b18d75b78ec9d577971acd6786486b4e1d4db2f3f62320ccd5f20acb9773",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "rebuildRecheckIds": [
+    "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/legacy-change-accounting.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "5f4f9a0ffcb71c723021df4a82e2cc1e879a9dd69a9e1fc0c0d4215fb46dfe23",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "rebuildRecheckIds": [
+    "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/legacy-preservation.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "f0ebd2559153a84dae89fb1cc46348a7c62e7a1366c7278ab44f76613528bb4f",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "rebuildRecheckIds": [
+    "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/legacy-test-disposition.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "675b2523dc28ca2b925023718d2358bd1b6547f820b04e4bbfb7fbd5e133fcd2",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "rebuildRecheckIds": [
+    "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/legacy-test-lint-debt-ratchet.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "d9f6249da11d545d4b54241c570ce39fc273d8e8b33006e0bc092102f1050193",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "rebuildRecheckIds": [
+    "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/nullish-literal-data-fallback.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "60ca6b0b8644e7367301482a7c9a1cec47f4210d035d262e5b2f219d4805a417",
+   "afterSha256": "d5e81185d0e7132b6f36233132738d87009335bb4884af8433aac162b76c9c57",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "rebuildRecheckIds": [
+    "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/rebuild-gates.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "35086eb59af822973c019ad9f373f7fb712f92e8cc41738616ce1b532f60b860",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "rebuildRecheckIds": [
+    "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/runtime-isolation.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "b8014a3b47d9f31d44a4bcdb26b207eab9711500f207b3b497c40d7d651b936d",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "rebuildRecheckIds": [
+    "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/wait-for-timeout-allowlist.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "d0f3949d6e35ef2889bde2db6b68bc842ce33fce34b2a44aacd9353682e83b0f",
+   "afterSha256": "c2607e405f67cb6c0388f30517f370247e5d4d191097f251db2c08676982adfd",
+   "capabilityIds": [
+    "legacy-dev-tool-architecture-guards"
+   ],
+   "impactRationale": "transaction.ts allowlist 18 -> 19; the added sleeps are poll cadences that terminate on a real signal (field read-back / transaction id resolving), not readiness stand-ins.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/config.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "c5fd3df73caf85652b8a8451b240918cb2e21009746e692981883e00310f103f",
+   "afterSha256": "9729239d826eb8604b5bd19eddd9c80d4a348afef6e60307c4df6e4f59cf716a",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Pins the rolled 06/30/2027 default and makes the ANNUAL_DATES_END override test use a value distinct from the default.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/core/daemon.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "b9366fe7cb01c84f977a8948777d361c5b5f6ec69ff01655f20f04ca689d7012",
+   "afterSha256": "2b37d3813a5ce07f3746fe14e10d51bca018d4b1c3f33be22f6119ff1a4ee41a",
+   "capabilityIds": [
+    "legacy-cli-daemon"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/domain/identity/eid.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "6b5616c73b62cde415ac87952aded16457ec836626b8a8b164df9738f98aeec0",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Pins parseEidList — the strict parser for the operator-reviewed NOT-this-person EID list (data.notMatchEids) that onboarding consults at the person-search identity gate and on UCPath's submit-time Person Match Found page (2026-08-20). Tokens must BE 8-digit 10… EIDs; a typo can never widen the override.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/domain/identity/ssn.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "9da3258d71461292df7af9a94a3b817186115b4a3f835a9ccaaf77fd5656823b",
+   "afterSha256": "489abf648ccc80d6b5bc55c25d559375b43e2db1db197271dc36b60669a9d8a4",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-separations",
+    "legacy-workflow-i9-check"
+   ],
+   "impactRationale": "Pins 900-999 detection including boundaries and 'a 9 outside the area digits', that no substitute value is produced, and the exact no-SSN comment wording.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/infra/auth/duo-arm-before-sso-navigation.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "8eb41cee34895bb9059f9e04ebf58cd9f03c5d377004ffe0c716e68361363681",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Test updated alongside the 2026-08-05 Emergency Contact fix (gate fakes model the value-anchored read; waitForTimeout allowlist count reflects the removed name-fill sleep)."
+  },
+  {
+   "path": "tests/unit/systems/crm/idocs-download.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "2fd29c1fecbdb55b256364733837a6598e92dd25be4cbca71c263e102b823cb7",
+   "afterSha256": "84cff73a4032e8644225a4253be9a4de328344de6002866174a06e07c899b9c9",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-crm-doc-download"
+   ],
+   "impactRationale": "Pins title-casing of ALL-CAPS CRM records, hyphen/apostrophe/multi-word surnames, and the canonical document names.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/systems/ucpath/ss-smart-hr.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "57506848064063459502da280dc9cb31d8a5dc6c5e9f44bc42bbf5be8b098f43",
+   "afterSha256": "d125f66d150d0febad496c36fb734211b1e051910a1e62e35d88932cbbaaa00a",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/systems/ucpath/transaction.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "425eac4dcc2c7ee649533bee1e83fa3670dd51f46a30998600438b5f037dfcdb",
+   "afterSha256": "72ed26c40168c95824112e5f0c870119183add019c60cc3defcb5fef86daa317",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": " 2026-08-20: pins decidePersonMatchContinue / classifySubmitSignals / normalizers with the live Robles + Sun candidate tables."
+  },
+  {
+   "path": "tests/unit/workflows/emergency-contact/enter.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "859ae34a020174b333ea095fd8f124aff220533c40b25508ef746feb28de6d9d",
+   "afterSha256": "252b8e3704d4f829ea44a4bdcc677072f1b1f762def320fa691981f7dfccaf17",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Test updated alongside the 2026-08-05 Emergency Contact fix (gate fakes model the value-anchored read; waitForTimeout allowlist count reflects the removed name-fill sleep)."
+  },
+  {
+   "path": "tests/unit/workflows/onboarding/workflow.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "73cfea57e2cd6b9ed2f82ee457417209d472773dc257587d6a22db406af7bac6",
+   "afterSha256": "d43875880d983f9ebf4d34ca53ffb574ba3a3be9080f61e45bbc187070f9cf76",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Pins the CRM placeholder normalization, including that real names containing a placeholder as a substring are preserved.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/workflows/separations/dry-run.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "be2dc5e08e2d5169f681a85cc2ebf8f672ce777fedac7e01954585062b378a34",
+   "afterSha256": "f83419d349434a2a619dbbac92ae048c33e32ad2d209186f16599b9967c962bf",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/workflows/sharepoint-download/sanitize-xlsx.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "2112906d0c9a57683b1be8be792856fb866c9c494b7bbefb88f09aec5b96b00e",
+   "capabilityIds": [
+    "legacy-workflow-sharepoint-download",
+    "legacy-workflow-emergency-contact"
+   ],
+   "impactRationale": "Pins removal of self-closing and paired elements across table parts, the no-op path on clean workbooks, and that worksheet cell data is never rewritten.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  }
+ ]
 }
