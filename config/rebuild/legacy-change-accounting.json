@@ -837,7 +837,7 @@
    "path": "src/workflows/separations/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "705842e6a4800e8775cd1b002207bfef73af656070dc1751bf539b1bee018893",
-   "afterSha256": "0b51b27cc738b15ef67a42d40dddd31bf67ac06473c33f46df565a3e9f6fdfbe",
+   "afterSha256": "5822cdbdd66774faf49e81c6239fe1a0c299db96e249c0bdeed5fdb6322916bd",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -846,7 +846,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift."
+   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists."
   },
   {
    "path": "src/workflows/separations/steps/kuali-extract.ts",
@@ -866,7 +866,7 @@
    "path": "src/workflows/separations/workflow.ts",
    "changeKind": "modified",
    "beforeSha256": "96a8ec7d7047ac00917d4a04cfdaf32c15d8fa97155ff61bc87a1d6734bdc60e",
-   "afterSha256": "cfb82592c48e466216372600805b6cd22265bf51e999381d535628ee70f8b580",
+   "afterSha256": "f61d75ce9a2120db9a7c7409f7e7bd1ddea30d4222d2e93483611c04155c2771",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -874,7 +874,8 @@
     "npm:test",
     "npm:test:architecture"
    ],
-   "preservation": "preserved"
+   "preservation": "preserved",
+   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists."
   },
   {
    "path": "src/workflows/sharepoint-download/download.ts",
@@ -1290,7 +1291,7 @@
    "path": "tests/unit/workflows/separations/dry-run.test.ts",
    "changeKind": "modified",
    "beforeSha256": "be2dc5e08e2d5169f681a85cc2ebf8f672ce777fedac7e01954585062b378a34",
-   "afterSha256": "f83419d349434a2a619dbbac92ae048c33e32ad2d209186f16599b9967c962bf",
+   "afterSha256": "e216510d4efbfd5b7d8b87b249a68fbd447515874564b8ba24f47ddd36606898",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1298,7 +1299,8 @@
     "npm:test",
     "npm:test:architecture"
    ],
-   "preservation": "preserved"
+   "preservation": "preserved",
+   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists."
   },
   {
    "path": "tests/unit/workflows/sharepoint-download/sanitize-xlsx.test.ts",
@@ -1340,6 +1342,36 @@
     "legacy-workflow-separations"
    ],
    "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/kuali/navigate.ts",
+   "changeKind": "modified",
+   "beforeSha256": "134485590fbd4e30d84be93ba704d72e5d674a0157b74c57be34370703eb874c",
+   "afterSha256": "bddbed9e1bd256abf9ca1e45f60af4a5f9ac68f4a2e17e74dfe6ef534938978d",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/kuali/index.ts",
+   "changeKind": "modified",
+   "beforeSha256": "205d1afa7ac17343841d7486fdcee1bf2a4e8c1f148c104cfc3c3a0f2d4cf00d",
+   "afterSha256": "e45f81503b8f9139a649bcf500f26fbb4eba904233e8080dfc43bced2cc6ad9b",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
