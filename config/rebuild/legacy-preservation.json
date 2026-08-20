@@ -1898,7 +1898,7 @@
    "src/systems/sharepoint/selectors.ts": "8f830411d0ac9a592014259605bd238db7f44b2e5e97848c07af4cdd1404e495",
    "src/systems/ucpath/action-plan.ts": "f64992836c0c9a80da3771f8965b5083c5c32688397f9fa83d5d06a14b25a679",
    "src/systems/ucpath/index.ts": "b54ffa18bce52747f40e666a226205c0dce456e68f6d5298128e146fd1edd1b9",
-   "src/systems/ucpath/job-summary.ts": "2450ee4adf5436b5053bd373093e41c1cc3edbf11e2848ce7ccac2207d1d4bbd",
+   "src/systems/ucpath/job-summary.ts": "7da79f28b36e2eb870e724fe080e4c530d487a2e251c3ade39fbe29e9120f0a7",
    "src/systems/ucpath/navigate.ts": "7ea5fe1f136dce4ed2b9d6e54da0fbeb3f314b21345f5d94588841d014e153db",
    "src/systems/ucpath/person-org-summary.ts": "456505e908a86bf9f3fd547746bcbed76e1b1ca8924c7e018f54993b8986b804",
    "src/systems/ucpath/personal-data.ts": "6bb4c067ef52f0ca321705e57fef3490e65a7d0f99937c1c301dcbb99855659e",
