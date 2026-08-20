@@ -217,12 +217,12 @@
    "path": "src/systems/crm/idocs-download.ts",
    "changeKind": "modified",
    "beforeSha256": "ec88d824954439e7b22dd0e135acd52a6da978670e6d28f5d8506cefd385aed3",
-   "afterSha256": "15232921126f569951bf1595afbdbf25a6fe2e906c90c798349509ae448b1a58",
+   "afterSha256": "eee79d4434e8bbdd436f5137c4d4cc4bde243db005f29b9b99a42233149eb2c6",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-crm-doc-download"
    ],
-   "impactRationale": "iDocs viewer hash is captured on the CRM record page and threaded to the download via options.viewerInfo; onboarding navigated to the UCPath Entry Sheet first (full page.goto), destroying the Salesforce Canvas iframe, so every run timed out at 30s and saved zero PDFs. Also title-cases the per-person folder name, names documents by known identity, and packs the folder into a sibling .zip. Affects onboarding's in-process pdf-download step and the standalone crm-doc-download daemon.",
+   "impactRationale": "iDocs viewer hash is captured on the CRM record page and threaded to the download via options.viewerInfo; onboarding navigated to the UCPath Entry Sheet first (full page.goto), destroying the Salesforce Canvas iframe, so every run timed out at 30s and saved zero PDFs. Also title-cases the per-person folder name, names documents by known identity, and packs the folder into a sibling .zip. Affects onboarding's in-process pdf-download step and the standalone crm-doc-download daemon. 2026-08-20 (pm): buildCrmDocumentDownloadPath now nests the per-hire folder under a local YYYY-MM-DD day folder (onboardingDateFolder); onboarding no longer zips (operator decision).",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -233,12 +233,12 @@
    "path": "src/systems/crm/index.ts",
    "changeKind": "modified",
    "beforeSha256": "2195ed3ec26792ec4f675bd02d950b17ea79bbd733b6f98f511cf28731e5956b",
-   "afterSha256": "af2f1194ab9cbe9b9fa06c07aae6aff527440db1c799b4fb2a03311eca8c6194",
+   "afterSha256": "fa877a9a834e2eb89cc7833657b27514fb777d1c7b5ba41893850600a34f55a9",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-crm-doc-download"
    ],
-   "impactRationale": "Exports readCrmIdocsViewerInfo / zipCrmDocumentFolder and the CrmIdocsViewerInfo / CrmDocumentArchive types for the capture-then-download split.",
+   "impactRationale": "Exports readCrmIdocsViewerInfo / zipCrmDocumentFolder and the CrmIdocsViewerInfo / CrmDocumentArchive types for the capture-then-download split. 2026-08-20 (pm): re-exports onboardingDateFolder.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -637,7 +637,7 @@
    "path": "src/workflows/onboarding/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "f7c38194ca9ef657840af3a87e56bc5dbae307f5e471d0605e729ff0e01872c2",
-   "afterSha256": "a2d34e2e79ac60560ff3407a766e4d75e75c9ae2d43c64765f6860c351add202",
+   "afterSha256": "cf551547780c090eeac1b2f9f87da211ff739d2806ffc5ca9506620e8562f37c",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
@@ -646,7 +646,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": " 2026-08-20: documents the Person Match Found page handling and the notMatchEids channel."
+   "impactRationale": " 2026-08-20: documents the Person Match Found page handling and the notMatchEids channel. 2026-08-20 (pm): documents are per-day plain folders."
   },
   {
    "path": "src/workflows/onboarding/enter.ts",
@@ -697,11 +697,11 @@
    "path": "src/workflows/onboarding/workflow.ts",
    "changeKind": "modified",
    "beforeSha256": "3fdbf1d1ed90700c5ad7aeaa93024083e6a319ecf778bdaf0874e8648c98b8a8",
-   "afterSha256": "ced98ff69f2ce1d1b2c610422164f876b69c82c71d80270aae8f9544d1499845",
+   "afterSha256": "c9254dcff25e3e1a7f9cd32321ff61815095d0407166c5411be857592106a836",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
-   "impactRationale": "Resets the I-9 page once per item so item N+1 never inherits item N's modal wreckage; uses the transaction number the submit itself read back. 2026-08-20: data.notMatchEids (operator-reviewed NOT-this-person EIDs) — person-search identity gate proceeds as a NEW hire when every Search/Match hit is a reviewed EID (exact-EID scoped) and the list rides into the submit.",
+   "impactRationale": "Resets the I-9 page once per item so item N+1 never inherits item N's modal wreckage; uses the transaction number the submit itself read back. 2026-08-20: data.notMatchEids (operator-reviewed NOT-this-person EIDs) — person-search identity gate proceeds as a NEW hire when every Search/Match hit is a reviewed EID (exact-EID scoped) and the list rides into the submit. 2026-08-20 (pm): pdf-download step leaves the documents as a plain folder in the day folder (no zip); stamps pdfFolder.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -1071,12 +1071,12 @@
    "path": "tests/unit/systems/crm/idocs-download.test.ts",
    "changeKind": "modified",
    "beforeSha256": "2fd29c1fecbdb55b256364733837a6598e92dd25be4cbca71c263e102b823cb7",
-   "afterSha256": "84cff73a4032e8644225a4253be9a4de328344de6002866174a06e07c899b9c9",
+   "afterSha256": "2de54a13fa42abcb9a620b2d5dd89f88f7fb4d589339fc0e74dea80cb83c58c3",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-crm-doc-download"
    ],
-   "impactRationale": "Pins title-casing of ALL-CAPS CRM records, hyphen/apostrophe/multi-word surnames, and the canonical document names.",
+   "impactRationale": "Pins title-casing of ALL-CAPS CRM records, hyphen/apostrophe/multi-word surnames, and the canonical document names. 2026-08-20 (pm): pins the per-day folder path shape.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
