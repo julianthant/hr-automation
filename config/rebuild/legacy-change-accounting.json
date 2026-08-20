@@ -518,7 +518,7 @@
    "path": "src/systems/ucpath/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "c562816dd0f5b85109c6c6fd7b56703d32703f10c12a5ad5f5a3c834f84d8cff",
-   "afterSha256": "56f89d48a7170006e49e7619eced71d5cd1f3f467f571c0719f33da5d5efcddc",
+   "afterSha256": "0bf2122c6385d38a929ac9485c8cdb5cad43696c25695010803e9af7e34a6b1c",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -527,13 +527,14 @@
     "npm:test",
     "npm:test:architecture"
    ],
-   "preservation": "preserved"
+   "preservation": "preserved",
+   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift."
   },
   {
    "path": "src/systems/ucpath/LESSONS.md",
    "changeKind": "modified",
    "beforeSha256": "010e7a25f50d7e63b24355bb254ded76690c9278a6885285ef3a52101fc5f9a1",
-   "afterSha256": "f3f9a096c620714a69caed23cd6d6fa0e2ec401574678bbc1f2c0252fe57600f",
+   "afterSha256": "0dada8518218ec4c46f5b35f8703c54a36523b55d41bb31f8d21457ec34a2ebb",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-person-lookup",
@@ -544,7 +545,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "2026-08-05 (aba05c65): corrected the 2026-08-04 $op accessible-name lesson's blast-radius paragraph — it had declared production immune while the production-driven ssSmartHRTransactions group carried the same fragile shape (the doc 4493 failure); adds the sweep-every-Find-an-Existing-Value-group rule. 2026-08-20: lesson — Save and Submit can land on the Person Match Found review page the outcome poll never watched. 2026-08-20 (pm): lesson — SS Smart HR Name box is First Last; single match auto-opens the detail page."
+   "impactRationale": "2026-08-05 (aba05c65): corrected the 2026-08-04 $op accessible-name lesson's blast-radius paragraph — it had declared production immune while the production-driven ssSmartHRTransactions group carried the same fragile shape (the doc 4493 failure); adds the sweep-every-Find-an-Existing-Value-group rule. 2026-08-20: lesson — Save and Submit can land on the Person Match Found review page the outcome poll never watched. 2026-08-20 (pm): lesson — SS Smart HR Name box is First Last; single match auto-opens the detail page. 2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift."
   },
   {
    "path": "src/systems/ucpath/SELECTORS.md",
@@ -836,7 +837,7 @@
    "path": "src/workflows/separations/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "705842e6a4800e8775cd1b002207bfef73af656070dc1751bf539b1bee018893",
-   "afterSha256": "7187be6b5e61f14754ad47eb845b26b1e309327af180358251a3551d3fbd9f4d",
+   "afterSha256": "0b51b27cc738b15ef67a42d40dddd31bf67ac06473c33f46df565a3e9f6fdfbe",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -844,7 +845,8 @@
     "npm:test",
     "npm:test:architecture"
    ],
-   "preservation": "preserved"
+   "preservation": "preserved",
+   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift."
   },
   {
    "path": "src/workflows/separations/steps/kuali-extract.ts",
@@ -1104,11 +1106,11 @@
    "path": "tests/unit/architecture/wait-for-timeout-allowlist.test.ts",
    "changeKind": "modified",
    "beforeSha256": "d0f3949d6e35ef2889bde2db6b68bc842ce33fce34b2a44aacd9353682e83b0f",
-   "afterSha256": "c2607e405f67cb6c0388f30517f370247e5d4d191097f251db2c08676982adfd",
+   "afterSha256": "df74c88053814458b5c57b1e3c4cf8a0747f21bf82730b12556b7c8c804d8221",
    "capabilityIds": [
     "legacy-dev-tool-architecture-guards"
    ],
-   "impactRationale": "transaction.ts allowlist 18 -> 19; the added sleeps are poll cadences that terminate on a real signal (field read-back / transaction id resolving), not readiness stand-ins.",
+   "impactRationale": "transaction.ts allowlist 18 -> 19; the added sleeps are poll cadences that terminate on a real signal (field read-back / transaction id resolving), not readiness stand-ins. 2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -1308,6 +1310,36 @@
     "legacy-workflow-emergency-contact"
    ],
    "impactRationale": "Pins removal of self-closing and paired elements across table parts, the no-op path on clean workbooks, and that worksheet cell data is never rewritten.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/ucpath/job-summary.ts",
+   "changeKind": "modified",
+   "beforeSha256": "2450ee4adf5436b5053bd373093e41c1cc3edbf11e2848ce7ccac2207d1d4bbd",
+   "afterSha256": "7da79f28b36e2eb870e724fe080e4c530d487a2e251c3ade39fbe29e9120f0a7",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/systems/ucpath/job-summary.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "89dfb00eb694fd4a91997d8987ff3ac0c6a4f4d38447752f5a12c0023e0680f0",
+   "afterSha256": "68a1fc5cbeac6bcb2e87bf275de9c36dd6489b8c2b353002cdac74d8ef268ad9",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
