@@ -16,6 +16,8 @@ import assert from "node:assert/strict";
 import {
   resolveSearchResult,
   resolveSearchPresence,
+  createSearchOutcomeSettler,
+  NO_RESULTS_STABLE_MS,
   parseMmddyyyy,
   mmddyyyyToDate,
   resolveSeparationTimecardDates,
@@ -348,5 +350,46 @@ describe("parseCalendarHeaderOrdinal", () => {
   it("returns null on an unparseable header (caller stops navigating)", () => {
     assert.equal(parseCalendarHeaderOrdinal(""), null);
     assert.equal(parseCalendarHeaderOrdinal("loading…"), null);
+  });
+});
+
+describe("createSearchOutcomeSettler", () => {
+  // 2026-08-21 (doc 4546, EID 10837979): the no-results sentinel is ALSO the
+  // search panel's pre-search resting state, so a single poll of
+  // "sentinel visible + no result yet" must NOT resolve not-found.
+  it("stays pending while the sentinel has not held for the stable window", () => {
+    const s = createSearchOutcomeSettler(2_000);
+    assert.equal(s.observe(false, true, 0), "pending");
+    assert.equal(s.observe(false, true, 200), "pending");
+    assert.equal(s.observe(false, true, 1_999), "pending");
+  });
+
+  it("resolves not-found once the sentinel has held continuously for the window", () => {
+    const s = createSearchOutcomeSettler(2_000);
+    s.observe(false, true, 0);
+    assert.equal(s.observe(false, true, 2_000), "not-found");
+  });
+
+  it("a found signal wins immediately, even after the sentinel was visible", () => {
+    const s = createSearchOutcomeSettler(2_000);
+    assert.equal(s.observe(false, true, 0), "pending");
+    assert.equal(s.observe(true, true, 300), "found");
+    assert.equal(s.observe(true, false, 300), "found");
+  });
+
+  it("a pending poll (neither signal) resets the sentinel clock", () => {
+    const s = createSearchOutcomeSettler(2_000);
+    s.observe(false, true, 0);
+    assert.equal(s.observe(false, false, 1_500), "pending");
+    assert.equal(s.observe(false, true, 3_000), "pending"); // clock restarted at 3000
+    assert.equal(s.observe(false, true, 4_999), "pending");
+    assert.equal(s.observe(false, true, 5_000), "not-found");
+  });
+
+  it("defaults to NO_RESULTS_STABLE_MS", () => {
+    const s = createSearchOutcomeSettler();
+    s.observe(false, true, 0);
+    assert.equal(s.observe(false, true, NO_RESULTS_STABLE_MS - 1), "pending");
+    assert.equal(s.observe(false, true, NO_RESULTS_STABLE_MS), "not-found");
   });
 });

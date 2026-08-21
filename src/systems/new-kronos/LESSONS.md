@@ -84,12 +84,22 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `goToMenu.goToButtonOnPage`, `goToMenu.goToButtonInFrame` in `selectors.ts`
 **Tags:** go-to, button, toolbar, quick-find, slideout, slideout__mask, intercept, modal-overlay, goToDropdownButton, ng-disabled, first, resolution, navigation, timecard
 
+## 2026-08-21 — The no-results sentinel is ALSO the pre-search resting state — NOT FOUND needs a stable window
+
+**Tried:** `waitForEmployeeSearchOutcome` polled every 200ms and returned NOT FOUND on the first tick where `"There are no items to display."` was visible and no found signal (checkbox / slat / EID text) was present in either context — the 2026-07-06 "found beats no-results" rule only protects the tick where BOTH are visible.
+**Failed because:** The sentinel is the Employee Search panel's resting/empty text BEFORE the search round-trip completes, so "sentinel visible + no result yet" on a single tick is the pre-search state, not a verdict. Live 2026-08-21 (separations doc 4546, EID 10837979 "Zhang, Nancy", HDH): `Clicking Search...` at t0, `Employee 10837979 NOT found` at t0+200ms. `searchEmployee` returned false → the timecard was never opened → the date model fell back to the Kuali Last Day Worked (08/08/2026) instead of the real last punch (08/16/2026) → a wrong-dated termination (`T002217792`, eff 08/09/2026) was filed and the Kuali form finalized with the wrong dates. Every FOUND doc in the same session rendered its result within ~1s, so the gap is grid-load latency, not a missing employee.
+**Fix:** `createSearchOutcomeSettler(NO_RESULTS_STABLE_MS = 2_000)` in `navigate.ts`: the sentinel must be visible CONTINUOUSLY for 2s with no found signal before `"not-found"`; any found signal returns `"found"` immediately; a tick with neither signal resets the sentinel clock. `waitForEmployeeSearchOutcome` feeds each tick through the settler instead of `resolveSearchPresence` directly. Pure settler pinned in `tests/unit/systems/new-kronos/navigate.test.ts`. Re-run of doc 4546 after the fix: the pending sweep deleted the superseded transaction and the corrected dates were filed (see `src/workflows/separations/CLAUDE.md`).
+**Selector:** `search.noResultsText`, `createSearchOutcomeSettler`, `NO_RESULTS_STABLE_MS`, `waitForEmployeeSearchOutcome` in `navigate.ts`
+**References:** Extends `src/systems/new-kronos/LESSONS.md#2026-07-06` (same sentinel, different tick). Separations date model: `src/workflows/separations/CLAUDE.md` "Date model".
+**Tags:** not-found, no-results, sentinel, pre-search, resting-state, stable-window, race, search, separations, hdh, wrong-dates, fail-loud
+
 ## 2026-07-06 — Found beats no-results during the search grid load overlap
 
 **Tried:** Racing `Promise.any([checkbox attached, slat visible])` (→ found) against `noResultsText.waitFor({ visible })` (→ not found) in `resolveSearchResult`.
 **Failed because:** While WFD loads search results it can briefly show BOTH `"There are no items to display."` AND the result checkbox/slat at the same time (live probe 2026-07-06, EID 10714794: at t+100ms `noResults=true` while `checkbox count=1`). Whichever waiter settled first won the race — when no-results won, a clearly-found employee was mis-resolved NOT FOUND in ~1s (`Employee 10714794 NOT found in Kronos` in kronos-pay-rule).
 **Fix:** Replace the race with `waitForEmployeeSearchOutcome`: poll BOTH contexts (iframe + top-level) every 200ms; on each tick `resolveSearchPresence(hasResult, noResults)` — **found always beats no-results** when both are true; not-found only when the sentinel is visible AND no result signal exists in either context. Added `search.resultEmployeeId` as a third found signal. Pure `resolveSearchPresence` pinned in `navigate.test.ts`.
 **Selector:** `search.resultEmployeeId`, `searchResultPresentInRoot`, `waitForEmployeeSearchOutcome`, `resolveSearchPresence` in `navigate.ts`
+**References:** Superseded-in-part by `#2026-08-21` — the same sentinel is also the PRE-search resting state, so a single sentinel-only tick is not a verdict either.
 **Tags:** found, not-found, race, overlap, no-results, checkbox, search, kronos-pay-rule, ISS-B04
 
 ## 2026-06-22 — Found-detection must wait for the "Select Item" checkbox ATTACHED, not VISIBLE (it's a hidden native input)

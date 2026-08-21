@@ -120,6 +120,46 @@ export function resolveSearchPresence(
   return "pending";
 }
 
+/**
+ * How long the "There are no items to display." sentinel must stay visible —
+ * CONTINUOUSLY, with no found signal — before a search resolves NOT FOUND.
+ *
+ * WFD shows that sentinel as the panel's resting/empty state BEFORE the search
+ * round-trip completes, so a single-poll "sentinel visible + no result yet" is
+ * NOT a verdict — it is the pre-search state. Live 2026-08-21 (separations doc
+ * 4546, EID 10837979 "Zhang, Nancy", HDH): NOT FOUND was resolved ~200ms after
+ * the Search click, the timecard was never opened, and the Kuali Last Day
+ * Worked (08/08/2026) was used instead of the real last punch (08/16/2026) — a
+ * wrong-dated termination was filed. Two seconds comfortably outlasts the
+ * observed grid-load gap (results appeared within ~1s on every found doc of the
+ * same session) while keeping a genuine no-results search fast.
+ */
+export const NO_RESULTS_STABLE_MS = 2_000;
+
+/**
+ * Pure settle-tracker for the not-found verdict: returns `"not-found"` only once
+ * the no-results sentinel has been continuously visible (no found signal) for
+ * `stableMs`. Any found signal returns `"found"` immediately; a `pending` poll
+ * (neither visible) resets the sentinel clock. Unit-pinned in `navigate.test.ts`.
+ */
+export function createSearchOutcomeSettler(stableMs: number = NO_RESULTS_STABLE_MS): {
+  observe(hasResult: boolean, noResults: boolean, nowMs: number): "found" | "not-found" | "pending";
+} {
+  let noResultsSince: number | null = null;
+  return {
+    observe(hasResult, noResults, nowMs) {
+      const outcome = resolveSearchPresence(hasResult, noResults);
+      if (outcome === "found") return "found";
+      if (outcome === "pending") {
+        noResultsSince = null;
+        return "pending";
+      }
+      if (noResultsSince === null) noResultsSince = nowMs;
+      return nowMs - noResultsSince >= stableMs ? "not-found" : "pending";
+    },
+  };
+}
+
 /** True when the given search root shows at least one employee result. */
 export async function searchResultPresentInRoot(
   root: SearchRoot,
@@ -137,7 +177,9 @@ export async function searchResultPresentInRoot(
  * Poll BOTH search contexts (portal-frame iframe + top-level page) until an
  * employee result appears, a genuine no-results state settles, or timeout.
  * Found signals always beat the no-results sentinel so a transient overlap
- * during grid load cannot false-negative a present employee.
+ * during grid load cannot false-negative a present employee, and the sentinel
+ * must hold continuously for `NO_RESULTS_STABLE_MS` before NOT FOUND is
+ * returned (it is also the panel's pre-search resting text).
  */
 async function waitForEmployeeSearchOutcome(
   page: Page,
@@ -146,6 +188,9 @@ async function waitForEmployeeSearchOutcome(
 ): Promise<boolean> {
   const contexts: SearchRoot[] = [searchFrame(page), page];
   const deadline = Date.now() + timeoutMs;
+  // NOT FOUND only after the sentinel has held for NO_RESULTS_STABLE_MS — the
+  // sentinel is also WFD's pre-search resting state (2026-08-21, doc 4546).
+  const settler = createSearchOutcomeSettler();
 
   while (Date.now() < deadline) {
     let hasResult = false;
@@ -164,7 +209,7 @@ async function waitForEmployeeSearchOutcome(
       }
     }
 
-    const outcome = resolveSearchPresence(hasResult, noResults);
+    const outcome = settler.observe(hasResult, noResults, Date.now());
     if (outcome === "found") return true;
     if (outcome === "not-found") return false;
 
