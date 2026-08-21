@@ -85,6 +85,84 @@ test("onboarding dry run runs every step but withholds both form submissions", (
   );
 });
 
+test("rehire mode (2026-08-21): no I-9, UC_CONC_HIRE plan on the matched Empl ID, dry run cancels the draft", () => {
+  const source = readFileSync(
+    new URL("../../../../src/workflows/onboarding/workflow.ts", import.meta.url),
+    "utf8",
+  );
+  const rehireNoMatchThrow = source.indexOf("Rehire mode: UCPath person search found NO existing person");
+  const rehireEidResolved = source.indexOf("rehireEmplId = eidPreApproved ? approvedEid");
+  const i9Step = source.indexOf('ctx.step("i9-creation"');
+  const i9SkippedRehire = source.indexOf('mode = "skipped-rehire"');
+  const i9Search = source.indexOf("searchI9Employee(i9Page");
+  const i9Create = source.indexOf("createI9Employee(i9Page");
+  const duplicateProbe = source.indexOf("findExistingHireTransaction(ucpathPage");
+  const concPlan = source.indexOf("buildConcurrentHirePlan(data, ucpathPage, rehireEmplId");
+  const fullPlan = source.indexOf("buildTransactionPlan(data, ucpathPage, i9ProfileId");
+  const dryRunCancel = source.indexOf("cancelConcurrentHireDraft(ucpathPage)");
+  const receiptReadback = source.indexOf("readSubmittedHireReceipt(ucpathPage");
+
+  for (const [label, index] of [
+    ["rehire no-match fail-loud", rehireNoMatchThrow],
+    ["rehire EID resolution", rehireEidResolved],
+    ["I-9 step", i9Step],
+    ["I-9 skipped-rehire marker", i9SkippedRehire],
+    ["I-9 search", i9Search],
+    ["I-9 create", i9Create],
+    ["duplicate-hire probe", duplicateProbe],
+    ["concurrent-hire plan", concPlan],
+    ["full-hire plan", fullPlan],
+    ["dry-run draft cancel", dryRunCancel],
+    ["receipt readback", receiptReadback],
+  ] as const) {
+    assert.notEqual(index, -1, `${label} marker must remain present`);
+  }
+
+  // Rehire resolves its Empl ID from person-search BEFORE the I-9 step, and the
+  // I-9 step returns on the rehire marker before any I-9 search/create.
+  assert.ok(rehireEidResolved < i9Step, "the rehire Empl ID is resolved in person-search, before the I-9 step");
+  assert.ok(i9Step < i9SkippedRehire && i9SkippedRehire < i9Search, "rehire skips the I-9 step before the SSN search");
+  assert.ok(i9SkippedRehire < i9Create, "rehire never reaches createI9Employee");
+  // The duplicate-hire probe still guards BOTH templates, and the plan is chosen by mode.
+  assert.ok(duplicateProbe < concPlan && concPlan < fullPlan, "probe → (rehire ? UC_CONC_HIRE plan : UC_FULL_HIRE plan)");
+  // A rehire dry run cancels the draft and terminates before the receipt readback.
+  assert.ok(concPlan < dryRunCancel && dryRunCancel < receiptReadback, "rehire dry run cancels the draft before any receipt readback");
+});
+
+test("buildConcurrentHirePlan: name readbacks guard the EID, dry run asserts Save enabled and never adds the submit", () => {
+  const source = readFileSync(
+    new URL("../../../../src/workflows/onboarding/enter.ts", import.meta.url),
+    "utf8",
+  );
+  const fn = source.indexOf("export function buildConcurrentHirePlan(");
+  assert.notEqual(fn, -1, "buildConcurrentHirePlan must exist");
+  const body = source.slice(fn);
+  const eidGuard = body.indexOf("isUcpathEmployeeId(emplId)");
+  const detailsName = body.indexOf("fillTransactionDetailsEmplId(page");
+  const detailsNameRefuse = body.indexOf("refusing to file a concurrent hire against the");
+  const reason = body.indexOf("selectReasonCode(page, getContentFrame(page), CONC_HIRE_REASON_CODE)");
+  const ack = body.indexOf("acknowledgePersonIdExistsDialog(page, emplId)");
+  const jobData = body.indexOf("fillJobData(page, getContentFrame(page), jobData)");
+  const personalName = body.indexOf("readPersonalDataLegalName(frame)");
+  const dryRunGuard = body.indexOf("if (options.dryRun)");
+  const enabledCheck = body.indexOf("Verify Save and Submit is enabled");
+  const submitStep = body.indexOf('"Save and Submit transaction"');
+  const submitCall = body.indexOf("clickSaveAndSubmit(page, getContentFrame(page), emplId");
+  for (const [label, index] of [
+    ["EID validity guard", eidGuard], ["details name readback", detailsName],
+    ["details name refusal", detailsNameRefuse], ["reason code", reason], ["person-exists ack", ack],
+    ["job data", jobData], ["personal-data name readback", personalName], ["dry-run guard", dryRunGuard],
+    ["enabled check", enabledCheck], ["submit step", submitStep], ["EID-keyed submit", submitCall],
+  ] as const) {
+    assert.notEqual(index, -1, `${label} marker must remain present`);
+  }
+  assert.ok(eidGuard < detailsName, "the Empl ID is validated before it is ever typed into UCPath");
+  assert.ok(detailsName < detailsNameRefuse && detailsNameRefuse < reason, "the resolved name is verified BEFORE the reason code / Continue");
+  assert.ok(reason < ack && ack < jobData, "Continue → acknowledge 'Person ID already exists' → Job Data");
+  assert.ok(jobData < personalName, "the Personal Data legal-name readback happens after Job Data");
+  assert.ok(dryRunGuard < submitStep && enabledCheck < submitStep, "dry run returns (after asserting Save enabled) before the submit step is added");
+});
+
 test("buildTransactionPlan omits Save and Submit in dry run, and asserts the button is enabled", () => {
   const source = readFileSync(
     new URL("../../../../src/workflows/onboarding/enter.ts", import.meta.url),

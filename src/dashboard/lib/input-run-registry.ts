@@ -242,6 +242,16 @@ export function parseCrmDocDownloadInputs(raw: string): InputRunParseResult {
   return { ok: true, inputs };
 }
 
+const ONBOARDING_PLACEHOLDER = "Enter emails, comma-separated (e.g. jdoe@ucsd.edu, asmith@ucsd.edu)";
+// Comma-separated emails → a `pool` batch (onboarding declares
+// `batch: { mode: "pool" }`). The regex catches obviously-malformed input
+// before enqueue; the workflow's Zod `z.string().email()` is the
+// authoritative check at claim time.
+const parseOnboardingEmails = parseCommaSeparated("email", {
+  regex: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+  message: "Must be a valid email address",
+});
+
 export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfig> = {
   separations: {
     placeholder: "Enter doc IDs, comma-separated (e.g. 3930, 3929)",
@@ -290,16 +300,29 @@ export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfi
     parseInput: parseCrmDocDownloadInputs,
   },
   onboarding: {
-    placeholder: "Enter emails, comma-separated (e.g. jdoe@ucsd.edu, asmith@ucsd.edu)",
-    // Comma-separated emails → a `pool` batch (onboarding declares
-    // `batch: { mode: "pool" }`). The regex catches obviously-malformed input
-    // before enqueue; the workflow's Zod `z.string().email()` is the
-    // authoritative check at claim time.
-    parseInput: parseCommaSeparated("email", {
-      regex: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-      message: "Must be a valid email address",
-    }),
+    placeholder: ONBOARDING_PLACEHOLDER,
+    parseInput: parseOnboardingEmails,
     supportsDryRun: true,
+    // Hire type — folded onto every parsed input as `mode` (validated by the
+    // workflow's Zod `mode` enum; omitted ⇒ new-hire). "Rehire" = the person
+    // already exists in UCPath: no I-9, UC_CONC_HIRE concurrent hire on the
+    // matched Empl ID (2026-08-21).
+    modes: [
+      {
+        key: "new-hire",
+        label: "New hire",
+        placeholder: ONBOARDING_PLACEHOLDER,
+        parseInput: parseOnboardingEmails,
+        note: "Creates the I-9 profile, then files the UC_FULL_HIRE Smart HR hire.",
+      },
+      {
+        key: "rehire",
+        label: "Rehire",
+        placeholder: ONBOARDING_PLACEHOLDER,
+        parseInput: parseOnboardingEmails,
+        note: "Existing UCPath person: skips the I-9 and files a UC_CONC_HIRE concurrent hire on their Empl ID.",
+      },
+    ],
   },
   "kronos-pay-rule": {
     placeholder: "Enter EIDs, comma-separated (e.g. 10873611, 10873075)",
