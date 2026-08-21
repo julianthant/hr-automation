@@ -117,6 +117,52 @@
    "preservation": "preserved"
   },
   {
+   "path": "src/dashboard/components/navigation/InputRunPanel.tsx",
+   "changeKind": "modified",
+   "beforeSha256": "6f464c4e37a485724352757287e5fce08a52e773fe42127893f4263edd22a0e1",
+   "afterSha256": "8d1fa79f0adbc5ae0347c27b513f962c7a7bbbdcd15b81dc0800aabe09008a12",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-person-lookup"
+   ],
+   "impactRationale": "2026-08-21 (b0dbd37e): input-run modes may render inside the run-settings gear (modesPlacement 'run-settings'); the inline segmented control stays for person-lookup.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/dashboard/components/navigation/RunSettingsMenu.tsx",
+   "changeKind": "modified",
+   "beforeSha256": "2c75f585666b6bea51d72e3caf28a737d6511978fc0a0dad46ac9d8bd1295f4a",
+   "afterSha256": "90ab3b73d15a1d2b76a99134e1e9bc33bf790dccdc2c40c805507272486be1a3",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "2026-08-21 (b0dbd37e): gear popover gains a modes radio section (onboarding Hire type: New hire | Rehire) counted toward the non-default indicator.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/dashboard/lib/input-run-registry.ts",
+   "changeKind": "modified",
+   "beforeSha256": "5a7b5d171d0065793c507dae8d8281cab384546952c136d68e6cc1df68856b97",
+   "afterSha256": "420ecaf7fcc67052ef8731e748635df220279ece1aef4503a0288e7d791c5966",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "2026-08-21 (ef0b20ad, b0dbd37e): onboarding declares hire-type modes new-hire | rehire (folded as input.mode), placed in the run-settings gear.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "src/domain/identity-approval.ts",
    "changeKind": "modified",
    "beforeSha256": "16222a735ff26e631b8e52eab63d82e5a3dc7acca0a5abeed8810e1d84bd78f4",
@@ -412,6 +458,36 @@
    "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
   },
   {
+   "path": "src/systems/kuali/index.ts",
+   "changeKind": "modified",
+   "beforeSha256": "205d1afa7ac17343841d7486fdcee1bf2a4e8c1f148c104cfc3c3a0f2d4cf00d",
+   "afterSha256": "e45f81503b8f9139a649bcf500f26fbb4eba904233e8080dfc43bced2cc6ad9b",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/kuali/navigate.ts",
+   "changeKind": "modified",
+   "beforeSha256": "134485590fbd4e30d84be93ba704d72e5d674a0157b74c57be34370703eb874c",
+   "afterSha256": "bddbed9e1bd256abf9ca1e45f60af4a5f9ac68f4a2e17e74dfe6ef534938978d",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "src/systems/new-kronos/LESSONS.md",
    "changeKind": "modified",
    "beforeSha256": "780ab0ff7f3085b1b4570d01b11e1ce63fb6ed7636a5bf31c0da50136d372fe9",
@@ -534,7 +610,7 @@
    "path": "src/systems/ucpath/LESSONS.md",
    "changeKind": "modified",
    "beforeSha256": "010e7a25f50d7e63b24355bb254ded76690c9278a6885285ef3a52101fc5f9a1",
-   "afterSha256": "0dada8518218ec4c46f5b35f8703c54a36523b55d41bb31f8d21457ec34a2ebb",
+   "afterSha256": "c1b054325b1747391055a5afbba7609ce529192f972c5b05860d5ffe75341fb5",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-person-lookup",
@@ -545,13 +621,13 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "2026-08-05 (aba05c65): corrected the 2026-08-04 $op accessible-name lesson's blast-radius paragraph — it had declared production immune while the production-driven ssSmartHRTransactions group carried the same fragile shape (the doc 4493 failure); adds the sweep-every-Find-an-Existing-Value-group rule. 2026-08-20: lesson — Save and Submit can land on the Person Match Found review page the outcome poll never watched. 2026-08-20 (pm): lesson — SS Smart HR Name box is First Last; single match auto-opens the detail page. 2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift."
+   "impactRationale": "2026-08-05 (aba05c65): corrected the 2026-08-04 $op accessible-name lesson's blast-radius paragraph — it had declared production immune while the production-driven ssSmartHRTransactions group carried the same fragile shape (the doc 4493 failure); adds the sweep-every-Find-an-Existing-Value-group rule. 2026-08-20: lesson — Save and Submit can land on the Person Match Found review page the outcome poll never watched. 2026-08-20 (pm): lesson — SS Smart HR Name box is First Last; single match auto-opens the detail page. 2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353."
   },
   {
    "path": "src/systems/ucpath/SELECTORS.md",
    "changeKind": "modified",
    "beforeSha256": "57fb1caeac412725c3c5defb0430dd9d5d910db97d077328cf2f37368d6fb1f4",
-   "afterSha256": "0ad50fba2e46c677fedf6fff1fc4010b882a3628d43657a2bf7ed08367ade7cc",
+   "afterSha256": "b8ddef2e1cc06e668f6c72f74e9b74b6d8d013e77b566d1b595526a55d744cae",
    "capabilityIds": [
     "legacy-workflow-i9-check",
     "legacy-workflow-onboarding",
@@ -563,18 +639,33 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "2026-08-05 (aba05c65): regenerated catalog (npm run selectors:catalog) for the ssSmartHRTransactions re-anchoring; generated content only. 2026-08-20: catalog regenerated for the Person Match Found selectors."
+   "impactRationale": "2026-08-05 (aba05c65): regenerated catalog (npm run selectors:catalog) for the ssSmartHRTransactions re-anchoring; generated content only. 2026-08-20: catalog regenerated for the Person Match Found selectors. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353."
   },
   {
    "path": "src/systems/ucpath/index.ts",
    "changeKind": "modified",
    "beforeSha256": "799e4d5bdf7bbdc6767abd13469b87d1183a9fb19f1fe00dc8adc07f8df36d2f",
-   "afterSha256": "b54ffa18bce52747f40e666a226205c0dce456e68f6d5298128e146fd1edd1b9",
+   "afterSha256": "6552c36837f5a57391942176221014fad0e42e4b9bb7cd108ae4c1f8cc60dd8a",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
    ],
-   "impactRationale": "Exports waitForSaveEnabled so the onboarding dry run can assert the submit button reached a clickable state without clicking it. 2026-08-20: re-exports the Person Match Found helpers + types.",
+   "impactRationale": "Exports waitForSaveEnabled so the onboarding dry run can assert the submit button reached a clickable state without clicking it. 2026-08-20: re-exports the Person Match Found helpers + types. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/ucpath/job-summary.ts",
+   "changeKind": "modified",
+   "beforeSha256": "2450ee4adf5436b5053bd373093e41c1cc3edbf11e2848ce7ccac2207d1d4bbd",
+   "afterSha256": "7da79f28b36e2eb870e724fe080e4c530d487a2e251c3ade39fbe29e9120f0a7",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -620,7 +711,7 @@
    "path": "src/systems/ucpath/selectors.ts",
    "changeKind": "modified",
    "beforeSha256": "4f6992525998eb6e3db8d2b3a4b67bb551aa0565e6a03710efd92a095d958aa5",
-   "afterSha256": "4551d6826caa187fefc9b6ffe7227ef6b487b878f12a90d9e95a1e7a15a8a85d",
+   "afterSha256": "a41882ab37080ca0add0ef14b629cc878488dd58e916cf0f57405ea42824ea7e",
    "capabilityIds": [
     "legacy-workflow-i9-check",
     "legacy-workflow-onboarding",
@@ -632,7 +723,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "2026-08-05 (aba05c65): re-anchored every ssSmartHRTransactions search arm after PeopleSoft folded the Find-an-Existing-Value operator select (<field>$op) into each input's accessible name ('Empl ID begins with', 'Approval Status =', ...), which made all exact:true arms match zero elements and killed separations transaction-check live (doc 4493). Anchored ^Label regex + live-probed record.field id arms, same repair personOrgSummary received 2026-08-04. Locator resolution only; no contract change. 2026-08-20: smartHR.personMatchFoundHeading / personMatchNotAMatchButton / personMatchCandidateRows — the Person Match Found review page, mapped from live failure screenshots."
+   "impactRationale": "2026-08-05 (aba05c65): re-anchored every ssSmartHRTransactions search arm after PeopleSoft folded the Find-an-Existing-Value operator select (<field>$op) into each input's accessible name ('Empl ID begins with', 'Approval Status =', ...), which made all exact:true arms match zero elements and killed separations transaction-check live (doc 4493). Anchored ^Label regex + live-probed record.field id arms, same repair personOrgSummary received 2026-08-04. Locator resolution only; no contract change. 2026-08-20: smartHR.personMatchFoundHeading / personMatchNotAMatchButton / personMatchCandidateRows — the Person Match Found review page, mapped from live failure screenshots. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353."
   },
   {
    "path": "src/systems/ucpath/ss-smart-hr.ts",
@@ -654,12 +745,12 @@
    "path": "src/systems/ucpath/transaction.ts",
    "changeKind": "modified",
    "beforeSha256": "1edbfd04c254d3a9a780431899ec30569b746536b45e53c1e1194ad84237bf94",
-   "afterSha256": "4d4d039a9c76b4544ff2752c1ed7e687c3c713ae6a0819614c2224839eb792a1",
+   "afterSha256": "da6b8c90ad4705c850995fb5e18c56cd2d3470974240f190cb35fdf0354ce1b1",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
    ],
-   "impactRationale": "Post-submit handling reads the dialog text and THROWS on a refusal instead of clicking past it (a 'Expected Job End Date cannot be before Job Effective Date' modal was being acknowledged as a successful submit), drains the dialog chain, waits for the transaction id to resolve, and acknowledges via the #ICOK escape hatch rather than a role-based OK click that resolved to an unrelated lookup prompt behind pt_modalMask. 2026-08-20: clickSaveAndSubmit now watches UCPath's submit-time \"Person Match Found\" page as a third named signal (classifySubmitSignals), reads the candidate grid by header (readPersonMatchCandidates) and continues only via the pure decidePersonMatchContinue (hard-identifier mismatch or operator-reviewed EID); otherwise fails loud naming the candidates. Live: two hires timed out blind on this page.",
+   "impactRationale": "Post-submit handling reads the dialog text and THROWS on a refusal instead of clicking past it (a 'Expected Job End Date cannot be before Job Effective Date' modal was being acknowledged as a successful submit), drains the dialog chain, waits for the transaction id to resolve, and acknowledges via the #ICOK escape hatch rather than a role-based OK click that resolved to an unrelated lookup prompt behind pt_modalMask. 2026-08-20: clickSaveAndSubmit now watches UCPath's submit-time \"Person Match Found\" page as a third named signal (classifySubmitSignals), reads the candidate grid by header (readPersonMatchCandidates) and continues only via the pure decidePersonMatchContinue (hard-identifier mismatch or operator-reviewed EID); otherwise fails loud naming the candidates. Live: two hires timed out blind on this page. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -762,7 +853,7 @@
    "path": "src/workflows/onboarding/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "f7c38194ca9ef657840af3a87e56bc5dbae307f5e471d0605e729ff0e01872c2",
-   "afterSha256": "5d053334e49b2c9eb4071a60d4726e69c35ec06d7454c44b7fbed30825119da0",
+   "afterSha256": "60fc4e02839b4a04ca88acdc10a5061b0be2f31028d0d900007e4f2b996f03d8",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
@@ -771,17 +862,32 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": " 2026-08-20: documents the Person Match Found page handling and the notMatchEids channel. 2026-08-20 (pm): documents are per-day plain folders. 2026-08-20 (pm): probe live-verified (First Last, detail page), not-this-person action."
+   "impactRationale": "2026-08-20: documents the Person Match Found page handling and the notMatchEids channel. 2026-08-20 (pm): documents are per-day plain folders. 2026-08-20 (pm): probe live-verified (First Last, detail page), not-this-person action. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353."
+  },
+  {
+   "path": "src/workflows/onboarding/config.ts",
+   "changeKind": "modified",
+   "beforeSha256": "ba1b23e8cbdbf16b2acbee8de099ec6d893ace65e969fa0134859a78352714a0",
+   "afterSha256": "002b1b7b2b744e68ceb119b7fe69a45ca49fc29107339679109cd92a5a169fad",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "2026-08-21 (ef0b20ad): CONC_HIRE_TEMPLATE_ID=UC_CONC_HIRE + CONC_HIRE_REASON_CODE for the rehire (concurrent hire) run mode.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
   },
   {
    "path": "src/workflows/onboarding/enter.ts",
    "changeKind": "modified",
    "beforeSha256": "60def469803c032799e46f1aab66267bec2a592b857a04da7fb1e9a0796bc25b",
-   "afterSha256": "ba2f60d5140bd4759fa4f112b9701b0e26b6c6867e50d4de1e7b083ebbf47127",
+   "afterSha256": "80bc66e41eb1e71b51a0d6ad4c8b4760836964bf0428aa3012f19ac93ebb01f2",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
-   "impactRationale": "buildTransactionPlan takes a dryRun option: fills all four tabs then stops before Save and Submit, asserting the button is ENABLED instead of clicking it. Also drops a UCPath-rejected SSN from the National ID fill and keys the comment on what was actually entered. 2026-08-20: threads hireIdentity (real SSN last-4 + DOB) and notMatchEids into clickSaveAndSubmit for the Person Match Found decision.",
+   "impactRationale": "buildTransactionPlan takes a dryRun option: fills all four tabs then stops before Save and Submit, asserting the button is ENABLED instead of clicking it. Also drops a UCPath-rejected SSN from the National ID fill and keys the comment on what was actually entered. 2026-08-20: threads hireIdentity (real SSN last-4 + DOB) and notMatchEids into clickSaveAndSubmit for the Person Match Found decision. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -807,11 +913,11 @@
    "path": "src/workflows/onboarding/schema.ts",
    "changeKind": "modified",
    "beforeSha256": "d4686635e0b9bdfa745163849bc95bb969114e1fdfff097a4249c7bf2df04056",
-   "afterSha256": "e9ea4966afecfc11d0e675d2f331c5abd4071e206ae3029abe8982f89a75abf6",
+   "afterSha256": "acc850876e3c034dca76d7340c7a09277bc8d1f227592ae6b349decc3ba963eb",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
-   "impactRationale": "Adds optional expectedJobEndDate (MM/DD/YYYY) to EmployeeData.",
+   "impactRationale": "Adds optional expectedJobEndDate (MM/DD/YYYY) to EmployeeData. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -822,11 +928,11 @@
    "path": "src/workflows/onboarding/workflow.ts",
    "changeKind": "modified",
    "beforeSha256": "3fdbf1d1ed90700c5ad7aeaa93024083e6a319ecf778bdaf0874e8648c98b8a8",
-   "afterSha256": "c9254dcff25e3e1a7f9cd32321ff61815095d0407166c5411be857592106a836",
+   "afterSha256": "0201ccf1615fc4d089f4efc688f9a2896850519ec19034b1b4360eee90d772b6",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
-   "impactRationale": "Resets the I-9 page once per item so item N+1 never inherits item N's modal wreckage; uses the transaction number the submit itself read back. 2026-08-20: data.notMatchEids (operator-reviewed NOT-this-person EIDs) — person-search identity gate proceeds as a NEW hire when every Search/Match hit is a reviewed EID (exact-EID scoped) and the list rides into the submit. 2026-08-20 (pm): pdf-download step leaves the documents as a plain folder in the day folder (no zip); stamps pdfFolder.",
+   "impactRationale": "Resets the I-9 page once per item so item N+1 never inherits item N's modal wreckage; uses the transaction number the submit itself read back. 2026-08-20: data.notMatchEids (operator-reviewed NOT-this-person EIDs) — person-search identity gate proceeds as a NEW hire when every Search/Match hit is a reviewed EID (exact-EID scoped) and the list rides into the submit. 2026-08-20 (pm): pdf-download step leaves the documents as a plain folder in the day folder (no zip); stamps pdfFolder. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -1065,15 +1171,17 @@
    "path": "tests/unit/architecture/nullish-literal-data-fallback.test.ts",
    "changeKind": "modified",
    "beforeSha256": "60ca6b0b8644e7367301482a7c9a1cec47f4210d035d262e5b2f219d4805a417",
-   "afterSha256": "d5e81185d0e7132b6f36233132738d87009335bb4884af8433aac162b76c9c57",
+   "afterSha256": "052e1d6d8d8f3be779329e472bcd006905fac4151ddfdb27601bbad8fa0279db",
    "capabilityIds": [
-    "legacy-dev-tool-architecture-guards"
+    "legacy-dev-tool-architecture-guards",
+    "legacy-workflow-onboarding"
    ],
    "rebuildRecheckIds": [
     "npm:lint:legacy-tests-ratchet",
     "npm:test:architecture"
    ],
-   "preservation": "preserved"
+   "preservation": "preserved",
+   "impactRationale": "2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353."
   },
   {
    "path": "tests/unit/architecture/rebuild-gates.test.ts",
@@ -1226,6 +1334,21 @@
    "preservation": "preserved"
   },
   {
+   "path": "tests/unit/systems/ucpath/job-summary.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "89dfb00eb694fd4a91997d8987ff3ac0c6a4f4d38447752f5a12c0023e0680f0",
+   "afterSha256": "68a1fc5cbeac6bcb2e87bf275de9c36dd6489b8c2b353002cdac74d8ef268ad9",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "tests/unit/systems/ucpath/ss-smart-hr.test.ts",
    "changeKind": "modified",
    "beforeSha256": "57506848064063459502da280dc9cb31d8a5dc6c5e9f44bc42bbf5be8b098f43",
@@ -1245,7 +1368,7 @@
    "path": "tests/unit/systems/ucpath/transaction.test.ts",
    "changeKind": "modified",
    "beforeSha256": "425eac4dcc2c7ee649533bee1e83fa3670dd51f46a30998600438b5f037dfcdb",
-   "afterSha256": "72ed26c40168c95824112e5f0c870119183add019c60cc3defcb5fef86daa317",
+   "afterSha256": "b163fed098f0bfba8f248d7301dc728df72969aee68c3d930109096fff701afb",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -1255,7 +1378,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": " 2026-08-20: pins decidePersonMatchContinue / classifySubmitSignals / normalizers with the live Robles + Sun candidate tables."
+   "impactRationale": "2026-08-20: pins decidePersonMatchContinue / classifySubmitSignals / normalizers with the live Robles + Sun candidate tables. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353."
   },
   {
    "path": "tests/unit/workflows/emergency-contact/enter.test.ts",
@@ -1273,14 +1396,29 @@
    "impactRationale": "Test updated alongside the 2026-08-05 Emergency Contact fix (gate fakes model the value-anchored read; waitForTimeout allowlist count reflects the removed name-fill sleep)."
   },
   {
-   "path": "tests/unit/workflows/onboarding/workflow.test.ts",
+   "path": "tests/unit/workflows/onboarding/schema.test.ts",
    "changeKind": "modified",
-   "beforeSha256": "73cfea57e2cd6b9ed2f82ee457417209d472773dc257587d6a22db406af7bac6",
-   "afterSha256": "d43875880d983f9ebf4d34ca53ffb574ba3a3be9080f61e45bbc187070f9cf76",
+   "beforeSha256": "9bd06b90739256da2394301627248e01cb095d823d2585c2489936c5d2e3bde2",
+   "afterSha256": "cf527db24e35dbbb15103a4aa670aa4a193e2677d55f9036fe02a3064c08bd22",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
-   "impactRationale": "Pins the CRM placeholder normalization, including that real names containing a placeholder as a substring are preserved.",
+   "impactRationale": "2026-08-21 (ef0b20ad): pins OnboardingInputSchema.mode enum (new-hire | rehire, optional).",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/workflows/onboarding/workflow.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "73cfea57e2cd6b9ed2f82ee457417209d472773dc257587d6a22db406af7bac6",
+   "afterSha256": "e19fd564f696f0aaae8055d22672ff3ebd1e38220f8fdaf227836ebdd7f5e5ae",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Pins the CRM placeholder normalization, including that real names containing a placeholder as a substring are preserved. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -1312,66 +1450,6 @@
     "legacy-workflow-emergency-contact"
    ],
    "impactRationale": "Pins removal of self-closing and paired elements across table parts, the no-op path on clean workbooks, and that worksheet cell data is never rewritten.",
-   "rebuildRecheckIds": [
-    "npm:test",
-    "npm:test:architecture"
-   ],
-   "preservation": "preserved"
-  },
-  {
-   "path": "src/systems/ucpath/job-summary.ts",
-   "changeKind": "modified",
-   "beforeSha256": "2450ee4adf5436b5053bd373093e41c1cc3edbf11e2848ce7ccac2207d1d4bbd",
-   "afterSha256": "7da79f28b36e2eb870e724fe080e4c530d487a2e251c3ade39fbe29e9120f0a7",
-   "capabilityIds": [
-    "legacy-workflow-separations"
-   ],
-   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift.",
-   "rebuildRecheckIds": [
-    "npm:test",
-    "npm:test:architecture"
-   ],
-   "preservation": "preserved"
-  },
-  {
-   "path": "tests/unit/systems/ucpath/job-summary.test.ts",
-   "changeKind": "modified",
-   "beforeSha256": "89dfb00eb694fd4a91997d8987ff3ac0c6a4f4d38447752f5a12c0023e0680f0",
-   "afterSha256": "68a1fc5cbeac6bcb2e87bf275de9c36dd6489b8c2b353002cdac74d8ef268ad9",
-   "capabilityIds": [
-    "legacy-workflow-separations"
-   ],
-   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift.",
-   "rebuildRecheckIds": [
-    "npm:test",
-    "npm:test:architecture"
-   ],
-   "preservation": "preserved"
-  },
-  {
-   "path": "src/systems/kuali/navigate.ts",
-   "changeKind": "modified",
-   "beforeSha256": "134485590fbd4e30d84be93ba704d72e5d674a0157b74c57be34370703eb874c",
-   "afterSha256": "bddbed9e1bd256abf9ca1e45f60af4a5f9ac68f4a2e17e74dfe6ef534938978d",
-   "capabilityIds": [
-    "legacy-workflow-separations"
-   ],
-   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists.",
-   "rebuildRecheckIds": [
-    "npm:test",
-    "npm:test:architecture"
-   ],
-   "preservation": "preserved"
-  },
-  {
-   "path": "src/systems/kuali/index.ts",
-   "changeKind": "modified",
-   "beforeSha256": "205d1afa7ac17343841d7486fdcee1bf2a4e8c1f148c104cfc3c3a0f2d4cf00d",
-   "afterSha256": "e45f81503b8f9139a649bcf500f26fbb4eba904233e8080dfc43bced2cc6ad9b",
-   "capabilityIds": [
-    "legacy-workflow-separations"
-   ],
-   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
