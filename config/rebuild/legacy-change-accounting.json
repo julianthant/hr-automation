@@ -491,15 +491,17 @@
    "path": "src/systems/new-kronos/LESSONS.md",
    "changeKind": "modified",
    "beforeSha256": "780ab0ff7f3085b1b4570d01b11e1ce63fb6ed7636a5bf31c0da50136d372fe9",
-   "afterSha256": "e506a3c9e2527bbf4c7954be49b8fe67d0552de8dc47e2fb3d0947a560c32f9f",
+   "afterSha256": "fcfe9ed2430b8d0250b326b0e04c23087e9b7b7bc76281e0362bf21b7ddabf67",
    "capabilityIds": [
-    "legacy-workflow-separations"
+    "legacy-workflow-separations",
+    "legacy-workflow-kronos-pay-rule"
    ],
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
    ],
-   "preservation": "preserved"
+   "preservation": "preserved",
+   "impactRationale": "2026-08-21 (16ca8559): New Kronos NOT FOUND now needs the no-results sentinel to hold continuously for NO_RESULTS_STABLE_MS (2s) with no found signal — the sentinel is also the Employee Search panel's pre-search resting state; a single-tick verdict mis-resolved HDH EID 10837979 (doc 4546) NOT FOUND, skipped the timecard, and filed a wrong-dated termination."
   },
   {
    "path": "src/systems/new-kronos/SELECTORS.md",
@@ -520,15 +522,17 @@
    "path": "src/systems/new-kronos/navigate.ts",
    "changeKind": "modified",
    "beforeSha256": "49b2fa7c165bcc6a3c59620e192b0055ad46e758c412c5a1c8c655ebbe9508c6",
-   "afterSha256": "4f6710e71c06f07c620e0c422288729770073ba2ec6b67c10a5c60947164f494",
+   "afterSha256": "26f6c3cd0fb621c966312714dabc5481f5b10f676381552097a3fa3f6fb2eeaa",
    "capabilityIds": [
-    "legacy-workflow-separations"
+    "legacy-workflow-separations",
+    "legacy-workflow-kronos-pay-rule"
    ],
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
    ],
-   "preservation": "preserved"
+   "preservation": "preserved",
+   "impactRationale": "2026-08-21 (16ca8559): New Kronos NOT FOUND now needs the no-results sentinel to hold continuously for NO_RESULTS_STABLE_MS (2s) with no found signal — the sentinel is also the Employee Search panel's pre-search resting state; a single-tick verdict mis-resolved HDH EID 10837979 (doc 4546) NOT FOUND, skipped the timecard, and filed a wrong-dated termination."
   },
   {
    "path": "src/systems/old-kronos/SELECTORS.md",
@@ -943,7 +947,7 @@
    "path": "src/workflows/separations/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "705842e6a4800e8775cd1b002207bfef73af656070dc1751bf539b1bee018893",
-   "afterSha256": "5822cdbdd66774faf49e81c6239fe1a0c299db96e249c0bdeed5fdb6322916bd",
+   "afterSha256": "f23cf2ee1d634b6f593d9238eafb2dde9e7e1d3fa68baf753d9b1518dd322942",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -952,7 +956,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists."
+   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists. 2026-08-21 (16ca8559): New Kronos NOT FOUND now needs the no-results sentinel to hold continuously for NO_RESULTS_STABLE_MS (2s) with no found signal — the sentinel is also the Employee Search panel's pre-search resting state; a single-tick verdict mis-resolved HDH EID 10837979 (doc 4546) NOT FOUND, skipped the timecard, and filed a wrong-dated termination."
   },
   {
    "path": "src/workflows/separations/steps/kuali-extract.ts",
@@ -1450,6 +1454,22 @@
     "legacy-workflow-emergency-contact"
    ],
    "impactRationale": "Pins removal of self-closing and paired elements across table parts, the no-op path on clean workbooks, and that worksheet cell data is never rewritten.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/systems/new-kronos/navigate.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "09a2e08ef6094c1d50b7321655de4df47c46a95f1b1154cafbad1379f6cb1090",
+   "afterSha256": "4c5a96d95aa0a210ce35fc2d18a5d77a16e96d128800a204569753f68df5f9ef",
+   "capabilityIds": [
+    "legacy-workflow-separations",
+    "legacy-workflow-kronos-pay-rule"
+   ],
+   "impactRationale": "2026-08-21 (16ca8559): New Kronos NOT FOUND now needs the no-results sentinel to hold continuously for NO_RESULTS_STABLE_MS (2s) with no found signal — the sentinel is also the Employee Search panel's pre-search resting state; a single-tick verdict mis-resolved HDH EID 10837979 (doc 4546) NOT FOUND, skipped the timecard, and filed a wrong-dated termination. Unit-pins createSearchOutcomeSettler / NO_RESULTS_STABLE_MS.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
