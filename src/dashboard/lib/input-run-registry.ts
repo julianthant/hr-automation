@@ -84,6 +84,16 @@ export interface InputRunConfig {
    * every parsed input; workflow-specific branching belongs in this registry.
    */
   modes?: readonly InputRunMode[];
+  /**
+   * Where the mode picker renders. `inline` (default) — a segmented control
+   * above the text box (person-lookup Search | Match, which also swaps the
+   * parser/placeholder). `run-settings` — a radio section inside the gear
+   * popover beside Workers / Dry run (onboarding Hire type: the modes share
+   * one parser, so the picker is a run setting, not an input-shape switch).
+   */
+  modesPlacement?: "inline" | "run-settings";
+  /** Section heading for the mode picker when it lives in run settings (e.g. "Hire type"). */
+  modesLabel?: string;
   /** Surface the independent CRM-check toggle in run settings. */
   supportsCrmCheck?: boolean;
   /**
@@ -306,7 +316,10 @@ export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfi
     // Hire type — folded onto every parsed input as `mode` (validated by the
     // workflow's Zod `mode` enum; omitted ⇒ new-hire). "Rehire" = the person
     // already exists in UCPath: no I-9, UC_CONC_HIRE concurrent hire on the
-    // matched Empl ID (2026-08-21).
+    // matched Empl ID (2026-08-21). Lives in the run-settings gear beside
+    // Workers / Dry run (operator ask 2026-08-21), not as a row above the box.
+    modesPlacement: "run-settings",
+    modesLabel: "Hire type",
     modes: [
       {
         key: "new-hire",
