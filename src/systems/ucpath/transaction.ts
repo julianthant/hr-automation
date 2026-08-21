@@ -11,6 +11,7 @@ import {
 import {
   smartHR,
   hrTasks,
+  ssSmartHRTransactions,
   personalData as personalDataSelectors,
   comments as commentsSelectors,
   termination as terminationSelectors,
@@ -510,6 +511,160 @@ export async function selectReasonCode(
   });
 
   log.success("Reason code selected and continued");
+}
+
+// ─── EID-bearing templates: "Enter Transaction Details" (UC_CONC_HIRE, …) ───
+
+/**
+ * Fill the Empl ID on the "Enter Transaction Details" page and read back the
+ * person NAME PeopleSoft resolves for it (`#PERSON_NAME_NAME_DISPLAY`).
+ *
+ * The readback is load-bearing: a mistyped/bogus EID resolves to SOME real
+ * person (live 2026-08-21: `10000001` → an unrelated employee), and Continue
+ * then files the transaction against THAT person. The caller MUST compare the
+ * returned name with the expected person before continuing. Throws when no
+ * name resolves (unknown EID / page never refreshed) — never returns "".
+ */
+export async function fillTransactionDetailsEmplId(
+  page: Page,
+  frame: FrameLocator,
+  emplId: string,
+): Promise<string> {
+  log.step(`Filling Empl ID ${emplId} on "Enter Transaction Details"...`);
+  await safeFill(ssSmartHRTransactions.emplIdInput(frame), emplId, {
+    timeout: 10_000,
+    label: "ucpath transaction details empl id",
+  });
+  // Blur → PeopleSoft round-trip that resolves the person name next to the field.
+  await page.keyboard.press("Tab");
+  await waitForPeopleSoftProcessing(frame, 20_000);
+  const nameLocator = smartHR.transactionDetailsPersonName(frame);
+  await waitForNamedCondition(nameLocator, {
+    timeoutMs: 15_000,
+    label: "transaction details resolved person name (PERSON_NAME_NAME_DISPLAY)",
+  });
+  const deadline = Date.now() + 15_000;
+  let name = "";
+  while (Date.now() < deadline) {
+    name = ((await nameLocator.textContent({ timeout: 5_000 }).catch(() => null)) ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (name) break;
+    await sleep(500);
+  }
+  if (!name) {
+    throw new Error(
+      `UCPath resolved NO person name for Empl ID ${emplId} on "Enter Transaction Details" — `
+      + `the EID may be unknown or the page never refreshed. Refusing to continue.`,
+    );
+  }
+  log.step(`Empl ID ${emplId} resolved to "${name}" on Enter Transaction Details`);
+  return name;
+}
+
+/**
+ * Acknowledge the "Person ID <eid> already exists in the system for <name>.
+ * Select OK to continue the hire process with this Person ID." dialog that the
+ * EID-bearing HIRE templates (UC_CONC_HIRE — live 2026-08-21) raise right after
+ * Continue on "Enter Transaction Details". Only THAT dialog, naming THIS EID,
+ * is acknowledged; no dialog, or any other dialog, throws — the page state is
+ * unknown and clicking OK blind could accept a validation refusal as if it were
+ * this confirmation. Returns the dialog text for the log.
+ */
+export async function acknowledgePersonIdExistsDialog(
+  page: Page,
+  emplId: string,
+  opts: { timeoutMs?: number } = {},
+): Promise<string> {
+  const timeoutMs = opts.timeoutMs ?? 20_000;
+  const deadline = Date.now() + timeoutMs;
+  let text = "";
+  while (Date.now() < deadline) {
+    text = await readPeopleSoftDialogText(page);
+    if (text) break;
+    await sleep(500);
+  }
+  if (!text) {
+    throw new Error(
+      `Expected the "Person ID ${emplId} already exists" confirmation after Continue on `
+      + `"Enter Transaction Details", but no PeopleSoft dialog appeared within ${timeoutMs}ms — `
+      + `page state unknown, refusing to proceed.`,
+    );
+  }
+  if (!/already exists in the system/i.test(text) || !text.includes(emplId)) {
+    throw new Error(
+      `Unexpected PeopleSoft dialog after Continue on "Enter Transaction Details" (expected `
+      + `"Person ID ${emplId} already exists in the system … Select OK to continue"): "${text.slice(0, 300)}"`,
+    );
+  }
+  const clicked = await dismissPeopleSoftDialog(page);
+  if (!clicked) {
+    throw new Error(`Could not click OK on the "Person ID ${emplId} already exists" dialog`);
+  }
+  log.step(`Acknowledged PeopleSoft dialog: ${text.slice(0, 200)}`);
+  return text;
+}
+
+/**
+ * Wait until the transaction form has landed on its Job Data tab (the Position
+ * Number textbox is the named post-condition). UC_CONC_HIRE opens on Job Data
+ * (tabs: Job Data → Earns Dist → Personal Data — live 2026-08-21).
+ */
+export async function waitForJobDataForm(frame: FrameLocator, timeoutMs = 30_000): Promise<void> {
+  await waitForPeopleSoftProcessing(frame, timeoutMs);
+  await waitForNamedCondition(jobDataSelectors.positionNumberInput(frame), {
+    timeoutMs,
+    label: "transaction form Job Data tab (Position Number textbox)",
+  });
+  log.success("Transaction form loaded on Job Data");
+}
+
+/**
+ * Read the Legal First / Legal Last name textboxes off the Personal Data tab.
+ * On EID-bearing templates they are PRE-FILLED from the existing person record,
+ * so they are a second wrong-person readback (after the Enter Transaction
+ * Details name). Throws if either is blank — an unreadable name must not pass
+ * a safety check by accident.
+ */
+export async function readPersonalDataLegalName(
+  frame: FrameLocator,
+): Promise<{ firstName: string; lastName: string }> {
+  const firstName = (await personalDataSelectors.legalFirstName(frame).inputValue({ timeout: 10_000 })).trim();
+  const lastName = (await personalDataSelectors.legalLastName(frame).inputValue({ timeout: 10_000 })).trim();
+  if (!firstName || !lastName) {
+    throw new Error(
+      `Personal Data tab legal name is blank (first='${firstName}', last='${lastName}') — cannot verify the person`,
+    );
+  }
+  return { firstName, lastName };
+}
+
+/**
+ * Discard the in-progress transaction draft via the form's Cancel button and
+ * wait for the Smart HR Transactions landing form (Select Template textbox) to
+ * return. Live 2026-08-21: a cancelled UC_CONC_HIRE draft left NO
+ * "Transactions in Progress" row; no confirmation dialog was raised (one is
+ * acknowledged if it appears).
+ */
+export async function cancelTransactionDraft(page: Page, frame: FrameLocator): Promise<void> {
+  log.step("Cancelling the transaction draft...");
+  await dismissPeopleSoftModalMask(page);
+  await safeClick(smartHR.cancelTransactionButton(frame), {
+    timeout: 10_000,
+    label: "ucpath transaction cancel button",
+  });
+  await sleep(2_000);
+  const dialogText = await readPeopleSoftDialogText(page);
+  if (dialogText) {
+    log.step(`Cancel raised a dialog — acknowledging: ${dialogText.slice(0, 160)}`);
+    await dismissPeopleSoftDialog(page);
+  }
+  await waitForPeopleSoftProcessing(frame, 20_000);
+  await waitForNamedCondition(smartHR.templateInput(frame), {
+    timeoutMs: 20_000,
+    label: "smart hr transactions form after cancel (Select Template textbox)",
+  });
+  log.success("Transaction draft cancelled — back on Smart HR Transactions");
 }
 
 // ─── STEP 4: Fill personal data ───
@@ -1044,6 +1199,19 @@ export async function clickEmployeeExperienceTab(
   frame: FrameLocator,
 ): Promise<void> {
   await clickTransactionTab(page, frame, "Employee Experience", smartHR.tab.employeeExperience(frame));
+}
+
+/**
+ * Click the Personal Data tab. On UC_FULL_HIRE it is the landing tab (re-clicked
+ * at the end of the walk); on UC_CONC_HIRE it is the LAST tab of the walk
+ * (Job Data → Earns Dist → Personal Data) and visiting it is what enables
+ * Save and Submit (live 2026-08-21).
+ */
+export async function clickPersonalDataTab(
+  page: Page,
+  frame: FrameLocator,
+): Promise<void> {
+  await clickTransactionTab(page, frame, "Personal Data", smartHR.tab.personalData(frame));
 }
 
 async function clickTransactionTab(
@@ -2069,4 +2237,22 @@ export function buildCommentsText(
     return `${base} EE does not have an SSN yet, we will add it as soon as it is provided.`;
   }
   return base;
+}
+
+/**
+ * Build the Smart HR comments text for a CONCURRENT HIRE (UC_CONC_HIRE — an
+ * existing UCPath person taking an additional Dining job). Mirrors the
+ * operator's manual comment verbatim (2026-08-20, T002216750):
+ *
+ *   "Concurrent Hire as Dining Student Effective 09/11/2026. PCN 40699123. Job number #1169086."
+ *
+ * PCN = the position number being filled; Job number = the CRM recruitment number.
+ * No SSN clause — the person record (and its National ID) already exists.
+ */
+export function buildConcurrentHireCommentsText(
+  effectiveDate: string,
+  positionNumber: string,
+  recruitmentNumber: string,
+): string {
+  return `Concurrent Hire as Dining Student Effective ${effectiveDate}. PCN ${positionNumber}. Job number #${recruitmentNumber}.`;
 }

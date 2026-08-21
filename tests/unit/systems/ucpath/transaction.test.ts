@@ -2,6 +2,7 @@ import { describe, test } from "vitest";
 import assert from "node:assert/strict";
 import type { FrameLocator, Locator, Page } from "playwright";
 import {
+  buildConcurrentHireCommentsText,
   extractSmartHrTransactionNumber,
   rowMatchesTerminationEid,
   classifyOutcomeSignals,
@@ -671,5 +672,14 @@ describe("classifySubmitSignals", () => {
   });
   test("nothing → pending", () => {
     assert.equal(classifySubmitSignals(false, false, false), "pending");
+  });
+});
+
+describe("buildConcurrentHireCommentsText (UC_CONC_HIRE rehire mode, 2026-08-21)", () => {
+  test("mirrors the operator's manual comment verbatim: hire wording, PCN, job number", () => {
+    assert.equal(
+      buildConcurrentHireCommentsText("09/11/2026", "40699123", "1169086"),
+      "Concurrent Hire as Dining Student Effective 09/11/2026. PCN 40699123. Job number #1169086.",
+    );
   });
 });

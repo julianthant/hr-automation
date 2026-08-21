@@ -86,6 +86,18 @@ export const smartHR = {
   continueButton: (f: FrameLocator): Locator =>
     f.getByRole("button", { name: "Continue" }),
 
+  /**
+   * "Enter Transaction Details" page (EID-bearing templates — UC_CONC_HIRE,
+   * UC_VOL_TERM, …): the person NAME PeopleSoft resolves next to the Empl ID
+   * field once an EID is entered. Load-bearing wrong-person guard — a bogus
+   * EID resolves to SOME real person (10000001 → a different employee), so
+   * the caller must compare this against the expected name before Continue.
+   * verified 2026-08-21 (live probe; id `PERSON_NAME_NAME_DISPLAY`)
+   * @tags empl, id, name, readback, transaction-details, smart-hr
+   */
+  transactionDetailsPersonName: (f: FrameLocator): Locator =>
+    f.locator("#PERSON_NAME_NAME_DISPLAY"),
+
   /** Tabs within the transaction form. verified 2026-03-16 */
   tab: {
     /**
@@ -120,6 +132,15 @@ export const smartHR = {
    */
   saveAndSubmitButton: (f: FrameLocator): Locator =>
     f.getByRole("button", { name: "Save and Submit" }).first(),
+
+  /**
+   * Cancel button on the transaction form action bar (discards the in-progress
+   * draft — live 2026-08-21 a cancelled UC_CONC_HIRE left NO "Transactions in
+   * Progress" row). verified 2026-08-21 (id `HR_TBH_WRK_TBH_CANCEL$6$`)
+   * @tags cancel, draft, transaction, button
+   */
+  cancelTransactionButton: (f: FrameLocator): Locator =>
+    f.locator('input[id^="HR_TBH_WRK_TBH_CANCEL"]').first(),
 
   /**
    * OK button on the confirmation dialog after Save & Submit. verified 2026-04-01
