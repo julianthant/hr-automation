@@ -41,8 +41,12 @@ import {
 import { extractRawFields, extractRecordPageFields } from "./extract.js";
 import { validateEmployeeData } from "./schema.js";
 import type { EmployeeData } from "./schema.js";
-import { buildTransactionPlan } from "./enter.js";
-import { TEMPLATE_ID } from "./config.js";
+import {
+  buildTransactionPlan,
+  buildConcurrentHirePlan,
+  cancelConcurrentHireDraft,
+} from "./enter.js";
+import { TEMPLATE_ID, CONC_HIRE_TEMPLATE_ID } from "./config.js";
 import {
   buildCrmDocumentDownloadPath,
   downloadCrmIdocsDocuments,
@@ -146,6 +150,10 @@ export const onboardingWorkflow = defineWorkflow({
     { key: "wage", label: "Wage" },
     { key: "effectiveDate", label: "Eff Date" },
     { key: "i9ProfileId", label: "I9 Profile" },
+    // "new-hire" | "rehire" — the dashboard mode picker (UC_FULL_HIRE vs UC_CONC_HIRE).
+    { key: "hireMode", label: "Hire type" },
+    // Rehire mode only: the existing UCPath Empl ID the concurrent hire is filed on.
+    { key: "emplId", label: "Empl ID", conditional: true },
     // Stamped by the post-submit readback (or the duplicate-hire skip path).
     // conditional: rehire / dry-run / failed runs legitimately never reach it.
     { key: "transactionNumber", label: "Txn #", conditional: true },
@@ -158,6 +166,7 @@ export const onboardingWorkflow = defineWorkflow({
   getId: (d) => d.email ?? "",
   initialData: (input) => ({
     email: input.email,
+    hireMode: input.mode ?? "new-hire",
     ...(input.dryRun ? { dryRun: true } : {}),
   }),
   operatorSubject: (input) =>
@@ -165,6 +174,19 @@ export const onboardingWorkflow = defineWorkflow({
   handler: async (ctx, input) => {
     const email = input.email;
     let data: EmployeeData | null = null;
+
+    // Hire type (dashboard input-run mode picker; default new-hire).
+    //   new-hire → UC_FULL_HIRE: I-9 profile + Smart HR new-hire transaction.
+    //   rehire   → the person ALREADY exists in UCPath: person-search MUST match
+    //              (no match fails loud), the I-9 step is skipped, and the hire
+    //              is filed as a UC_CONC_HIRE concurrent hire on the matched
+    //              Empl ID (live-mapped 2026-08-21; operator procedure 2026-08-20).
+    const hireMode = input.mode ?? "new-hire";
+    const isRehire = hireMode === "rehire";
+    ctx.updateData({ hireMode });
+    log.step(`[onboarding] hire type: ${hireMode}${isRehire ? " (existing person → UC_CONC_HIRE, no I-9)" : " (UC_FULL_HIRE)"}`);
+    // Rehire mode: the existing person's Empl ID, resolved by person-search below.
+    let rehireEmplId = "";
 
     // Identity-approval re-run marker. When the operator approves a chosen EID
     // from the identity-approval review, the approve action re-enqueues this
@@ -420,6 +442,13 @@ export const onboardingWorkflow = defineWorkflow({
       && matchedEids.every((eid) => notMatchEids.includes(eid));
 
     if (searchResult.found && everyMatchReviewedNotThisPerson) {
+      if (isRehire) {
+        throw new Error(
+          `Rehire mode: UCPath matched ${matchedEids.join(", ")} but every one is operator-reviewed `
+          + `NOT this person (notMatchEids) — there is no existing person to file a concurrent hire on. `
+          + `Run as a New hire instead, or correct notMatchEids.`,
+        );
+      }
       // ── Operator-reviewed false match → proceed as a NEW hire ──
       // Every EID Search/Match returned is one the operator already reviewed
       // (via the identity-approval card / Person Org Summary) and confirmed is
@@ -457,10 +486,20 @@ export const onboardingWorkflow = defineWorkflow({
       const crmName = `${crmFirst} ${crmLast}`.trim();
       const nameTier = match ? classifyNameSimilarity(crmName, matchedName) : "different";
 
-      if (!eidPreApproved && match && nameTier === "different") {
+      // Rehire mode with MORE THAN ONE matched person: the EID cannot be picked
+      // automatically (the same SSN/DOB/name fuzzy search can return several
+      // people). Pause for the same identity review — the operator approves the
+      // proposed EID or types the right one, and the approved re-run carries it.
+      const rehireAmbiguous = isRehire && !eidPreApproved && matchedEids.length > 1;
+
+      if (!eidPreApproved && match && (nameTier === "different" || rehireAmbiguous)) {
         log.warn(
-          `[person-search] UCPath match "${matchedName}" (EID ${match.emplId}) does not match the CRM `
-          + `record "${crmName}" — PAUSING for operator identity approval (no silent rehire/hire).`,
+          rehireAmbiguous && nameTier !== "different"
+            ? `[person-search] Rehire mode: UCPath returned ${matchedEids.length} matching persons `
+              + `(${matchedEids.join(", ")}) for "${crmName}" — PAUSING for operator identity approval `
+              + `to pick the Empl ID for the concurrent hire.`
+            : `[person-search] UCPath match "${matchedName}" (EID ${match.emplId}) does not match the CRM `
+              + `record "${crmName}" — PAUSING for operator identity approval (no silent rehire/hire).`,
         );
         ctx.updateData(buildIdentityApprovalPauseData({
           // Original = the CRM-extracted person. A new hire has no UCPath EID, so
@@ -482,25 +521,61 @@ export const onboardingWorkflow = defineWorkflow({
         );
       }
 
-      log.error("Person already exists in UCPath — marking as rehire");
+      const emplIds = searchResult.matches?.map((m) => m.emplId).join(", ") ?? "";
       if (searchResult.matches) {
         for (const m of searchResult.matches) {
           log.step(`  Empl ID: ${m.emplId}, Name: ${m.firstName} ${m.lastName}`);
         }
       }
-      const emplIds = searchResult.matches?.map((m) => m.emplId).join(", ") ?? "";
-      ctx.updateData({
-        rehire: "Yes",
-        existingEmplIds: emplIds,
-        i9ProfileId: "N/A",
-        status: "Rehire",
-      });
-      // Early return — rehire short-circuits before I-9 creation and transaction.
-      return;
-    }
 
-    log.success("No duplicate found — proceeding with I-9 creation");
-    ctx.updateData({ rehire: "No" });
+      if (isRehire) {
+        // ── Rehire mode: the match IS the expected outcome — carry the EID forward ──
+        // Exactly one candidate by now: either the operator-approved EID, or the
+        // single person-search match (>1 paused above).
+        rehireEmplId = eidPreApproved ? approvedEid : (matchedEids[0] ?? "");
+        if (!isUcpathEmployeeId(rehireEmplId)) {
+          throw new Error(
+            `Rehire mode: person-search matched but yielded no usable UCPath Empl ID `
+            + `(matches: '${emplIds || "<none>"}') for ${crmName} — cannot file the concurrent hire.`,
+          );
+        }
+        log.success(
+          `[person-search] Rehire mode: existing UCPath person ${rehireEmplId} — continuing to the `
+          + `${CONC_HIRE_TEMPLATE_ID} concurrent-hire transaction (I-9 step skipped).`,
+        );
+        ctx.updateData({
+          rehire: "Yes",
+          existingEmplIds: emplIds,
+          emplId: rehireEmplId,
+          i9ProfileId: "N/A (rehire — no I-9)",
+        });
+      } else {
+        // ── New-hire mode: an existing person is NOT filed — short-circuit ──
+        log.error(
+          "Person already exists in UCPath — marking as rehire and stopping. To file this person as "
+          + "an additional Dining job, re-run in the Rehire mode (UC_CONC_HIRE concurrent hire).",
+        );
+        ctx.updateData({
+          rehire: "Yes",
+          existingEmplIds: emplIds,
+          i9ProfileId: "N/A",
+          status: "Rehire",
+        });
+        // Early return — rehire short-circuits before I-9 creation and transaction.
+        return;
+      }
+    } else if (isRehire) {
+      const crmFirst = typeof ctx.data.firstName === "string" ? ctx.data.firstName : "";
+      const crmLast = typeof ctx.data.lastName === "string" ? ctx.data.lastName : "";
+      throw new Error(
+        `Rehire mode: UCPath person search found NO existing person for ${crmFirst} ${crmLast} `
+        + `(SSN/DOB/name) — a rehire needs an existing Empl ID to file the UC_CONC_HIRE concurrent hire on. `
+        + `Run as a New hire instead, or check the CRM SSN/DOB against UCPath.`,
+      );
+    } else {
+      log.success("No duplicate found — proceeding with I-9 creation");
+      ctx.updateData({ rehire: "No" });
+    }
 
     // --- Phase 4: I-9 search (existing) or creation (new) ---
     //
@@ -513,9 +588,18 @@ export const onboardingWorkflow = defineWorkflow({
     const i9ProfileId = await ctx.step("i9-creation", async () => {
       const t0 = Date.now();
       let resultPid = "";
-      let mode: "existing" | "created" | "pending" = "pending";
+      let mode: "existing" | "created" | "pending" | "skipped-rehire" = "pending";
       try {
         if (!data) throw new Error("extraction did not produce data");
+
+        // ── Rehire mode: NO I-9 ── the person already exists in UCPath; the
+        // concurrent hire neither creates nor searches an I-9 profile (operator
+        // rule 2026-08-21: "the rehire does not need the i9").
+        if (isRehire) {
+          mode = "skipped-rehire";
+          log.step(`[Step: i9-creation] SKIPPED — rehire mode (existing person ${rehireEmplId}); no I-9 profile is searched or created`);
+          return "";
+        }
 
         // ── SSN that is not really an SSN (2026-08-18) ──
         // A National ID in the 900-999 range is an ITIN or CRM's all-9s
@@ -670,9 +754,10 @@ export const onboardingWorkflow = defineWorkflow({
       try {
         if (!data) throw new Error("extraction did not produce data");
 
+        const templateId = isRehire ? CONC_HIRE_TEMPLATE_ID : TEMPLATE_ID;
         log.debug(
-          `[Step: transaction] START template='${TEMPLATE_ID}' `
-          + `effectiveDate='${data.effectiveDate}'`,
+          `[Step: transaction] START template='${templateId}' `
+          + `effectiveDate='${data.effectiveDate}'${isRehire ? ` emplId='${rehireEmplId}'` : ""}`,
         );
 
         // ── Duplicate-hire idempotency probe (before the irreversible submit) ──
@@ -692,7 +777,7 @@ export const onboardingWorkflow = defineWorkflow({
           firstName: data.firstName,
           lastName: data.lastName,
           effectiveDate: data.effectiveDate,
-          templateId: TEMPLATE_ID,
+          templateId,
         });
         if (existingHire.found) {
           txnExit = existingHire.transactionId || "<already-submitted>";
@@ -722,12 +807,18 @@ export const onboardingWorkflow = defineWorkflow({
           // hire (2026-08-18: T002214808/810/812 were all read fine here while
           // the SS lookup found nothing).
           let submittedTxnNumber = "";
-          const plan = buildTransactionPlan(data, ucpathPage, i9ProfileId, {
-            dryRun: input.dryRun === true,
-            onTransactionNumber: (txn) => { submittedTxnNumber = txn; },
-            notMatchEids,
-          });
-          log.step("Executing Smart HR transaction plan...");
+          const plan = isRehire
+            // Rehire: UC_CONC_HIRE on the existing Empl ID (no I-9, no personal data).
+            ? buildConcurrentHirePlan(data, ucpathPage, rehireEmplId, {
+                dryRun: input.dryRun === true,
+                onTransactionNumber: (txn) => { submittedTxnNumber = txn; },
+              })
+            : buildTransactionPlan(data, ucpathPage, i9ProfileId, {
+                dryRun: input.dryRun === true,
+                onTransactionNumber: (txn) => { submittedTxnNumber = txn; },
+                notMatchEids,
+              });
+          log.step(`Executing Smart HR ${templateId} transaction plan...`);
           await plan.execute();
 
           // DRY RUN terminal: the form is now fully filled but NOT submitted.
@@ -737,6 +828,21 @@ export const onboardingWorkflow = defineWorkflow({
           if (input.dryRun) {
             txnExit = "<dry-run: filled, not submitted>";
             await ctx.screenshot({ kind: "form", label: "onboarding-dry-run-transaction-filled" });
+            if (isRehire) {
+              // The concurrent-hire draft sits on a REAL Empl ID — discard it so
+              // no stale in-progress row precedes the live run.
+              await cancelConcurrentHireDraft(ucpathPage);
+              log.success(
+                "DRY RUN COMPLETE: UC_CONC_HIRE concurrent-hire form filled across all tabs, Save and "
+                + "Submit was ENABLED, and the draft was CANCELLED (nothing submitted, no draft left).",
+              );
+              ctx.updateData({
+                status: "Dry Run Complete",
+                dryRun: true,
+                transactionDraftLeftInUcpath: false,
+              });
+              return;
+            }
             log.success(
               "DRY RUN COMPLETE: Smart HR transaction form filled across all tabs and NOT submitted. "
               + "An unsubmitted draft remains in UCPath — delete it there if you do not intend to submit.",
@@ -793,7 +899,7 @@ export const onboardingWorkflow = defineWorkflow({
                 firstName: data.firstName,
                 lastName: data.lastName,
                 effectiveDate: data.effectiveDate,
-                templateId: TEMPLATE_ID,
+                templateId,
               });
             }
           }

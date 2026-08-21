@@ -152,12 +152,12 @@ const ALLOWLIST: CountAllowlist = {
     reason: "Same as onbase/handler.ts: `input.employeeName ?? \"\"` is a display-only field; `ucpathId` is the real identifier.",
   },
   "src/workflows/onboarding/enter.ts": {
-    count: 2,
-    reason: "`data.dob ?? \"\"` / `data.recruitmentNumber ?? \"N/A\"` are display/log-message fields (a log line and an on-screen 'N/A' placeholder), not values fed into a UCPath submission field.",
+    count: 3,
+    reason: "`data.dob ?? \"\"` / `data.recruitmentNumber ?? \"N/A\"` (x2 — the new-hire and the UC_CONC_HIRE concurrent-hire comment text, 2026-08-21) are display/log-message fields (a log line and an on-screen 'N/A' placeholder in the free-text Comments), not values fed into a UCPath submission field.",
   },
   "src/workflows/onboarding/workflow.ts": {
-    count: 1,
-    reason: "`data.dob ?? \"<none>\"` appears only inside a log message template, not decision logic.",
+    count: 3,
+    reason: "`data.dob ?? \"<none>\"` appears only inside a log message template, not decision logic. `input.mode ?? \"new-hire\"` (x2, 2026-08-21: initialData + handler entry) is the documented default of an OPTIONAL schema enum (`OnboardingInputSchema.mode`) — an omitted mode IS the new-hire path by contract, not a substitute for corrupted data.",
   },
   "src/workflows/person-lookup/workflow.ts": {
     count: 1,

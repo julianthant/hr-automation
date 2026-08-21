@@ -4,6 +4,7 @@ import {
   validateEmployeeData,
   EmployeeDataSchema,
   OnboardingInputSchema,
+  ONBOARDING_HIRE_MODES,
 } from "../../../../src/workflows/onboarding/schema.js";
 import { ExtractionError } from "../../../../src/systems/crm/types.js";
 
@@ -261,5 +262,22 @@ describe("OnboardingInputSchema", () => {
   it("rejects a malformed email", () => {
     const result = OnboardingInputSchema.safeParse({ email: "not-an-email" });
     assert.equal(result.success, false);
+  });
+});
+
+describe("OnboardingInputSchema.mode (hire type, 2026-08-21)", () => {
+  it("accepts a bare email (mode is optional → new-hire by contract)", () => {
+    const result = OnboardingInputSchema.parse({ email: "a@b.com" });
+    assert.equal(result.mode, undefined);
+  });
+  it("accepts mode 'new-hire' and 'rehire'", () => {
+    assert.equal(OnboardingInputSchema.parse({ email: "a@b.com", mode: "new-hire" }).mode, "new-hire");
+    assert.equal(OnboardingInputSchema.parse({ email: "a@b.com", mode: "rehire" }).mode, "rehire");
+  });
+  it("rejects an unknown mode (no silent coercion onto a hire path)", () => {
+    assert.throws(() => OnboardingInputSchema.parse({ email: "a@b.com", mode: "concurrent" }));
+  });
+  it("ONBOARDING_HIRE_MODES is exactly new-hire + rehire", () => {
+    assert.deepEqual([...ONBOARDING_HIRE_MODES], ["new-hire", "rehire"]);
   });
 });

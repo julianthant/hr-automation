@@ -89,9 +89,24 @@ export function validateEmployeeData(
  *   search/create step and before Smart HR. A rehearsal writes to no system of
  *   record. Mirrors the strict no-write meaning of `dryRun` on the other
  *   dashboard-launched workflows that expose it.
+ * - `mode` — hire type, see below.
  */
+export const ONBOARDING_HIRE_MODES = ["new-hire", "rehire"] as const;
+export type OnboardingHireMode = (typeof ONBOARDING_HIRE_MODES)[number];
+
 export const OnboardingInputSchema = z.object({
   email: z.string().email(),
   dryRun: z.boolean().optional(),
+  /**
+   * Hire type (dashboard input-run mode picker; omitted ⇒ `new-hire`).
+   *
+   * - `new-hire` — the person does NOT exist in UCPath: I-9 profile is created
+   *   (search-first), then the UC_FULL_HIRE Smart HR transaction.
+   * - `rehire` — the person ALREADY exists in UCPath (person-search MUST match;
+   *   a no-match fails loud): the I-9 step is skipped entirely and the hire is
+   *   filed as a UC_CONC_HIRE "Staff Concurrent Hire/Inter Location Transfer"
+   *   on the matched Empl ID (reason "Concurrent Hire - Non Dual Emp").
+   */
+  mode: z.enum(ONBOARDING_HIRE_MODES).optional(),
 });
 export type OnboardingInput = z.infer<typeof OnboardingInputSchema>;
