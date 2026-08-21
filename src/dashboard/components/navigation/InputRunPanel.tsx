@@ -141,7 +141,7 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
       onSubmit={onSubmit}
       className="flex flex-col gap-1.5 flex-1 min-w-0"
     >
-      {config.modes && config.modes.length > 0 && (
+      {config.modes && config.modes.length > 0 && config.modesPlacement !== "run-settings" && (
         <div className="flex items-center gap-2 min-w-0">
           <div
             role="radiogroup"
@@ -230,6 +230,14 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
           crmCheck={crmCheck}
           crmCheckDefault={selectedMode?.crmCheckDefault ?? false}
           onToggleCrmCheck={setCrmCheck}
+          modes={config.modesPlacement === "run-settings" ? config.modes ?? [] : []}
+          modesLabel={config.modesLabel}
+          modeKey={selectedMode?.key}
+          onSelectMode={(key) => {
+            const next = config.modes?.find((m) => m.key === key);
+            setModeKey(key);
+            setCrmCheck(next?.crmCheckDefault ?? false);
+          }}
           workflowLabel={workflowDef?.label ?? workflow}
         />
       </div>

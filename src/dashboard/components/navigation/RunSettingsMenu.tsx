@@ -34,8 +34,27 @@ interface RunSettingsMenuProps {
   crmCheck?: boolean;
   crmCheckDefault?: boolean;
   onToggleCrmCheck?: (next: boolean) => void;
+  /**
+   * Workflow modes rendered as a radio section INSIDE the popover (registry
+   * `modesPlacement: "run-settings"`, e.g. onboarding Hire type). Empty/omitted
+   * → no section. The first mode is the default; any other selection flips the
+   * gear's non-default indicator.
+   */
+  modes?: readonly RunSettingsMode[];
+  /** Section heading for `modes` (e.g. "Hire type"). */
+  modesLabel?: string;
+  /** Selected mode key (ignored when `modes` is empty). */
+  modeKey?: string;
+  onSelectMode?: (key: string) => void;
   /** Workflow label for the trigger's tooltip. */
   workflowLabel: string;
+}
+
+/** Minimal mode shape the gear needs (the registry's `InputRunMode` satisfies it). */
+export interface RunSettingsMode {
+  key: string;
+  label: string;
+  note?: string;
 }
 
 /**
@@ -63,6 +82,10 @@ export function RunSettingsMenu({
   crmCheck = false,
   crmCheckDefault = false,
   onToggleCrmCheck,
+  modes = [],
+  modesLabel = "Mode",
+  modeKey,
+  onSelectMode,
   workflowLabel,
 }: RunSettingsMenuProps) {
   const [open, setOpen] = useState(false);
@@ -70,11 +93,14 @@ export function RunSettingsMenu({
   const presetDefault = presetId === FULL_PRESET_ID;
   const dryRunDefault = !supportsDryRun || !dryRun;
   const crmDefault = !supportsCrmCheck || crmCheck === crmCheckDefault;
-  const isDefault = workersDefault && presetDefault && dryRunDefault && crmDefault;
+  const selectedMode = modes.length > 0 ? modes.find((m) => m.key === modeKey) ?? modes[0] : null;
+  const modeDefault = modes.length === 0 || selectedMode?.key === modes[0]?.key;
+  const isDefault = workersDefault && presetDefault && dryRunDefault && crmDefault && modeDefault;
   const selectedPreset = presetDefault ? null : presets.find((p) => p.id === presetId);
 
   const tooltip = [
     `Workers: ${workerChoiceLabel(workerChoice)}`,
+    selectedMode ? `${modesLabel}: ${selectedMode.label}` : null,
     presets.length > 0 ? `Run mode: ${presetDefault ? "Full" : selectedPreset?.label ?? "(unknown)"}` : null,
     supportsDryRun ? `Dry run: ${dryRun ? "On" : "Off"}` : null,
     supportsCrmCheck ? `CRM check: ${crmCheck ? "On" : "Off"}` : null,
@@ -112,6 +138,30 @@ export function RunSettingsMenu({
           <span className="text-[13px] font-medium text-foreground">Workers</span>
           <WorkerStepper value={workerChoice} onChange={onSelectWorker} />
         </div>
+
+        {modes.length > 0 && (
+          <>
+            <div className="my-1.5 border-t border-border/60" aria-hidden />
+            <div className="px-2 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground font-medium">
+              {modesLabel}
+            </div>
+            <ul role="radiogroup" aria-label={modesLabel} className="flex flex-col gap-1.5 px-0.5">
+              {modes.map((m) => (
+                <RadioRow
+                  key={m.key}
+                  id={m.key}
+                  label={m.label}
+                  description={m.note ?? ""}
+                  selected={m.key === selectedMode?.key}
+                  onSelect={() => {
+                    onSelectMode?.(m.key);
+                    setOpen(false);
+                  }}
+                />
+              ))}
+            </ul>
+          </>
+        )}
 
         {supportsDryRun && (
           <>
