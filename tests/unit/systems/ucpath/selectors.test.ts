@@ -1,7 +1,8 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import type { FrameLocator, Locator, Page } from "playwright";
-import { hrTasks, termination } from "../../../../src/systems/ucpath/selectors.js";
+
+import { hrTasks, jobSummary, termination } from "../../../../src/systems/ucpath/selectors.js";
 
 /** Captures the raw CSS a selector hands to `frame.locator(...)`. */
 function captureFrameSelector(build: (f: FrameLocator) => Locator): string {
@@ -70,5 +71,42 @@ describe("UCPath termination selectors", () => {
 
     assert.match(selector, /^input\[/);
     assert.match(selector, /\[id\^="HR_TBH_SCR_WRK_TBH_DATE\$"\]/);
+  });
+});
+
+class CountingLocator {
+  constructor(private readonly matches: number) {}
+
+  getByRole(): CountingLocator {
+    return new CountingLocator(1);
+  }
+
+  locator(selector: string): CountingLocator {
+    return new CountingLocator(selector.includes("EMPLID") ? 0 : this.matches);
+  }
+
+  or(other: CountingLocator): CountingLocator {
+    return new CountingLocator(this.matches + other.matches);
+  }
+
+  first(): CountingLocator {
+    return new CountingLocator(Math.min(this.matches, 1));
+  }
+
+  async count(): Promise<number> {
+    return this.matches;
+  }
+}
+
+describe("jobSummary.rowDrillInLink", () => {
+  it("resolves one click target when a Fluid result row also contains a drill-in link", async () => {
+    const fluidRowWithNestedLink = new CountingLocator(1) as unknown as Locator;
+    const target = jobSummary.rowDrillInLink(fluidRowWithNestedLink);
+
+    assert.equal(
+      await target.count(),
+      1,
+      "strict-mode click must not receive both the result <tr> and its nested drill-in <a>",
+    );
   });
 });

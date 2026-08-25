@@ -678,19 +678,18 @@ export const jobSummary = {
 
   /**
    * Drill-in target that navigates from the grid to the detail page for the
-   * matching row. On the live Fluid grid the ROW ITSELF is the click target — its
-   * `onclick` (`submitAction_win0(..,'#ICRow<n>')`) drills in; there is no `<a>`
-   * drill-in link, so the chain falls through to the row locator (`.or(row)` —
-   * verified 2026-06-24: a real click on the row drills to the detail page). The
-   * legacy "drill in" link role and EMPLID hyperlink stay as classic-grid
-   * fallbacks. verified 2026-06-24
+   * matching row. The Fluid row itself drills in via `onclick`; some live
+   * renderings also include a nested "Drill in" anchor. `.first()` keeps that
+   * valid overlap strict-mode safe while preserving the legacy anchor/EMPLID
+   * fallbacks. verified 2026-08-25 (EID 10647741, active STDT 4 row)
    * @tags multi-row, drill-in, select, row, fluid, job-summary
    */
   rowDrillInLink: (row: Locator): Locator =>
     row
       .getByRole("link", { name: /drill in/i })
       .or(row.locator('a[id*="EMPLID"]'))
-      .or(row),
+      .or(row)
+      .first(),
 
   /**
    * GRID-INDEPENDENT drill-in targets for the Workforce Job Summary results page,
