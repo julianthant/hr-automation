@@ -12,7 +12,7 @@ live.
   wizard always begins with `Input`, derives `Steps`, `Values`, and `Options` from current customization
   in causal order, and ends with `Confirm`. The ordinary path is `Input -> Confirm`; there is no old
   Review stage or example-value row.
-- The workflow title has one shared Radix-backed gear dropdown. It is anchored below the trigger,
+- The workflow title has one shared non-modal Radix-backed gear dropdown. It is anchored below the trigger,
   overlays the form without reflowing it, closes on outside pointer or Escape, returns focus to the gear,
   and exposes checkbox-menu semantics. `Default steps` and `Default options` begin checked, so no
   customization stages render on the ordinary path.
@@ -34,6 +34,10 @@ live.
 
 ## Dated lessons
 
+- **2026-08-28 — a modal dropdown nested in a modal dialog makes the parent body an outside target.**
+  Radix `DropdownMenu` defaults to `modal=true`; after opening the launcher gear, the next pointer click
+  inside the launcher dismissed both layers. Keep this menu `modal={false}` so outside interaction closes
+  only the menu while the parent dialog remains open; Escape still restores focus to the gear.
 - **2026-08-28 — optional inputs belong to the full workflow, not to every custom run.** When every step
   is selected, the workflow resolves its downstream values and no manual replacement fields appear.
   Turning a step off makes the values that step would have supplied mandatory before Start. Showing the

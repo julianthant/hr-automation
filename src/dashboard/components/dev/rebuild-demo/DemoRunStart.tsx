@@ -856,7 +856,7 @@ export function DemoRunModal({
             <section className="flex flex-col gap-[var(--ds-space-snug)]">
               <div className="flex min-w-0 items-start gap-[var(--ds-space-base)]">
                 <h3 className={cn(dsText.section, "min-w-0 flex-1 font-semibold", dsFg.base)}>{workflow.label}</h3>
-                <DropdownMenu open={settingsOpen} onOpenChange={setSettingsOpen}>
+                <DropdownMenu modal={false} open={settingsOpen} onOpenChange={setSettingsOpen}>
                   <DropdownMenuTrigger asChild>
                     <IconButton
                       label="Run settings"
