@@ -45,7 +45,7 @@ export type RunStartCustomizationSection = "steps" | "values" | "options";
 
 export interface RunStartStage {
   number: number;
-  label: "Input" | "Steps" | "Values" | "Options";
+  label: "Input" | "Steps" | "Values" | "Options" | "Confirm";
 }
 
 const CUSTOMIZATION_STAGE_LABEL: Record<RunStartCustomizationSection, RunStartStage["label"]> = {
@@ -81,13 +81,50 @@ export function runStartCustomizationSections({
 }
 
 /**
- * The compact launch path describes only sections that are currently present.
- * Input never moves; opt-in customization follows in the same causal order as
- * its disclosures, so the numbered path cannot leave a stale gap behind.
+ * The compact launch path is a real wizard. Input never moves, opt-in
+ * customization follows in causal order, and Confirm is always the terminal
+ * step where the consequential command lives.
  */
 export function runStartStages(sections: readonly RunStartCustomizationSection[]): RunStartStage[] {
   return [
     { number: 1, label: "Input" },
     ...sections.map((section, index) => ({ number: index + 2, label: CUSTOMIZATION_STAGE_LABEL[section] })),
+    { number: sections.length + 2, label: "Confirm" },
   ];
+}
+
+export function adjacentRunStartStage(
+  stages: readonly RunStartStage[],
+  current: RunStartStage["label"],
+  direction: "previous" | "next",
+): RunStartStage["label"] | null {
+  const currentIndex = stages.findIndex((stage) => stage.label === current);
+  if (currentIndex < 0) return null;
+  return stages[currentIndex + (direction === "next" ? 1 : -1)]?.label ?? null;
+}
+
+const RUN_START_STAGE_ORDER: readonly RunStartStage["label"][] = [
+  "Input",
+  "Steps",
+  "Values",
+  "Options",
+  "Confirm",
+];
+
+/**
+ * A dynamic stage can disappear while the gear menu is open. Keep the wizard
+ * on the nearest still-present earlier step instead of stranding it on a page
+ * that no longer exists.
+ */
+export function reconcileRunStartStage(
+  stages: readonly RunStartStage[],
+  current: RunStartStage["label"],
+): RunStartStage["label"] {
+  if (stages.some((stage) => stage.label === current)) return current;
+  const currentIndex = RUN_START_STAGE_ORDER.indexOf(current);
+  for (let index = currentIndex - 1; index >= 0; index -= 1) {
+    const candidate = RUN_START_STAGE_ORDER[index];
+    if (stages.some((stage) => stage.label === candidate)) return candidate;
+  }
+  return "Input";
 }

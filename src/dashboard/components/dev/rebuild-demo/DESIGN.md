@@ -28,21 +28,22 @@ Consequences of that one line, in order of authority:
 
 ## Run launcher
 
-The launcher is workflow-first. Its compact numbered path is an honest projection of the current form:
-**1 Input** always leads, followed only by the opt-in `Steps`, consequence-driven `Values`, and opt-in
-`Options` disclosures that are actually present. It is an indicator, not a second navigation system. The
-ordinary task path remains **Input -> Start**. The desktop workflow rail stays visible because it is the
-fastest way to change work; at narrow widths it becomes a single select so the form keeps the full
-viewport. There is no Review stage and no example-value row.
+The launcher is workflow-first. Its compact numbered wizard is an honest projection of the current
+task: **Input** always leads, followed only by the opt-in `Steps`, consequence-driven `Values`, and
+opt-in `Options` stages that are actually present, with **Confirm** always last. The ordinary task path
+is **Input -> Confirm**. The desktop workflow rail stays visible because it is the fastest way to change
+work; at narrow widths it becomes a single select so the form keeps the full viewport. There is no old
+verbose Review surface and no example-value row.
 
 The working area is one compact column beside the workflow rail. One gear beside the workflow title
 opens the shared keyboard-aware dropdown, anchored below the trigger and over the form without shifting
 it; the menu holds `Default steps` and `Default options`, both checked initially. Unchecking `Default
-steps` adds a `Steps` disclosure where every
-declared step starts selected. Turning a step off adds a `Values` disclosure containing the values that
-step would have resolved; Start stays disabled until they are supplied. Unchecking `Default options`
-adds the `Options` disclosure. Safety gates remain visible and locked. Phone capture is not a launcher
-method.
+steps` adds a `Steps` stage where every declared step starts selected. Turning a step off adds a `Values`
+stage containing the values that step would have resolved; Next stays disabled until they are supplied.
+Unchecking `Default options` adds the `Options` stage. Every pre-confirmation stage ends in Next. Only
+Confirm carries Start, and it summarizes the scope, deviations, destination, and safety facts needed to
+commit without recreating the old Review page. Safety gates remain visible and locked. Phone capture is
+not a launcher method.
 
 ---
 
