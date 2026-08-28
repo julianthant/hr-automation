@@ -474,6 +474,37 @@ export interface StartFlagWire {
   defaultWhen?: { choice: string; equals: string[] };
 }
 
+/**
+ * A value a skipped timeline step would otherwise have resolved for the steps
+ * after it. The full workflow needs none of these values from the operator;
+ * they become required only when that step is deliberately turned off.
+ */
+export interface StartReplacementInputWire {
+  key: string;
+  label: string;
+  placeholder: string;
+  inputKind: "text" | "id" | "date" | "select";
+  options?: { value: string; label: string }[];
+}
+
+/** One operator-visible step in the start review timeline. */
+export interface StartTimelineStepWire {
+  key: string;
+  label: string;
+  system: string;
+  outcome: string;
+  /** Safety gates may be visible in the timeline without being bypassable. */
+  locked?: boolean;
+  lockedReason?: string;
+  /** Values promoted into the form when this step is turned off. */
+  replacementInputs?: StartReplacementInputWire[];
+}
+
+export interface StartTimelineWire {
+  note: string;
+  steps: StartTimelineStepWire[];
+}
+
 export interface StartCapabilityWire {
   /** the peer methods this workflow can be started by, in offer order */
   methods: StartMethodWire[];
@@ -483,6 +514,8 @@ export interface StartCapabilityWire {
   flags: StartFlagWire[];
   /** the one line saying what starting this workflow does */
   note: string;
+  /** The declared run path and the inputs needed to safely bypass a step. */
+  timeline?: StartTimelineWire;
 }
 
 function dryRunFlag(methods?: StartMethodKind[]): StartFlagWire {
@@ -952,6 +985,85 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
         workerChoice(),
       ],
       flags: [dryRunFlag()],
+      timeline: {
+        note: "The full run resolves every downstream value. Turn off a step only when you already have the values it would have supplied.",
+        steps: [
+          {
+            key: "kuali-extraction",
+            label: "Read the separation",
+            system: "Kuali",
+            outcome: "Employee, dates and termination details",
+            replacementInputs: [
+              { key: "employeeName", label: "Employee name", placeholder: "Last, First", inputKind: "text" },
+              { key: "eid", label: "Confirmed EID", placeholder: "10000000", inputKind: "id" },
+              { key: "lastDayWorked", label: "Last day worked", placeholder: "MM/DD/YYYY", inputKind: "date" },
+              { key: "separationDate", label: "Separation date", placeholder: "MM/DD/YYYY", inputKind: "date" },
+              {
+                key: "terminationType",
+                label: "Termination type",
+                placeholder: "Choose one",
+                inputKind: "select",
+                options: [
+                  { value: "voluntary", label: "Voluntary" },
+                  { value: "involuntary", label: "Involuntary" },
+                ],
+              },
+            ],
+          },
+          {
+            key: "identity-check",
+            label: "Verify the employee",
+            system: "UCPath",
+            outcome: "A confirmed person and EID",
+            replacementInputs: [
+              { key: "eid", label: "Confirmed EID", placeholder: "10000000", inputKind: "id" },
+            ],
+          },
+          {
+            key: "transaction-check",
+            label: "Check for an existing termination",
+            system: "UCPath",
+            outcome: "A duplicate-safe transaction path",
+            locked: true,
+            lockedReason: "Safety gate: always runs before a new transaction",
+          },
+          {
+            key: "ucpath-job-summary",
+            label: "Read job details",
+            system: "UCPath",
+            outcome: "Department and payroll code",
+            replacementInputs: [
+              { key: "department", label: "Department", placeholder: "Department name", inputKind: "text" },
+              { key: "payrollCode", label: "Payroll code", placeholder: "Payroll code", inputKind: "text" },
+            ],
+          },
+          {
+            key: "kronos-search",
+            label: "Verify final work dates",
+            system: "New Kronos",
+            outcome: "Last worked date and timekeeper",
+            replacementInputs: [
+              { key: "lastDayWorked", label: "Last day worked", placeholder: "MM/DD/YYYY", inputKind: "date" },
+              { key: "timekeeperName", label: "Timekeeper name", placeholder: "Last, First", inputKind: "text" },
+            ],
+          },
+          {
+            key: "ucpath-transaction",
+            label: "Create the termination",
+            system: "UCPath",
+            outcome: "Smart HR transaction number",
+            replacementInputs: [
+              { key: "transactionNumber", label: "Existing transaction number", placeholder: "Transaction #", inputKind: "id" },
+            ],
+          },
+          {
+            key: "kuali-finalization",
+            label: "Finalize the separation",
+            system: "Kuali",
+            outcome: "Completed document and receipt",
+          },
+        ],
+      },
     },
     absences: {
       roster: NO_ROSTER_TYPED,

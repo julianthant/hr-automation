@@ -26,6 +26,19 @@ Consequences of that one line, in order of authority:
 6. **A professional dashboard does not explain itself.** Explanatory prose is a
    defect unless it lives inside an **ⓘ**. See the next section — it is binding.
 
+## Run launcher
+
+The launcher is workflow-first and uses one task path: **Input -> Review -> Start**. The desktop
+workflow rail stays visible because it is the fastest way to change work; at narrow widths it becomes a
+single select so the form keeps the full viewport. Shared run settings are a collapsed disclosure, never
+a permanent third rail.
+
+The workflow timeline is the signature control. Every step starts selected. A selected step resolves its
+own downstream values, so the full workflow asks for no manual replacements. Turning a step off promotes
+the values it would have resolved into a required-input block directly below the timeline; Review stays
+disabled until those values are supplied. Safety gates remain visible and locked. Phone capture is not a
+launcher method.
+
 ---
 
 ## The product does not explain itself
