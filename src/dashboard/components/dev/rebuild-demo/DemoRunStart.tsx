@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  ArrowRight,
   Check,
   ChevronDown,
   ChevronUp,
@@ -93,6 +94,7 @@ import {
   missingReplacementInputs,
   replacementInputsForSelection,
   runStartCustomizationSections,
+  runStartStages,
   type RunStartCustomizationSection,
 } from "./demo-runstart-timeline";
 import { DemoIntakeDialog } from "./DemoIntake";
@@ -717,6 +719,7 @@ export function DemoRunModal({
     }),
     [capability.timeline, defaultSteps, defaultOptions, selectedSteps],
   );
+  const launchStages = useMemo(() => runStartStages(customizationSections), [customizationSections]);
 
   const entries = useMemo(
     () => (methodWire.kind === "typed" ? parseEntries(text, methodWire.accepts, methodWire.separator) : []),
@@ -882,6 +885,28 @@ export function DemoRunModal({
                 </DropdownMenu>
               </div>
             </section>
+
+            <ol aria-label="Run configuration path" className="flex flex-wrap items-center gap-[var(--ds-space-snug)]">
+              {launchStages.map((stage, index) => (
+                <li key={stage.label} className="flex items-center gap-[var(--ds-space-snug)]">
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "flex size-[var(--ds-h-sm)] shrink-0 items-center justify-center border",
+                      dsRadius.pill,
+                      dsText.meta,
+                      dsText.nums,
+                      "border-[color:var(--ds-border-strong)] bg-[var(--ds-surface-2)]",
+                      dsFg.secondary,
+                    )}
+                  >
+                    {stage.number}
+                  </span>
+                  <span className={cn(dsText.ui, "font-medium", dsFg.secondary)}>{stage.label}</span>
+                  {index < launchStages.length - 1 && <ArrowRight aria-hidden className={cn(dsIcon.sm, dsFg.faint)} />}
+                </li>
+              ))}
+            </ol>
 
             <div className="flex min-w-0 flex-col gap-[var(--ds-space-loose)]">
               {launcherStartMethods(capability).length > 1 && (

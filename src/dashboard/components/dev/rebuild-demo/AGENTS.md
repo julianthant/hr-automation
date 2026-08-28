@@ -8,8 +8,10 @@ live.
 
 - `DemoRunStart.tsx` owns one workflow-first launcher: desktop keeps the workflow rail; narrow layouts
   replace it with a workflow select so the task column remains usable.
-- The launcher workspace is a compact one-column dialog beside the workflow rail. The ordinary path is
-  input -> Start; there is no Review stage or example-value row.
+- The launcher workspace is a compact one-column dialog beside the workflow rail. Its compact numbered
+  path always begins with `1 Input`, then derives `Steps`, `Values`, and `Options` from the present
+  customization disclosures in causal order; it is an honest path indicator, not stage navigation. The
+  ordinary path remains input -> Start; there is no Review stage or example-value row.
 - The workflow title has one shared Radix-backed gear dropdown. It is anchored below the trigger,
   overlays the form without reflowing it, closes on outside pointer or Escape, returns focus to the gear,
   and exposes checkbox-menu semantics. `Default steps` and `Default options` begin checked, so no

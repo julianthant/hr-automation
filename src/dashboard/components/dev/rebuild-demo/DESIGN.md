@@ -28,9 +28,12 @@ Consequences of that one line, in order of authority:
 
 ## Run launcher
 
-The launcher is workflow-first and uses one task path: **Input -> Start**. The desktop workflow rail stays
-visible because it is the fastest way to change work; at narrow widths it becomes a single select so the
-form keeps the full viewport. There is no Review stage and no example-value row.
+The launcher is workflow-first. Its compact numbered path is an honest projection of the current form:
+**1 Input** always leads, followed only by the opt-in `Steps`, consequence-driven `Values`, and opt-in
+`Options` disclosures that are actually present. It is an indicator, not a second navigation system. The
+ordinary task path remains **Input -> Start**. The desktop workflow rail stays visible because it is the
+fastest way to change work; at narrow widths it becomes a single select so the form keeps the full
+viewport. There is no Review stage and no example-value row.
 
 The working area is one compact column beside the workflow rail. One gear beside the workflow title
 opens the shared keyboard-aware dropdown, anchored below the trigger and over the form without shifting
