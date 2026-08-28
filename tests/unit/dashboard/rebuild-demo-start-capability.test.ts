@@ -5,6 +5,7 @@ import {
   DEMO_WORKFLOW_LIST,
   effectiveChoiceValues,
   defaultFlagValues,
+  launcherStartMethods,
   requireStartCapability,
   requireStartMethod,
   startWorkflowGroups,
@@ -133,6 +134,14 @@ test("every workflow declares the input kinds production actually accepts", () =
     assert.deepEqual(methodKinds(id as DemoWorkflowId), kinds, `${id} accepts the wrong input kinds`);
   }
   assert.equal(Object.keys(expected).length, startableWorkflows().length, "a startable workflow was added without an input-kind assertion");
+});
+
+test("the launcher excludes phone capture from both its defaults and offered methods", () => {
+  assert.deepEqual(launcherStartMethods(capabilityOf("oath-signature")).map((method) => method.kind), ["typed", "upload"]);
+  assert.deepEqual(launcherStartMethods(capabilityOf("emergency-contact")).map((method) => method.kind), ["upload"]);
+  for (const workflow of startableWorkflows()) {
+    assert.notEqual(launcherStartMethods(requireStartCapability(workflow))[0]?.kind, "capture");
+  }
 });
 
 test("the typed values and separators match production, not the demo's old guesses", () => {

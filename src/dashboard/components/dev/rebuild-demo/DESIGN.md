@@ -33,11 +33,13 @@ workflow rail stays visible because it is the fastest way to change work; at nar
 single select so the form keeps the full viewport. Shared run settings are a collapsed disclosure, never
 a permanent third rail.
 
-The workflow timeline is the signature control. Every step starts selected. A selected step resolves its
-own downstream values, so the full workflow asks for no manual replacements. Turning a step off promotes
-the values it would have resolved into a required-input block directly below the timeline; Review stays
-disabled until those values are supplied. Safety gates remain visible and locked. Phone capture is not a
-launcher method.
+The workflow timeline is the signature control. At wide widths, the working area is a two-column split:
+the starting input and any promoted requirements stay on the left while the timeline remains visible on
+the right. At narrow widths, that becomes one column in causal order: starting input, timeline, promoted
+requirements, then options. Every step starts selected. A selected step resolves its own downstream
+values, so the full workflow asks for no manual replacements. Turning a step off promotes the values it
+would have resolved into a required-input block; Review stays disabled until those values are supplied.
+Safety gates remain visible and locked. Phone capture is not a launcher method.
 
 ---
 
