@@ -43,6 +43,17 @@ export function missingReplacementInputs(
 
 export type RunStartCustomizationSection = "steps" | "values" | "options";
 
+export interface RunStartStage {
+  number: number;
+  label: "Input" | "Steps" | "Values" | "Options";
+}
+
+const CUSTOMIZATION_STAGE_LABEL: Record<RunStartCustomizationSection, RunStartStage["label"]> = {
+  steps: "Steps",
+  values: "Values",
+  options: "Options",
+};
+
 /**
  * Progressive launcher sections, in causal order. The default form has none:
  * steps appear only when the operator opts out of the workflow defaults,
@@ -67,4 +78,16 @@ export function runStartCustomizationSections({
   }
   if (!defaultOptions) sections.push("options");
   return sections;
+}
+
+/**
+ * The compact launch path describes only sections that are currently present.
+ * Input never moves; opt-in customization follows in the same causal order as
+ * its disclosures, so the numbered path cannot leave a stale gap behind.
+ */
+export function runStartStages(sections: readonly RunStartCustomizationSection[]): RunStartStage[] {
+  return [
+    { number: 1, label: "Input" },
+    ...sections.map((section, index) => ({ number: index + 2, label: CUSTOMIZATION_STAGE_LABEL[section] })),
+  ];
 }
