@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import {
+  adjacentRunStartStage,
   defaultSelectedSteps,
   missingReplacementInputs,
+  reconcileRunStartStage,
   replacementInputsForSelection,
   runStartCustomizationSections,
   runStartStages,
@@ -74,34 +76,42 @@ describe("rebuild demo run-start timeline", () => {
     assert.deepEqual(runStartCustomizationSections({ timeline, defaultSteps: false, defaultOptions: false, selectedSteps: full }), ["steps", "options"]);
   });
 
-  it("projects the ordinary launcher as Input only", () => {
-    assert.deepEqual(runStartStages([]), [{ number: 1, label: "Input" }]);
+  it("projects the ordinary launcher as Input then Confirm", () => {
+    assert.deepEqual(runStartStages([]), [
+      { number: 1, label: "Input" },
+      { number: 2, label: "Confirm" },
+    ]);
   });
 
   it("projects each dynamic launch path in causal order with no numbering gaps", () => {
     assert.deepEqual(runStartStages(["steps"]), [
       { number: 1, label: "Input" },
       { number: 2, label: "Steps" },
+      { number: 3, label: "Confirm" },
     ]);
     assert.deepEqual(runStartStages(["steps", "values"]), [
       { number: 1, label: "Input" },
       { number: 2, label: "Steps" },
       { number: 3, label: "Values" },
+      { number: 4, label: "Confirm" },
     ]);
     assert.deepEqual(runStartStages(["options"]), [
       { number: 1, label: "Input" },
       { number: 2, label: "Options" },
+      { number: 3, label: "Confirm" },
     ]);
     assert.deepEqual(runStartStages(["steps", "options"]), [
       { number: 1, label: "Input" },
       { number: 2, label: "Steps" },
       { number: 3, label: "Options" },
+      { number: 4, label: "Confirm" },
     ]);
     assert.deepEqual(runStartStages(["steps", "values", "options"]), [
       { number: 1, label: "Input" },
       { number: 2, label: "Steps" },
       { number: 3, label: "Values" },
       { number: 4, label: "Options" },
+      { number: 5, label: "Confirm" },
     ]);
   });
 
@@ -117,6 +127,7 @@ describe("rebuild demo run-start timeline", () => {
       { number: 2, label: "Steps" },
       { number: 3, label: "Values" },
       { number: 4, label: "Options" },
+      { number: 5, label: "Confirm" },
     ]);
 
     const restored = runStartCustomizationSections({
@@ -129,6 +140,22 @@ describe("rebuild demo run-start timeline", () => {
       { number: 1, label: "Input" },
       { number: 2, label: "Steps" },
       { number: 3, label: "Options" },
+      { number: 4, label: "Confirm" },
     ]);
+  });
+
+  it("moves forward and back through only the stages that currently exist", () => {
+    const stages = runStartStages(["steps", "values", "options"]);
+    assert.equal(adjacentRunStartStage(stages, "Input", "next"), "Steps");
+    assert.equal(adjacentRunStartStage(stages, "Steps", "next"), "Values");
+    assert.equal(adjacentRunStartStage(stages, "Confirm", "previous"), "Options");
+    assert.equal(adjacentRunStartStage(stages, "Input", "previous"), null);
+    assert.equal(adjacentRunStartStage(stages, "Confirm", "next"), null);
+  });
+
+  it("falls back to the nearest earlier stage when a dynamic stage disappears", () => {
+    assert.equal(reconcileRunStartStage(runStartStages(["steps", "options"]), "Values"), "Steps");
+    assert.equal(reconcileRunStartStage(runStartStages([]), "Options"), "Input");
+    assert.equal(reconcileRunStartStage(runStartStages(["options"]), "Confirm"), "Confirm");
   });
 });

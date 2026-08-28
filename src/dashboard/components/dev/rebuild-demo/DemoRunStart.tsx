@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import {
   ArrowRight,
   Check,
-  ChevronDown,
-  ChevronUp,
   FileSpreadsheet,
   FileText,
   Keyboard,
@@ -32,6 +30,7 @@ import {
   Field,
   IconButton,
   Input,
+  KeyValueList,
   MetaLine,
   SectionLabel,
   Select,
@@ -49,6 +48,7 @@ import {
   DEMO_WORKFLOWS,
   START_SEPARATOR,
   START_VALUE_NOUN,
+  choiceOptionLabel,
   defaultChoiceValues,
   defaultFlagValues,
   effectiveChoiceValues,
@@ -78,6 +78,7 @@ import {
   deriveStartPlan,
   parseEntries,
   submitDemoEnqueue,
+  testSystems,
   type DemoEnqueueResult,
   type EnqueuePolicy,
   type InstanceChoice,
@@ -86,16 +87,19 @@ import {
 import {
   EnqueueResultBanner,
   InstanceSelector,
+  RunFlagChips,
   StartChoiceControl,
   StartFlagControl,
 } from "./DemoRunStartKit";
 import {
+  adjacentRunStartStage,
   defaultSelectedSteps,
   missingReplacementInputs,
+  reconcileRunStartStage,
   replacementInputsForSelection,
   runStartCustomizationSections,
   runStartStages,
-  type RunStartCustomizationSection,
+  type RunStartStage,
 } from "./demo-runstart-timeline";
 import { DemoIntakeDialog } from "./DemoIntake";
 import { SOURCE_SHEETS } from "./demo-data-intake";
@@ -122,9 +126,9 @@ import { SOURCE_SHEETS } from "./demo-data-intake";
  *  - **More than one input kind is a PEER CHOICE.** `oath-signature` takes typed
  *    EIDs or an uploaded packet; they are peer tabs. Phone capture has its own
  *    intake surface and is not a launcher mode.
- *  - **The ordinary path is one form and one command.** Defaults stay out of
- *    the way; the gear reveals the two switches that opt into custom steps or
- *    options, and skipped-step values appear only when they are required.
+ *  - **The ordinary path is Input → Confirm.** Defaults stay out of the way;
+ *    the gear opts into custom steps or options, skipped-step values appear
+ *    only when required, and only Confirm carries the consequential command.
  *  - **Starting is a COMMAND**, so it returns `applied | conflict | rejected`.
  *    All three are reachable by clicking.
  */
@@ -501,7 +505,7 @@ function WorkflowTimeline({
               <button
                 type="button"
                 aria-pressed={isSelected}
-                aria-label={`${isSelected ? "Include" : "Skip"} ${step.label}`}
+                aria-label={`${isSelected ? "Skip" : "Include"} ${step.label}`}
                 disabled={disabled}
                 onClick={() => onToggle(step.key)}
                 className={cn(
@@ -585,40 +589,6 @@ function ReplacementInputs({
   );
 }
 
-function LauncherDisclosure({
-  title,
-  meta,
-  open,
-  onToggle,
-  children,
-}: {
-  title: string;
-  meta?: string;
-  open: boolean;
-  onToggle: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <section className="border-t border-[color:var(--ds-border)]">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={onToggle}
-        className={cn(
-          "flex min-h-[var(--ds-h-bar)] w-full items-center gap-[var(--ds-space-base)] py-[var(--ds-space-cozy)] text-left",
-          dsFocus,
-          dsMotion.fast,
-        )}
-      >
-        <span className={cn(dsText.title, "font-semibold", dsFg.base)}>{title}</span>
-        {meta && <span className={cn("ml-auto", dsText.meta, dsText.nums, dsFg.muted)}>{meta}</span>}
-        {open ? <ChevronUp aria-hidden className={cn(dsIcon.sm, dsFg.muted)} /> : <ChevronDown aria-hidden className={cn(dsIcon.sm, dsFg.muted)} />}
-      </button>
-      {open && <div className="pb-[var(--ds-space-loose)]">{children}</div>}
-    </section>
-  );
-}
-
 export function DemoRunModal({
   open,
   onOpenChange,
@@ -654,7 +624,7 @@ export function DemoRunModal({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [defaultSteps, setDefaultSteps] = useState(true);
   const [defaultOptions, setDefaultOptions] = useState(true);
-  const [openSections, setOpenSections] = useState<RunStartCustomizationSection[]>([]);
+  const [currentStage, setCurrentStage] = useState<RunStartStage["label"]>("Input");
   /** the contract version this form was BUILT against — bumped by a reload */
   /* The START CONTRACT each open form was built against. It is a token, not a
      version: a minor (presentation-only) bump leaves every open form valid, so
@@ -677,7 +647,7 @@ export function DemoRunModal({
     setSettingsOpen(false);
     setDefaultSteps(true);
     setDefaultOptions(true);
-    setOpenSections([]);
+    setCurrentStage("Input");
     setPolicy("reject-active");
     setPriority("interactive");
     setInstances({});
@@ -720,6 +690,10 @@ export function DemoRunModal({
     [capability.timeline, defaultSteps, defaultOptions, selectedSteps],
   );
   const launchStages = useMemo(() => runStartStages(customizationSections), [customizationSections]);
+
+  useEffect(() => {
+    setCurrentStage((current) => reconcileRunStartStage(launchStages, current));
+  }, [launchStages]);
 
   const entries = useMemo(
     () => (methodWire.kind === "typed" ? parseEntries(text, methodWire.accepts, methodWire.separator) : []),
@@ -767,6 +741,17 @@ export function DemoRunModal({
       ? `Fill ${missingReplacement.map((input) => input.label).join(", ")} for the steps you turned off.`
       : null);
 
+  const previousStage = adjacentRunStartStage(launchStages, currentStage, "previous");
+  const nextStage = adjacentRunStartStage(launchStages, currentStage, "next");
+  const stageBlockedReason =
+    currentStage === "Input"
+      ? methodBlockedReason
+      : currentStage === "Values" && missingReplacement.length > 0
+        ? `Fill ${missingReplacement.map((input) => input.label).join(", ")}.`
+        : currentStage === "Confirm"
+          ? blockedReason
+          : null;
+
   const start = useCallback(() => {
     setResult(
       submitDemoEnqueue({
@@ -787,21 +772,12 @@ export function DemoRunModal({
   }, [workflowId, builtContract, method, plan, policy, dryRun, duplicateCheck, crmCheck, instances, capability, choiceValues, scopeLabel, conflict]);
 
   const isHandoff = methodWire.kind === "spreadsheet";
-  const isSectionOpen = (section: RunStartCustomizationSection) => openSections.includes(section);
-  const toggleSection = (section: RunStartCustomizationSection) => {
-    setOpenSections((current) =>
-      current.includes(section) ? current.filter((candidate) => candidate !== section) : [...current, section],
-    );
-  };
-  const openSection = (section: RunStartCustomizationSection) => {
-    setOpenSections((current) => current.includes(section) ? current : [...current, section]);
-  };
   const changeDefaultSteps = (next: boolean) => {
     setDefaultSteps(next);
     if (next) {
       setSelectedSteps(defaultSelectedSteps(capability.timeline));
-    } else {
-      openSection("steps");
+    } else if (currentStage === "Confirm") {
+      setCurrentStage("Steps");
     }
     setResult(null);
   };
@@ -814,11 +790,39 @@ export function DemoRunModal({
       setPolicy("reject-active");
       setPriority("interactive");
       setInstances({});
-    } else {
-      openSection("options");
+    } else if (currentStage === "Confirm") {
+      setCurrentStage("Options");
     }
     setResult(null);
   };
+
+  const skippedSteps = capability.timeline?.steps.filter((step) => !selectedSteps.includes(step.key)) ?? [];
+  const lockedGateCount = capability.timeline?.steps.filter((step) => step.locked).length ?? 0;
+  const replacementSummary = replacementInputs.map((input) => {
+    const value = replacementValues[input.key]?.trim() ?? "";
+    const optionLabel = input.options?.find((option) => option.value === value)?.label;
+    return `${input.label}: ${optionLabel ?? value}`;
+  });
+  const flagDefaults = defaultFlagValues(capability, choiceValues);
+  const optionChanges = [
+    ...choices
+      .filter((choice) => (choiceValues[choice.key] ?? choice.defaultValue) !== choice.defaultValue)
+      .map((choice) => `${choice.label}: ${choiceOptionLabel(choice, choiceValues[choice.key] ?? choice.defaultValue)}`),
+    ...flags
+      .filter((flag) => (flagValues[flag.key] ?? flagDefaults[flag.key]) !== flagDefaults[flag.key])
+      .map((flag) => `${flag.label}: ${(flagValues[flag.key] ?? flagDefaults[flag.key]) ? "On" : "Off"}`),
+    ...(policy !== "reject-active" ? [`Active-run policy: ${ENQUEUE_POLICY_LABEL[policy]}`] : []),
+    ...(priority !== "interactive" ? ["Priority: Bulk"] : []),
+  ];
+  const inputSummary =
+    methodWire.kind === "typed"
+      ? valid.map((entry) => entry.value).join(", ")
+      : methodWire.kind === "upload"
+        ? files.map((file) => file.fileName).join(", ")
+        : methodWire.kind === "spreadsheet"
+          ? sheets.find((sheet) => sheet.id === sheetId)?.fileName ?? "No sheet selected"
+          : "No input required";
+  const targetTestSystems = testSystems(workflow, instances);
 
   return (
     <Dialog open={open} onOpenChange={(next) => { onOpenChange(next); if (!next) setResult(null); }}>
@@ -851,10 +855,7 @@ export function DemoRunModal({
 
             <section className="flex flex-col gap-[var(--ds-space-snug)]">
               <div className="flex min-w-0 items-start gap-[var(--ds-space-base)]">
-                <span className="flex min-w-0 flex-1 flex-col gap-[var(--ds-space-snug)]">
-                  <h3 className={cn(dsText.section, "font-semibold", dsFg.base)}>{workflow.label}</h3>
-                  <p className={cn(dsText.body, dsFg.secondary, "max-w-[74ch]")}>{capability.note}</p>
-                </span>
+                <h3 className={cn(dsText.section, "min-w-0 flex-1 font-semibold", dsFg.base)}>{workflow.label}</h3>
                 <DropdownMenu open={settingsOpen} onOpenChange={setSettingsOpen}>
                   <DropdownMenuTrigger asChild>
                     <IconButton
@@ -888,7 +889,11 @@ export function DemoRunModal({
 
             <ol aria-label="Run configuration path" className="flex flex-wrap items-center gap-[var(--ds-space-snug)]">
               {launchStages.map((stage, index) => (
-                <li key={stage.label} className="flex items-center gap-[var(--ds-space-snug)]">
+                <li
+                  key={stage.label}
+                  aria-current={stage.label === currentStage ? "step" : undefined}
+                  className="flex items-center gap-[var(--ds-space-snug)]"
+                >
                   <span
                     aria-hidden
                     className={cn(
@@ -896,49 +901,58 @@ export function DemoRunModal({
                       dsRadius.pill,
                       dsText.meta,
                       dsText.nums,
-                      "border-[color:var(--ds-border-strong)] bg-[var(--ds-surface-2)]",
-                      dsFg.secondary,
+                      stage.label === currentStage
+                        ? "border-transparent bg-[var(--ds-accent)] text-[color:var(--ds-accent-fg)]"
+                        : "border-[color:var(--ds-border-strong)] bg-[var(--ds-surface-2)]",
+                      stage.label !== currentStage && dsFg.secondary,
                     )}
                   >
                     {stage.number}
                   </span>
-                  <span className={cn(dsText.ui, "font-medium", dsFg.secondary)}>{stage.label}</span>
+                  <span className={cn(dsText.ui, "font-medium", stage.label === currentStage ? dsFg.base : dsFg.secondary)}>
+                    {stage.label}
+                  </span>
                   {index < launchStages.length - 1 && <ArrowRight aria-hidden className={cn(dsIcon.sm, dsFg.faint)} />}
                 </li>
               ))}
             </ol>
 
             <div className="flex min-w-0 flex-col gap-[var(--ds-space-loose)]">
-              {launcherStartMethods(capability).length > 1 && (
-                <MethodTabs
-                  methods={launcherStartMethods(capability)}
-                  value={method}
-                  onChange={(next) => { setMethod(next); setResult(null); }}
-                />
+              {currentStage === "Input" && (
+                <section aria-labelledby="run-start-input" className="flex flex-col gap-[var(--ds-space-loose)]">
+                  <h4 id="run-start-input" className={cn(dsText.title, "font-semibold", dsFg.base)}>Input</h4>
+                  {launcherStartMethods(capability).length > 1 && (
+                    <MethodTabs
+                      methods={launcherStartMethods(capability)}
+                      value={method}
+                      onChange={(next) => { setMethod(next); setResult(null); }}
+                    />
+                  )}
+                  {methodWire.kind === "typed" && (
+                    <TypedInput method={methodWire} workflowId={workflowId} text={text} onText={(next) => { setText(next); setResult(null); }} problems={bad} validCount={valid.length} />
+                  )}
+                  {methodWire.kind === "upload" && (
+                    <UploadInput accepts={methodWire.accepts} multiFile={methodWire.multiFile} merge={methodWire.merge} fileIds={fileIds} onChange={(next) => { setFileIds(next); setResult(null); }} />
+                  )}
+                  {methodWire.kind === "spreadsheet" && (
+                    <Field label="Sheet">
+                      <Select value={sheetId} onChange={(event) => { setSheetId(event.target.value); setResult(null); }}>
+                        {sheets.map((sheet) => <option key={sheet.id} value={sheet.id}>{sheet.fileName} · {sheet.sizeLabel}</option>)}
+                      </Select>
+                    </Field>
+                  )}
+                  {methodWire.kind === "bare" && <Well><span className={cn(dsText.ui, "font-semibold", dsFg.base)}>Nothing to fill in</span></Well>}
+                </section>
               )}
 
-              {methodWire.kind === "typed" && (
-                <TypedInput method={methodWire} workflowId={workflowId} text={text} onText={(next) => { setText(next); setResult(null); }} problems={bad} validCount={valid.length} />
-              )}
-              {methodWire.kind === "upload" && (
-                <UploadInput accepts={methodWire.accepts} multiFile={methodWire.multiFile} merge={methodWire.merge} fileIds={fileIds} onChange={(next) => { setFileIds(next); setResult(null); }} />
-              )}
-              {methodWire.kind === "spreadsheet" && (
-                <Field label="Sheet">
-                  <Select value={sheetId} onChange={(event) => setSheetId(event.target.value)}>
-                    {sheets.map((sheet) => <option key={sheet.id} value={sheet.id}>{sheet.fileName} · {sheet.sizeLabel}</option>)}
-                  </Select>
-                </Field>
-              )}
-              {methodWire.kind === "bare" && <Well><span className={cn(dsText.ui, "font-semibold", dsFg.base)}>Nothing to fill in</span></Well>}
-
-              {customizationSections.includes("steps") && capability.timeline && (
-                <LauncherDisclosure
-                  title="Steps"
-                  meta={`${selectedSteps.length} of ${capability.timeline.steps.length}`}
-                  open={isSectionOpen("steps")}
-                  onToggle={() => toggleSection("steps")}
-                >
+              {currentStage === "Steps" && capability.timeline && (
+                <section aria-labelledby="run-start-steps" className="flex flex-col gap-[var(--ds-space-cozy)]">
+                  <div className="flex flex-wrap items-baseline justify-between gap-[var(--ds-space-base)]">
+                    <h4 id="run-start-steps" className={cn(dsText.title, "font-semibold", dsFg.base)}>Steps</h4>
+                    <span className={cn(dsText.meta, dsText.nums, dsFg.muted)}>
+                      {selectedSteps.length} of {capability.timeline.steps.length} included
+                    </span>
+                  </div>
                   <WorkflowTimeline
                     timeline={capability.timeline}
                     selectedSteps={selectedSteps}
@@ -947,34 +961,29 @@ export function DemoRunModal({
                         ? selectedSteps.filter((step) => step !== key)
                         : [...selectedSteps, key];
                       setSelectedSteps(next);
-                      if (replacementInputsForSelection(capability.timeline, next).length > 0) openSection("values");
                       setResult(null);
                     }}
                   />
-                </LauncherDisclosure>
+                </section>
               )}
 
-              {customizationSections.includes("values") && (
-                <LauncherDisclosure
-                  title="Values"
-                  meta={`${replacementInputs.length} required`}
-                  open={isSectionOpen("values")}
-                  onToggle={() => toggleSection("values")}
-                >
+              {currentStage === "Values" && (
+                <section aria-labelledby="run-start-values" className="flex flex-col gap-[var(--ds-space-cozy)]">
+                  <div className="flex flex-wrap items-baseline justify-between gap-[var(--ds-space-base)]">
+                    <h4 id="run-start-values" className={cn(dsText.title, "font-semibold", dsFg.base)}>Values</h4>
+                    <span className={cn(dsText.meta, dsText.nums, dsFg.muted)}>{replacementInputs.length} required</span>
+                  </div>
                   <ReplacementInputs
                     inputs={replacementInputs}
                     values={replacementValues}
                     onChange={(key, value) => { setReplacementValues((current) => ({ ...current, [key]: value })); setResult(null); }}
                   />
-                </LauncherDisclosure>
+                </section>
               )}
 
-              {customizationSections.includes("options") && (
-                <LauncherDisclosure
-                  title="Options"
-                  open={isSectionOpen("options")}
-                  onToggle={() => toggleSection("options")}
-                >
+              {currentStage === "Options" && (
+                <section aria-labelledby="run-start-options" className="flex flex-col gap-[var(--ds-space-cozy)]">
+                  <h4 id="run-start-options" className={cn(dsText.title, "font-semibold", dsFg.base)}>Options</h4>
                   <div className="flex flex-col gap-[var(--ds-space-loose)] bg-[var(--ds-recess-bg)] p-[var(--ds-space-cozy)]">
                     {choices.length > 0 && (
                       <div className="grid grid-cols-1 gap-[var(--ds-space-cozy)] @min-[560px]:grid-cols-2">
@@ -1013,7 +1022,52 @@ export function DemoRunModal({
                     ))}
                     {!isHandoff && <InstanceSelector workflow={workflow} value={instances} onChange={(next) => { setInstances(next); setResult(null); }} />}
                   </div>
-                </LauncherDisclosure>
+                </section>
+              )}
+
+              {currentStage === "Confirm" && (
+                <section aria-labelledby="run-start-confirm" className="flex flex-col gap-[var(--ds-space-cozy)]">
+                  <div className="flex flex-wrap items-center justify-between gap-[var(--ds-space-base)]">
+                    <h4 id="run-start-confirm" className={cn(dsText.title, "font-semibold", dsFg.base)}>Confirm</h4>
+                    <RunFlagChips dryRun={dryRun} test={targetTestSystems} priority={priority} />
+                  </div>
+                  <Well className="p-[var(--ds-space-cozy)]">
+                    <KeyValueList
+                      className="grid-cols-[max-content_minmax(0,1fr)] [&_dd]:overflow-visible [&_dd]:whitespace-normal [&_dd]:break-words [&_dd]:text-clip"
+                      items={[
+                        { key: "Workflow", value: workflow.label },
+                        { key: "Input", value: inputSummary },
+                        { key: "Creates", value: plan.headline },
+                        {
+                          key: "Steps",
+                          value: skippedSteps.length > 0
+                            ? `Skip ${skippedSteps.map((step) => step.label).join(", ")}`
+                            : "Default workflow",
+                        },
+                        {
+                          key: "Values",
+                          value: replacementSummary.length > 0 ? replacementSummary.join(" · ") : "No manual values",
+                        },
+                        {
+                          key: "Options",
+                          value: optionChanges.length > 0 ? optionChanges.join(" · ") : "Defaults retained",
+                        },
+                        {
+                          key: "Safety",
+                          value: `${lockedGateCount} required gate${lockedGateCount === 1 ? "" : "s"} · ${ENQUEUE_POLICY_LABEL[policy]}`,
+                        },
+                      ]}
+                    />
+                  </Well>
+                  {conflict && (
+                    <Banner tone="warning" title={`Active run found for ${conflict.label}`}>
+                      {conflict.note}. The selected policy is {ENQUEUE_POLICY_LABEL[policy].toLowerCase()}.
+                    </Banner>
+                  )}
+                  {plan.warnings.map((warning) => (
+                    <Banner key={warning} tone="warning" title="Check before starting">{warning}</Banner>
+                  ))}
+                </section>
               )}
             </div>
           </DialogBody>
@@ -1026,14 +1080,25 @@ export function DemoRunModal({
               items={
                 [
                   `${workflow.label} ${workflowVersionTag(workflow)}`,
-                  blockedReason ?? (isHandoff || plan.rows.length === 0 ? undefined : plan.headline),
+                  stageBlockedReason ?? (currentStage === "Confirm" && !isHandoff && plan.rows.length > 0 ? plan.headline : undefined),
                 ].filter(Boolean) as string[]
               }
             />
           }
         >
+          {previousStage && (
+            <Button variant="secondary" onClick={() => setCurrentStage(previousStage)}>Back</Button>
+          )}
           <Button variant="secondary" onClick={() => onOpenChange(false)}>Cancel</Button>
-          {isHandoff ? (
+          {currentStage !== "Confirm" ? (
+            <Button
+              variant="primary"
+              disabled={Boolean(stageBlockedReason) || nextStage === null}
+              onClick={() => { if (nextStage) setCurrentStage(nextStage); }}
+            >
+              Next
+            </Button>
+          ) : isHandoff ? (
             <Button
               variant="primary"
               icon={<FileSpreadsheet aria-hidden className={dsIcon.md} />}
