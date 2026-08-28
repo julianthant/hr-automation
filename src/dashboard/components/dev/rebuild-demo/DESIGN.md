@@ -28,18 +28,18 @@ Consequences of that one line, in order of authority:
 
 ## Run launcher
 
-The launcher is workflow-first and uses one task path: **Input -> Review -> Start**. The desktop
-workflow rail stays visible because it is the fastest way to change work; at narrow widths it becomes a
-single select so the form keeps the full viewport. Shared run settings are a collapsed disclosure, never
-a permanent third rail.
+The launcher is workflow-first and uses one task path: **Input -> Start**. The desktop workflow rail stays
+visible because it is the fastest way to change work; at narrow widths it becomes a single select so the
+form keeps the full viewport. There is no Review stage and no example-value row.
 
-The workflow timeline is the signature control. At wide widths, the working area is a two-column split:
-the starting input and any promoted requirements stay on the left while the timeline remains visible on
-the right. At narrow widths, that becomes one column in causal order: starting input, timeline, promoted
-requirements, then options. Every step starts selected. A selected step resolves its own downstream
-values, so the full workflow asks for no manual replacements. Turning a step off promotes the values it
-would have resolved into a required-input block; Review stays disabled until those values are supplied.
-Safety gates remain visible and locked. Phone capture is not a launcher method.
+The working area is one compact column beside the workflow rail. One gear beside the workflow title
+opens the shared keyboard-aware dropdown, anchored below the trigger and over the form without shifting
+it; the menu holds `Default steps` and `Default options`, both checked initially. Unchecking `Default
+steps` adds a `Steps` disclosure where every
+declared step starts selected. Turning a step off adds a `Values` disclosure containing the values that
+step would have resolved; Start stays disabled until they are supplied. Unchecking `Default options`
+adds the `Options` disclosure. Safety gates remain visible and locked. Phone capture is not a launcher
+method.
 
 ---
 

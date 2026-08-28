@@ -40,3 +40,31 @@ export function missingReplacementInputs(
 ): StartReplacementInputWire[] {
   return inputs.filter((input) => (values[input.key] ?? "").trim().length === 0);
 }
+
+export type RunStartCustomizationSection = "steps" | "values" | "options";
+
+/**
+ * Progressive launcher sections, in causal order. The default form has none:
+ * steps appear only when the operator opts out of the workflow defaults,
+ * values appear only when a skipped step needs replacements, and options
+ * appear only when the operator opts out of their defaults.
+ */
+export function runStartCustomizationSections({
+  timeline,
+  defaultSteps,
+  defaultOptions,
+  selectedSteps,
+}: {
+  timeline: StartTimelineWire | undefined;
+  defaultSteps: boolean;
+  defaultOptions: boolean;
+  selectedSteps: readonly string[];
+}): RunStartCustomizationSection[] {
+  const sections: RunStartCustomizationSection[] = [];
+  if (timeline && !defaultSteps) {
+    sections.push("steps");
+    if (replacementInputsForSelection(timeline, selectedSteps).length > 0) sections.push("values");
+  }
+  if (!defaultOptions) sections.push("options");
+  return sections;
+}

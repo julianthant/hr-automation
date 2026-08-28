@@ -4,6 +4,7 @@ import {
   defaultSelectedSteps,
   missingReplacementInputs,
   replacementInputsForSelection,
+  runStartCustomizationSections,
 } from "../../../src/dashboard/components/dev/rebuild-demo/demo-runstart-timeline.js";
 import type { StartTimelineWire } from "../../../src/dashboard/components/dev/rebuild-demo/demo-wire.js";
 
@@ -62,5 +63,13 @@ describe("rebuild demo run-start timeline", () => {
 
     const restoredRead = replacementInputsForSelection(timeline, ["read-kuali", "verify-person", "submit"]);
     assert.deepEqual(restoredRead, []);
+  });
+
+  it("adds customization sections only as their defaults are turned off", () => {
+    const full = defaultSelectedSteps(timeline);
+    assert.deepEqual(runStartCustomizationSections({ timeline, defaultSteps: true, defaultOptions: true, selectedSteps: full }), []);
+    assert.deepEqual(runStartCustomizationSections({ timeline, defaultSteps: false, defaultOptions: true, selectedSteps: full }), ["steps"]);
+    assert.deepEqual(runStartCustomizationSections({ timeline, defaultSteps: false, defaultOptions: true, selectedSteps: ["verify-person", "submit"] }), ["steps", "values"]);
+    assert.deepEqual(runStartCustomizationSections({ timeline, defaultSteps: false, defaultOptions: false, selectedSteps: full }), ["steps", "options"]);
   });
 });
