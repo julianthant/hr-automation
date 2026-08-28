@@ -55,4 +55,12 @@ describe("rebuild demo run-start timeline", () => {
     assert.deepEqual(missingReplacementInputs(inputs, { eid: "  " }).map((input) => input.key), ["eid", "date"]);
     assert.deepEqual(missingReplacementInputs(inputs, { eid: "10000000", date: "08/28/2026" }), []);
   });
+
+  it("removes a promoted requirement as soon as a supplying step is restored", () => {
+    const skippedRead = replacementInputsForSelection(timeline, ["verify-person", "submit"]);
+    assert.deepEqual(skippedRead.map((input) => input.key), ["eid", "date"]);
+
+    const restoredRead = replacementInputsForSelection(timeline, ["read-kuali", "verify-person", "submit"]);
+    assert.deepEqual(restoredRead, []);
+  });
 });

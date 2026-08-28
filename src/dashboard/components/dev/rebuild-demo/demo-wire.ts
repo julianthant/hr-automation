@@ -420,6 +420,8 @@ export type StartMethodWire =
   | BareStartMethod;
 
 export type StartMethodKind = StartMethodWire["kind"];
+export type LauncherStartMethodWire = Exclude<StartMethodWire, CaptureStartMethod>;
+export type LauncherStartMethodKind = LauncherStartMethodWire["kind"];
 
 export interface StartChoiceOptionWire {
   value: string;
@@ -2021,6 +2023,34 @@ export function requireStartMethod(
     throw new Error(`demo wire: ${kind} resolves to ${matching.length} methods for choices ${JSON.stringify(values)} — expected exactly one`);
   }
   return matching[0];
+}
+
+/**
+ * Methods the desktop launcher may offer. Phone capture has its own intake
+ * surface and is deliberately not a launcher mode; filtering it at this model
+ * boundary keeps initialization and rendering from disagreeing about that.
+ */
+export function launcherStartMethods(capability: StartCapabilityWire): LauncherStartMethodWire[] {
+  const methods = capability.methods.filter(
+    (method): method is LauncherStartMethodWire => method.kind !== "capture",
+  );
+  if (methods.length === 0) {
+    throw new Error("demo wire: this start declares no launcher method outside phone capture");
+  }
+  return methods;
+}
+
+/** A launcher-safe method lookup that can never resolve the capture branch. */
+export function requireLauncherStartMethod(
+  capability: StartCapabilityWire,
+  kind: LauncherStartMethodKind,
+  values: Record<string, string> = {},
+): LauncherStartMethodWire {
+  const method = requireStartMethod(capability, kind, values);
+  if (method.kind === "capture") {
+    throw new Error("demo wire: phone capture is not a launcher method");
+  }
+  return method;
 }
 
 /** every choice's declared default — the value set a fresh modal opens on */
