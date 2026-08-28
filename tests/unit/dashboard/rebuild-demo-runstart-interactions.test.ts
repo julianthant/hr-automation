@@ -15,4 +15,17 @@ describe("rebuild demo run-start interactions", () => {
       "a modal DropdownMenu pointer-locks the parent Dialog; its next body click dismisses both layers",
     );
   });
+
+  it("renders the opt-in options directly on the launcher surface", () => {
+    const optionsStage = source.match(
+      /\{currentStage === "Options"[\s\S]*?\{currentStage === "Confirm"/,
+    )?.[0];
+
+    assert.ok(optionsStage, "expected the Options stage before Confirm");
+    assert.doesNotMatch(
+      optionsStage,
+      /bg-\[var\(--ds-recess-bg\)\]/,
+      "the Options controls must not reintroduce a separate black recessed panel",
+    );
+  });
 });

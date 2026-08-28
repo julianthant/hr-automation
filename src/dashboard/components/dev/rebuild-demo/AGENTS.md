@@ -19,7 +19,8 @@ live.
 - Unchecking `Default steps` adds the `Steps` stage. Skipping a workflow step then adds `Values` with
   the required replacement inputs. Unchecking `Default options` adds the `Options` stage.
 - Shared queue, safety, and destination controls live only in that opt-in `Options` stage; they must
-  not become a permanent inspector rail.
+  not become a permanent inspector rail. The controls render directly on the launcher surface rather
+  than inside a separate recessed panel.
 - A workflow timeline comes from `StartCapabilityWire.timeline`. All declared steps start selected.
 - A skipped step promotes its `replacementInputs` into `Values`. Next remains blocked there until every
   promoted input is non-blank. Duplicate replacement keys render once.
