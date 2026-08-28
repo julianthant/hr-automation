@@ -1,32 +1,35 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  ArrowRight,
   Check,
   ChevronDown,
   ChevronUp,
   FileSpreadsheet,
   FileText,
   Keyboard,
-  Layers,
   LockKeyhole,
   Play,
   Search,
-  SlidersHorizontal,
+  Settings,
   Upload,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import {
   Badge,
   Banner,
   Button,
   Card,
-  Chip,
   Dialog,
   DialogBody,
   DialogContent,
   DialogFooter,
-  EmptyState,
   Field,
+  IconButton,
   Input,
   MetaLine,
   SectionLabel,
@@ -74,7 +77,6 @@ import {
   deriveStartPlan,
   parseEntries,
   submitDemoEnqueue,
-  testSystems,
   type DemoEnqueueResult,
   type EnqueuePolicy,
   type InstanceChoice,
@@ -83,8 +85,6 @@ import {
 import {
   EnqueueResultBanner,
   InstanceSelector,
-  PlanPreview,
-  RunFlagChips,
   StartChoiceControl,
   StartFlagControl,
 } from "./DemoRunStartKit";
@@ -92,6 +92,8 @@ import {
   defaultSelectedSteps,
   missingReplacementInputs,
   replacementInputsForSelection,
+  runStartCustomizationSections,
+  type RunStartCustomizationSection,
 } from "./demo-runstart-timeline";
 import { DemoIntakeDialog } from "./DemoIntake";
 import { SOURCE_SHEETS } from "./demo-data-intake";
@@ -118,8 +120,9 @@ import { SOURCE_SHEETS } from "./demo-data-intake";
  *  - **More than one input kind is a PEER CHOICE.** `oath-signature` takes typed
  *    EIDs or an uploaded packet; they are peer tabs. Phone capture has its own
  *    intake surface and is not a launcher mode.
- *  - **The plan is shown before the commit, and it never counts people.** Before
- *    a review reads a document the backend knows PAGES. The preview says pages.
+ *  - **The ordinary path is one form and one command.** Defaults stay out of
+ *    the way; the gear reveals the two switches that opt into custom steps or
+ *    options, and skipped-step values appear only when they are required.
  *  - **Starting is a COMMAND**, so it returns `applied | conflict | rejected`.
  *    All three are reachable by clicking.
  */
@@ -431,22 +434,6 @@ function TypedInput({
   const sep = START_SEPARATOR[method.separator];
   return (
     <div className="flex flex-col gap-[var(--ds-space-snug)]">
-      {method.examples && method.examples.length > 0 && (
-        <div className="flex flex-wrap items-center gap-[var(--ds-space-snug)]">
-          <SectionLabel>Examples</SectionLabel>
-          {method.examples.map((example) => (
-            <Button
-              key={example.key}
-              size="sm"
-              variant="outline"
-              title={example.note}
-              onClick={() => onText(example.values.join(`${sep.char} `))}
-            >
-              {example.label}
-            </Button>
-          ))}
-        </div>
-      )}
       <Field
         label={`${label} — ${sep.label}`}
         hint={`${validCount} valid · ${problems.length} refused`}
@@ -495,35 +482,18 @@ function WorkflowTimeline({
   timeline,
   selectedSteps,
   onToggle,
-  readOnly = false,
 }: {
   timeline: StartTimelineWire;
   selectedSteps: readonly string[];
   onToggle: (key: string) => void;
-  readOnly?: boolean;
 }) {
   const selected = new Set(selectedSteps);
   return (
-    <section aria-label="Workflow steps" className="flex flex-col gap-[var(--ds-space-base)]">
-      <div className="flex flex-wrap items-end justify-between gap-[var(--ds-space-base)]">
-        <span className="flex flex-col gap-[var(--ds-space-hair)]">
-          <SectionLabel>Workflow</SectionLabel>
-          <h4 className={cn(dsText.title, "font-semibold", dsFg.base)}>
-            {selectedSteps.length} of {timeline.steps.length} steps
-          </h4>
-        </span>
-        {!readOnly && selectedSteps.length < timeline.steps.length && (
-          <Button size="sm" variant="ghost" onClick={() => timeline.steps.forEach((step) => {
-            if (!selected.has(step.key)) onToggle(step.key);
-          })}>
-            Restore full workflow
-          </Button>
-        )}
-      </div>
+    <section aria-label="Workflow steps">
       <ol className="divide-y divide-[color:var(--ds-border-subtle)] border-y border-[color:var(--ds-border)]">
         {timeline.steps.map((step, index) => {
           const isSelected = selected.has(step.key);
-          const disabled = readOnly || step.locked;
+          const disabled = Boolean(step.locked);
           return (
             <li key={step.key}>
               <button
@@ -566,9 +536,9 @@ function WorkflowTimeline({
                     <LockKeyhole aria-hidden className={dsIcon.sm} />
                     required gate
                   </span>
-                ) : !readOnly ? (
+                ) : (
                   <span className={cn(dsText.meta, isSelected ? dsFg.muted : dsFg.secondary)}>{isSelected ? "On" : "Off"}</span>
-                ) : null}
+                )}
               </button>
             </li>
           );
@@ -589,13 +559,7 @@ function ReplacementInputs({
 }) {
   if (inputs.length === 0) return null;
   return (
-    <section className="flex flex-col gap-[var(--ds-space-cozy)] border-t border-[color:var(--ds-border)] pt-[var(--ds-space-loose)]">
-      <span className="flex flex-col gap-[var(--ds-space-hair)]">
-        <SectionLabel>Required inputs</SectionLabel>
-        <h4 className={cn(dsText.title, "font-semibold", dsFg.base)}>
-          {inputs.length} value{inputs.length === 1 ? "" : "s"} needed for skipped steps
-        </h4>
-      </span>
+    <div className="flex flex-col gap-[var(--ds-space-cozy)]">
       <div className="grid grid-cols-1 gap-[var(--ds-space-cozy)] @min-[560px]:grid-cols-2">
         {inputs.map((input) => (
           <Field key={input.key} label={input.label}>
@@ -615,6 +579,40 @@ function ReplacementInputs({
           </Field>
         ))}
       </div>
+    </div>
+  );
+}
+
+function LauncherDisclosure({
+  title,
+  meta,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  meta?: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <section className="border-t border-[color:var(--ds-border)]">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        className={cn(
+          "flex min-h-[var(--ds-h-bar)] w-full items-center gap-[var(--ds-space-base)] py-[var(--ds-space-cozy)] text-left",
+          dsFocus,
+          dsMotion.fast,
+        )}
+      >
+        <span className={cn(dsText.title, "font-semibold", dsFg.base)}>{title}</span>
+        {meta && <span className={cn("ml-auto", dsText.meta, dsText.nums, dsFg.muted)}>{meta}</span>}
+        {open ? <ChevronUp aria-hidden className={cn(dsIcon.sm, dsFg.muted)} /> : <ChevronDown aria-hidden className={cn(dsIcon.sm, dsFg.muted)} />}
+      </button>
+      {open && <div className="pb-[var(--ds-space-loose)]">{children}</div>}
     </section>
   );
 }
@@ -647,12 +645,14 @@ export function DemoRunModal({
   const [priority, setPriority] = useState<"interactive" | "bulk">("interactive");
   const [instances, setInstances] = useState<InstanceChoice>({});
   const [result, setResult] = useState<DemoEnqueueResult | null>(null);
-  const [stage, setStage] = useState<"input" | "review">("input");
   const [selectedSteps, setSelectedSteps] = useState<string[]>(() =>
     defaultSelectedSteps(initialCapability.timeline),
   );
   const [replacementValues, setReplacementValues] = useState<Record<string, string>>({});
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [defaultSteps, setDefaultSteps] = useState(true);
+  const [defaultOptions, setDefaultOptions] = useState(true);
+  const [openSections, setOpenSections] = useState<RunStartCustomizationSection[]>([]);
   /** the contract version this form was BUILT against — bumped by a reload */
   /* The START CONTRACT each open form was built against. It is a token, not a
      version: a minor (presentation-only) bump leaves every open form valid, so
@@ -670,10 +670,15 @@ export function DemoRunModal({
     setText("");
     setFileIds([]);
     setSheetId(SOURCE_SHEETS.find((s) => s.workflow === next)?.id ?? "");
-    setStage("input");
     setSelectedSteps(defaultSelectedSteps(capability.timeline));
     setReplacementValues({});
-    setShowAdvanced(false);
+    setSettingsOpen(false);
+    setDefaultSteps(true);
+    setDefaultOptions(true);
+    setOpenSections([]);
+    setPolicy("reject-active");
+    setPriority("interactive");
+    setInstances({});
     setResult(null);
   }, []);
 
@@ -703,6 +708,15 @@ export function DemoRunModal({
     () => missingReplacementInputs(replacementInputs, replacementValues),
     [replacementInputs, replacementValues],
   );
+  const customizationSections = useMemo(
+    () => runStartCustomizationSections({
+      timeline: capability.timeline,
+      defaultSteps,
+      defaultOptions,
+      selectedSteps,
+    }),
+    [capability.timeline, defaultSteps, defaultOptions, selectedSteps],
+  );
 
   const entries = useMemo(
     () => (methodWire.kind === "typed" ? parseEntries(text, methodWire.accepts, methodWire.separator) : []),
@@ -718,7 +732,6 @@ export function DemoRunModal({
     [workflow, methodWire, entries, files],
   );
 
-  const test = testSystems(workflow, instances);
   const conflict = activeConflictFor(
     workflowId,
     methodWire.kind === "typed" ? valid.map((e) => e.value) : files.map((f) => f.fileName),
@@ -771,13 +784,45 @@ export function DemoRunModal({
   }, [workflowId, builtContract, method, plan, policy, dryRun, duplicateCheck, crmCheck, instances, capability, choiceValues, scopeLabel, conflict]);
 
   const isHandoff = methodWire.kind === "spreadsheet";
+  const isSectionOpen = (section: RunStartCustomizationSection) => openSections.includes(section);
+  const toggleSection = (section: RunStartCustomizationSection) => {
+    setOpenSections((current) =>
+      current.includes(section) ? current.filter((candidate) => candidate !== section) : [...current, section],
+    );
+  };
+  const openSection = (section: RunStartCustomizationSection) => {
+    setOpenSections((current) => current.includes(section) ? current : [...current, section]);
+  };
+  const changeDefaultSteps = (next: boolean) => {
+    setDefaultSteps(next);
+    if (next) {
+      setSelectedSteps(defaultSelectedSteps(capability.timeline));
+    } else {
+      openSection("steps");
+    }
+    setResult(null);
+  };
+  const changeDefaultOptions = (next: boolean) => {
+    setDefaultOptions(next);
+    if (next) {
+      const defaults = defaultChoiceValues(capability);
+      setChoiceValues(defaults);
+      setFlagValues(defaultFlagValues(capability, defaults));
+      setPolicy("reject-active");
+      setPriority("interactive");
+      setInstances({});
+    } else {
+      openSection("options");
+    }
+    setResult(null);
+  };
 
   return (
     <Dialog open={open} onOpenChange={(next) => { onOpenChange(next); if (!next) setResult(null); }}>
       <DialogContent
-        size="xl"
+        size="lg"
         title="Start a run"
-        className="h-[min(92dvh,840px)] max-w-[min(96vw,1320px)]"
+        className="h-[min(86dvh,720px)]"
       >
         <div className="flex min-h-0 flex-1">
           <WorkflowPicker value={workflowId} onChange={selectWorkflow} />
@@ -801,184 +846,154 @@ export function DemoRunModal({
               />
             )}
 
-            <div className="flex items-center gap-[var(--ds-space-base)] border-b border-[color:var(--ds-border)] pb-[var(--ds-space-cozy)]">
-              <span className={cn("flex size-[var(--ds-h-sm)] items-center justify-center", dsRadius.pill, stage === "input" ? "bg-[var(--ds-accent)] text-[color:var(--ds-accent-fg)]" : "bg-[var(--ds-surface-3)]", dsText.micro, dsText.nums)}>1</span>
-              <span className={cn(dsText.ui, stage === "input" ? "font-semibold" : dsFg.muted)}>Input</span>
-              <ArrowRight aria-hidden className={cn(dsIcon.sm, dsFg.faint)} />
-              <span className={cn("flex size-[var(--ds-h-sm)] items-center justify-center", dsRadius.pill, stage === "review" ? "bg-[var(--ds-accent)] text-[color:var(--ds-accent-fg)]" : "bg-[var(--ds-surface-3)]", dsText.micro, dsText.nums)}>2</span>
-              <span className={cn(dsText.ui, stage === "review" ? "font-semibold" : dsFg.muted)}>Review</span>
-            </div>
-
             <section className="flex flex-col gap-[var(--ds-space-snug)]">
-              <div className="flex min-w-0 flex-wrap items-center gap-[var(--ds-space-base)]">
-                <h3 className={cn(dsText.section, "min-w-0 font-semibold", dsFg.base)}>{workflow.label}</h3>
-                <Chip label="group">{workflow.category}</Chip>
-                <RunFlagChips dryRun={dryRun} test={test} priority={priority} />
+              <div className="flex min-w-0 items-start gap-[var(--ds-space-base)]">
+                <span className="flex min-w-0 flex-1 flex-col gap-[var(--ds-space-snug)]">
+                  <h3 className={cn(dsText.section, "font-semibold", dsFg.base)}>{workflow.label}</h3>
+                  <p className={cn(dsText.body, dsFg.secondary, "max-w-[74ch]")}>{capability.note}</p>
+                </span>
+                <DropdownMenu open={settingsOpen} onOpenChange={setSettingsOpen}>
+                  <DropdownMenuTrigger asChild>
+                    <IconButton
+                      label="Run settings"
+                      size="md"
+                      variant="outline"
+                      icon={<Settings aria-hidden className={dsIcon.md} />}
+                    />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    {capability.timeline && (
+                      <DropdownMenuCheckboxItem
+                        checked={defaultSteps}
+                        onCheckedChange={(next) => changeDefaultSteps(next === true)}
+                        onSelect={(event) => event.preventDefault()}
+                      >
+                        Default steps
+                      </DropdownMenuCheckboxItem>
+                    )}
+                    <DropdownMenuCheckboxItem
+                      checked={defaultOptions}
+                      onCheckedChange={(next) => changeDefaultOptions(next === true)}
+                      onSelect={(event) => event.preventDefault()}
+                    >
+                      Default options
+                    </DropdownMenuCheckboxItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
-              <p className={cn(dsText.body, dsFg.secondary, "max-w-[74ch]")}>{capability.note}</p>
             </section>
 
-            {stage === "input" ? (
-              <div
-                className={cn(
-                  "grid grid-cols-1 gap-[var(--ds-space-section)]",
-                  capability.timeline &&
-                    "@min-[880px]:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)] @min-[880px]:gap-x-[var(--ds-space-page)] @min-[880px]:gap-y-[var(--ds-space-loose)]",
-                )}
-              >
-                <div className="flex min-w-0 flex-col gap-[var(--ds-space-loose)] @min-[880px]:col-start-1 @min-[880px]:row-start-1">
-                  {launcherStartMethods(capability).length > 1 && (
-                    <MethodTabs
-                      methods={launcherStartMethods(capability)}
-                      value={method}
-                      onChange={(next) => { setMethod(next); setResult(null); }}
-                    />
-                  )}
-
-                  {methodWire.kind === "typed" && (
-                    <TypedInput method={methodWire} workflowId={workflowId} text={text} onText={(next) => { setText(next); setResult(null); }} problems={bad} validCount={valid.length} />
-                  )}
-                  {methodWire.kind === "upload" && (
-                    <UploadInput accepts={methodWire.accepts} multiFile={methodWire.multiFile} merge={methodWire.merge} fileIds={fileIds} onChange={(next) => { setFileIds(next); setResult(null); }} />
-                  )}
-                  {methodWire.kind === "spreadsheet" && (
-                    <Field label="Sheet">
-                      <Select value={sheetId} onChange={(event) => setSheetId(event.target.value)}>
-                        {sheets.map((sheet) => <option key={sheet.id} value={sheet.id}>{sheet.fileName} · {sheet.sizeLabel}</option>)}
-                      </Select>
-                    </Field>
-                  )}
-                  {methodWire.kind === "bare" && <Well><span className={cn(dsText.ui, "font-semibold", dsFg.base)}>Nothing to fill in</span></Well>}
-                </div>
-
-                {capability.timeline && (
-                  <aside className="min-w-0 @min-[880px]:col-start-2 @min-[880px]:row-span-3 @min-[880px]:row-start-1 @min-[880px]:self-start @min-[880px]:border-l @min-[880px]:border-[color:var(--ds-border)] @min-[880px]:pl-[var(--ds-space-page)]">
-                    <div className="@min-[880px]:sticky @min-[880px]:top-0">
-                      <WorkflowTimeline
-                        timeline={capability.timeline}
-                        selectedSteps={selectedSteps}
-                        onToggle={(key) => {
-                          setSelectedSteps((current) => current.includes(key) ? current.filter((step) => step !== key) : [...current, key]);
-                          setResult(null);
-                        }}
-                      />
-                    </div>
-                  </aside>
-                )}
-
-                <ReplacementInputs
-                  inputs={replacementInputs}
-                  values={replacementValues}
-                  onChange={(key, value) => { setReplacementValues((current) => ({ ...current, [key]: value })); setResult(null); }}
+            <div className="flex min-w-0 flex-col gap-[var(--ds-space-loose)]">
+              {launcherStartMethods(capability).length > 1 && (
+                <MethodTabs
+                  methods={launcherStartMethods(capability)}
+                  value={method}
+                  onChange={(next) => { setMethod(next); setResult(null); }}
                 />
+              )}
 
-                <section className="border-t border-[color:var(--ds-border)] pt-[var(--ds-space-cozy)] @min-[880px]:col-start-1">
-                  <button
-                    type="button"
-                    aria-expanded={showAdvanced}
-                    onClick={() => setShowAdvanced((current) => !current)}
-                    className={cn("flex min-h-[var(--ds-h-md)] w-full items-center gap-[var(--ds-space-base)] text-left", dsFocus, dsFg.secondary)}
-                  >
-                    <SlidersHorizontal aria-hidden className={dsIcon.sm} />
-                    <span className={cn(dsText.ui, "font-semibold")}>Options</span>
-                    <MetaLine className="ml-auto" items={[dryRun ? "dry run" : "live", priority, test.length > 0 ? `${test.length} test` : "production"]} />
-                    {showAdvanced ? <ChevronUp aria-hidden className={dsIcon.sm} /> : <ChevronDown aria-hidden className={dsIcon.sm} />}
-                  </button>
-                  {showAdvanced && (
-                    <div className="mt-[var(--ds-space-cozy)] flex flex-col gap-[var(--ds-space-loose)] bg-[var(--ds-recess-bg)] p-[var(--ds-space-cozy)]">
-                      {choices.length > 0 && (
-                        <div className="grid grid-cols-1 gap-[var(--ds-space-cozy)] @min-[560px]:grid-cols-2">
-                          {choices.map((choice) => (
-                            <StartChoiceControl key={choice.key} choice={choice} value={choiceValues[choice.key] ?? choice.defaultValue} onChange={(next) => {
-                              const nextChoices = { ...choiceValues, [choice.key]: next };
-                              setChoiceValues(nextChoices);
-                              setFlagValues((previous) => {
-                                const defaults = defaultFlagValues(capability, nextChoices);
-                                const changed = { ...previous };
-                                for (const flag of capability.flags) if (flag.defaultWhen?.choice === choice.key) changed[flag.key] = defaults[flag.key];
-                                return changed;
-                              });
-                              setResult(null);
-                            }} />
-                          ))}
-                        </div>
-                      )}
-                      {!isHandoff && (
-                        <div className="grid grid-cols-1 gap-[var(--ds-space-cozy)] @min-[560px]:grid-cols-2">
-                          <Field label="Active-run policy" description={conflict ? `${conflict.label} — ${conflict.note}.` : undefined}>
-                            <Select value={policy} onChange={(event) => { setPolicy(event.target.value as EnqueuePolicy); setResult(null); }}>
-                              {(Object.keys(ENQUEUE_POLICY_LABEL) as EnqueuePolicy[]).map((key) => <option key={key} value={key}>{ENQUEUE_POLICY_LABEL[key]}</option>)}
-                            </Select>
-                          </Field>
-                          <Field label="Priority">
-                            <Select value={priority} onChange={(event) => setPriority(event.target.value as "interactive" | "bulk")}>
-                              <option value="interactive">Interactive</option>
-                              <option value="bulk">Bulk</option>
-                            </Select>
-                          </Field>
-                        </div>
-                      )}
-                      {flags.map((flag) => (
-                        <StartFlagControl key={flag.key} flag={flag} checked={flagValues[flag.key] ?? defaultFlagValues(capability, choiceValues)[flag.key]} onChange={(next) => { setFlagValues((previous) => ({ ...previous, [flag.key]: next })); setResult(null); }} />
-                      ))}
-                      {!isHandoff && <InstanceSelector workflow={workflow} value={instances} onChange={(next) => { setInstances(next); setResult(null); }} />}
-                    </div>
-                  )}
-                </section>
-              </div>
-            ) : (
-              <div
-                className={cn(
-                  "grid grid-cols-1 gap-[var(--ds-space-section)]",
-                  capability.timeline &&
-                    "@min-[880px]:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)] @min-[880px]:gap-x-[var(--ds-space-page)]",
-                )}
-              >
-                <div className="flex min-w-0 flex-col gap-[var(--ds-space-loose)] @min-[880px]:col-start-1 @min-[880px]:row-start-1">
-                  <section className="flex flex-col gap-[var(--ds-space-cozy)]">
-                    <span className="flex flex-col gap-[var(--ds-space-hair)]">
-                      <SectionLabel>Ready to start</SectionLabel>
-                      <h3 className={cn(dsText.section, "font-semibold", dsFg.base)}>{plan.headline}</h3>
-                    </span>
-                    <RunFlagChips dryRun={dryRun} test={test} priority={priority} />
-                  </section>
-                  {replacementInputs.length > 0 && (
-                    <Well className="grid grid-cols-1 gap-[var(--ds-space-base)] @min-[560px]:grid-cols-2">
-                      {replacementInputs.map((input) => (
-                        <span key={input.key} className="flex min-w-0 flex-col gap-[var(--ds-space-hair)]">
-                          <span className={cn(dsText.meta, dsFg.muted)}>{input.label}</span>
-                          <span className={cn(dsText.ui, "truncate", dsFg.base)}>{replacementValues[input.key]}</span>
-                        </span>
-                      ))}
-                    </Well>
-                  )}
-                  {isHandoff ? (
-                    <Well className="flex flex-col gap-[var(--ds-space-snug)]">
-                      {plan.decisions.map((decision) => <span key={decision} className={cn(dsText.body, dsFg.secondary)}>{decision}</span>)}
-                    </Well>
-                  ) : plan.rows.length === 0 ? (
-                    <Well><EmptyState className="p-[var(--ds-space-base)]" icon={<Layers aria-hidden className={dsIcon.lg} />} title={plan.headline} description="Return to input and add at least one valid value." /></Well>
-                  ) : (
-                    <PlanPreview plan={plan} dryRun={dryRun} test={test} />
-                  )}
-                </div>
-                {capability.timeline && (
-                  <aside className="min-w-0 @min-[880px]:col-start-2 @min-[880px]:row-start-1 @min-[880px]:self-start @min-[880px]:border-l @min-[880px]:border-[color:var(--ds-border)] @min-[880px]:pl-[var(--ds-space-page)]">
-                    <div className="@min-[880px]:sticky @min-[880px]:top-0">
-                      <WorkflowTimeline timeline={capability.timeline} selectedSteps={selectedSteps} onToggle={() => undefined} readOnly />
-                    </div>
-                  </aside>
-                )}
-              </div>
-            )}
+              {methodWire.kind === "typed" && (
+                <TypedInput method={methodWire} workflowId={workflowId} text={text} onText={(next) => { setText(next); setResult(null); }} problems={bad} validCount={valid.length} />
+              )}
+              {methodWire.kind === "upload" && (
+                <UploadInput accepts={methodWire.accepts} multiFile={methodWire.multiFile} merge={methodWire.merge} fileIds={fileIds} onChange={(next) => { setFileIds(next); setResult(null); }} />
+              )}
+              {methodWire.kind === "spreadsheet" && (
+                <Field label="Sheet">
+                  <Select value={sheetId} onChange={(event) => setSheetId(event.target.value)}>
+                    {sheets.map((sheet) => <option key={sheet.id} value={sheet.id}>{sheet.fileName} · {sheet.sizeLabel}</option>)}
+                  </Select>
+                </Field>
+              )}
+              {methodWire.kind === "bare" && <Well><span className={cn(dsText.ui, "font-semibold", dsFg.base)}>Nothing to fill in</span></Well>}
+
+              {customizationSections.includes("steps") && capability.timeline && (
+                <LauncherDisclosure
+                  title="Steps"
+                  meta={`${selectedSteps.length} of ${capability.timeline.steps.length}`}
+                  open={isSectionOpen("steps")}
+                  onToggle={() => toggleSection("steps")}
+                >
+                  <WorkflowTimeline
+                    timeline={capability.timeline}
+                    selectedSteps={selectedSteps}
+                    onToggle={(key) => {
+                      const next = selectedSteps.includes(key)
+                        ? selectedSteps.filter((step) => step !== key)
+                        : [...selectedSteps, key];
+                      setSelectedSteps(next);
+                      if (replacementInputsForSelection(capability.timeline, next).length > 0) openSection("values");
+                      setResult(null);
+                    }}
+                  />
+                </LauncherDisclosure>
+              )}
+
+              {customizationSections.includes("values") && (
+                <LauncherDisclosure
+                  title="Values"
+                  meta={`${replacementInputs.length} required`}
+                  open={isSectionOpen("values")}
+                  onToggle={() => toggleSection("values")}
+                >
+                  <ReplacementInputs
+                    inputs={replacementInputs}
+                    values={replacementValues}
+                    onChange={(key, value) => { setReplacementValues((current) => ({ ...current, [key]: value })); setResult(null); }}
+                  />
+                </LauncherDisclosure>
+              )}
+
+              {customizationSections.includes("options") && (
+                <LauncherDisclosure
+                  title="Options"
+                  open={isSectionOpen("options")}
+                  onToggle={() => toggleSection("options")}
+                >
+                  <div className="flex flex-col gap-[var(--ds-space-loose)] bg-[var(--ds-recess-bg)] p-[var(--ds-space-cozy)]">
+                    {choices.length > 0 && (
+                      <div className="grid grid-cols-1 gap-[var(--ds-space-cozy)] @min-[560px]:grid-cols-2">
+                        {choices.map((choice) => (
+                          <StartChoiceControl key={choice.key} choice={choice} value={choiceValues[choice.key] ?? choice.defaultValue} onChange={(next) => {
+                            const nextChoices = { ...choiceValues, [choice.key]: next };
+                            setChoiceValues(nextChoices);
+                            setFlagValues((previous) => {
+                              const defaults = defaultFlagValues(capability, nextChoices);
+                              const changed = { ...previous };
+                              for (const flag of capability.flags) if (flag.defaultWhen?.choice === choice.key) changed[flag.key] = defaults[flag.key];
+                              return changed;
+                            });
+                            setResult(null);
+                          }} />
+                        ))}
+                      </div>
+                    )}
+                    {!isHandoff && (
+                      <div className="grid grid-cols-1 gap-[var(--ds-space-cozy)] @min-[560px]:grid-cols-2">
+                        <Field label="Active-run policy" description={conflict ? `${conflict.label} — ${conflict.note}.` : undefined}>
+                          <Select value={policy} onChange={(event) => { setPolicy(event.target.value as EnqueuePolicy); setResult(null); }}>
+                            {(Object.keys(ENQUEUE_POLICY_LABEL) as EnqueuePolicy[]).map((key) => <option key={key} value={key}>{ENQUEUE_POLICY_LABEL[key]}</option>)}
+                          </Select>
+                        </Field>
+                        <Field label="Priority">
+                          <Select value={priority} onChange={(event) => setPriority(event.target.value as "interactive" | "bulk")}>
+                            <option value="interactive">Interactive</option>
+                            <option value="bulk">Bulk</option>
+                          </Select>
+                        </Field>
+                      </div>
+                    )}
+                    {flags.map((flag) => (
+                      <StartFlagControl key={flag.key} flag={flag} checked={flagValues[flag.key] ?? defaultFlagValues(capability, choiceValues)[flag.key]} onChange={(next) => { setFlagValues((previous) => ({ ...previous, [flag.key]: next })); setResult(null); }} />
+                    ))}
+                    {!isHandoff && <InstanceSelector workflow={workflow} value={instances} onChange={(next) => { setInstances(next); setResult(null); }} />}
+                  </div>
+                </LauncherDisclosure>
+              )}
+            </div>
           </DialogBody>
         </div>
 
-        {/* The footer says either why you cannot start or exactly what starting
-            will make. The plan's cards live in the body where they belong, but
-            its ANSWER — the row count — sits beside the verb, so the operator
-            never has to scroll back down to check what they are about to press.
-            An empty plan has nothing to promise, so it promises nothing. */}
         <DialogFooter
           meta={
             <MetaLine
@@ -992,41 +1007,25 @@ export function DemoRunModal({
             />
           }
         >
-          {stage === "input" ? (
-            <>
-              <Button variant="secondary" onClick={() => onOpenChange(false)}>Cancel</Button>
-              <Button
-                variant="primary"
-                icon={<ArrowRight aria-hidden className={dsIcon.md} />}
-                disabled={Boolean(blockedReason)}
-                onClick={() => setStage("review")}
-              >
-                Review run
-              </Button>
-            </>
+          <Button variant="secondary" onClick={() => onOpenChange(false)}>Cancel</Button>
+          {isHandoff ? (
+            <Button
+              variant="primary"
+              icon={<FileSpreadsheet aria-hidden className={dsIcon.md} />}
+              disabled={!sheetId}
+              onClick={() => { onOpenChange(false); onOpenIntake(sheetId); }}
+            >
+              Open the intake…
+            </Button>
           ) : (
-            <>
-              <Button variant="secondary" onClick={() => setStage("input")}>Back to input</Button>
-              {isHandoff ? (
-                <Button
-                  variant="primary"
-                  icon={<FileSpreadsheet aria-hidden className={dsIcon.md} />}
-                  disabled={!sheetId}
-                  onClick={() => { onOpenChange(false); onOpenIntake(sheetId); }}
-                >
-                  Open the intake…
-                </Button>
-              ) : (
-                <Button
-                  variant="primary"
-                  icon={<Play aria-hidden className={dsIcon.md} />}
-                  disabled={Boolean(blockedReason) || result?.state === "applied"}
-                  onClick={start}
-                >
-                  {dryRun ? "Start dry run" : "Start run"}
-                </Button>
-              )}
-            </>
+            <Button
+              variant="primary"
+              icon={<Play aria-hidden className={dsIcon.md} />}
+              disabled={Boolean(blockedReason) || result?.state === "applied"}
+              onClick={start}
+            >
+              {dryRun ? "Start dry run" : "Start run"}
+            </Button>
           )}
         </DialogFooter>
       </DialogContent>
