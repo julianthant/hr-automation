@@ -984,7 +984,7 @@ export function DemoRunModal({
               {currentStage === "Options" && (
                 <section aria-labelledby="run-start-options" className="flex flex-col gap-[var(--ds-space-cozy)]">
                   <h4 id="run-start-options" className={cn(dsText.title, "font-semibold", dsFg.base)}>Options</h4>
-                  <div className="flex flex-col gap-[var(--ds-space-loose)] bg-[var(--ds-recess-bg)] p-[var(--ds-space-cozy)]">
+                  <div className="flex flex-col gap-[var(--ds-space-loose)]">
                     {choices.length > 0 && (
                       <div className="grid grid-cols-1 gap-[var(--ds-space-cozy)] @min-[560px]:grid-cols-2">
                         {choices.map((choice) => (
