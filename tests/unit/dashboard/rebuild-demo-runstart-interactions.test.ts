@@ -35,10 +35,23 @@ describe("rebuild demo run-start interactions", () => {
     )?.[0];
 
     assert.ok(configurationPath, "expected the numbered run configuration path");
-    assert.match(configurationPath, /border-b border-\[color:var\(--ds-border\)\] pb-\[var\(--ds-space-cozy\)\]/);
+    assert.match(configurationPath, /border-b border-\[color:var\(--ds-border\)\][^"\n]* pb-\[var\(--ds-space-cozy\)\]/);
     assert.match(configurationPath, /dsText\.micro/);
     assert.match(configurationPath, /bg-\[var\(--ds-surface-3\)\]/);
     assert.doesNotMatch(configurationPath, /dsText\.meta/);
+  });
+
+  it("joins the workflow filter and configuration path into one desktop rule", () => {
+    assert.match(
+      source,
+      /box-content[^\n]*h-\[var\(--ds-h-sm\)\][^\n]*border-b[^\n]*py-\[var\(--ds-space-cozy\)\]/,
+      "the workflow filter row must end at the same height as the stepper",
+    );
+    assert.match(
+      source,
+      /aria-label="Run configuration path"[\s\S]*?-mx-\[var\(--ds-space-loose\)\][^\n]*px-\[var\(--ds-space-loose\)\]/,
+      "the stepper divider must cross the body padding and meet the filter divider",
+    );
   });
 
   it("places the configuration path above the workflow title and settings", () => {

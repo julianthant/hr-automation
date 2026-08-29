@@ -182,7 +182,7 @@ function WorkflowPicker({ value, onChange }: { value: DemoWorkflowId; onChange: 
 
   return (
     <div className="hidden w-[204px] shrink-0 flex-col border-r border-[color:var(--ds-border)] min-[768px]:flex">
-      <div className="shrink-0 border-b border-[color:var(--ds-border)] p-[var(--ds-space-base)]">
+      <div className="box-content flex h-[var(--ds-h-sm)] shrink-0 items-center border-b border-[color:var(--ds-border)] px-[var(--ds-space-base)] py-[var(--ds-space-cozy)]">
         {/* A plain labelled input rather than SearchInput: this filters a list
             of fourteen, so a clear affordance would cost a control for a state
             one keystroke undoes. */}
@@ -855,7 +855,7 @@ export function DemoRunModal({
 
             <ol
               aria-label="Run configuration path"
-              className="flex flex-wrap items-center gap-[var(--ds-space-base)] border-b border-[color:var(--ds-border)] pb-[var(--ds-space-cozy)]"
+              className="-mx-[var(--ds-space-loose)] flex flex-wrap items-center gap-[var(--ds-space-base)] border-b border-[color:var(--ds-border)] px-[var(--ds-space-loose)] pb-[var(--ds-space-cozy)]"
             >
               {launchStages.map((stage, index) => (
                 <li
