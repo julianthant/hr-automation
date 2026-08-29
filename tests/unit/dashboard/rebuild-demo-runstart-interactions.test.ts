@@ -28,4 +28,25 @@ describe("rebuild demo run-start interactions", () => {
       "the Options controls must not reintroduce a separate black recessed panel",
     );
   });
+
+  it("renders the dynamic configuration path as the compact ruled strip", () => {
+    const configurationPath = source.match(
+      /<ol\s+aria-label="Run configuration path"[\s\S]*?<\/ol>/,
+    )?.[0];
+
+    assert.ok(configurationPath, "expected the numbered run configuration path");
+    assert.match(configurationPath, /border-b border-\[color:var\(--ds-border\)\] pb-\[var\(--ds-space-cozy\)\]/);
+    assert.match(configurationPath, /dsText\.micro/);
+    assert.match(configurationPath, /bg-\[var\(--ds-surface-3\)\]/);
+    assert.doesNotMatch(configurationPath, /dsText\.meta/);
+  });
+
+  it("places the configuration path above the workflow title and settings", () => {
+    const configurationPathIndex = source.indexOf('aria-label="Run configuration path"');
+    const workflowTitleIndex = source.indexOf(">\{workflow.label\}</h3>");
+
+    assert.notEqual(configurationPathIndex, -1, "expected the configuration path");
+    assert.notEqual(workflowTitleIndex, -1, "expected the workflow title");
+    assert.ok(configurationPathIndex < workflowTitleIndex, "the stepper must be the first launcher row");
+  });
 });

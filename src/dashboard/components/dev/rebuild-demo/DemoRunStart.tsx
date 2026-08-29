@@ -853,6 +853,39 @@ export function DemoRunModal({
               />
             )}
 
+            <ol
+              aria-label="Run configuration path"
+              className="flex flex-wrap items-center gap-[var(--ds-space-base)] border-b border-[color:var(--ds-border)] pb-[var(--ds-space-cozy)]"
+            >
+              {launchStages.map((stage, index) => (
+                <li
+                  key={stage.label}
+                  aria-current={stage.label === currentStage ? "step" : undefined}
+                  className="flex items-center gap-[var(--ds-space-base)]"
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "flex size-[var(--ds-h-sm)] shrink-0 items-center justify-center",
+                      dsRadius.pill,
+                      dsText.micro,
+                      dsText.nums,
+                      stage.label === currentStage
+                        ? "bg-[var(--ds-accent)] text-[color:var(--ds-accent-fg)]"
+                        : "bg-[var(--ds-surface-3)]",
+                      stage.label !== currentStage && dsFg.muted,
+                    )}
+                  >
+                    {stage.number}
+                  </span>
+                  <span className={cn(dsText.ui, stage.label === currentStage ? "font-semibold" : dsFg.muted)}>
+                    {stage.label}
+                  </span>
+                  {index < launchStages.length - 1 && <ArrowRight aria-hidden className={cn(dsIcon.sm, dsFg.faint)} />}
+                </li>
+              ))}
+            </ol>
+
             <section className="flex flex-col gap-[var(--ds-space-snug)]">
               <div className="flex min-w-0 items-start gap-[var(--ds-space-base)]">
                 <h3 className={cn(dsText.section, "min-w-0 flex-1 font-semibold", dsFg.base)}>{workflow.label}</h3>
@@ -886,36 +919,6 @@ export function DemoRunModal({
                 </DropdownMenu>
               </div>
             </section>
-
-            <ol aria-label="Run configuration path" className="flex flex-wrap items-center gap-[var(--ds-space-snug)]">
-              {launchStages.map((stage, index) => (
-                <li
-                  key={stage.label}
-                  aria-current={stage.label === currentStage ? "step" : undefined}
-                  className="flex items-center gap-[var(--ds-space-snug)]"
-                >
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "flex size-[var(--ds-h-sm)] shrink-0 items-center justify-center border",
-                      dsRadius.pill,
-                      dsText.meta,
-                      dsText.nums,
-                      stage.label === currentStage
-                        ? "border-transparent bg-[var(--ds-accent)] text-[color:var(--ds-accent-fg)]"
-                        : "border-[color:var(--ds-border-strong)] bg-[var(--ds-surface-2)]",
-                      stage.label !== currentStage && dsFg.secondary,
-                    )}
-                  >
-                    {stage.number}
-                  </span>
-                  <span className={cn(dsText.ui, "font-medium", stage.label === currentStage ? dsFg.base : dsFg.secondary)}>
-                    {stage.label}
-                  </span>
-                  {index < launchStages.length - 1 && <ArrowRight aria-hidden className={cn(dsIcon.sm, dsFg.faint)} />}
-                </li>
-              ))}
-            </ol>
 
             <div className="flex min-w-0 flex-col gap-[var(--ds-space-loose)]">
               {currentStage === "Input" && (

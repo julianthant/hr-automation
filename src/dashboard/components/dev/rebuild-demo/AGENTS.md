@@ -11,7 +11,9 @@ live.
 - The launcher workspace is a compact one-column dialog beside the workflow rail. Its compact numbered
   wizard always begins with `Input`, derives `Steps`, `Values`, and `Options` from current customization
   in causal order, and ends with `Confirm`. The ordinary path is `Input -> Confirm`; there is no old
-  Review stage or example-value row.
+  Review stage or example-value row. The path uses the launcher's original compact ruled-strip treatment:
+  small numbered circles, muted inactive labels, tight arrows, and a full-width bottom divider. It is
+  the first workspace row, above the workflow title and gear.
 - The workflow title has one shared non-modal Radix-backed gear dropdown. It is anchored below the trigger,
   overlays the form without reflowing it, closes on outside pointer or Escape, returns focus to the gear,
   and exposes checkbox-menu semantics. `Default steps` and `Default options` begin checked, so no
