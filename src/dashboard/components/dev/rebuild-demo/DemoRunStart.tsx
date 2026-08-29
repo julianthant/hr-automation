@@ -8,27 +8,20 @@ import {
   LockKeyhole,
   Play,
   Search,
-  Settings,
   Upload,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import {
   Badge,
   Banner,
   Button,
   Card,
+  Checkbox,
   Dialog,
   DialogBody,
   DialogContent,
   DialogFooter,
   Field,
-  IconButton,
   Input,
   KeyValueList,
   MetaLine,
@@ -126,9 +119,9 @@ import { SOURCE_SHEETS } from "./demo-data-intake";
  *  - **More than one input kind is a PEER CHOICE.** `oath-signature` takes typed
  *    EIDs or an uploaded packet; they are peer tabs. Phone capture has its own
  *    intake surface and is not a launcher mode.
- *  - **The ordinary path is Input → Confirm.** Defaults stay out of the way;
- *    the gear opts into custom steps or options, skipped-step values appear
- *    only when required, and only Confirm carries the consequential command.
+ *  - **The ordinary path is Input → Options → Confirm.** Step customization is
+ *    a plain option; enabling it reveals Steps, and skipped-step values appear
+ *    only when required. Only Confirm carries the consequential command.
  *  - **Starting is a COMMAND**, so it returns `applied | conflict | rejected`.
  *    All three are reachable by clicking.
  */
@@ -621,9 +614,7 @@ export function DemoRunModal({
     defaultSelectedSteps(initialCapability.timeline),
   );
   const [replacementValues, setReplacementValues] = useState<Record<string, string>>({});
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [defaultSteps, setDefaultSteps] = useState(true);
-  const [defaultOptions, setDefaultOptions] = useState(true);
+  const [customizeSteps, setCustomizeSteps] = useState(false);
   const [currentStage, setCurrentStage] = useState<RunStartStage["label"]>("Input");
   /** the contract version this form was BUILT against — bumped by a reload */
   /* The START CONTRACT each open form was built against. It is a token, not a
@@ -644,9 +635,7 @@ export function DemoRunModal({
     setSheetId(SOURCE_SHEETS.find((s) => s.workflow === next)?.id ?? "");
     setSelectedSteps(defaultSelectedSteps(capability.timeline));
     setReplacementValues({});
-    setSettingsOpen(false);
-    setDefaultSteps(true);
-    setDefaultOptions(true);
+    setCustomizeSteps(false);
     setCurrentStage("Input");
     setPolicy("reject-active");
     setPriority("interactive");
@@ -669,6 +658,10 @@ export function DemoRunModal({
     (choice) => !(capability.timeline && choice.key === "preset"),
   );
   const flags = visibleFlags(capability, method);
+  const automationWorkersChoice = choices.find((choice) => choice.key === "workers");
+  const otherChoices = choices.filter((choice) => choice.key !== "workers");
+  const dryRunFlag = flags.find((flag) => flag.key === "dryRun");
+  const otherFlags = flags.filter((flag) => flag.key !== "dryRun");
   const dryRun = flags.some((f) => f.key === "dryRun") && flagValues.dryRun === true;
   const duplicateCheck = flags.some((f) => f.key === "duplicateCheck") && flagValues.duplicateCheck === true;
   const crmCheck = flags.some((f) => f.key === "crmCheck") && flagValues.crmCheck === true;
@@ -683,11 +676,10 @@ export function DemoRunModal({
   const customizationSections = useMemo(
     () => runStartCustomizationSections({
       timeline: capability.timeline,
-      defaultSteps,
-      defaultOptions,
+      customizeSteps,
       selectedSteps,
     }),
-    [capability.timeline, defaultSteps, defaultOptions, selectedSteps],
+    [capability.timeline, customizeSteps, selectedSteps],
   );
   const launchStages = useMemo(() => runStartStages(customizationSections), [customizationSections]);
 
@@ -772,26 +764,12 @@ export function DemoRunModal({
   }, [workflowId, builtContract, method, plan, policy, dryRun, duplicateCheck, crmCheck, instances, capability, choiceValues, scopeLabel, conflict]);
 
   const isHandoff = methodWire.kind === "spreadsheet";
-  const changeDefaultSteps = (next: boolean) => {
-    setDefaultSteps(next);
-    if (next) {
+  const changeCustomizeSteps = (next: boolean) => {
+    setCustomizeSteps(next);
+    if (!next) {
       setSelectedSteps(defaultSelectedSteps(capability.timeline));
     } else if (currentStage === "Confirm") {
       setCurrentStage("Steps");
-    }
-    setResult(null);
-  };
-  const changeDefaultOptions = (next: boolean) => {
-    setDefaultOptions(next);
-    if (next) {
-      const defaults = defaultChoiceValues(capability);
-      setChoiceValues(defaults);
-      setFlagValues(defaultFlagValues(capability, defaults));
-      setPolicy("reject-active");
-      setPriority("interactive");
-      setInstances({});
-    } else if (currentStage === "Confirm") {
-      setCurrentStage("Options");
     }
     setResult(null);
   };
@@ -887,37 +865,7 @@ export function DemoRunModal({
             </ol>
 
             <section className="flex flex-col gap-[var(--ds-space-snug)]">
-              <div className="flex min-w-0 items-start gap-[var(--ds-space-base)]">
-                <h3 className={cn(dsText.section, "min-w-0 flex-1 font-semibold", dsFg.base)}>{workflow.label}</h3>
-                <DropdownMenu modal={false} open={settingsOpen} onOpenChange={setSettingsOpen}>
-                  <DropdownMenuTrigger asChild>
-                    <IconButton
-                      label="Run settings"
-                      size="md"
-                      variant="outline"
-                      icon={<Settings aria-hidden className={dsIcon.md} />}
-                    />
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
-                    {capability.timeline && (
-                      <DropdownMenuCheckboxItem
-                        checked={defaultSteps}
-                        onCheckedChange={(next) => changeDefaultSteps(next === true)}
-                        onSelect={(event) => event.preventDefault()}
-                      >
-                        Default steps
-                      </DropdownMenuCheckboxItem>
-                    )}
-                    <DropdownMenuCheckboxItem
-                      checked={defaultOptions}
-                      onCheckedChange={(next) => changeDefaultOptions(next === true)}
-                      onSelect={(event) => event.preventDefault()}
-                    >
-                      Default options
-                    </DropdownMenuCheckboxItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+              <h3 className={cn(dsText.section, "min-w-0 font-semibold", dsFg.base)}>{workflow.label}</h3>
             </section>
 
             <div className="flex min-w-0 flex-col gap-[var(--ds-space-loose)]">
@@ -986,9 +934,28 @@ export function DemoRunModal({
               {currentStage === "Options" && (
                 <section aria-label="Options" className="flex flex-col gap-[var(--ds-space-cozy)]">
                   <div className="flex flex-col gap-[var(--ds-space-loose)]">
-                    {choices.length > 0 && (
+                    {(capability.timeline || dryRunFlag) && (
+                      <div className="grid grid-cols-1 gap-[var(--ds-space-cozy)] @min-[480px]:grid-cols-2">
+                        {capability.timeline && (
+                          <Checkbox
+                            checked={customizeSteps}
+                            onCheckedChange={(next) => changeCustomizeSteps(next === true)}
+                            label="Customize steps"
+                            description="Choose which workflow steps this run includes."
+                          />
+                        )}
+                        {dryRunFlag && (
+                          <StartFlagControl
+                            flag={dryRunFlag}
+                            checked={flagValues[dryRunFlag.key] ?? defaultFlagValues(capability, choiceValues)[dryRunFlag.key]}
+                            onChange={(next) => { setFlagValues((previous) => ({ ...previous, [dryRunFlag.key]: next })); setResult(null); }}
+                          />
+                        )}
+                      </div>
+                    )}
+                    {otherChoices.length > 0 && (
                       <div className="grid grid-cols-1 gap-[var(--ds-space-cozy)] @min-[560px]:grid-cols-2">
-                        {choices.map((choice) => (
+                        {otherChoices.map((choice) => (
                           <StartChoiceControl key={choice.key} choice={choice} value={choiceValues[choice.key] ?? choice.defaultValue} onChange={(next) => {
                             const nextChoices = { ...choiceValues, [choice.key]: next };
                             setChoiceValues(nextChoices);
@@ -1004,7 +971,10 @@ export function DemoRunModal({
                       </div>
                     )}
                     {!isHandoff && (
-                      <div className="grid grid-cols-1 gap-[var(--ds-space-cozy)] @min-[560px]:grid-cols-2">
+                      <div className={cn(
+                        "grid grid-cols-1 gap-[var(--ds-space-cozy)]",
+                        automationWorkersChoice ? "@min-[480px]:grid-cols-3" : "@min-[480px]:grid-cols-2",
+                      )}>
                         <Field label="Active-run policy" description={conflict ? `${conflict.label} — ${conflict.note}.` : undefined}>
                           <Select value={policy} onChange={(event) => { setPolicy(event.target.value as EnqueuePolicy); setResult(null); }}>
                             {(Object.keys(ENQUEUE_POLICY_LABEL) as EnqueuePolicy[]).map((key) => <option key={key} value={key}>{ENQUEUE_POLICY_LABEL[key]}</option>)}
@@ -1016,9 +986,16 @@ export function DemoRunModal({
                             <option value="bulk">Bulk</option>
                           </Select>
                         </Field>
+                        {automationWorkersChoice && (
+                          <StartChoiceControl
+                            choice={automationWorkersChoice}
+                            value={choiceValues[automationWorkersChoice.key] ?? automationWorkersChoice.defaultValue}
+                            onChange={(next) => { setChoiceValues((previous) => ({ ...previous, [automationWorkersChoice.key]: next })); setResult(null); }}
+                          />
+                        )}
                       </div>
                     )}
-                    {flags.map((flag) => (
+                    {otherFlags.map((flag) => (
                       <StartFlagControl key={flag.key} flag={flag} checked={flagValues[flag.key] ?? defaultFlagValues(capability, choiceValues)[flag.key]} onChange={(next) => { setFlagValues((previous) => ({ ...previous, [flag.key]: next })); setResult(null); }} />
                     ))}
                     {!isHandoff && <InstanceSelector workflow={workflow} value={instances} onChange={(next) => { setInstances(next); setResult(null); }} />}

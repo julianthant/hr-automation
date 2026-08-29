@@ -41,7 +41,7 @@ export function missingReplacementInputs(
   return inputs.filter((input) => (values[input.key] ?? "").trim().length === 0);
 }
 
-export type RunStartCustomizationSection = "steps" | "values" | "options";
+export type RunStartCustomizationSection = "options" | "steps" | "values";
 
 export interface RunStartStage {
   number: number;
@@ -55,35 +55,31 @@ const CUSTOMIZATION_STAGE_LABEL: Record<RunStartCustomizationSection, RunStartSt
 };
 
 /**
- * Progressive launcher sections, in causal order. The default form has none:
- * steps appear only when the operator opts out of the workflow defaults,
- * values appear only when a skipped step needs replacements, and options
- * appear only when the operator opts out of their defaults.
+ * Progressive launcher sections, in causal order. Options is always visible;
+ * it is where the operator opts into step customization. Steps then appears,
+ * followed by Values only when a skipped step needs replacements.
  */
 export function runStartCustomizationSections({
   timeline,
-  defaultSteps,
-  defaultOptions,
+  customizeSteps,
   selectedSteps,
 }: {
   timeline: StartTimelineWire | undefined;
-  defaultSteps: boolean;
-  defaultOptions: boolean;
+  customizeSteps: boolean;
   selectedSteps: readonly string[];
 }): RunStartCustomizationSection[] {
-  const sections: RunStartCustomizationSection[] = [];
-  if (timeline && !defaultSteps) {
+  const sections: RunStartCustomizationSection[] = ["options"];
+  if (timeline && customizeSteps) {
     sections.push("steps");
     if (replacementInputsForSelection(timeline, selectedSteps).length > 0) sections.push("values");
   }
-  if (!defaultOptions) sections.push("options");
   return sections;
 }
 
 /**
- * The compact launch path is a real wizard. Input never moves, opt-in
- * customization follows in causal order, and Confirm is always the terminal
- * step where the consequential command lives.
+ * The compact launch path is a real wizard. Input and Options never move,
+ * opt-in step customization follows Options, and Confirm is always the
+ * terminal step where the consequential command lives.
  */
 export function runStartStages(sections: readonly RunStartCustomizationSection[]): RunStartStage[] {
   return [
@@ -105,16 +101,16 @@ export function adjacentRunStartStage(
 
 const RUN_START_STAGE_ORDER: readonly RunStartStage["label"][] = [
   "Input",
+  "Options",
   "Steps",
   "Values",
-  "Options",
   "Confirm",
 ];
 
 /**
- * A dynamic stage can disappear while the gear menu is open. Keep the wizard
- * on the nearest still-present earlier step instead of stranding it on a page
- * that no longer exists.
+ * A dynamic stage can disappear when step customization is switched off. Keep
+ * the wizard on the nearest still-present earlier step instead of stranding it
+ * on a page that no longer exists.
  */
 export function reconcileRunStartStage(
   stages: readonly RunStartStage[],

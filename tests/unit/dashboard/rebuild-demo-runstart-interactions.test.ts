@@ -8,12 +8,10 @@ const source = readFileSync(
 );
 
 describe("rebuild demo run-start interactions", () => {
-  it("keeps the settings menu non-modal inside the run dialog", () => {
-    assert.match(
-      source,
-      /<DropdownMenu\s+modal=\{false\}\s+open=\{settingsOpen\}/,
-      "a modal DropdownMenu pointer-locks the parent Dialog; its next body click dismisses both layers",
-    );
+  it("shows Options in the ordinary path and removes the settings gear", () => {
+    assert.doesNotMatch(source, /<DropdownMenu/);
+    assert.doesNotMatch(source, /<Settings/);
+    assert.match(source, /const \[customizeSteps, setCustomizeSteps\] = useState\(false\)/);
   });
 
   it("renders the opt-in options directly on the launcher surface", () => {
@@ -27,6 +25,10 @@ describe("rebuild demo run-start interactions", () => {
       /bg-\[var\(--ds-recess-bg\)\]/,
       "the Options controls must not reintroduce a separate black recessed panel",
     );
+    assert.match(optionsStage, /label="Customize steps"/);
+    assert.match(optionsStage, /checked=\{customizeSteps\}/);
+    assert.match(optionsStage, /@min-\[480px\]:grid-cols-2/);
+    assert.match(optionsStage, /automationWorkersChoice \? "@min-\[480px\]:grid-cols-3"/);
   });
 
   it("does not repeat Input or Options below the workflow title", () => {
@@ -70,9 +72,9 @@ describe("rebuild demo run-start interactions", () => {
     );
   });
 
-  it("places the configuration path above the workflow title and settings", () => {
+  it("places the configuration path above the workflow title", () => {
     const configurationPathIndex = source.indexOf('aria-label="Run configuration path"');
-    const workflowTitleIndex = source.indexOf(">\{workflow.label\}</h3>");
+    const workflowTitleIndex = source.indexOf(">{workflow.label}</h3>");
 
     assert.notEqual(configurationPathIndex, -1, "expected the configuration path");
     assert.notEqual(workflowTitleIndex, -1, "expected the workflow title");
