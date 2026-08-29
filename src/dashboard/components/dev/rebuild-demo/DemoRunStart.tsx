@@ -922,8 +922,7 @@ export function DemoRunModal({
 
             <div className="flex min-w-0 flex-col gap-[var(--ds-space-loose)]">
               {currentStage === "Input" && (
-                <section aria-labelledby="run-start-input" className="flex flex-col gap-[var(--ds-space-loose)]">
-                  <h4 id="run-start-input" className={cn(dsText.title, "font-semibold", dsFg.base)}>Input</h4>
+                <section aria-label="Input" className="flex flex-col gap-[var(--ds-space-loose)]">
                   {launcherStartMethods(capability).length > 1 && (
                     <MethodTabs
                       methods={launcherStartMethods(capability)}
@@ -985,8 +984,7 @@ export function DemoRunModal({
               )}
 
               {currentStage === "Options" && (
-                <section aria-labelledby="run-start-options" className="flex flex-col gap-[var(--ds-space-cozy)]">
-                  <h4 id="run-start-options" className={cn(dsText.title, "font-semibold", dsFg.base)}>Options</h4>
+                <section aria-label="Options" className="flex flex-col gap-[var(--ds-space-cozy)]">
                   <div className="flex flex-col gap-[var(--ds-space-loose)]">
                     {choices.length > 0 && (
                       <div className="grid grid-cols-1 gap-[var(--ds-space-cozy)] @min-[560px]:grid-cols-2">

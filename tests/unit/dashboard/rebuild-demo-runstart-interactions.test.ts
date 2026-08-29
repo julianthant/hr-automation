@@ -29,6 +29,22 @@ describe("rebuild demo run-start interactions", () => {
     );
   });
 
+  it("does not repeat Input or Options below the workflow title", () => {
+    const inputStage = source.match(
+      /\{currentStage === "Input"[\s\S]*?\{currentStage === "Steps"/,
+    )?.[0];
+    const optionsStage = source.match(
+      /\{currentStage === "Options"[\s\S]*?\{currentStage === "Confirm"/,
+    )?.[0];
+
+    assert.ok(inputStage, "expected the Input stage");
+    assert.ok(optionsStage, "expected the Options stage");
+    assert.match(inputStage, /<section aria-label="Input"/);
+    assert.match(optionsStage, /<section aria-label="Options"/);
+    assert.doesNotMatch(inputStage, />Input<\/h4>/);
+    assert.doesNotMatch(optionsStage, />Options<\/h4>/);
+  });
+
   it("renders the dynamic configuration path as the compact ruled strip", () => {
     const configurationPath = source.match(
       /<ol\s+aria-label="Run configuration path"[\s\S]*?<\/ol>/,
