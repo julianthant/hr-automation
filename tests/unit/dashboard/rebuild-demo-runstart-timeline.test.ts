@@ -68,49 +68,33 @@ describe("rebuild demo run-start timeline", () => {
     assert.deepEqual(restoredRead, []);
   });
 
-  it("adds customization sections only as their defaults are turned off", () => {
+  it("always shows Options and adds Steps only when customization is enabled", () => {
     const full = defaultSelectedSteps(timeline);
-    assert.deepEqual(runStartCustomizationSections({ timeline, defaultSteps: true, defaultOptions: true, selectedSteps: full }), []);
-    assert.deepEqual(runStartCustomizationSections({ timeline, defaultSteps: false, defaultOptions: true, selectedSteps: full }), ["steps"]);
-    assert.deepEqual(runStartCustomizationSections({ timeline, defaultSteps: false, defaultOptions: true, selectedSteps: ["verify-person", "submit"] }), ["steps", "values"]);
-    assert.deepEqual(runStartCustomizationSections({ timeline, defaultSteps: false, defaultOptions: false, selectedSteps: full }), ["steps", "options"]);
+    assert.deepEqual(runStartCustomizationSections({ timeline, customizeSteps: false, selectedSteps: full }), ["options"]);
+    assert.deepEqual(runStartCustomizationSections({ timeline, customizeSteps: true, selectedSteps: full }), ["options", "steps"]);
+    assert.deepEqual(runStartCustomizationSections({ timeline, customizeSteps: true, selectedSteps: ["verify-person", "submit"] }), ["options", "steps", "values"]);
   });
 
-  it("projects the ordinary launcher as Input then Confirm", () => {
-    assert.deepEqual(runStartStages([]), [
-      { number: 1, label: "Input" },
-      { number: 2, label: "Confirm" },
-    ]);
-  });
-
-  it("projects each dynamic launch path in causal order with no numbering gaps", () => {
-    assert.deepEqual(runStartStages(["steps"]), [
-      { number: 1, label: "Input" },
-      { number: 2, label: "Steps" },
-      { number: 3, label: "Confirm" },
-    ]);
-    assert.deepEqual(runStartStages(["steps", "values"]), [
-      { number: 1, label: "Input" },
-      { number: 2, label: "Steps" },
-      { number: 3, label: "Values" },
-      { number: 4, label: "Confirm" },
-    ]);
+  it("projects the ordinary launcher as Input, Options, then Confirm", () => {
     assert.deepEqual(runStartStages(["options"]), [
       { number: 1, label: "Input" },
       { number: 2, label: "Options" },
       { number: 3, label: "Confirm" },
     ]);
-    assert.deepEqual(runStartStages(["steps", "options"]), [
+  });
+
+  it("projects the customized path in causal order with no numbering gaps", () => {
+    assert.deepEqual(runStartStages(["options", "steps"]), [
       { number: 1, label: "Input" },
-      { number: 2, label: "Steps" },
-      { number: 3, label: "Options" },
+      { number: 2, label: "Options" },
+      { number: 3, label: "Steps" },
       { number: 4, label: "Confirm" },
     ]);
-    assert.deepEqual(runStartStages(["steps", "values", "options"]), [
+    assert.deepEqual(runStartStages(["options", "steps", "values"]), [
       { number: 1, label: "Input" },
-      { number: 2, label: "Steps" },
-      { number: 3, label: "Values" },
-      { number: 4, label: "Options" },
+      { number: 2, label: "Options" },
+      { number: 3, label: "Steps" },
+      { number: 4, label: "Values" },
       { number: 5, label: "Confirm" },
     ]);
   });
@@ -118,44 +102,43 @@ describe("rebuild demo run-start timeline", () => {
   it("renumbers the path when restoring a supplying step removes Values", () => {
     const skipped = runStartCustomizationSections({
       timeline,
-      defaultSteps: false,
-      defaultOptions: false,
+      customizeSteps: true,
       selectedSteps: ["verify-person", "submit"],
     });
     assert.deepEqual(runStartStages(skipped), [
       { number: 1, label: "Input" },
-      { number: 2, label: "Steps" },
-      { number: 3, label: "Values" },
-      { number: 4, label: "Options" },
+      { number: 2, label: "Options" },
+      { number: 3, label: "Steps" },
+      { number: 4, label: "Values" },
       { number: 5, label: "Confirm" },
     ]);
 
     const restored = runStartCustomizationSections({
       timeline,
-      defaultSteps: false,
-      defaultOptions: false,
+      customizeSteps: true,
       selectedSteps: defaultSelectedSteps(timeline),
     });
     assert.deepEqual(runStartStages(restored), [
       { number: 1, label: "Input" },
-      { number: 2, label: "Steps" },
-      { number: 3, label: "Options" },
+      { number: 2, label: "Options" },
+      { number: 3, label: "Steps" },
       { number: 4, label: "Confirm" },
     ]);
   });
 
   it("moves forward and back through only the stages that currently exist", () => {
-    const stages = runStartStages(["steps", "values", "options"]);
-    assert.equal(adjacentRunStartStage(stages, "Input", "next"), "Steps");
+    const stages = runStartStages(["options", "steps", "values"]);
+    assert.equal(adjacentRunStartStage(stages, "Input", "next"), "Options");
+    assert.equal(adjacentRunStartStage(stages, "Options", "next"), "Steps");
     assert.equal(adjacentRunStartStage(stages, "Steps", "next"), "Values");
-    assert.equal(adjacentRunStartStage(stages, "Confirm", "previous"), "Options");
+    assert.equal(adjacentRunStartStage(stages, "Confirm", "previous"), "Values");
     assert.equal(adjacentRunStartStage(stages, "Input", "previous"), null);
     assert.equal(adjacentRunStartStage(stages, "Confirm", "next"), null);
   });
 
   it("falls back to the nearest earlier stage when a dynamic stage disappears", () => {
-    assert.equal(reconcileRunStartStage(runStartStages(["steps", "options"]), "Values"), "Steps");
-    assert.equal(reconcileRunStartStage(runStartStages([]), "Options"), "Input");
+    assert.equal(reconcileRunStartStage(runStartStages(["options", "steps"]), "Values"), "Steps");
+    assert.equal(reconcileRunStartStage(runStartStages(["options"]), "Steps"), "Options");
     assert.equal(reconcileRunStartStage(runStartStages(["options"]), "Confirm"), "Confirm");
   });
 });
