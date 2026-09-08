@@ -1083,7 +1083,7 @@
    "path": "src/workflows/separations/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "705842e6a4800e8775cd1b002207bfef73af656070dc1751bf539b1bee018893",
-   "afterSha256": "8ddc19a11f0d7706b4045be13672fdae6c3e5f916f664bec2b5ee62f13e0ae53",
+   "afterSha256": "4cbeb4d3cb1fb32ef8e66f4c182ec3c636f718ed946c196e961cf72e17e94077",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1157,7 +1157,7 @@
    "path": "src/workflows/separations/workflow.ts",
    "changeKind": "modified",
    "beforeSha256": "96a8ec7d7047ac00917d4a04cfdaf32c15d8fa97155ff61bc87a1d6734bdc60e",
-   "afterSha256": "c6999e0160efa720d44840068b3b612247d744c793905dc196f4d5c073ce0b2a",
+   "afterSha256": "15280ca74dd845a8930589cdceeee6a1cd3fb53b146b7cccfdc3450a9e6d6f6c",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1736,7 +1736,7 @@
    "path": "tests/unit/workflows/separations/dry-run.test.ts",
    "changeKind": "modified",
    "beforeSha256": "be2dc5e08e2d5169f681a85cc2ebf8f672ce777fedac7e01954585062b378a34",
-   "afterSha256": "c3844b1a9d5dbccf4eeacab26e498a4811df092efb5408f0a6802e52cc7e626b",
+   "afterSha256": "9fa1d8bc3f77b8b3295ac6ab132f02804569ccf01723fa643a265efb58a69d70",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],

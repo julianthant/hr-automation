@@ -61,7 +61,7 @@ In batch mode (`runWorkflowBatch`) or daemon mode, all three systems authenticat
 
 Task 1 extraction always opens the current Kuali action, including edit/resume. The current checklist instruction identifies Task 1 versus Task 2; Task 2 still contains the historical Task 1 section. A Task 2 action with a recorded Task 1 transaction completes without any edits.
 
-Additional Separation Comments and Student Title Code identify the intended job. Conflicting titles fail. Job Summary searches by that code and resolves one employment record and position. Ambiguous or incomplete jobs fail before submission.
+Additional Separation Comments and Student Title Code identify the intended job. Conflicting titles fail. Job Summary searches by that code and resolves one employment record and position. Ambiguous or incomplete jobs fail before submission. These source comments select the job only. Both UCPath comment fields must contain exactly `buildTerminationComments` output: dates, the permitted leave clause, and Kuali form number. Never append job identifiers, copied Kuali source comments, or replacement history.
 
 Transaction check runs after identity verification and date reconciliation. Reuse requires the same EID, employment record, position, and exact final effective date. SS Smart HR inspects every TER candidate. A matching Approved or Pending transaction can be reused; another job is preserved. A pending transaction for the same job with a different date fails for explicit correction. The separation workflow never invokes the legacy employee-wide pending deletion.
 
