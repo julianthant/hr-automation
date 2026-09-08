@@ -974,7 +974,7 @@ export const separationsWorkflow = defineWorkflow({
       lastDayWorked,
       docId,
       { sickDates: timecard.sickDates, holidayDates: timecard.holidayDates },
-    ) + (separationJob ? ` Employment record ${separationJob.emplRecord}; position ${separationJob.positionNumber}; job code ${separationJob.jobCode}. ${kualiData.additionalComments || ""}` : "");
+    );
 
     // Position the New Kronos timecard view so the chosen Last Day Worked
     // row is CENTERED, then take a dedicated audit screenshot of ONLY the

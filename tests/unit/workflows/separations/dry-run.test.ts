@@ -1054,7 +1054,7 @@ describe("job identity and Task 1 safety", () => {
     assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
     assert.equal(mocks.fillTimekeeperTasks.mock.calls.length, 0);
   });
-  it("carries the Kuali comment job through lookup and real submission", async () => {
+  it("uses Kuali job comments for targeting while keeping transaction comments canonical", async () => {
     mocks.runKualiExtract.mockResolvedValue({ ...KUALI_FIXTURE, currentTask: 1, jobCodeHint: "004920", additionalComments: "Academic year position - STDT 3" });
     const { ctx } = makeFakeCtx({ docId: "4605" });
     await runHandler(ctx, { docId: "4605" });
@@ -1062,7 +1062,10 @@ describe("job identity and Task 1 safety", () => {
     assert.equal(lookupOptions.jobCode, "004920");
     assert.equal(lookupOptions.resolveJob, true);
     assert.deepEqual(mocks.runUcpathTransaction.mock.calls[0][8], { emplRecord: "0", positionNumber: "41202096", jobCode: "004920" });
-    assert.match(mocks.runUcpathTransaction.mock.calls[0][4] as string, /Academic year position - STDT 3/);
+    assert.equal(
+      mocks.runUcpathTransaction.mock.calls[0][4],
+      "Termination eff 01/16/2026. Last Day Worked 01/15/2026. Kuali form #4605.",
+    );
   });
   it("fails before submission when the resolved job has no record or position", async () => {
     mocks.getJobSummaryIdentity.mockResolvedValue({ found: true, name: "Test Employee", data: { jobCode: "004920" } });
