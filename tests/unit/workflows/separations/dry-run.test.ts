@@ -166,7 +166,7 @@ const KRONOS_NOT_FOUND = {
 // getJobSummaryIdentity, before identity-check). The default (beforeEach) is a
 // FOUND record whose name matches KUALI_FIXTURE so identity-check skips.
 const JS_NAME_MISMATCH = { found: true, name: "Totally Different Person", data: null };
-const JS_SIMILAR = { found: true, name: "Jayden Balmaceda", data: null };
+const JS_SIMILAR = { found: true, name: "Jayden Balmaceda", data: { emplRecord: "0", positionNumber: "41202096", deptId: "", departmentDescription: "", jobCode: "004920", jobDescription: "STDT 3" } };
 
 const fakePage = { bringToFront: async () => {}, isClosed: () => false } as unknown;
 
@@ -259,7 +259,7 @@ beforeEach(() => {
   mocks.getJobSummaryIdentity.mockResolvedValue({
     found: true,
     name: "Test Employee",
-    data: { deptId: "", departmentDescription: "", jobCode: "", jobDescription: "" },
+    data: { emplRecord: "0", positionNumber: "41202096", deptId: "", departmentDescription: "", jobCode: "004920", jobDescription: "STDT 3" },
   });
   mocks.updateEmployeeName.mockResolvedValue(undefined);
   mocks.updateLastDayWorked.mockResolvedValue(undefined);
@@ -631,7 +631,7 @@ describe("separations handler — identity-check (conditional, Job-Summary-gated
     mocks.getJobSummaryIdentity.mockResolvedValueOnce({
       found: true,
       name: "Santos Hernandez",
-      data: { deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
+      data: { emplRecord: "0", positionNumber: "41202096", deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
     });
     const { ctx, probe } = makeFakeCtx(
       { docId: "4131" },
@@ -664,7 +664,7 @@ describe("separations handler — identity-check (conditional, Job-Summary-gated
     // the Job Summary name still mismatches (the "Keep original" choice).
     mocks.getJobSummaryIdentity.mockResolvedValueOnce({
       found: true, name: "Santos Hernandez",
-      data: { deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
+      data: { emplRecord: "0", positionNumber: "41202096", deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
     });
     const delegateSpy = vi.fn();
     const { ctx, probe } = makeFakeCtx({ docId: "4313", eidApproved: "10833507" });
@@ -765,6 +765,8 @@ describe("separations handler — transaction-check (existing-termination branch
     assert.deepEqual(mocks.runTransactionCheck.mock.calls[0][2], {
       dryRun: true,
       separationDate: KUALI_FIXTURE.separationDate,
+      effectiveDate: "01/16/2026",
+      job: { emplRecord: "0", positionNumber: "41202096", jobCode: "004920" },
     });
   });
 
@@ -836,7 +838,7 @@ describe("separations handler — department gate (skip Kronos for non-HDH)", ()
   const JS_FOUND = (departmentDescription: string) => ({
     found: true,
     name: "Test Employee",
-    data: { deptId: "000123", departmentDescription, jobCode: "001234", jobDescription: "Analyst" },
+    data: { emplRecord: "0", positionNumber: "41202096", deptId: "000123", departmentDescription, jobCode: "001234", jobDescription: "Analyst" },
   });
 
   it("SKIPS kronos-search for a non-HDH department (not timekept in New Kronos)", async () => {
@@ -1006,7 +1008,7 @@ describe("separations handler — run mode 'Skip UCPath transaction'", () => {
     mocks.getJobSummaryIdentity.mockResolvedValue({
       found: true,
       name: "Test Employee",
-      data: { deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
+      data: { emplRecord: "0", positionNumber: "41202096", deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
     });
     const { ctx, probe } = makeFakeCtx({ docId: "4540" }, { skipSteps: SKIP });
     await runHandler(ctx, { docId: "4540" });
@@ -1037,5 +1039,35 @@ describe("separations handler — run mode 'Skip UCPath transaction'", () => {
     await runHandler(ctx, { docId: "4540" });
     assert.equal(probe.data.transactionNumber, "T-PREFILLED");
     assert.equal(mocks.readTransactionNumber.mock.calls.length, 0);
+  });
+});
+
+
+describe("job identity and Task 1 safety", () => {
+  it("stops before any lookup or write when the current action is Task 2", async () => {
+    mocks.runKualiExtract.mockResolvedValue({ ...KUALI_FIXTURE, currentTask: 2, completedTask1Transaction: "T002226497" });
+    const { ctx, probe } = makeFakeCtx({ docId: "4589" });
+    await runHandler(ctx, { docId: "4589" });
+    assert.equal(probe.data.transactionNumber, "T002226497");
+    assert.equal(mocks.getJobSummaryIdentity.mock.calls.length, 0);
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
+    assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
+    assert.equal(mocks.fillTimekeeperTasks.mock.calls.length, 0);
+  });
+  it("carries the Kuali comment job through lookup and real submission", async () => {
+    mocks.runKualiExtract.mockResolvedValue({ ...KUALI_FIXTURE, currentTask: 1, jobCodeHint: "004920", additionalComments: "Academic year position - STDT 3" });
+    const { ctx } = makeFakeCtx({ docId: "4605" });
+    await runHandler(ctx, { docId: "4605" });
+    const lookupOptions = mocks.getJobSummaryIdentity.mock.calls[0][2] as { jobCode: string; resolveJob: boolean };
+    assert.equal(lookupOptions.jobCode, "004920");
+    assert.equal(lookupOptions.resolveJob, true);
+    assert.deepEqual(mocks.runUcpathTransaction.mock.calls[0][8], { emplRecord: "0", positionNumber: "41202096", jobCode: "004920" });
+    assert.match(mocks.runUcpathTransaction.mock.calls[0][4] as string, /Academic year position - STDT 3/);
+  });
+  it("fails before submission when the resolved job has no record or position", async () => {
+    mocks.getJobSummaryIdentity.mockResolvedValue({ found: true, name: "Test Employee", data: { jobCode: "004920" } });
+    const { ctx } = makeFakeCtx({ docId: "4605" });
+    await assert.rejects(runHandler(ctx, { docId: "4605" }), /Missing employment record/);
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
   });
 });

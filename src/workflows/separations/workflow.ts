@@ -1,3 +1,4 @@
+import { matchesSeparationJob, type SeparationJob } from "../../domain/separation-job.js";
 import { z } from "zod/v4";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
@@ -114,13 +115,13 @@ export type SeparationInput = z.infer<typeof SeparationInputSchema>;
 const separationsSteps = [
   "kuali-extraction",
   "identity-check",
-  "transaction-check",
   // ucpath-job-summary now runs BEFORE kronos-search (2026-06-24): the
   // Workforce Job Summary department is resolved + filled first, and its
   // department gates kronos-search — non-HDH employees aren't timekept in New
   // Kronos, so the timecard read is skipped for them. See the handler.
   "ucpath-job-summary",
   "kronos-search",
+  "transaction-check",
   "ucpath-transaction",
   "kuali-finalization",
 ] as const;
@@ -419,67 +420,25 @@ export const separationsWorkflow = defineWorkflow({
     const presetSkippedTransaction =
       ctx.shouldSkipStep("ucpath-transaction") || ctx.shouldSkipStep("transaction-check");
 
-    // ─── Step 1: Extract Kuali data ───
-    // Kuali docs are user-editable between runs (e.g. correcting a wrong EID
-    // after a failed first pass). Caching the extraction would serve stale
-    // values on retry, so always re-read. See
-    // docs/superpowers/specs/2026-04-23-daemon-isolation-and-separations-stability-design.md
-    // Part 1.2 for the general caching rule (write-once / non-user-editable only).
-    //
-    // Edit-and-resume bypass: if every required field is already in
-    // ctx.data (the dashboard's "Run with these values" path pre-merges
-    // them via the kernel's prefilledData channel — including non-
-    // editable fields carried over from the previous run's data, see
-    // buildRunWithDataHandler), skip the extraction step entirely and
-    // synthesize a kualiData object from those values. The downstream
-    // code path is unchanged — it reads from kualiData, which now
-    // mirrors what extraction would have returned.
-    //
-    // `rawTerminationType` is required (downstream `mapReasonCode` reads
-    // it) but isn't surfaced as an editable field — it carries over from
-    // the previous run's data via the run-with-data merge.
-    // `rawTerminationType` is consumed only by `mapReasonCode`, which lives
-    // inside the `ucpath-transaction` step. When that step is being skipped
-    // (txn # prefilled — pure Kuali-finalization retry path), the field is
-    // not load-bearing, so drop it from the bypass requirement. This makes
-    // edit-and-resume robust against cancel-queued / save-data lineage that
-    // can drop internal fields between runs.
+    // Always open the actual action: edit/resume must not target a stale page or Task 2.
+    const prefilled = { ...ctx.data };
+    let kualiData = await ctx.step("kuali-extraction", () => runKualiExtract(ctx, docId));
+    if (kualiData.currentTask === 2) {
+      if (!kualiData.completedTask1Transaction) throw new Error(`Kuali ${docId} is at Task 2 without a verified Task 1 transaction`);
+      for (const step of separationsSteps) if (step !== "kuali-extraction") ctx.skipStep(step);
+      ctx.updateData({ transactionNumber: kualiData.completedTask1Transaction, status: "Task 1 already complete; Task 2 untouched" });
+      return;
+    }
     const requiredKualiFields = txnNumberPrefilled
       ? (["name", "eid", "separationDate", "lastDayWorked"] as const)
       : (["name", "eid", "rawTerminationType", "separationDate", "lastDayWorked"] as const);
-    const allPrefilled = requiredKualiFields.every(
-      (k) => typeof ctx.data[k] === "string" && (ctx.data[k]).length > 0,
-    );
-
-    let kualiData: KualiSeparationData;
-    if (allPrefilled) {
-      ctx.skipStep("kuali-extraction");
-      log.step(
-        `[Step: kuali-extraction] SKIPPED — using manual input from edit-data ` +
-        `(name='${String(ctx.data.name)}' eid='${String(ctx.data.eid)}' ` +
-        `lastDayWorked='${String(ctx.data.lastDayWorked)}' separationDate='${String(ctx.data.separationDate)}'` +
-        (txnNumberPrefilled ? `; txn # prefilled — rawTerminationType not required)` : `)`),
-      );
-      kualiData = {
-        // Normalize the prefilled name too — an operator typing in Edit Data may
-        // enter ALL-CAPS or "First Last"; keep the standard display convention.
-        employeeName: displayPersonName(ctx.data.name as string),
-        eid: ctx.data.eid as string,
-        // Fall back chain: raw Kuali string → display-only "Vol"/"Invol" → empty.
-        // The empty fallback is only reachable on the txnNumberPrefilled path
-        // where mapReasonCode (the only consumer) won't run.
-        terminationType:
-          // Use raw Kuali string only — display values ("Vol"/"Invol") must not
-          // reach isVoluntaryTermination(), which only knows raw Kuali strings.
-          (ctx.data.rawTerminationType as string | undefined) ?? "",
-        separationDate: ctx.data.separationDate as string,
-        lastDayWorked: ctx.data.lastDayWorked as string,
-        // `location` isn't read downstream — empty string is safe and keeps
-        // the synthesized object structurally compatible with KualiSeparationData.
-        location: "",
+    if (requiredKualiFields.every(k => typeof prefilled[k] === "string" && prefilled[k].length > 0)) {
+      kualiData = { ...kualiData,
+        employeeName: displayPersonName(prefilled.name as string), eid: prefilled.eid as string,
+        separationDate: prefilled.separationDate as string, lastDayWorked: prefilled.lastDayWorked as string,
+        ...(typeof prefilled.rawTerminationType === "string" && prefilled.rawTerminationType ? { terminationType: prefilled.rawTerminationType } : {}),
       };
-    } else {
-      kualiData = await ctx.step("kuali-extraction", () => runKualiExtract(ctx, docId));
+      ctx.updateData({ name: kualiData.employeeName, eid: kualiData.eid, separationDate: kualiData.separationDate, lastDayWorked: kualiData.lastDayWorked });
     }
 
     // ─── EID-approval re-run gate ───
@@ -603,7 +562,7 @@ export const separationsWorkflow = defineWorkflow({
       // full-8-digit miss). Reads the detail-page NAME on a hit so the name can
       // be compared. Genuine selector/nav failures still throw (fail loud).
       const js = await getJobSummaryIdentity(ucpathPage, kualiData.eid, {
-        separationDate: kualiData.separationDate,
+        separationDate: kualiData.separationDate, jobCode: kualiData.jobCodeHint, resolveJob: true,
       });
       jobSummaryFound = js.found;
       jobSummaryName = js.name;
@@ -715,60 +674,20 @@ export const separationsWorkflow = defineWorkflow({
       // EID no longer overrides here — it pauses for approval above.)
     }
 
-    // ─── Step 3: transaction-check (AFTER identity-check, with the verified EID) ───
-    // Search SS Smart HR for an existing termination (TER) transaction:
-    //   · none      → create a new transaction downstream (normal flow).
-    //   · Approved  → reuse its T#, SKIP ucpath-transaction, and file the
-    //                 duplicate-termination comment (Image 7) in Kuali.
-    //   · Pending   → delete it (LIVE only — the dry-run path reports the intent
-    //                 but doesn't mutate), then create a fresh transaction.
-    // The DELETE is the only mutation; runTransactionCheck gates it on dryRun.
-    // Skipped only when a txn # is already prefilled (edit-resume — UCPath
-    // already has the transaction; nothing to check).
-    let approvedDuplicateTxn = "";
-    if (txnNumberPrefilled || presetSkippedTransaction) {
-      ctx.skipStep("transaction-check");
-      log.step(
-        txnNumberPrefilled
-          ? `[Step: transaction-check] SKIPPED — txn # prefilled (UCPath transaction already known; no check needed)`
-          : `[Step: transaction-check] SKIPPED — run mode 'Skip UCPath transaction' (no Smart HR lookup, no pending-delete)`,
-      );
-    } else {
-      const checkResult = await ctx.step("transaction-check", () =>
-        runTransactionCheck(ctx, kualiData.eid, {
-          dryRun: !!input.dryRun,
-          separationDate: kualiData.separationDate,
-        }),
-      );
-      if (checkResult.status === "approved") {
-        approvedDuplicateTxn = checkResult.transactionNumber;
-        // Reuse the approved transaction: stamp it + the duplicate-termination
-        // comment onto ctx.data so BOTH the dry-run preview and live
-        // kuali-finalization pick them up. The comment is newline-joined with
-        // any existing edit-resume comment (fillTimekeeperComments also
-        // preserves the form's current value).
-        const dupComment = buildDuplicateTerminationComment(
-          docId,
-          getInitials(timekeeperName),
-          todayMmDdYyyy(),
-        );
-        ctx.updateData({
-          transactionNumber: approvedDuplicateTxn,
-          comments: joinComments((ctx.data.comments as string | undefined) ?? "", dupComment),
+    let separationJob: SeparationJob | undefined;
+    if (!txnNumberPrefilled && !presetSkippedTransaction) {
+      if (!jobSummaryData) {
+        const js = await getJobSummaryIdentity(await ctx.page("ucpath"), kualiData.eid, {
+          separationDate: kualiData.separationDate, jobCode: kualiData.jobCodeHint, resolveJob: true,
         });
-        ctx.recordData({
-          direction: "write",
-          field: "comments",
-          label: "Duplicate-Termination Comment",
-          value: dupComment,
-          system: "Kuali",
-          note: "Queued from approved transaction reuse — UCPath create skipped",
-        });
-        log.warn(
-          `[transaction-check] Reusing APPROVED termination #${approvedDuplicateTxn} — ` +
-          `ucpath-transaction will be skipped; duplicate-termination comment queued for Kuali`,
-        );
+        if (!js.found || !js.data) throw new Error(`Cannot resolve the separation job for ${kualiData.eid}`);
+        jobSummaryData = js.data;
       }
+      const { emplRecord, positionNumber, jobCode } = jobSummaryData;
+      if (emplRecord === undefined || !positionNumber) throw new Error(`Missing employment record or position for ${kualiData.eid}`);
+      separationJob = { emplRecord, positionNumber, jobCode };
+      matchesSeparationJob(separationJob, separationJob);
+      ctx.updateData({ emplRecord, positionNumber, jobCode, separationJobComment: kualiData.additionalComments });
     }
 
     // ─── Department gate: skip New Kronos for non-HDH employees (2026-06-24) ───
@@ -999,12 +918,63 @@ export const separationsWorkflow = defineWorkflow({
     // Build the termination comment now (a pure string) so the dry-run terminal
     // can preview the EXACT comment that would be filed to UCPath — including the
     // sick/holiday clause — letting the operator verify it before any real run.
+    let approvedDuplicateTxn = "";
+    if (txnNumberPrefilled || presetSkippedTransaction) {
+      ctx.skipStep("transaction-check");
+      log.step(
+        txnNumberPrefilled
+          ? `[Step: transaction-check] SKIPPED — txn # prefilled (UCPath transaction already known; no check needed)`
+          : `[Step: transaction-check] SKIPPED — run mode 'Skip UCPath transaction' (no Smart HR lookup, no pending-delete)`,
+      );
+    } else {
+      const checkResult = await ctx.step("transaction-check", () =>
+        runTransactionCheck(ctx, kualiData.eid, {
+          dryRun: !!input.dryRun,
+          separationDate: kualiData.separationDate,
+          job: separationJob, effectiveDate: termEffDate,
+        }),
+      );
+      if (checkResult.status === "pending-reused") {
+        approvedDuplicateTxn = checkResult.transactionNumber;
+        ctx.updateData({ transactionNumber: approvedDuplicateTxn, status: "Reusing matching pending termination" });
+      }
+      if (checkResult.status === "approved") {
+        approvedDuplicateTxn = checkResult.transactionNumber;
+        // Reuse the approved transaction: stamp it + the duplicate-termination
+        // comment onto ctx.data so BOTH the dry-run preview and live
+        // kuali-finalization pick them up. The comment is newline-joined with
+        // any existing edit-resume comment (fillTimekeeperComments also
+        // preserves the form's current value).
+        const dupComment = buildDuplicateTerminationComment(
+          docId,
+          getInitials(timekeeperName),
+          todayMmDdYyyy(),
+        );
+        ctx.updateData({
+          transactionNumber: approvedDuplicateTxn,
+          comments: joinComments((ctx.data.comments as string | undefined) ?? "", dupComment),
+        });
+        ctx.recordData({
+          direction: "write",
+          field: "comments",
+          label: "Duplicate-Termination Comment",
+          value: dupComment,
+          system: "Kuali",
+          note: "Queued from approved transaction reuse — UCPath create skipped",
+        });
+        log.warn(
+          `[transaction-check] Reusing APPROVED termination #${approvedDuplicateTxn} — ` +
+          `ucpath-transaction will be skipped; duplicate-termination comment queued for Kuali`,
+        );
+      }
+    }
+
     const finalComments = buildTerminationComments(
       termEffDate,
       lastDayWorked,
       docId,
       { sickDates: timecard.sickDates, holidayDates: timecard.holidayDates },
-    );
+    ) + (separationJob ? ` Employment record ${separationJob.emplRecord}; position ${separationJob.positionNumber}; job code ${separationJob.jobCode}. ${kualiData.additionalComments || ""}` : "");
 
     // Position the New Kronos timecard view so the chosen Last Day Worked
     // row is CENTERED, then take a dedicated audit screenshot of ONLY the
@@ -1166,7 +1136,7 @@ export const separationsWorkflow = defineWorkflow({
           ? `[Step: ucpath-transaction] SKIPPED — using manual input from edit-data ` +
             `(transactionNumber='${transactionNumber}' — UCPath submit not needed)`
           : approvedDuplicateTxn
-            ? `[Step: ucpath-transaction] SKIPPED — reusing APPROVED duplicate termination ` +
+            ? `[Step: ucpath-transaction] SKIPPED — reusing verified job termination ` +
               `(transactionNumber='${transactionNumber}' — UCPath create not needed)`
             : `[Step: ucpath-transaction] SKIPPED — run mode 'Skip UCPath transaction' ` +
               `(preserving transactionNumber='${transactionNumber}' from the Kuali form; no Smart HR submit)`,
@@ -1183,6 +1153,7 @@ export const separationsWorkflow = defineWorkflow({
         template,
         transactionNumber,
         lastDayWorked,
+        separationJob,
       );
       transactionNumber = result.transactionNumber;
       submittedWithoutTxnNumber = result.submittedWithoutTxnNumber;

@@ -4,7 +4,7 @@ import {
   fillTransactionResults,
   fillTimekeeperComments,
   verifyTxnNumberFilled,
-  clickSave,
+  saveAndVerifySeparation,
 } from "../../../systems/kuali/index.js";
 import { finalTransactions } from "../../../systems/kuali/selectors.js";
 import { buildDateChangeComments, buildSeparationDateChangeComment, getInitials, joinComments } from "../schema.js";
@@ -96,6 +96,6 @@ export async function runKualiFinalize(
   // form is never clipped at its fold. See src/core/CLAUDE.md (Audit Screenshots).
   await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved', systems: ['kuali'] });
 
-  await clickSave(kualiPage);
+  await saveAndVerifySeparation(kualiPage, transactionNumber, finalTermEffDate);
   log.step(`[Step: kuali-finalization] END took=${Date.now() - t0}ms success`);
 }

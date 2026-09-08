@@ -5,7 +5,7 @@ import { join } from "node:path";
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import manifest from "../../../config/rebuild/legacy-preservation.json" with { type: "json" };
-import { REPO_ROOT } from "./helpers/guard-files.js";
+import { gitVisibleFiles, REPO_ROOT } from "./helpers/guard-files.js";
 
 function baselineFiles(root: string): string[] {
   return execFileSync(
@@ -40,7 +40,7 @@ describe("legacy source and test preservation", () => {
     assert.equal(manifest.runtimeIsolation.sourceRoot, "src");
     const sourceRoot = manifest.roots.find(({ root }) => root === manifest.runtimeIsolation.sourceRoot);
     assert.ok(sourceRoot, "src preservation root must exist");
-    const expected = sourceRoot.files.filter((path) => path.endsWith(".ts") || path.endsWith(".tsx")).sort();
+    const expected = gitVisibleFiles([manifest.runtimeIsolation.sourceRoot]).filter((path) => path.endsWith(".ts") || path.endsWith(".tsx")).sort();
     assert.deepEqual(Object.keys(manifest.runtimeIsolation.files).sort(), expected);
     for (const [path, expectedHash] of Object.entries(manifest.runtimeIsolation.files)) {
       const actualHash = createHash("sha256").update(readFileSync(join(REPO_ROOT, path))).digest("hex");

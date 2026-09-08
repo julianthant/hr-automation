@@ -1,3 +1,4 @@
+import type { SeparationJob } from "../../../domain/separation-job.js";
 import { log } from "../../../utils/log.js";
 import {
   findTerminationTransactionStatus,
@@ -20,7 +21,7 @@ import type { DataPoint } from "../../../domain/data-point.js";
  */
 export type TransactionCheckResult =
   | { status: "none" }
-  | { status: "approved"; transactionNumber: string }
+  | { status: "approved" | "pending-reused"; transactionNumber: string }
   | { status: "pending-deleted"; transactionId: string }
   | { status: "pending-skipped-dryrun"; transactionId: string };
 
@@ -66,7 +67,7 @@ export type TransactionCheckResult =
 export async function runTransactionCheck(
   ctx: Ctx<readonly string[], Record<string, unknown>>,
   eid: string,
-  opts: { dryRun: boolean; separationDate?: string },
+  opts: { dryRun: boolean; separationDate?: string; job?: SeparationJob; effectiveDate?: string },
 ): Promise<TransactionCheckResult> {
   const t0 = Date.now();
   log.debug(`[Step: transaction-check] START eid='${eid}' dryRun=${opts.dryRun} sepDate='${opts.separationDate ?? ""}'`);
@@ -79,6 +80,8 @@ export async function runTransactionCheck(
     // ignored. See findTerminationTransactionStatus.
     const ter = await findTerminationTransactionStatus(ucpathPage, eid, {
       separationDate: opts.separationDate,
+      job: opts.job,
+      effectiveDate: opts.effectiveDate,
     });
 
     // Best-effort audit shot of the SS Smart HR search results so the operator
@@ -135,6 +138,13 @@ export async function runTransactionCheck(
         note: "Approved — UCPath transaction create will be skipped",
       });
       return { status: "approved", transactionNumber: ter.transactionId };
+    }
+
+    if (opts.job) {
+      // A job-scoped search replaces the old employee-wide pending deletion.
+      return ter.found && status === "pending"
+        ? { status: "pending-reused", transactionNumber: ter.transactionId }
+        : { status: "none" };
     }
 
     // Concern 2 — every remaining path creates a fresh transaction downstream, so

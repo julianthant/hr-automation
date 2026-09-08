@@ -76,3 +76,13 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Fix:** Added **Tier 0** (highest priority) — match the UCPath `deptId` against the option's leading `"<code> - "` prefix. Live-verified the Kuali Department combobox renders EVERY option as `"<deptId> - <Name>"` (`000141`, `000412`, `000414`, `000422`, `000719`), and the code IS the UCPath dept ID, so a code match is exact and immune to all name drift. Threaded `deptId` from `JobSummaryData` (already extracted in `extractWorkLocation`) → `runUcpathJobSummary` → `fillFinalTransactions({ deptId })` → `pickDepartmentOptionIndex(options, description, deptId)`. `deptCodesMatch` compares trimmed-equal OR integer-equal so it's zero-padding-agnostic. Name tiers stay as a fallback when no deptId / no code match. Pinned by `tests/unit/systems/kuali/pick-department-option-index.test.ts` (ECEC case, "no deptId still fails", padding-agnostic, Tier 0 beats a competing name match, fallback when code absent).
 **Selector:** `finalTransactions.department` in `selectors.ts` (consumed by `fillFinalTransactions` in `navigate.ts`)
 **Tags:** select, selectOption, option, department, dept-id, code, tier-0, abbreviation, ecec, final-transactions, separation, kuali
+
+## 2026-09-08 — A closed Save dialog does not prove persisted Task 1 fields
+
+**Tried:** Filled the transaction number and comments, clicked Save, then immediately reopened the action after its dialog closed.
+
+**Failed because:** The dialog closed before the save request completed. Navigating away could leave the old transaction and comments persisted. Task 2 also still renders the historical Task 1 section, so section presence alone cannot authorize editing.
+
+**Fix:** Read the current checklist instruction. Save Task 1, wait for the save network activity to finish, reopen the same action, and verify the exact transaction number, effective date, and comments. `saveAndVerifySeparation` fails on any mismatch. Live repair of document 4605 verified T002230487 after this sequence.
+
+**Tags:** separation, task-1, task-2, save, persistence, comments, readback

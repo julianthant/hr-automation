@@ -16,6 +16,8 @@ export interface JobSummaryData {
   departmentDescription: string;
   jobCode: string;
   jobDescription: string;
+  emplRecord?: string;
+  positionNumber?: string;
 }
 
 /**
@@ -152,7 +154,7 @@ export async function navigateToWorkforceJobSummary(page: Page): Promise<void> {
  * auto-fallback was removed intentionally; upstream data needs to be
  * corrected rather than silently worked around.
  */
-export async function searchJobSummary(page: Page, emplId: string): Promise<boolean> {
+export async function searchJobSummary(page: Page, emplId: string, jobCode?: string): Promise<boolean> {
   const root = await getFormRoot(page);
 
   log.step(`[Job Summary] Searching for Empl ID: ${emplId}`);
@@ -160,6 +162,10 @@ export async function searchJobSummary(page: Page, emplId: string): Promise<bool
     timeout: 10_000,
     label: "ucpath job summary empl id",
   });
+  if (jobCode) {
+    if (!/^\d{6}$/.test(jobCode)) throw new Error(`Invalid Kuali job code: ${jobCode}`);
+    await safeFill(jobSummary.jobCodeSearchInput(root), jobCode, { timeout: 10_000, label: "job-summary job code" });
+  }
   await safeClick(jobSummary.searchButton(root), {
     timeout: 10_000,
     label: "ucpath job summary search button",
@@ -613,7 +619,7 @@ export function pickWorkLocationRow(
 export async function extractWorkLocation(
   page: Page,
   opts: { separationDate?: string } = {},
-): Promise<{ deptId: string; departmentDescription: string }> {
+): Promise<{ deptId: string; departmentDescription: string; positionNumber?: string }> {
   const root = await getFormRoot(page);
 
   log.step("[Job Summary] Clicking Work Location tab...");
@@ -699,7 +705,7 @@ export async function extractWorkLocation(
     (opts.separationDate ? `, latest ≤ separation ${opts.separationDate}` : ", latest") +
     `): Dept ID ${picked.deptId}, Department "${picked.departmentDescription}"`,
   );
-  return { deptId: picked.deptId, departmentDescription: picked.departmentDescription };
+  return { deptId: picked.deptId, departmentDescription: picked.departmentDescription, positionNumber: picked.positionNumber };
 }
 
 /** The Job Information data the separation needs (Job Code + its Description). */
@@ -873,10 +879,10 @@ export async function extractEmployeeName(page: Page): Promise<string> {
 export async function getJobSummaryIdentity(
   page: Page,
   emplId: string,
-  opts: { separationDate?: string } = {},
+  opts: { separationDate?: string; jobCode?: string; resolveJob?: boolean } = {},
 ): Promise<JobSummaryIdentity> {
   await navigateToWorkforceJobSummary(page);
-  const found = await searchJobSummary(page, emplId);
+  const found = await searchJobSummary(page, emplId, opts.jobCode);
   if (!found) {
     return { found: false, name: "", data: null };
   }
@@ -926,10 +932,22 @@ export async function getJobSummaryIdentity(
     );
   }
 
+  let emplRecord: string | undefined;
+  if (opts.resolveJob) {
+    const dump = await readFrozenGridDump(page);
+    const grids = dump.left.filter((grid) => grid.rows.length > 0);
+    if (grids.length !== 1) throw new Error(`Cannot identify the employment-record grid for ${emplId}`);
+    const records = new Set(grids[0].rows.map((row) => row[1]));
+    if (records.size !== 1 || !/^\d+$/.test([...records][0])) throw new Error(`Cannot identify one employment record for ${emplId}`);
+    emplRecord = [...records][0];
+    if (!workLocation.positionNumber) throw new Error(`No position number for ${emplId}, record ${emplRecord}`);
+    if (opts.jobCode && jobInfo.jobCode !== opts.jobCode) throw new Error(`Kuali job ${opts.jobCode} does not match UCPath job ${jobInfo.jobCode}`);
+  }
   return {
     found: true,
     name,
     data: {
+      ...(opts.resolveJob ? { emplRecord, positionNumber: workLocation.positionNumber } : {}),
       deptId: workLocation.deptId,
       departmentDescription: workLocation.departmentDescription,
       jobCode: jobInfo.jobCode,

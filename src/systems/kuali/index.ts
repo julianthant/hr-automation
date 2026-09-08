@@ -15,6 +15,7 @@ export {
   verifyTxnNumberFilled,
   readTransactionNumber,
   clickSave,
+  saveAndVerifySeparation,
 } from "./navigate.js";
 
 export type { KualiSeparationData } from "./navigate.js";
