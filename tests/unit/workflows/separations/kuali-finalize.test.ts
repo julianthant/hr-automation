@@ -41,6 +41,7 @@ vi.mock("../../../../src/systems/kuali/index.js", async (importOriginal) => ({
   fillTimekeeperComments: mocks.fillTimekeeperComments,
   verifyTxnNumberFilled: mocks.verifyTxnNumberFilled,
   clickSave: mocks.clickSave,
+  saveAndVerifySeparation: mocks.clickSave,
 }));
 
 vi.mock("../../../../src/systems/kuali/selectors.js", async (importOriginal) => ({
