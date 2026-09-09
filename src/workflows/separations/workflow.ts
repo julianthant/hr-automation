@@ -412,11 +412,7 @@ export const separationsWorkflow = defineWorkflow({
     const txnNumberPrefilled =
       typeof ctx.data.transactionNumber === "string"
       && (ctx.data.transactionNumber).length > 0;
-    // "Skip UCPath transaction" run mode (preset `skip-ucpath-transaction`):
-    // everything else runs (Job Summary re-fill, Kronos, Kuali finalization)
-    // but NO Smart HR transaction is checked or created; the Transaction #
-    // already on the Kuali form is preserved. Distinct from `txnNumberPrefilled`
-    // (edit-and-resume), which ALSO skips the identity gate / Job Summary.
+    // Skip-create mode preserves a number only after read-only job/receipt verification.
     const presetSkippedTransaction =
       ctx.shouldSkipStep("ucpath-transaction") || ctx.shouldSkipStep("transaction-check");
 
@@ -674,8 +670,8 @@ export const separationsWorkflow = defineWorkflow({
       // EID no longer overrides here — it pauses for approval above.)
     }
 
-    let separationJob: SeparationJob | undefined;
-    if (!txnNumberPrefilled && !presetSkippedTransaction) {
+    let separationJob: SeparationJob;
+    {
       if (!jobSummaryData) {
         const js = await getJobSummaryIdentity(await ctx.page("ucpath"), kualiData.eid, {
           separationDate: kualiData.separationDate, jobCode: kualiData.jobCodeHint, resolveJob: true,
@@ -762,16 +758,16 @@ export const separationsWorkflow = defineWorkflow({
     } else {
       const kualiPageForDept = await ctx.page("kuali");
       await ctx.step("ucpath-job-summary", () =>
-        runUcpathJobSummary(kualiPageForDept, jobSummaryData!, kualiData.eid),
+        runUcpathJobSummary(kualiPageForDept, jobSummaryData, kualiData.eid),
       );
       // Provenance: department/payroll READ from the UCPath Job Summary, then
       // WRITTEN into the Kuali separation form.
       ctx.recordData([
-        { direction: "read", field: "departmentDescription", label: "Department", value: jobSummaryData!.departmentDescription, system: "UCPath Job Summary" },
-        { direction: "read", field: "jobCode", label: "Payroll Title Code", value: jobSummaryData!.jobCode, system: "UCPath Job Summary" },
-        { direction: "read", field: "jobDescription", label: "Payroll Title", value: jobSummaryData!.jobDescription, system: "UCPath Job Summary" },
-        { direction: "write", field: "department", label: "Department", value: jobSummaryData!.departmentDescription, system: "Kuali" },
-        { direction: "write", field: "payrollTitle", label: "Payroll Title", value: jobSummaryData!.jobDescription, system: "Kuali" },
+        { direction: "read", field: "departmentDescription", label: "Department", value: jobSummaryData.departmentDescription, system: "UCPath Job Summary" },
+        { direction: "read", field: "jobCode", label: "Payroll Title Code", value: jobSummaryData.jobCode, system: "UCPath Job Summary" },
+        { direction: "read", field: "jobDescription", label: "Payroll Title", value: jobSummaryData.jobDescription, system: "UCPath Job Summary" },
+        { direction: "write", field: "department", label: "Department", value: jobSummaryData.departmentDescription, system: "Kuali" },
+        { direction: "write", field: "payrollTitle", label: "Payroll Title", value: jobSummaryData.jobDescription, system: "Kuali" },
       ]);
     }
 
@@ -915,25 +911,33 @@ export const separationsWorkflow = defineWorkflow({
       );
     }
 
-    // Build the termination comment now (a pure string) so the dry-run terminal
-    // can preview the EXACT comment that would be filed to UCPath — including the
-    // sick/holiday clause — letting the operator verify it before any real run.
+    validateLastDayWorked(lastDayWorked, "Last Day Worked");
+    validateLastDayWorked(separationDate, "Separation Date");
+    const finalComments = buildTerminationComments(
+      termEffDate, lastDayWorked, docId,
+      { sickDates: timecard.sickDates, holidayDates: timecard.holidayDates },
+    );
+    // A copied or saved number is a claim, not proof of this form's job.
+    let requestedTransaction = txnNumberPrefilled ? String(prefilled.transactionNumber) : "";
+    if (presetSkippedTransaction && !requestedTransaction) {
+      requestedTransaction = await readTransactionNumber(await ctx.page("kuali"));
+      if (!requestedTransaction) throw new Error(`Run mode 'Skip UCPath transaction' for doc #${docId}: the Kuali form has NO Transaction Number and none was prefilled`);
+    }
     let approvedDuplicateTxn = "";
-    if (txnNumberPrefilled || presetSkippedTransaction) {
-      ctx.skipStep("transaction-check");
-      log.step(
-        txnNumberPrefilled
-          ? `[Step: transaction-check] SKIPPED — txn # prefilled (UCPath transaction already known; no check needed)`
-          : `[Step: transaction-check] SKIPPED — run mode 'Skip UCPath transaction' (no Smart HR lookup, no pending-delete)`,
-      );
-    } else {
+    {
       const checkResult = await ctx.step("transaction-check", () =>
         runTransactionCheck(ctx, kualiData.eid, {
           dryRun: !!input.dryRun,
           separationDate: kualiData.separationDate,
-          job: separationJob, effectiveDate: termEffDate,
+          job: separationJob, effectiveDate: termEffDate, expectedComments: finalComments,
         }),
       );
+      if (requestedTransaction && (
+        (checkResult.status !== "pending-reused" && checkResult.status !== "approved")
+        || checkResult.transactionNumber !== requestedTransaction
+      )) {
+        throw new Error(`Cannot reuse transaction ${requestedTransaction} for Kuali ${docId}: no matching verified job/date/comments receipt`);
+      }
       if (checkResult.status === "pending-reused") {
         approvedDuplicateTxn = checkResult.transactionNumber;
         ctx.updateData({ transactionNumber: approvedDuplicateTxn, status: "Reusing matching pending termination" });
@@ -968,13 +972,6 @@ export const separationsWorkflow = defineWorkflow({
         );
       }
     }
-
-    const finalComments = buildTerminationComments(
-      termEffDate,
-      lastDayWorked,
-      docId,
-      { sickDates: timecard.sickDates, holidayDates: timecard.holidayDates },
-    );
 
     // Position the New Kronos timecard view so the chosen Last Day Worked
     // row is CENTERED, then take a dedicated audit screenshot of ONLY the
@@ -1089,38 +1086,9 @@ export const separationsWorkflow = defineWorkflow({
     // The reconciled `lastDayWorked` is written to UCPath's dedicated field;
     // the driver checks Override Last Date Worked and requires an exact value +
     // checkbox readback before Save & Submit can run.
-    // Two reasons the UCPath transaction step is skipped with a known number:
-    //   1. Edit-and-resume: a prefilled `transactionNumber` means UCPath already
-    //      accepted the submit on a prior run and the user just wants Kuali
-    //      finalization re-run (the failure was downstream).
-    //   2. Approved duplicate: transaction-check found an ALREADY-APPROVED
-    //      termination (`approvedDuplicateTxn`) — reuse it instead of creating a
-    //      new one (the duplicate-termination comment was already queued onto
-    //      ctx.data.comments).
-    // Either way: no Smart HR navigation, no findExistingTerminationTransaction
-    // probe, no submit — the known number flows straight into
-    // kuali-finalization's transaction-results fill.
-    let transactionNumber = txnNumberPrefilled
-      ? (ctx.data.transactionNumber as string)
-      : approvedDuplicateTxn; // "" when transaction-check found no approved dup
-    // "Skip UCPath transaction" run mode: PRESERVE the number already on the
-    // Kuali form so finalization re-verifies against it (verifyTxnNumberFilled
-    // would otherwise refill the field to "" — blanking a filed transaction).
-    // No number anywhere (not prefilled, form empty) → fail loud: this mode is
-    // for redoing the Kuali side of an ALREADY-FILED transaction, never for
-    // finalizing a form whose transaction was never created.
-    if (presetSkippedTransaction && !transactionNumber) {
-      transactionNumber = await readTransactionNumber(kualiPage);
-      if (!transactionNumber) {
-        throw new Error(
-          `Run mode 'Skip UCPath transaction' for doc #${docId}: the Kuali form has NO Transaction Number ` +
-          `and none was prefilled — nothing to preserve. Run the full workflow (or prefill the txn # via Edit Data) instead.`,
-        );
-      }
-      log.step(
-        `[Skip UCPath transaction] Preserving Transaction # '${transactionNumber}' already on the Kuali form`,
-      );
-    }
+    // All reused numbers, including explicit resume/skip-create inputs, passed
+    // the same live job/date/comments check above. Never submit a replacement here.
+    let transactionNumber = approvedDuplicateTxn;
     // Tracks the specific "submit succeeded but no txn # extracted" case.
     // We must abort before kuali-finalization so we don't write a blank
     // transaction number back to the Kuali form. Raised outside the step's

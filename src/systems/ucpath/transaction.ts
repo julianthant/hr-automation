@@ -1745,8 +1745,9 @@ export async function findExistingTerminationTransaction(
   employeeId: string,
   effectiveDate: string,
   job?: SeparationJob,
+  expectedComments?: string,
 ): Promise<ExistingTerminationResult> {
-  if (job) return findExistingTerminationForJob(page, employeeId, effectiveDate, job);
+  if (job) return findExistingTerminationForJob(page, employeeId, effectiveDate, job, expectedComments);
   try {
     log.step(`[Txn Lookup] Checking for existing termination: eid='${employeeId}' effDate='${effectiveDate}'`);
     if (!employeeId) {
@@ -2280,6 +2281,7 @@ export function buildConcurrentHireCommentsText(
 /** Inspect each exact in-progress row; never sweep or reuse another concurrent job. */
 async function findExistingTerminationForJob(page: Page, eid: string, effectiveDate: string, job: SeparationJob, expectedComments?: string): Promise<ExistingTerminationResult> {
   matchesSeparationJob(job, job);
+  if (!expectedComments?.trim()) throw new Error("Job-scoped termination lookup requires canonical comments");
   await navigateToSmartHR(page);
   await clickSmartHRTransactions(page);
   const frame = getContentFrame(page);

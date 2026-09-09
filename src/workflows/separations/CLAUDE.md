@@ -67,7 +67,7 @@ Transaction check runs after identity verification and date reconciliation. Reus
 
 Creation selects the verified employment record before the reason code, verifies the job header and position, and fills both Comments and Initiator Comments after the LDW refresh. The in-progress duplicate guard and post-submit receipt use the same job identity. Missing transaction numbers, comments, or receipt identity fail rather than being treated as a successful submission. Kuali finalization saves Task 1 and reopens the same action to verify the saved transaction, effective date, and comments. It never marks Task 2 complete.
 
-Operator-prefilled transaction numbers remain an explicit Kuali-only resume path; extraction still opens the action and checks its current task. Future-date checks remain in force. Dry runs do not submit or save.
+Saved, copied, and operator-prefilled transaction numbers are unverified claims. Resume and Skip UCPath transaction modes resolve the current form job and perform read-only receipt verification before Kuali finalization; skipping creation never skips this verification. Both receipt comment fields must equal the current canonical text. The SS lookup restores and rechecks the matching receipt before audit capture. Reconciled Last Day Worked and Separation Date are checked again for future dates, including future Kronos leave. Dry runs do not submit or save.
 
 ## Date model (2026-06-22 rework — READ THIS)
 

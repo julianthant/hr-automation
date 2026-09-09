@@ -719,7 +719,7 @@
    "path": "src/systems/ucpath/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "c562816dd0f5b85109c6c6fd7b56703d32703f10c12a5ad5f5a3c834f84d8cff",
-   "afterSha256": "8a0501cf8d9e3a11215ac8c6caeb68e74e9b1f82555693e8879616b59d7c99c7",
+   "afterSha256": "766a1ad3b0efc7acd9e9782a0f2c2e3b6e213e65435fb4685e7685e4c2bd47af",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -854,7 +854,7 @@
    "path": "src/systems/ucpath/ss-smart-hr.ts",
    "changeKind": "modified",
    "beforeSha256": "6524118fb49e244442824d134484709530bf2a80a5be73bf183fd7d5cac847f2",
-   "afterSha256": "f3db03e9157f63ef9fb4ad55b4a76dca463a3a9ab9365cc952b399c9b96a38ca",
+   "afterSha256": "a77391a4e12b95e82cf1f0711d75e3f2fb3a91f31d89851b3648356cfef3dee2",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -885,7 +885,7 @@
    "path": "src/systems/ucpath/transaction.ts",
    "changeKind": "modified",
    "beforeSha256": "1edbfd04c254d3a9a780431899ec30569b746536b45e53c1e1194ad84237bf94",
-   "afterSha256": "3da7c9c80490c7baf81e471262989837cbfd042074048af86a8749f765250a09",
+   "afterSha256": "7c1648444c84b40c4e786cebb7504ee5c0a39660e875426d54440176ccbcf800",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -1083,7 +1083,7 @@
    "path": "src/workflows/separations/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "705842e6a4800e8775cd1b002207bfef73af656070dc1751bf539b1bee018893",
-   "afterSha256": "4cbeb4d3cb1fb32ef8e66f4c182ec3c636f718ed946c196e961cf72e17e94077",
+   "afterSha256": "4cd4f31fb1ba8d03f6fcdeaf62e2329dbce5f6205058e91d8e7f0deede5dc30d",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1127,7 +1127,7 @@
    "path": "src/workflows/separations/steps/transaction-check.ts",
    "changeKind": "modified",
    "beforeSha256": "77ea249015a7bf23624de272f169ad65a66ac18357751e1cc126e818640a41e4",
-   "afterSha256": "67dbdf388a8a1aa70aa288b44ab1fa12a7a7aee45e18f5e37e1c13fa760f3323",
+   "afterSha256": "4f25dfb92e6aed9d35cfdc08874385ba976f2a3b7c1bedc75f39750a05665ac0",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1142,7 +1142,7 @@
    "path": "src/workflows/separations/steps/ucpath-transaction.ts",
    "changeKind": "modified",
    "beforeSha256": "bb300fe3deaff044d191fe1b25535467493ce2132cac33c52176af5071bb8ded",
-   "afterSha256": "f1807fc7812fcb12e3bb64836f6e1f9f5f5f107dadf6c50d4cdbf4008e4a9a23",
+   "afterSha256": "0b690a59ade9595d77be1731cdafaf09aec63a58fed7aa7ad6226bfbaeb17ee0",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1157,7 +1157,7 @@
    "path": "src/workflows/separations/workflow.ts",
    "changeKind": "modified",
    "beforeSha256": "96a8ec7d7047ac00917d4a04cfdaf32c15d8fa97155ff61bc87a1d6734bdc60e",
-   "afterSha256": "15280ca74dd845a8930589cdceeee6a1cd3fb53b146b7cccfdc3450a9e6d6f6c",
+   "afterSha256": "8f61cdec82d87473da315f9b6766d6bb43e732e9ac3b2237095f5bccae009a9e",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1188,7 +1188,7 @@
    "path": "tests/live/separations-dryrun.test.ts",
    "changeKind": "modified",
    "beforeSha256": "cec446b2ab38631a2f0020d503bfd5e795b743ec9b9ade4d9a8821704c84a917",
-   "afterSha256": "b68fd8936928f0a03120cbe3dad86c93a9789ab42ec3837c3a60ca35489d7cd5",
+   "afterSha256": "45d79b9d6b3fa3a2039c8e2b21b97e260a51150ce83aa8f98c78fe512e020500",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1477,14 +1477,14 @@
    "beforeSha256": null,
    "afterSha256": "b88871c744f15edfa60e6b02436edea346d0c42123457a3212ce8ad840bb14e1",
    "capabilityIds": [
-    "legacy-workflow-separations"
+    "legacy-dashboard-dev"
    ],
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks."
+   "impactRationale": "Reconciles preservation metadata for already-committed dashboard demo launcher interaction, timeline and start-capability tests at base 9d19e414; no dashboard test behavior is changed by this separation maintenance patch."
   },
   {
    "path": "tests/unit/dashboard/rebuild-demo-runstart-timeline.test.ts",
@@ -1492,14 +1492,14 @@
    "beforeSha256": null,
    "afterSha256": "fb78779aff66df38cdbe7e4a11a0c11fa27f8bde686aafd0d69775de2fde8776",
    "capabilityIds": [
-    "legacy-workflow-separations"
+    "legacy-dashboard-dev"
    ],
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks."
+   "impactRationale": "Reconciles preservation metadata for already-committed dashboard demo launcher interaction, timeline and start-capability tests at base 9d19e414; no dashboard test behavior is changed by this separation maintenance patch."
   },
   {
    "path": "tests/unit/dashboard/rebuild-demo-start-capability.test.ts",
@@ -1507,14 +1507,14 @@
    "beforeSha256": "8daf9b3120df628266770a864443f46e8aa17e8a9a76937f9dcef17ebb95f353",
    "afterSha256": "d6b448310c49999206818ed4d7fe364c3bc3df200ada5214cbea96af8d8578ca",
    "capabilityIds": [
-    "legacy-workflow-separations"
+    "legacy-dashboard-dev"
    ],
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks."
+   "impactRationale": "Reconciles preservation metadata for already-committed dashboard demo launcher interaction, timeline and start-capability tests at base 9d19e414; no dashboard test behavior is changed by this separation maintenance patch."
   },
   {
    "path": "tests/unit/domain/identity/eid.test.ts",
@@ -1656,6 +1656,21 @@
    "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks."
   },
   {
+   "path": "tests/unit/systems/ucpath/separation-receipt.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "5d108566cb042841e4366ae7656b85ce5150b5a51de231e471053224a17fb40e",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks."
+  },
+  {
    "path": "tests/unit/systems/ucpath/ss-smart-hr.test.ts",
    "changeKind": "modified",
    "beforeSha256": "57506848064063459502da280dc9cb31d8a5dc6c5e9f44bc42bbf5be8b098f43",
@@ -1736,7 +1751,7 @@
    "path": "tests/unit/workflows/separations/dry-run.test.ts",
    "changeKind": "modified",
    "beforeSha256": "be2dc5e08e2d5169f681a85cc2ebf8f672ce777fedac7e01954585062b378a34",
-   "afterSha256": "9fa1d8bc3f77b8b3295ac6ab132f02804569ccf01723fa643a265efb58a69d70",
+   "afterSha256": "cadfcfacb763aa8985bd8586676cccd7cf99694c92d3b135dcedb8e6504066f7",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1781,7 +1796,7 @@
    "path": "tests/unit/workflows/separations/transaction-check.test.ts",
    "changeKind": "modified",
    "beforeSha256": "8448c05c5b63c425db20c96a6c9bc69c1820995ba269f9699aae8fec0620fb7b",
-   "afterSha256": "b785e250b5bb7bcd3bc41ccf270ebde396ac7844b0051df31fa6eb0b95b3c3ed",
+   "afterSha256": "4637fe37d89c5b3b1dcf34820efea23aaeab053619a4202673c909c9eaa37600",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],

@@ -240,7 +240,7 @@ describe.skipIf(!ready)(
             const data = Object.assign({}, ...rows.map(row => row.data)) as Record<string, string>;
             const job = { emplRecord: data.emplRecord, positionNumber: data.positionNumber, jobCode: data.jobCode };
             const page = await session.page("ucpath");
-            const receipt = await findExistingTerminationTransaction(page, data.eid, data.terminationEffDate, job);
+            const receipt = await findExistingTerminationTransaction(page, data.eid, data.terminationEffDate, job, data.separationComment);
             assert.equal(receipt.txnNumber, data.transactionNumber);
             const { getContentFrame } = await import("../../src/systems/ucpath/selectors.js");
             const shown = await readTerminationJob(getContentFrame(page));
