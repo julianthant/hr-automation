@@ -67,7 +67,7 @@ export type TransactionCheckResult =
 export async function runTransactionCheck(
   ctx: Ctx<readonly string[], Record<string, unknown>>,
   eid: string,
-  opts: { dryRun: boolean; separationDate?: string; job?: SeparationJob; effectiveDate?: string },
+  opts: { dryRun: boolean; separationDate?: string; job?: SeparationJob; effectiveDate?: string; expectedComments?: string },
 ): Promise<TransactionCheckResult> {
   const t0 = Date.now();
   log.debug(`[Step: transaction-check] START eid='${eid}' dryRun=${opts.dryRun} sepDate='${opts.separationDate ?? ""}'`);
@@ -82,6 +82,7 @@ export async function runTransactionCheck(
       separationDate: opts.separationDate,
       job: opts.job,
       effectiveDate: opts.effectiveDate,
+      expectedComments: opts.expectedComments,
     });
 
     // Best-effort audit shot of the SS Smart HR search results so the operator

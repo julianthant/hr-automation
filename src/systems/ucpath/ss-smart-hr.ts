@@ -382,11 +382,12 @@ export async function navigateToSsSmartHrTransactions(page: Page): Promise<void>
 export async function findTerminationTransactionStatus(
   page: Page,
   eid: string,
-  opts: { separationDate?: string; toleranceDays?: number; job?: SeparationJob; effectiveDate?: string } = {},
+  opts: { separationDate?: string; toleranceDays?: number; job?: SeparationJob; effectiveDate?: string; expectedComments?: string } = {},
 ): Promise<TerminationTransactionStatus> {
   if (opts.job) {
     if (!opts.effectiveDate) throw new Error("Job-scoped termination lookup requires an exact effective date");
-    return findTerminationForJob(page, eid, opts.job, opts.effectiveDate);
+    if (!opts.expectedComments?.trim()) throw new Error("Job-scoped termination lookup requires canonical comments");
+    return findTerminationForJob(page, eid, opts.job, opts.effectiveDate, opts.expectedComments);
   }
   await navigateToSsSmartHrTransactions(page);
   const frame = getContentFrame(page);
@@ -1088,7 +1089,7 @@ async function scanSsSmartHrResults(frame: FrameLocator): Promise<SsSmartHrRow[]
 
 
 /** Read every TER candidate's actual employment record and position before reuse. */
-async function findTerminationForJob(page: Page, eid: string, job: SeparationJob, effectiveDate: string): Promise<TerminationTransactionStatus> {
+async function findTerminationForJob(page: Page, eid: string, job: SeparationJob, effectiveDate: string, expectedComments: string): Promise<TerminationTransactionStatus> {
   matchesSeparationJob(job, job); // Reject an incomplete target before any navigation.
   await navigateToSsSmartHrTransactions(page);
   const frame = getContentFrame(page);
@@ -1108,8 +1109,7 @@ async function findTerminationForJob(page: Page, eid: string, job: SeparationJob
     }
     candidates = rows.filter(r => r.action.trim() === "TER").map(r => r.transactionId);
   }
-  const matches: TerminationTransactionStatus[] = [];
-  for (const id of candidates) {
+  const openReceipt = async (id: string): Promise<string> => {
     await navigateToSsSmartHrTransactions(page);
     await safeFill(ssSmartHRTransactions.txnNumberTextbox(frame), id, { label: "termination receipt number" });
     await safeClick(ssSmartHRTransactions.searchButton(frame), { label: "termination receipt search" });
@@ -1122,6 +1122,11 @@ async function findTerminationForJob(page: Page, eid: string, job: SeparationJob
     await safeClick(smartHR.continueButton(frame), { label: "termination receipt continue" });
     await waitForPeopleSoftProcessing(frame, 15_000);
     await page.waitForLoadState("networkidle");
+    return status;
+  };
+  const matches: TerminationTransactionStatus[] = [];
+  for (const id of candidates) {
+    const status = await openReceipt(id);
     const actual = await readTerminationJob(frame);
     if (actual.eid !== eid) throw new Error(`Receipt ${id} belongs to ${actual.eid}, expected ${eid}`);
     if (!matchesSeparationJob(actual, job)) continue;
@@ -1130,12 +1135,21 @@ async function findTerminationForJob(page: Page, eid: string, job: SeparationJob
     }
     if (actual.effectiveDate !== effectiveDate) continue;
     if (status === "Approved" || status === "Pending") {
-      if (!(await comments.commentsTextarea(frame).inputValue()).trim() || !(await comments.initiatorCommentsTextarea(frame).inputValue()).trim()) throw new Error(`Termination ${id} is missing Comments or Initiator Comments; correct it before reuse`);
+      if (await comments.commentsTextarea(frame).inputValue() !== expectedComments || await comments.initiatorCommentsTextarea(frame).inputValue() !== expectedComments) throw new Error(`Termination ${id} has incorrect Comments or Initiator Comments; correct it before reuse`);
       matches.push({ found: true, transactionId: id, approvalStatus: status, effectiveDate });
     } else if (!/^(Denied|Cancelled|Canceled|Refused)$/.test(status)) {
       throw new Error(`Unrecognized termination status ${status} for ${id}`);
     }
   }
   if (matches.length > 1) throw new Error(`Multiple terminations match ${eid}/${job.emplRecord}/${job.positionNumber}/${effectiveDate}: ${matches.map(m => m.transactionId).join(", ")}`);
-  return matches[0] ?? { found: false, transactionId: "", approvalStatus: "", effectiveDate: "" };
+  const match = matches[0];
+  if (match && match.transactionId !== candidates.at(-1)) {
+    const status = await openReceipt(match.transactionId);
+    const actual = await readTerminationJob(frame);
+    if (status !== match.approvalStatus || actual.eid !== eid || actual.effectiveDate !== effectiveDate || !matchesSeparationJob(actual, job)
+      || await comments.commentsTextarea(frame).inputValue() !== expectedComments || await comments.initiatorCommentsTextarea(frame).inputValue() !== expectedComments) {
+      throw new Error(`Termination ${match.transactionId} changed while restoring its audit receipt`);
+    }
+  }
+  return match ?? { found: false, transactionId: "", approvalStatus: "", effectiveDate: "" };
 }

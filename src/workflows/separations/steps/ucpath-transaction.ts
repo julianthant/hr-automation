@@ -94,6 +94,7 @@ export async function runUcpathTransaction(
       kualiData.eid,
       finalTermEffDate,
       job,
+      finalComments,
     );
     if (lookupResult.txnNumber) {
       log.warn(`[UCPath Txn] Existing termination transaction #${lookupResult.txnNumber} found on Smart HR list — skipping submit.`);
