@@ -1109,7 +1109,7 @@ async function findTerminationForJob(page: Page, eid: string, job: SeparationJob
     }
     candidates = rows.filter(r => r.action.trim() === "TER").map(r => r.transactionId);
   }
-  const openReceipt = async (id: string): Promise<string> => {
+  const openReceipt = async (id: string): Promise<{ status: string; effectiveDate: string }> => {
     await navigateToSsSmartHrTransactions(page);
     await safeFill(ssSmartHRTransactions.txnNumberTextbox(frame), id, { label: "termination receipt number" });
     await safeClick(ssSmartHRTransactions.searchButton(frame), { label: "termination receipt search" });
@@ -1117,6 +1117,16 @@ async function findTerminationForJob(page: Page, eid: string, job: SeparationJob
     const actualId = (await ssSmartHRTransactions.transactionDetailTxnId(frame).innerText()).trim();
     const status = (await ssSmartHRTransactions.transactionDetailApprovalStatus(frame).innerText()).trim();
     if (actualId !== id || !status) throw new Error(`Cannot verify termination receipt ${id}`);
+    const receiptEffectiveDate = detailPageEffdt(await smartHR.transactionBody(frame).innerText());
+    if (!hireEffectiveDateMatches(receiptEffectiveDate, effectiveDate)) {
+      // This receipt has a different effective date, so it cannot be this
+      // separation. Its detail page need not expose a mutable job form.
+      log.step(
+        `[SS Smart HR] Receipt ${id} effdt '${receiptEffectiveDate || "<unreadable>"}' does not match ` +
+        `this separation's effective date '${effectiveDate}' — prior termination skipped`,
+      );
+      return { status, effectiveDate: receiptEffectiveDate };
+    }
     await safeClick(ssSmartHRTransactions.detailPersonLink(frame), { label: "termination receipt employee" });
     await waitForPeopleSoftProcessing(frame, 15_000);
     const employmentRecord = smartHR.employmentRecordSelect(frame);
@@ -1135,31 +1145,32 @@ async function findTerminationForJob(page: Page, eid: string, job: SeparationJob
       // EID, employment record, position, and effective date before reuse.
       log.step(`[SS Smart HR] Receipt ${id} opened its job form directly (single employment record)`);
     }
-    return status;
+    return { status, effectiveDate: receiptEffectiveDate };
   };
   const matches: TerminationTransactionStatus[] = [];
   for (const id of candidates) {
-    const status = await openReceipt(id);
+    const receipt = await openReceipt(id);
+    if (!hireEffectiveDateMatches(receipt.effectiveDate, effectiveDate)) continue;
     const actual = await readTerminationJob(frame);
     if (actual.eid !== eid) throw new Error(`Receipt ${id} belongs to ${actual.eid}, expected ${eid}`);
     if (!matchesSeparationJob(actual, job)) continue;
-    if (status === "Pending" && actual.effectiveDate !== effectiveDate) {
+    if (receipt.status === "Pending" && actual.effectiveDate !== effectiveDate) {
       throw new Error(`Pending termination ${id} for record ${job.emplRecord}, position ${job.positionNumber} has effective date ${actual.effectiveDate}, expected ${effectiveDate}; resolve that transaction before creating another`);
     }
     if (actual.effectiveDate !== effectiveDate) continue;
-    if (status === "Approved" || status === "Pending") {
+    if (receipt.status === "Approved" || receipt.status === "Pending") {
       if (await comments.commentsTextarea(frame).inputValue() !== expectedComments || await comments.initiatorCommentsTextarea(frame).inputValue() !== expectedComments) throw new Error(`Termination ${id} has incorrect Comments or Initiator Comments; correct it before reuse`);
-      matches.push({ found: true, transactionId: id, approvalStatus: status, effectiveDate });
-    } else if (!/^(Denied|Cancelled|Canceled|Refused)$/.test(status)) {
-      throw new Error(`Unrecognized termination status ${status} for ${id}`);
+      matches.push({ found: true, transactionId: id, approvalStatus: receipt.status, effectiveDate });
+    } else if (!/^(Denied|Cancelled|Canceled|Refused)$/.test(receipt.status)) {
+      throw new Error(`Unrecognized termination status ${receipt.status} for ${id}`);
     }
   }
   if (matches.length > 1) throw new Error(`Multiple terminations match ${eid}/${job.emplRecord}/${job.positionNumber}/${effectiveDate}: ${matches.map(m => m.transactionId).join(", ")}`);
   const match = matches[0];
   if (match && match.transactionId !== candidates.at(-1)) {
-    const status = await openReceipt(match.transactionId);
+    const receipt = await openReceipt(match.transactionId);
     const actual = await readTerminationJob(frame);
-    if (status !== match.approvalStatus || actual.eid !== eid || actual.effectiveDate !== effectiveDate || !matchesSeparationJob(actual, job)
+    if (receipt.status !== match.approvalStatus || !hireEffectiveDateMatches(receipt.effectiveDate, effectiveDate) || actual.eid !== eid || actual.effectiveDate !== effectiveDate || !matchesSeparationJob(actual, job)
       || await comments.commentsTextarea(frame).inputValue() !== expectedComments || await comments.initiatorCommentsTextarea(frame).inputValue() !== expectedComments) {
       throw new Error(`Termination ${match.transactionId} changed while restoring its audit receipt`);
     }

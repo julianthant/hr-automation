@@ -5,7 +5,7 @@ import type { Page } from "playwright";
 vi.resetModules();
 const state = vi.hoisted(() => ({
   search: "", current: "", comments: "canonical", initiator: "canonical", opened: [] as string[],
-  wrongId: false, directJobForm: false, continueClicks: 0,
+  wrongId: false, directJobForm: false, receiptEffectiveDate: "09/02/2026", continueClicks: 0,
 }));
 vi.mock("../../../../src/systems/ucpath/navigate.js", async (original) => ({
   ...await original<typeof import("../../../../src/systems/ucpath/navigate.js")>(),
@@ -26,7 +26,7 @@ vi.mock("../../../../src/systems/ucpath/selectors.js", async (original) => {
   ];
   const body = () => ({
     evaluate: async () => grid(),
-    innerText: async () => `Effective Date: 09/02/2026 Employee ID: 10599318 Employee Record: ${state.current === "T000000001" ? "0 (STDT 3)" : "1 (STDT 4)"}`,
+    innerText: async () => `Effective Date: ${state.receiptEffectiveDate} Employee ID: 10599318 Employee Record: ${state.current === "T000000001" ? "0 (STDT 3)" : "1 (STDT 4)"}`,
   });
   return {
     ...real,
@@ -61,7 +61,7 @@ beforeAll(async () => {
 const page = { waitForTimeout: async () => {}, waitForLoadState: async () => {} } as unknown as Page;
 const job = { emplRecord: "0", positionNumber: "41202096", jobCode: "004920" };
 const options = { job, effectiveDate: "09/02/2026", expectedComments: "canonical" };
-beforeEach(() => { Object.assign(state, { search: "", current: "", comments: "canonical", initiator: "canonical", opened: [], wrongId: false, directJobForm: false, continueClicks: 0 }); });
+beforeEach(() => { Object.assign(state, { search: "", current: "", comments: "canonical", initiator: "canonical", opened: [], wrongId: false, directJobForm: false, receiptEffectiveDate: "09/02/2026", continueClicks: 0 }); });
 
 describe("job-scoped SS receipt reuse", () => {
   it("restores the matching receipt after inspecting a different concurrent job", async () => {
@@ -84,6 +84,13 @@ describe("job-scoped SS receipt reuse", () => {
     state.directJobForm = true;
     const result = await findTerminationTransactionStatus(page, "10599318", options);
     assert.equal(result.transactionId, "T000000001");
+    assert.equal(state.continueClicks, 0);
+  });
+  it("skips a prior receipt by effective date before requiring a job form", async () => {
+    state.receiptEffectiveDate = "08/31/2026";
+    state.directJobForm = true;
+    const result = await findTerminationTransactionStatus(page, "10599318", options);
+    assert.equal(result.found, false);
     assert.equal(state.continueClicks, 0);
   });
   it("requires canonical expected comments before either lookup navigates", async () => {
