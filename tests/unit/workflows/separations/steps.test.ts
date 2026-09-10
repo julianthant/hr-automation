@@ -23,9 +23,9 @@ test('separations effective step list is auth:<systems> + work steps', () => {
     'auth:ucpath',
     'kuali-extraction',
     'identity-check',
-    'transaction-check',
     'ucpath-job-summary',
     'kronos-search',
+    'transaction-check',
     'ucpath-transaction',
     'kuali-finalization',
     // The trailing search-only 'i9-check' step is GONE (2026-07-17): the I-9

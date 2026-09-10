@@ -45,6 +45,18 @@ export function getContentFrame(page: Page): FrameLocator {
 // ─── Smart HR Transactions (sidebar + template setup + controls) ──────────
 
 export const smartHR = {
+  /** Employment record on Enter Transaction Details. verified 2026-09-08
+   * @tags termination, employment, record, concurrent, job
+   */
+  employmentRecordSelect: (f: FrameLocator): Locator => f.getByRole("combobox", { name: "Employment Record Number", exact: true }),
+  /** Rendered transaction body for verified header/receipt parsing. verified 2026-09-08
+   * @tags termination, body, header, receipt
+   */
+  transactionBody: (f: FrameLocator): Locator => f.locator("body"),
+  /** Exact in-progress row hyperlink discovered by its DOM id. verified 2026-09-08
+   * @tags termination, in-progress, row, link
+   */
+  transactionLinkById: (f: FrameLocator, id: string): Locator => f.locator(`[id="${id}"]`),
   /**
    * Navigation Area button that collapses the sidebar so iframe buttons aren't blocked. verified 2026-03-16
    * @tags sidebar, collapse, navigation, button
@@ -1373,6 +1385,10 @@ export const payPathActions = {
 // (search-form arms re-probed live after the `$op` accessible-name drift)
 
 export const ssSmartHRTransactions = {
+  /** Employee drill-in link on the transaction receipt. verified 2026-09-08
+   * @tags ss-smart-hr, employee, detail, link
+   */
+  detailPersonLink: (f: FrameLocator): Locator => f.locator('[id="NAME$0"]'),
   // Search-input accessible names are "<Label> begins with" (the operator
   // <select>, `<field>$op`, is folded in via aria-labelledby:
   // `<FIELD>_LBL$star <FIELD>_LBL <FIELD>$op`) — the same PeopleSoft

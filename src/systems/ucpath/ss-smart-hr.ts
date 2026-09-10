@@ -1,3 +1,5 @@
+import { commentsMatchTermination, matchesSeparationJob, type SeparationJob } from "../../domain/separation-job.js";
+import { readTerminationJob } from "./termination-job.js";
 import type { Page, FrameLocator, Locator } from "playwright";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
@@ -5,8 +7,10 @@ import {
   navigateToSmartHR,
   collapseSidebar,
   waitForPeopleSoftProcessing,
+  dismissPeopleSoftDialog,
+  readPeopleSoftDialogText,
 } from "./navigate.js";
-import { getContentFrame, ssSmartHRTransactions, hrTasks } from "./selectors.js";
+import { getContentFrame, ssSmartHRTransactions, hrTasks, smartHR, comments, jobData } from "./selectors.js";
 import { safeClick, safeFill } from "../common/index.js";
 
 /**
@@ -380,8 +384,13 @@ export async function navigateToSsSmartHrTransactions(page: Page): Promise<void>
 export async function findTerminationTransactionStatus(
   page: Page,
   eid: string,
-  opts: { separationDate?: string; toleranceDays?: number } = {},
+  opts: { separationDate?: string; toleranceDays?: number; job?: SeparationJob; effectiveDate?: string; expectedComments?: string } = {},
 ): Promise<TerminationTransactionStatus> {
+  if (opts.job) {
+    if (!opts.effectiveDate) throw new Error("Job-scoped termination lookup requires an exact effective date");
+    if (!opts.expectedComments?.trim()) throw new Error("Job-scoped termination lookup requires canonical comments");
+    return findTerminationForJob(page, eid, opts.job, opts.effectiveDate, opts.expectedComments);
+  }
   await navigateToSsSmartHrTransactions(page);
   const frame = getContentFrame(page);
 
@@ -1078,4 +1087,111 @@ async function scanSsSmartHrResults(frame: FrameLocator): Promise<SsSmartHrRow[]
     return out;
   });
   return parseSsSmartHrRows(matrix);
+}
+
+
+/** Read every TER candidate's actual employment record and position before reuse. */
+async function findTerminationForJob(page: Page, eid: string, job: SeparationJob, effectiveDate: string, expectedComments: string): Promise<TerminationTransactionStatus> {
+  matchesSeparationJob(job, job); // Reject an incomplete target before any navigation.
+  await navigateToSsSmartHrTransactions(page);
+  const frame = getContentFrame(page);
+  await safeFill(ssSmartHRTransactions.emplIdInput(frame), eid, { label: "termination job employee" });
+  await safeClick(ssSmartHRTransactions.searchButton(frame), { label: "termination job search" });
+  await waitForPeopleSoftProcessing(frame, 15_000);
+  await page.waitForLoadState("networkidle");
+  let candidates: string[];
+  if (await ssSmartHRTransactions.transactionDetailTxnId(frame).count() === 1) {
+    const body = await smartHR.transactionBody(frame).innerText();
+    candidates = /\bTER\b/.test(body) ? [(await ssSmartHRTransactions.transactionDetailTxnId(frame).innerText()).trim()] : [];
+  } else {
+    const rows = await scanSsSmartHrResults(frame);
+    if (rows.length >= 100) throw new Error(`SS Smart HR results for ${eid} may be truncated; cannot establish termination uniqueness`);
+    if (!rows.length && !/No matching values/i.test(await smartHR.transactionBody(frame).innerText())) {
+      throw new Error(`SS Smart HR search for ${eid} did not render a verified result`);
+    }
+    candidates = rows.filter(r => r.action.trim() === "TER").map(r => r.transactionId);
+  }
+  const openReceipt = async (id: string): Promise<{ status: string; effectiveDate: string }> => {
+    await navigateToSsSmartHrTransactions(page);
+    await safeFill(ssSmartHRTransactions.txnNumberTextbox(frame), id, { label: "termination receipt number" });
+    await safeClick(ssSmartHRTransactions.searchButton(frame), { label: "termination receipt search" });
+    await ssSmartHRTransactions.transactionDetailTxnId(frame).filter({ hasText: id }).waitFor();
+    const actualId = (await ssSmartHRTransactions.transactionDetailTxnId(frame).innerText()).trim();
+    const status = (await ssSmartHRTransactions.transactionDetailApprovalStatus(frame).innerText()).trim();
+    if (actualId !== id || !status) throw new Error(`Cannot verify termination receipt ${id}`);
+    const receiptEffectiveDate = detailPageEffdt(await smartHR.transactionBody(frame).innerText());
+    if (!hireEffectiveDateMatches(receiptEffectiveDate, effectiveDate)) {
+      // This receipt has a different effective date, so it cannot be this
+      // separation. Its detail page need not expose a mutable job form.
+      log.step(
+        `[SS Smart HR] Receipt ${id} effdt '${receiptEffectiveDate || "<unreadable>"}' does not match ` +
+        `this separation's effective date '${effectiveDate}' — prior termination skipped`,
+      );
+      return { status, effectiveDate: receiptEffectiveDate };
+    }
+    await safeClick(ssSmartHRTransactions.detailPersonLink(frame), { label: "termination receipt employee" });
+    await waitForPeopleSoftProcessing(frame, 15_000);
+    const dialogText = await readPeopleSoftDialogText(page);
+    if (dialogText) {
+      await dismissPeopleSoftDialog(page);
+      throw new Error(`UCPath dialog on receipt ${id}: "${dialogText}"`);
+    }
+    const employmentRecord = smartHR.employmentRecordSelect(frame);
+    if (await employmentRecord.count() === 1) {
+      await safeClick(smartHR.continueButton(frame), { label: "termination receipt continue" });
+      await waitForPeopleSoftProcessing(frame, 15_000);
+      await page.waitForLoadState("networkidle");
+    } else if (await jobData.positionNumberInput(frame).count() !== 1) {
+      const postDialog = await readPeopleSoftDialogText(page);
+      if (postDialog) {
+        await dismissPeopleSoftDialog(page);
+        throw new Error(`UCPath dialog on receipt ${id}: "${postDialog}"`);
+      }
+      throw new Error(
+        `Termination receipt ${id} did not open a verified job form after employee drill-in: ` +
+        "Employment Record Number and Position Number are both absent",
+      );
+    } else {
+      // A one-record receipt opens its termination form directly: no record chooser
+      // or Continue button is rendered. `readTerminationJob` below still proves the
+      // EID, employment record, position, and effective date before reuse.
+      log.step(`[SS Smart HR] Receipt ${id} opened its job form directly (single employment record)`);
+    }
+    return { status, effectiveDate: receiptEffectiveDate };
+  };
+  const matches: TerminationTransactionStatus[] = [];
+  for (const id of candidates) {
+    const receipt = await openReceipt(id);
+    if (!hireEffectiveDateMatches(receipt.effectiveDate, effectiveDate)) continue;
+    const actual = await readTerminationJob(frame);
+    if (actual.eid !== eid) throw new Error(`Receipt ${id} belongs to ${actual.eid}, expected ${eid}`);
+    if (!matchesSeparationJob(actual, job)) continue;
+    if (receipt.status === "Pending" && actual.effectiveDate !== effectiveDate) {
+      throw new Error(`Pending termination ${id} for record ${job.emplRecord}, position ${job.positionNumber} has effective date ${actual.effectiveDate}, expected ${effectiveDate}; resolve that transaction before creating another`);
+    }
+    if (actual.effectiveDate !== effectiveDate) continue;
+    if (receipt.status === "Approved" || receipt.status === "Pending") {
+      const commVal = await comments.commentsTextarea(frame).inputValue();
+      const initVal = await comments.initiatorCommentsTextarea(frame).inputValue();
+      if (!commentsMatchTermination(commVal, expectedComments) || !commentsMatchTermination(initVal, expectedComments)) {
+        throw new Error(`Termination ${id} has incorrect Comments or Initiator Comments; correct it before reuse`);
+      }
+      matches.push({ found: true, transactionId: id, approvalStatus: receipt.status, effectiveDate });
+    } else if (!/^(Denied|Cancelled|Canceled|Refused)$/.test(receipt.status)) {
+      throw new Error(`Unrecognized termination status ${receipt.status} for ${id}`);
+    }
+  }
+  if (matches.length > 1) throw new Error(`Multiple terminations match ${eid}/${job.emplRecord}/${job.positionNumber}/${effectiveDate}: ${matches.map(m => m.transactionId).join(", ")}`);
+  const match = matches[0];
+  if (match && match.transactionId !== candidates.at(-1)) {
+    const receipt = await openReceipt(match.transactionId);
+    const actual = await readTerminationJob(frame);
+    const commVal = await comments.commentsTextarea(frame).inputValue();
+    const initVal = await comments.initiatorCommentsTextarea(frame).inputValue();
+    if (receipt.status !== match.approvalStatus || !hireEffectiveDateMatches(receipt.effectiveDate, effectiveDate) || actual.eid !== eid || actual.effectiveDate !== effectiveDate || !matchesSeparationJob(actual, job)
+      || !commentsMatchTermination(commVal, expectedComments) || !commentsMatchTermination(initVal, expectedComments)) {
+      throw new Error(`Termination ${match.transactionId} changed while restoring its audit receipt`);
+    }
+  }
+  return match ?? { found: false, transactionId: "", approvalStatus: "", effectiveDate: "" };
 }

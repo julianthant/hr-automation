@@ -1,3 +1,5 @@
+import type { SeparationJob } from "../../../domain/separation-job.js";
+import { selectTerminationEmploymentRecord, verifyTerminationJob } from "../../../systems/ucpath/termination-job.js";
 import { log } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { WorkflowError } from "../../../domain/workflow-error.js";
@@ -13,6 +15,7 @@ import {
   fillTerminationLastDateWorked,
   clickSaveAndSubmit,
   findExistingTerminationTransaction,
+  findTerminationTransactionStatus,
   scrollToTransactionReadbackArea,
 } from "../../../systems/ucpath/index.js";
 import { ssSmartHRTransactions } from "../../../systems/ucpath/selectors.js";
@@ -71,6 +74,7 @@ export async function runUcpathTransaction(
   template: string,
   initialTransactionNumber: string,
   lastDayWorked: string,
+  job?: SeparationJob,
 ): Promise<UcpathTransactionResult> {
   const t0 = Date.now();
   log.debug(`[Step: ucpath-transaction] START empl='${kualiData.eid}' template='${template}'`);
@@ -90,6 +94,8 @@ export async function runUcpathTransaction(
       ucpathPage,
       kualiData.eid,
       finalTermEffDate,
+      job,
+      finalComments,
     );
     if (lookupResult.txnNumber) {
       log.warn(`[UCPath Txn] Existing termination transaction #${lookupResult.txnNumber} found on Smart HR list — skipping submit.`);
@@ -101,6 +107,21 @@ export async function runUcpathTransaction(
       ctx.updateData({ transactionNumber });
       await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-existing', systems: ['ucpath'], stitch: true });
       return { transactionNumber, submittedWithoutTxnNumber };
+    }
+
+    if (job) {
+      const ssExisting = await findTerminationTransactionStatus(ucpathPage, kualiData.eid, {
+        job,
+        effectiveDate: finalTermEffDate,
+        expectedComments: finalComments,
+      });
+      if (ssExisting.found && ssExisting.transactionId) {
+        log.warn(`[UCPath Txn] Existing termination transaction #${ssExisting.transactionId} found on SS Smart HR — skipping submit.`);
+        transactionNumber = ssExisting.transactionId;
+        ctx.updateData({ transactionNumber });
+        await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-existing-ss', systems: ['ucpath'], stitch: true });
+        return { transactionNumber, submittedWithoutTxnNumber };
+      }
     }
 
     try {
@@ -125,6 +146,7 @@ export async function runUcpathTransaction(
       }
       log.step("[UCPath Txn] Filling Empl ID...");
       await ssSmartHRTransactions.emplIdInput(frame).fill(kualiData.eid, { timeout: 10_000 });
+      if (job) await selectTerminationEmploymentRecord(ucpathPage, job);
       await selectReasonCode(ucpathPage, frame, ucpathReason);
 
       // fillComments fills the first field on the page AFTER "Enter Transaction
@@ -167,7 +189,14 @@ export async function runUcpathTransaction(
         system: "UCPath Smart HR",
       });
 
-      const submitResult = await clickSaveAndSubmit(ucpathPage, frame, kualiData.eid);
+      if (job) {
+        await verifyTerminationJob(frame, kualiData.eid, job, finalTermEffDate);
+        // The LDW override refresh can replace controls; fill both comments after it settles.
+        await fillComments(ucpathPage, frame, finalComments);
+      }
+      const submitResult = await clickSaveAndSubmit(ucpathPage, frame, kualiData.eid, job ? {
+        terminationJob: job, terminationEffectiveDate: finalTermEffDate, terminationComments: finalComments,
+      } : {});
       transactionNumber = submitResult.transactionNumber ?? "";
       log.step(
         `[UCPath Txn] submit result: success=${submitResult.success} `
@@ -177,6 +206,22 @@ export async function runUcpathTransaction(
       if (!submitResult.success) {
         log.error(`[UCPath Txn] Submit failed: ${submitResult.error}`);
         return { transactionNumber, submittedWithoutTxnNumber };
+      }
+      if (!transactionNumber && job) {
+        log.step(`[UCPath Txn] Submit returned no transaction number — attempting recovery via SS Smart HR for ${kualiData.eid}/${job.emplRecord}...`);
+        try {
+          const recovered = await findTerminationTransactionStatus(ucpathPage, kualiData.eid, {
+            job,
+            effectiveDate: finalTermEffDate,
+            expectedComments: finalComments,
+          });
+          if (recovered.found && recovered.transactionId) {
+            transactionNumber = recovered.transactionId;
+            log.success(`[UCPath Txn] Successfully recovered receipt #${transactionNumber} via SS Smart HR`);
+          }
+        } catch (e) {
+          log.warn(`[UCPath Txn] SS Smart HR receipt recovery failed: ${errorMessage(e)}`);
+        }
       }
       if (!transactionNumber) {
         submittedWithoutTxnNumber = true;
@@ -204,6 +249,7 @@ export async function runUcpathTransaction(
       // Empl-ID-not-recognized is FATAL and self-explanatory — let it escape so
       // the run fails with the clear message (its own screenshot already fired)
       // instead of falling through to a blank Kuali finalization.
+      if (job) throw e;
       if (e instanceof EmplIdNotRecognizedError || e instanceof LastDateWorkedVerificationError) throw e;
       log.error(`[UCPath Txn] Failed: ${errorMessage(e)}`);
       // Diagnostic capture for this soft-failure path. The error is swallowed
