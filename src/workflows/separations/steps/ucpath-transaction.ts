@@ -15,6 +15,7 @@ import {
   fillTerminationLastDateWorked,
   clickSaveAndSubmit,
   findExistingTerminationTransaction,
+  findTerminationTransactionStatus,
   scrollToTransactionReadbackArea,
 } from "../../../systems/ucpath/index.js";
 import { ssSmartHRTransactions } from "../../../systems/ucpath/selectors.js";
@@ -108,6 +109,21 @@ export async function runUcpathTransaction(
       return { transactionNumber, submittedWithoutTxnNumber };
     }
 
+    if (job) {
+      const ssExisting = await findTerminationTransactionStatus(ucpathPage, kualiData.eid, {
+        job,
+        effectiveDate: finalTermEffDate,
+        expectedComments: finalComments,
+      });
+      if (ssExisting.found && ssExisting.transactionId) {
+        log.warn(`[UCPath Txn] Existing termination transaction #${ssExisting.transactionId} found on SS Smart HR — skipping submit.`);
+        transactionNumber = ssExisting.transactionId;
+        ctx.updateData({ transactionNumber });
+        await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-existing-ss', systems: ['ucpath'], stitch: true });
+        return { transactionNumber, submittedWithoutTxnNumber };
+      }
+    }
+
     try {
       // When findExistingTerminationTransaction left the page at Smart HR
       // Transactions (alreadyAtSmartHR=true), skip the double navigation
@@ -190,6 +206,22 @@ export async function runUcpathTransaction(
       if (!submitResult.success) {
         log.error(`[UCPath Txn] Submit failed: ${submitResult.error}`);
         return { transactionNumber, submittedWithoutTxnNumber };
+      }
+      if (!transactionNumber && job) {
+        log.step(`[UCPath Txn] Submit returned no transaction number — attempting recovery via SS Smart HR for ${kualiData.eid}/${job.emplRecord}...`);
+        try {
+          const recovered = await findTerminationTransactionStatus(ucpathPage, kualiData.eid, {
+            job,
+            effectiveDate: finalTermEffDate,
+            expectedComments: finalComments,
+          });
+          if (recovered.found && recovered.transactionId) {
+            transactionNumber = recovered.transactionId;
+            log.success(`[UCPath Txn] Successfully recovered receipt #${transactionNumber} via SS Smart HR`);
+          }
+        } catch (e) {
+          log.warn(`[UCPath Txn] SS Smart HR receipt recovery failed: ${errorMessage(e)}`);
+        }
       }
       if (!transactionNumber) {
         submittedWithoutTxnNumber = true;

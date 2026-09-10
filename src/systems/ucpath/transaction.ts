@@ -1,4 +1,5 @@
-import { matchesSeparationJob, type SeparationJob } from "../../domain/separation-job.js";
+import { commentsMatchTermination, matchesSeparationJob, type SeparationJob } from "../../domain/separation-job.js";
+import { findTerminationTransactionStatus } from "./ss-smart-hr.js";
 import { readTerminationJob, verifyTerminationJob } from "./termination-job.js";
 import type { Page, FrameLocator, Locator } from "playwright";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -1590,9 +1591,31 @@ export async function clickSaveAndSubmit(
 
   if (opts.terminationJob) {
     if (!employeeId || !opts.terminationEffectiveDate || !opts.terminationComments) throw new Error("Termination receipt requires EID, job, date, and comments");
-    const receipt = await findExistingTerminationForJob(page, employeeId, opts.terminationEffectiveDate, opts.terminationJob, opts.terminationComments);
-    if (!receipt.txnNumber) throw new Error(`Submitted termination for ${employeeId}/${opts.terminationJob.emplRecord} has no verified receipt; do not resubmit without checking UCPath`);
-    transactionNumber = receipt.txnNumber;
+    let receiptTxn = "";
+    try {
+      const receipt = await findExistingTerminationForJob(page, employeeId, opts.terminationEffectiveDate, opts.terminationJob, opts.terminationComments);
+      receiptTxn = receipt.txnNumber ?? "";
+    } catch (e) {
+      log.warn(`[Submit] in-progress receipt verification threw: ${errorMessage(e)} — attempting SS Smart HR recovery`);
+    }
+    if (!receiptTxn) {
+      log.step(`[Submit] In-progress grid yielded no receipt — recovering via SS Smart HR for ${employeeId}/${opts.terminationJob.emplRecord}...`);
+      try {
+        const ssReceipt = await findTerminationTransactionStatus(page, employeeId, {
+          job: opts.terminationJob,
+          effectiveDate: opts.terminationEffectiveDate,
+          expectedComments: opts.terminationComments,
+        });
+        if (ssReceipt.found && ssReceipt.transactionId) {
+          log.success(`[Submit] Recovered submitted receipt ${ssReceipt.transactionId} from SS Smart HR`);
+          receiptTxn = ssReceipt.transactionId;
+        }
+      } catch (e) {
+        log.warn(`[Submit] SS Smart HR receipt recovery threw: ${errorMessage(e)}`);
+      }
+    }
+    if (!receiptTxn) throw new Error(`Submitted termination for ${employeeId}/${opts.terminationJob.emplRecord} has no verified receipt; do not resubmit without checking UCPath`);
+    transactionNumber = receiptTxn;
   }
   return { success: true, transactionNumber };
 }
@@ -2286,25 +2309,51 @@ async function findExistingTerminationForJob(page: Page, eid: string, effectiveD
   await clickSmartHRTransactions(page);
   const frame = getContentFrame(page);
   await smartHR.createTransactionButton(frame).waitFor();
-  const ids = await smartHR.transactionBody(frame).evaluate((body, employeeId) => {
+  const ids = await smartHR.transactionBody(frame).evaluate((body, { employeeId, targetDate }) => {
     const ids: string[] = [];
     for (const row of Array.from(body.querySelectorAll("tr"))) {
       const cells = Array.from(row.cells).map(c => (c.textContent ?? "").trim());
       if (!cells.includes(employeeId) || !cells.some(c => /^Terminat/i.test(c))) continue;
+      // Filter before opening historical receipts:
+      // Exclude wrong-date receipts before employee drill-in.
+      if (targetDate && !row.textContent?.includes(targetDate)) continue;
       const link = row.querySelector<HTMLAnchorElement>('a[id^="NAME$"]');
       if (!link?.id) throw new Error("Termination row has no stable employee link");
       ids.push(link.id);
     }
     return ids;
-  }, eid);
+  }, { employeeId: eid, targetDate: effectiveDate });
   const found: { txn: string; linkId: string }[] = [];
   for (const [index, id] of ids.entries()) {
     if (index > 0) { await navigateToSmartHR(page); await clickSmartHRTransactions(page); }
     await safeClick(smartHR.transactionLinkById(frame, id), { label: "exact termination row" });
-    await smartHR.employmentRecordSelect(frame).waitFor();
-    await safeClick(smartHR.continueButton(frame), { label: "exact termination continue" });
     await waitForPeopleSoftProcessing(frame, 15_000);
-    await page.waitForLoadState("networkidle");
+
+    const dialogText = await readPeopleSoftDialogText(page);
+    if (dialogText) {
+      await dismissPeopleSoftDialog(page);
+      throw new Error(`UCPath dialog on termination receipt row ${id}: "${dialogText}"`);
+    }
+
+    const employmentRecord = smartHR.employmentRecordSelect(frame);
+    if (await employmentRecord.count() === 1) {
+      await safeClick(smartHR.continueButton(frame), { label: "exact termination continue" });
+      await waitForPeopleSoftProcessing(frame, 15_000);
+      await page.waitForLoadState("networkidle");
+    } else if (await jobDataSelectors.positionNumberInput(frame).count() !== 1) {
+      const postDialog = await readPeopleSoftDialogText(page);
+      if (postDialog) {
+        await dismissPeopleSoftDialog(page);
+        throw new Error(`UCPath dialog on termination receipt row ${id}: "${postDialog}"`);
+      }
+      throw new Error(
+        `Termination receipt row ${id} did not open a verified job form: ` +
+        "Employment Record Number and Position Number are both absent",
+      );
+    } else {
+      log.step(`[Smart HR] Termination row ${id} opened its job form directly (single employment record)`);
+    }
+
     const actual = await readTerminationJob(frame);
     if (actual.eid !== eid) throw new Error(`Termination grid changed: expected ${eid}, found ${actual.eid}`);
     if (!matchesSeparationJob(actual, job)) continue;
@@ -2315,7 +2364,7 @@ async function findExistingTerminationForJob(page: Page, eid: string, effectiveD
     if (!/\bPending\b/.test(body)) throw new Error(`Transaction ${txn} does not have a verified Pending receipt`);
     const comments = await commentsSelectors.commentsTextarea(frame).inputValue();
     const initiator = await commentsSelectors.initiatorCommentsTextarea(frame).inputValue();
-    if (!comments.trim() || !initiator.trim() || (expectedComments !== undefined && (comments !== expectedComments || initiator !== expectedComments))) {
+    if (!comments.trim() || !initiator.trim() || (expectedComments !== undefined && (!commentsMatchTermination(comments, expectedComments) || !commentsMatchTermination(initiator, expectedComments)))) {
       throw new Error(`Transaction ${txn} is missing or has incorrect Comments / Initiator Comments; correct it before reuse`);
     }
     found.push({ txn, linkId: id });
@@ -2327,10 +2376,18 @@ async function findExistingTerminationForJob(page: Page, eid: string, effectiveD
     await navigateToSmartHR(page);
     await clickSmartHRTransactions(page);
     await safeClick(smartHR.transactionLinkById(frame, match.linkId), { label: "matching termination receipt" });
-    await smartHR.employmentRecordSelect(frame).waitFor();
-    await safeClick(smartHR.continueButton(frame), { label: "matching termination receipt continue" });
     await waitForPeopleSoftProcessing(frame, 15_000);
-    await page.waitForLoadState("networkidle");
+    const dialogText = await readPeopleSoftDialogText(page);
+    if (dialogText) {
+      await dismissPeopleSoftDialog(page);
+      throw new Error(`UCPath dialog on termination receipt ${match.txn}: "${dialogText}"`);
+    }
+    const employmentRecord = smartHR.employmentRecordSelect(frame);
+    if (await employmentRecord.count() === 1) {
+      await safeClick(smartHR.continueButton(frame), { label: "matching termination receipt continue" });
+      await waitForPeopleSoftProcessing(frame, 15_000);
+      await page.waitForLoadState("networkidle");
+    }
     await verifyTerminationJob(frame, eid, job, effectiveDate);
     if (await readTxnNumberFromDetailPage(frame) !== match.txn) throw new Error("Termination receipt changed during verification");
   }

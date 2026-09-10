@@ -290,7 +290,7 @@
    "path": "src/domain/separation-job.ts",
    "changeKind": "added",
    "beforeSha256": null,
-   "afterSha256": "e7da699afc8007d50f6ff5800c551bf6908262d0d33fce5228467666aa7ae362",
+   "afterSha256": "1d9a95dc1fe27b613264988b3198d030840373b79785356170b739d406a54a06",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -299,7 +299,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
+   "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: adds commentsMatchTermination to permit duplicate Kuali request document reference difference only after substantive termination details match."
   },
   {
    "path": "src/domain/settings/types.ts",
@@ -735,7 +735,7 @@
    "path": "src/systems/ucpath/LESSONS.md",
    "changeKind": "modified",
    "beforeSha256": "010e7a25f50d7e63b24355bb254ded76690c9278a6885285ef3a52101fc5f9a1",
-   "afterSha256": "ca05c4a4e69222da518981d35833c6b7f3860b4de4a1035ec50d536cadad3dae",
+   "afterSha256": "cf3e42c83fb80268bb2514df21231104329e2465d13d7ad62ef0cf71dc34df60",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-person-lookup",
@@ -746,7 +746,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "2026-08-05 (aba05c65): corrected the 2026-08-04 $op accessible-name lesson's blast-radius paragraph — it had declared production immune while the production-driven ssSmartHRTransactions group carried the same fragile shape (the doc 4493 failure); adds the sweep-every-Find-an-Existing-Value-group rule. 2026-08-20: lesson — Save and Submit can land on the Person Match Found review page the outcome poll never watched. 2026-08-20 (pm): lesson — SS Smart HR Name box is First Last; single match auto-opens the detail page. 2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: records the prior TER receipt behavior found on separation 4596: effective date is sufficient to skip a different event, while a matching date still requires job-form proof."
+   "impactRationale": "2026-08-05 (aba05c65): corrected the 2026-08-04 $op accessible-name lesson's blast-radius paragraph — it had declared production immune while the production-driven ssSmartHRTransactions group carried the same fragile shape (the doc 4493 failure); adds the sweep-every-Find-an-Existing-Value-group rule. 2026-08-20: lesson — Save and Submit can land on the Person Match Found review page the outcome poll never watched. 2026-08-20 (pm): lesson — SS Smart HR Name box is First Last; single match auto-opens the detail page. 2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: records the prior TER receipt behavior found on separation 4596: effective date is sufficient to skip a different event, while a matching date still requires job-form proof. 2026-09-10: records post-submit receipt recovery via SS Smart HR, duplicate Kuali request document reference tolerance with substantive equality check, and historical receipt date pre-filtering."
   },
   {
    "path": "src/systems/ucpath/SELECTORS.md",
@@ -801,12 +801,12 @@
    "path": "src/systems/ucpath/navigate.ts",
    "changeKind": "modified",
    "beforeSha256": "138772d16f32488512cc32d3057f13da215e2af978f11c60c593b73451b69b58",
-   "afterSha256": "7ea5fe1f136dce4ed2b9d6e54da0fbeb3f314b21345f5d94588841d014e153db",
+   "afterSha256": "87e8656c9cdeb37796c9d815c3448dc9b0a6e890a7189fcd2235976fdc1ccdb4",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
    ],
-   "impactRationale": "Adds readPeopleSoftDialogText: reads a #ICOK dialog's message WITHOUT dismissing it, so a blocking refusal can be distinguished from a submit confirmation.",
+   "impactRationale": "Adds readPeopleSoftDialogText: reads a #ICOK dialog's message WITHOUT dismissing it, so a blocking refusal can be distinguished from a submit confirmation. 2026-09-10: guards frames check in PeopleSoft dialog readers for unit test mock environments.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -854,7 +854,7 @@
    "path": "src/systems/ucpath/ss-smart-hr.ts",
    "changeKind": "modified",
    "beforeSha256": "6524118fb49e244442824d134484709530bf2a80a5be73bf183fd7d5cac847f2",
-   "afterSha256": "75d5ae66b2a85dc5fafc8eb3f347c153d5325febd5089e4dd644b3ad8c205319",
+   "afterSha256": "5efc1a7d2d43530316c8a88ee21eb3ded7fc17a253c889c2f2ff96ad347e7de3",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -864,7 +864,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": " 2026-08-20 (pm): buildHireSearchName → First Last (live-verified; Last,First never matched); readSsSmartHrSearchOutcome handles the single-match auto-opened detail page for both the pre-submit hire probe and the receipt readback. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: reads every TER receipt's verified effective date first; a prior date is skipped without a job-form read, while a matching date still requires exact job identity before reuse."
+   "impactRationale": " 2026-08-20 (pm): buildHireSearchName → First Last (live-verified; Last,First never matched); readSsSmartHrSearchOutcome handles the single-match auto-opened detail page for both the pre-submit hire probe and the receipt readback. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: reads every TER receipt's verified effective date first; a prior date is skipped without a job-form read, while a matching date still requires exact job identity before reuse. 2026-09-10: uses commentsMatchTermination for duplicate Kuali requests and surfaces unexpected dialogs after employee drill-in."
   },
   {
    "path": "src/systems/ucpath/termination-job.ts",
@@ -885,12 +885,12 @@
    "path": "src/systems/ucpath/transaction.ts",
    "changeKind": "modified",
    "beforeSha256": "1edbfd04c254d3a9a780431899ec30569b746536b45e53c1e1194ad84237bf94",
-   "afterSha256": "7c1648444c84b40c4e786cebb7504ee5c0a39660e875426d54440176ccbcf800",
+   "afterSha256": "00cf0a7c48f5b9e28456ed3e1c1a136a3ce5f16d8d5f8b08b19554d749feb41d",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
    ],
-   "impactRationale": "Post-submit handling reads the dialog text and THROWS on a refusal instead of clicking past it (a 'Expected Job End Date cannot be before Job Effective Date' modal was being acknowledged as a successful submit), drains the dialog chain, waits for the transaction id to resolve, and acknowledges via the #ICOK escape hatch rather than a role-based OK click that resolved to an unrelated lookup prompt behind pt_modalMask. 2026-08-20: clickSaveAndSubmit now watches UCPath's submit-time \"Person Match Found\" page as a third named signal (classifySubmitSignals), reads the candidate grid by header (readPersonMatchCandidates) and continues only via the pure decidePersonMatchContinue (hard-identifier mismatch or operator-reviewed EID); otherwise fails loud naming the candidates. Live: two hires timed out blind on this page. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values.",
+   "impactRationale": "Post-submit handling reads the dialog text and THROWS on a refusal instead of clicking past it (a 'Expected Job End Date cannot be before Job Effective Date' modal was being acknowledged as a successful submit), drains the dialog chain, waits for the transaction id to resolve, and acknowledges via the #ICOK escape hatch rather than a role-based OK click that resolved to an unrelated lookup prompt behind pt_modalMask. 2026-08-20: clickSaveAndSubmit now watches UCPath's submit-time \"Person Match Found\" page as a third named signal (classifySubmitSignals), reads the candidate grid by header (readPersonMatchCandidates) and continues only via the pure decidePersonMatchContinue (hard-identifier mismatch or operator-reviewed EID); otherwise fails loud naming the candidates. Live: two hires timed out blind on this page. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: recovers transaction number via findTerminationTransactionStatus on SS Smart HR after Save & Submit; pre-filters receipts by effective date before drill-in; supports direct-form and chooser paths; uses commentsMatchTermination.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -1083,7 +1083,7 @@
    "path": "src/workflows/separations/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "705842e6a4800e8775cd1b002207bfef73af656070dc1751bf539b1bee018893",
-   "afterSha256": "4cd4f31fb1ba8d03f6fcdeaf62e2329dbce5f6205058e91d8e7f0deede5dc30d",
+   "afterSha256": "e147344ea6a1f363aa241932732e84600b0c61f303de92e6abc95a1043011bb2",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1092,7 +1092,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists. 2026-08-21 (16ca8559): New Kronos NOT FOUND now needs the no-results sentinel to hold continuously for NO_RESULTS_STABLE_MS (2s) with no found signal — the sentinel is also the Employee Search panel's pre-search resting state; a single-tick verdict mis-resolved HDH EID 10837979 (doc 4546) NOT FOUND, skipped the timecard, and filed a wrong-dated termination. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
+   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists. 2026-08-21 (16ca8559): New Kronos NOT FOUND now needs the no-results sentinel to hold continuously for NO_RESULTS_STABLE_MS (2s) with no found signal — the sentinel is also the Employee Search panel's pre-search resting state; a single-tick verdict mis-resolved HDH EID 10837979 (doc 4546) NOT FOUND, skipped the timecard, and filed a wrong-dated termination. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: documents post-submit recovery via SS Smart HR, duplicate Kuali request handling via commentsMatchTermination, and historical receipt filtering."
   },
   {
    "path": "src/workflows/separations/steps/kuali-extract.ts",
@@ -1142,7 +1142,7 @@
    "path": "src/workflows/separations/steps/ucpath-transaction.ts",
    "changeKind": "modified",
    "beforeSha256": "bb300fe3deaff044d191fe1b25535467493ce2132cac33c52176af5071bb8ded",
-   "afterSha256": "0b690a59ade9595d77be1731cdafaf09aec63a58fed7aa7ad6226bfbaeb17ee0",
+   "afterSha256": "28aa05fd49320fab5d3e94263c310e7a00bdd994703334dc18f3bd2814b3637b",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1151,7 +1151,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
+   "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: recovers receipt via findTerminationTransactionStatus before and after submit to avoid re-submitting."
   },
   {
    "path": "src/workflows/separations/workflow.ts",
@@ -1552,7 +1552,7 @@
    "path": "tests/unit/domain/separation-job.test.ts",
    "changeKind": "added",
    "beforeSha256": null,
-   "afterSha256": "32a5fc24f9872f2e6f91e31a02175137de3ebebb5535ac7a01757e18fc526b59",
+   "afterSha256": "805f19cfbeccad6479ce340595f4263235e79ae2e44bffe0ecf12d3b09340924",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1561,7 +1561,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
+   "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: unit tests for commentsMatchTermination."
   },
   {
    "path": "tests/unit/infra/auth/duo-arm-before-sso-navigation.test.ts",
@@ -1659,7 +1659,7 @@
    "path": "tests/unit/systems/ucpath/separation-receipt.test.ts",
    "changeKind": "added",
    "beforeSha256": null,
-   "afterSha256": "477d52569cfafcc2db36b99571772a59108d186d6734a92a8e347acfdf9200fa",
+   "afterSha256": "8fb7f9338d6f9a6bf2a4bc4dcc1395be653b0e3fdf45c5689aa0adb0abe9833d",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1668,7 +1668,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks. 2026-09-10: pins prior-TER effective-date skipping before job-form access and preserves job-form proof for matching dates."
+   "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks. 2026-09-10: pins prior-TER effective-date skipping before job-form access and preserves job-form proof for matching dates. 2026-09-10: tests duplicate Kuali request comment matching and substantive mismatch rejection."
   },
   {
    "path": "tests/unit/systems/ucpath/ss-smart-hr.test.ts",

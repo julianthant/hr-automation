@@ -69,6 +69,11 @@ Creation selects the verified employment record before the reason code, verifies
 
 Saved, copied, and operator-prefilled transaction numbers are unverified claims. Resume and Skip UCPath transaction modes resolve the current form job and perform read-only receipt verification before Kuali finalization; skipping creation never skips this verification. Both receipt comment fields must equal the current canonical text. The SS lookup restores and rechecks the matching receipt before audit capture. Reconciled Last Day Worked and Separation Date are checked again for future dates, including future Kronos leave. Dry runs do not submit or save.
 
+**Post-submit recovery and duplicate Kuali requests (2026-09-10):**
+- When Save & Submit readback yields no transaction number, the workflow queries SS Smart HR via `findTerminationTransactionStatus` for the exact EID, employment record, position, and effective date. If a verified matching receipt exists, its transaction number is reused and Kuali finalization finishes normally; the workflow never submits again merely because receipt readback timed out.
+- Duplicate Kuali requests (#4652, #4651 for #4653) describing the same termination are recognized via `commentsMatchTermination`. Once all substantive details (EID, job, effective date, LDW, leave clauses) are proven identical, the differing document reference (`Kuali form #<docId>.`) is permitted, the existing transaction is linked in Kuali, and the original UCPath comments are preserved. Substantive date, job, or comment mismatches continue to be rejected.
+- In Smart HR transactions lookup (`findExistingTerminationForJob`), rows are filtered by `targetDate` before employee drill-in to prevent opening historical (e.g. 2025) receipts. Both verified direct-form and employment-record chooser paths are handled explicitly, and unexpected PeopleSoft dialogs are surfaced with their actual text via `readPeopleSoftDialogText`.
+
 ## Date model (2026-06-22 rework — READ THIS)
 
 The old "Kuali separation date is authoritative, never overridden" model is **gone** (it was wrong — operator-confirmed). Both dates are now derived from the New Kronos timecard. The reconciliation is:

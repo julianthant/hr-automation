@@ -93,6 +93,26 @@ describe("job-scoped SS receipt reuse", () => {
     assert.equal(result.found, false);
     assert.equal(state.continueClicks, 0);
   });
+  it("permits duplicate Kuali request document reference in comments", async () => {
+    state.comments = "Termination eff 09/02/2026. Last Day Worked 09/01/2026. Kuali form #4653.";
+    state.initiator = "Termination eff 09/02/2026. Last Day Worked 09/01/2026. Kuali form #4653.";
+    const result = await findTerminationTransactionStatus(page, "10599318", {
+      ...options,
+      expectedComments: "Termination eff 09/02/2026. Last Day Worked 09/01/2026. Kuali form #4652.",
+    });
+    assert.equal(result.transactionId, "T000000001");
+  });
+  it("rejects substantive comment mismatches across Kuali requests", async () => {
+    state.comments = "Termination eff 09/02/2026. Last Day Worked 08/30/2026. Kuali form #4653.";
+    state.initiator = "Termination eff 09/02/2026. Last Day Worked 08/30/2026. Kuali form #4653.";
+    await assert.rejects(
+      () => findTerminationTransactionStatus(page, "10599318", {
+        ...options,
+        expectedComments: "Termination eff 09/02/2026. Last Day Worked 09/01/2026. Kuali form #4652.",
+      }),
+      /incorrect Comments or Initiator/,
+    );
+  });
   it("requires canonical expected comments before either lookup navigates", async () => {
     await assert.rejects(() => findTerminationTransactionStatus(page, "10599318", { job, effectiveDate: "09/02/2026" }), /requires canonical comments/);
     await assert.rejects(() => findExistingTerminationTransaction(page, "10599318", "09/02/2026", job), /requires canonical comments/);
