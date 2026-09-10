@@ -1061,12 +1061,12 @@ describe("job identity and Task 1 safety", () => {
     assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
     assert.equal(mocks.fillTimekeeperTasks.mock.calls.length, 0);
   });
-  it("uses Kuali job comments for targeting while keeping transaction comments canonical", async () => {
+  it("does not use Kuali job comments to constrain Workforce resolution", async () => {
     mocks.runKualiExtract.mockResolvedValue({ ...KUALI_FIXTURE, currentTask: 1, jobCodeHint: "004920", additionalComments: "Academic year position - STDT 3" });
     const { ctx } = makeFakeCtx({ docId: "4605" });
     await runHandler(ctx, { docId: "4605" });
-    const lookupOptions = mocks.getJobSummaryIdentity.mock.calls[0][2] as { jobCode: string; resolveJob: boolean };
-    assert.equal(lookupOptions.jobCode, "004920");
+    const lookupOptions = mocks.getJobSummaryIdentity.mock.calls[0][2] as { jobCode?: string; resolveJob: boolean };
+    assert.equal(lookupOptions.jobCode, undefined);
     assert.equal(lookupOptions.resolveJob, true);
     assert.deepEqual(mocks.runUcpathTransaction.mock.calls[0][8], { emplRecord: "0", positionNumber: "41202096", jobCode: "004920" });
     assert.equal(
