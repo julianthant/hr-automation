@@ -44,11 +44,10 @@ npm run dashboard:watch                      # Same, but tsx watch restarts SSE 
 npm run dashboard:prod                       # Serve pre-built dashboard from SSE only
 ```
 
-Open **http://localhost:5173** to monitor live workflow progress. The standard
-`npm run dashboard` command starts ngrok and uses the assigned HTTPS URL for
-phone Capture QR links while the public host remains scoped to token-gated phone
-Capture endpoints. Capture does not use LAN QR fallbacks; a dashboard started
-without `--capture-ngrok` or `CAPTURE_PUBLIC_URL` (e.g. `dashboard:prod`) still
+Open **http://localhost:5173** to monitor live workflow progress. Capture
+QR links require a public URL (set `CAPTURE_PUBLIC_URL` when running ngrok
+separately, or pass `--capture-ngrok`). Capture does not use LAN QR fallbacks;
+a dashboard started without `CAPTURE_PUBLIC_URL` or `--capture-ngrok` still
 boots — Capture is disabled and `/api/capture/start` returns 503 until a public
 URL is provided.
 
