@@ -127,9 +127,9 @@ describe("D88 runtime isolation", () => {
       sourceRoot: "src",
       entrypoint: "src/cli.ts",
       commands: {
-        dashboard: "tsx --env-file=.env src/cli.ts dashboard --capture-ngrok",
+        dashboard: "tsx --env-file=.env src/cli.ts dashboard",
         "dashboard:prod": "tsx --env-file=.env src/cli.ts dashboard --prod",
-        "dashboard:watch": "tsx watch --env-file=.env src/cli.ts dashboard --capture-ngrok",
+        "dashboard:watch": "tsx watch --env-file=.env src/cli.ts dashboard",
       },
       stateRoot: ".tracker",
       artifactRoot: ".tracker",
