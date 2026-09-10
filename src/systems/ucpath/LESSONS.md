@@ -492,3 +492,13 @@ results). Live batch: 216 EC forms, 208 filed.
 **Tags:** ss-smart-hr, termination, receipt, effective-date, prior-termination, employment-record, transaction-check, separation
 
 **References:** `src/systems/ucpath/ss-smart-hr.ts` (`findTerminationForJob`); `tests/unit/systems/ucpath/separation-receipt.test.ts`.
+
+## 2026-09-10 — Post-submit receipt recovery, duplicate Kuali requests, and historical receipt filtering
+
+**Tried:** In separations, relying solely on immediate post-submit readback for the transaction number, rejecting duplicate Kuali requests due to the differing document-reference comments, and opening historical Smart HR transaction rows without date pre-filtering.
+
+**Failed because:** Save & Submit readback can time out even though UCPath created the transaction, causing unnecessary failure or risk of re-submission. Duplicate Kuali forms (#4652, #4651 for #4653) describe the exact same termination but have different `Kuali form #<docId>.` references, causing exact string comparison on comments to reject valid duplicate reuse. In Smart HR transactions, clicking a historical (e.g. 2025) receipt row for an employee with multiple past actions opened obsolete forms or triggered unexpected dialogs.
+
+**Fix:** (1) When Save & Submit returns no transaction number, query SS Smart HR via `findTerminationTransactionStatus` by employee, employment record, position, and effective date to recover and verify the receipt and reuse the transaction number. (2) `commentsMatchTermination` permits document-reference differences (`Kuali form #<docId>.`) only after proving all substantive details (effective date, LDW, leave clauses) match, linking duplicate requests to the existing transaction. (3) In `findExistingTerminationForJob`, filter rows by `targetDate` before drill-in, support direct-form and record chooser paths, and surface unexpected dialogs with `readPeopleSoftDialogText`.
+
+**Tags:** separations, receipt-recovery, duplicate-kuali, comments, smart-hr, filter-date, dialog-text

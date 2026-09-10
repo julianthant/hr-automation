@@ -1,4 +1,4 @@
-import { matchesSeparationJob, type SeparationJob } from "../../domain/separation-job.js";
+import { commentsMatchTermination, matchesSeparationJob, type SeparationJob } from "../../domain/separation-job.js";
 import { readTerminationJob } from "./termination-job.js";
 import type { Page, FrameLocator, Locator } from "playwright";
 import { log } from "../../utils/log.js";
@@ -7,6 +7,8 @@ import {
   navigateToSmartHR,
   collapseSidebar,
   waitForPeopleSoftProcessing,
+  dismissPeopleSoftDialog,
+  readPeopleSoftDialogText,
 } from "./navigate.js";
 import { getContentFrame, ssSmartHRTransactions, hrTasks, smartHR, comments, jobData } from "./selectors.js";
 import { safeClick, safeFill } from "../common/index.js";
@@ -1129,12 +1131,22 @@ async function findTerminationForJob(page: Page, eid: string, job: SeparationJob
     }
     await safeClick(ssSmartHRTransactions.detailPersonLink(frame), { label: "termination receipt employee" });
     await waitForPeopleSoftProcessing(frame, 15_000);
+    const dialogText = await readPeopleSoftDialogText(page);
+    if (dialogText) {
+      await dismissPeopleSoftDialog(page);
+      throw new Error(`UCPath dialog on receipt ${id}: "${dialogText}"`);
+    }
     const employmentRecord = smartHR.employmentRecordSelect(frame);
     if (await employmentRecord.count() === 1) {
       await safeClick(smartHR.continueButton(frame), { label: "termination receipt continue" });
       await waitForPeopleSoftProcessing(frame, 15_000);
       await page.waitForLoadState("networkidle");
     } else if (await jobData.positionNumberInput(frame).count() !== 1) {
+      const postDialog = await readPeopleSoftDialogText(page);
+      if (postDialog) {
+        await dismissPeopleSoftDialog(page);
+        throw new Error(`UCPath dialog on receipt ${id}: "${postDialog}"`);
+      }
       throw new Error(
         `Termination receipt ${id} did not open a verified job form after employee drill-in: ` +
         "Employment Record Number and Position Number are both absent",
@@ -1159,7 +1171,11 @@ async function findTerminationForJob(page: Page, eid: string, job: SeparationJob
     }
     if (actual.effectiveDate !== effectiveDate) continue;
     if (receipt.status === "Approved" || receipt.status === "Pending") {
-      if (await comments.commentsTextarea(frame).inputValue() !== expectedComments || await comments.initiatorCommentsTextarea(frame).inputValue() !== expectedComments) throw new Error(`Termination ${id} has incorrect Comments or Initiator Comments; correct it before reuse`);
+      const commVal = await comments.commentsTextarea(frame).inputValue();
+      const initVal = await comments.initiatorCommentsTextarea(frame).inputValue();
+      if (!commentsMatchTermination(commVal, expectedComments) || !commentsMatchTermination(initVal, expectedComments)) {
+        throw new Error(`Termination ${id} has incorrect Comments or Initiator Comments; correct it before reuse`);
+      }
       matches.push({ found: true, transactionId: id, approvalStatus: receipt.status, effectiveDate });
     } else if (!/^(Denied|Cancelled|Canceled|Refused)$/.test(receipt.status)) {
       throw new Error(`Unrecognized termination status ${receipt.status} for ${id}`);
@@ -1170,8 +1186,10 @@ async function findTerminationForJob(page: Page, eid: string, job: SeparationJob
   if (match && match.transactionId !== candidates.at(-1)) {
     const receipt = await openReceipt(match.transactionId);
     const actual = await readTerminationJob(frame);
+    const commVal = await comments.commentsTextarea(frame).inputValue();
+    const initVal = await comments.initiatorCommentsTextarea(frame).inputValue();
     if (receipt.status !== match.approvalStatus || !hireEffectiveDateMatches(receipt.effectiveDate, effectiveDate) || actual.eid !== eid || actual.effectiveDate !== effectiveDate || !matchesSeparationJob(actual, job)
-      || await comments.commentsTextarea(frame).inputValue() !== expectedComments || await comments.initiatorCommentsTextarea(frame).inputValue() !== expectedComments) {
+      || !commentsMatchTermination(commVal, expectedComments) || !commentsMatchTermination(initVal, expectedComments)) {
       throw new Error(`Termination ${match.transactionId} changed while restoring its audit receipt`);
     }
   }

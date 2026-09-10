@@ -44,3 +44,35 @@ export function parseKualiSeparationTask(text: string): 1 | 2 {
   if (!match) throw new Error("Kuali separation task instruction is missing or unknown; refusing to edit the form");
   return match[1] === "1" ? 1 : 2;
 }
+
+/**
+ * PURE: verify that an existing termination transaction's comments describe the
+ * exact same termination as the expected comments.
+ *
+ * Permitted difference: duplicate Kuali requests (e.g. doc #4653 vs #4652 / #4651)
+ * have identical substantive termination details (effective date, Last Day Worked,
+ * leave clause) and differ ONLY in the Kuali form reference ("Kuali form #<docId>.").
+ *
+ * Substantive mismatches (different dates, different leave clauses, extraneous narrative)
+ * return false.
+ */
+export function commentsMatchTermination(
+  actualComments: string,
+  expectedComments: string,
+): boolean {
+  const normActual = actualComments.trim();
+  const normExpected = expectedComments.trim();
+  if (!normActual || !normExpected) return false;
+  if (normActual === normExpected) return true;
+
+  const stripFormRef = (s: string) =>
+    s.replace(/\s*Kuali\s+form\s+#\d+\.?/gi, "").trim();
+
+  const actualBase = stripFormRef(normActual);
+  const expectedBase = stripFormRef(normExpected);
+
+  const hasActualForm = /Kuali\s+form\s+#\d+/i.test(normActual);
+  const hasExpectedForm = /Kuali\s+form\s+#\d+/i.test(normExpected);
+
+  return hasActualForm && hasExpectedForm && actualBase.length > 0 && actualBase === expectedBase;
+}
