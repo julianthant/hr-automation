@@ -562,10 +562,6 @@ export const personSearch = {
 // ─── Job Summary page (sidebar-less direct URL + iframe cases) ─────────────
 
 export const jobSummary = {
-  /** Filter Workforce Job Summary by the requester's job code. verified 2026-09-08
-   * @tags job-summary, code, search, concurrent
-   */
-  jobCodeSearchInput: (root: Locator): Locator => root.getByRole("textbox", { name: /^Job Code\b/ }),
   /**
    * Campus discovery page — UCSD link. verified 2026-04-01
    * @tags campus, discovery, ucsd, link, job-summary

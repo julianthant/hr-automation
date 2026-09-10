@@ -752,7 +752,7 @@
    "path": "src/systems/ucpath/SELECTORS.md",
    "changeKind": "modified",
    "beforeSha256": "57fb1caeac412725c3c5defb0430dd9d5d910db97d077328cf2f37368d6fb1f4",
-   "afterSha256": "ee47d743cdbd8090c64ceea1ac93b3e0f9ee35dc1d6bed37f749ef2b85ab865f",
+   "afterSha256": "3175f0dced3557a1a228a1d7d4eea475771cb86384a63a87bc7c0a411183da6f",
    "capabilityIds": [
     "legacy-workflow-i9-check",
     "legacy-workflow-onboarding",
@@ -786,7 +786,7 @@
    "path": "src/systems/ucpath/job-summary.ts",
    "changeKind": "modified",
    "beforeSha256": "2450ee4adf5436b5053bd373093e41c1cc3edbf11e2848ce7ccac2207d1d4bbd",
-   "afterSha256": "a26dd9468c1a792bbe52ca8288761300355ea87f541667b950e62a86443e3604",
+   "afterSha256": "49a7f5316c691be65c712b286579a9a0f7f08157b54ef50338bdbd9ebacb9d49",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -836,7 +836,7 @@
    "path": "src/systems/ucpath/selectors.ts",
    "changeKind": "modified",
    "beforeSha256": "4f6992525998eb6e3db8d2b3a4b67bb551aa0565e6a03710efd92a095d958aa5",
-   "afterSha256": "4c86ba09721d70e7de91c6254918d9532474918e341c161aec0d5f0bbe7403b5",
+   "afterSha256": "a51c0024c373c2249a9ab4d1c7dc84ea548b83980fe7082048b56249ff3d112c",
    "capabilityIds": [
     "legacy-workflow-i9-check",
     "legacy-workflow-onboarding",

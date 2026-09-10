@@ -154,7 +154,7 @@ export async function navigateToWorkforceJobSummary(page: Page): Promise<void> {
  * auto-fallback was removed intentionally; upstream data needs to be
  * corrected rather than silently worked around.
  */
-export async function searchJobSummary(page: Page, emplId: string, jobCode?: string): Promise<boolean> {
+export async function searchJobSummary(page: Page, emplId: string): Promise<boolean> {
   const root = await getFormRoot(page);
 
   log.step(`[Job Summary] Searching for Empl ID: ${emplId}`);
@@ -162,10 +162,6 @@ export async function searchJobSummary(page: Page, emplId: string, jobCode?: str
     timeout: 10_000,
     label: "ucpath job summary empl id",
   });
-  if (jobCode) {
-    if (!/^\d{6}$/.test(jobCode)) throw new Error(`Invalid Kuali job code: ${jobCode}`);
-    await safeFill(jobSummary.jobCodeSearchInput(root), jobCode, { timeout: 10_000, label: "job-summary job code" });
-  }
   await safeClick(jobSummary.searchButton(root), {
     timeout: 10_000,
     label: "ucpath job summary search button",
@@ -882,7 +878,10 @@ export async function getJobSummaryIdentity(
   opts: { separationDate?: string; jobCode?: string; resolveJob?: boolean } = {},
 ): Promise<JobSummaryIdentity> {
   await navigateToWorkforceJobSummary(page);
-  const found = await searchJobSummary(page, emplId, opts.jobCode);
+  // Search by EID alone. Kuali's job code is validated after the matching
+  // Workforce record is loaded; using it as a search criterion can hide a
+  // valid employee when the form's code is stale.
+  const found = await searchJobSummary(page, emplId);
   if (!found) {
     return { found: false, name: "", data: null };
   }
