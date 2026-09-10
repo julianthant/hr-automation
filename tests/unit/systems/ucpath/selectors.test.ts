@@ -16,7 +16,7 @@ function captureFrameSelector(build: (f: FrameLocator) => Locator): string {
 
   build(frame);
   assert.equal(seen.length, 1, "expected exactly one frame.locator() call");
-  return seen[0]!;
+  return seen[0];
 }
 
 describe("UCPath hrTasks selectors", () => {
