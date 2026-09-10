@@ -59,6 +59,8 @@ docs/*
 !docs/engineering/**
 !docs/rebuild/
 !docs/rebuild/**
+!docs/superpowers/
+!docs/superpowers/**
 
 # Tracker data (local runtime)
 .tracker/
@@ -107,3 +109,8 @@ data/i9/
 # Rosters (Action History, SharePoint downloads) — keep directory, ignore contents.
 data/rosters/*
 !data/rosters/.gitkeep
+
+# Local outputs & scratch directories
+/outputs/
+/tmp/
+
