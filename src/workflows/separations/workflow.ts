@@ -558,7 +558,7 @@ export const separationsWorkflow = defineWorkflow({
       // full-8-digit miss). Reads the detail-page NAME on a hit so the name can
       // be compared. Genuine selector/nav failures still throw (fail loud).
       const js = await getJobSummaryIdentity(ucpathPage, kualiData.eid, {
-        separationDate: kualiData.separationDate, jobCode: kualiData.jobCodeHint, resolveJob: true,
+        separationDate: kualiData.separationDate, resolveJob: true,
       });
       jobSummaryFound = js.found;
       jobSummaryName = js.name;
@@ -674,7 +674,7 @@ export const separationsWorkflow = defineWorkflow({
     {
       if (!jobSummaryData) {
         const js = await getJobSummaryIdentity(await ctx.page("ucpath"), kualiData.eid, {
-          separationDate: kualiData.separationDate, jobCode: kualiData.jobCodeHint, resolveJob: true,
+          separationDate: kualiData.separationDate, resolveJob: true,
         });
         if (!js.found || !js.data) throw new Error(`Cannot resolve the separation job for ${kualiData.eid}`);
         jobSummaryData = js.data;

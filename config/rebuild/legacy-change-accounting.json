@@ -786,11 +786,11 @@
    "path": "src/systems/ucpath/job-summary.ts",
    "changeKind": "modified",
    "beforeSha256": "2450ee4adf5436b5053bd373093e41c1cc3edbf11e2848ce7ccac2207d1d4bbd",
-   "afterSha256": "49a7f5316c691be65c712b286579a9a0f7f08157b54ef50338bdbd9ebacb9d49",
+   "afterSha256": "907f6dab500140283aac3f0489a95a7d2cea6c324cc7ed502a9ba472830ae223",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
-   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values.",
+   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: resolves Workforce Job Summary by EID without passing or comparing Kuali job-code hints; Workforce job data remains the source for the Kuali payroll fields.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -1157,7 +1157,7 @@
    "path": "src/workflows/separations/workflow.ts",
    "changeKind": "modified",
    "beforeSha256": "96a8ec7d7047ac00917d4a04cfdaf32c15d8fa97155ff61bc87a1d6734bdc60e",
-   "afterSha256": "8f61cdec82d87473da315f9b6766d6bb43e732e9ac3b2237095f5bccae009a9e",
+   "afterSha256": "adadfed294d48dfaf050b773287fd2c208e2c7c89850fae217e84f8c3985f1f9",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1166,7 +1166,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
+   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: resolves Workforce Job Summary by EID without passing or comparing Kuali job-code hints; Workforce job data remains the source for the Kuali payroll fields."
   },
   {
    "path": "src/workflows/sharepoint-download/download.ts",
@@ -1751,7 +1751,7 @@
    "path": "tests/unit/workflows/separations/dry-run.test.ts",
    "changeKind": "modified",
    "beforeSha256": "be2dc5e08e2d5169f681a85cc2ebf8f672ce777fedac7e01954585062b378a34",
-   "afterSha256": "cadfcfacb763aa8985bd8586676cccd7cf99694c92d3b135dcedb8e6504066f7",
+   "afterSha256": "1df4372360854e962ae88ce4cea9ffdbbc57762c6ba02c090732bd2997a67fc2",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1760,7 +1760,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
+   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: asserts Workforce resolution receives no Kuali job-code hint."
   },
   {
    "path": "tests/unit/workflows/separations/kuali-finalize.test.ts",

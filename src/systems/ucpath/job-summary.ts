@@ -875,12 +875,11 @@ export async function extractEmployeeName(page: Page): Promise<string> {
 export async function getJobSummaryIdentity(
   page: Page,
   emplId: string,
-  opts: { separationDate?: string; jobCode?: string; resolveJob?: boolean } = {},
+  opts: { separationDate?: string; resolveJob?: boolean } = {},
 ): Promise<JobSummaryIdentity> {
   await navigateToWorkforceJobSummary(page);
-  // Search by EID alone. Kuali's job code is validated after the matching
-  // Workforce record is loaded; using it as a search criterion can hide a
-  // valid employee when the form's code is stale.
+  // Search and resolve by EID alone. A Kuali job-code hint may be stale, so it
+  // must never constrain Workforce lookup or reject the resolved job.
   const found = await searchJobSummary(page, emplId);
   if (!found) {
     return { found: false, name: "", data: null };
@@ -902,8 +901,7 @@ export async function getJobSummaryIdentity(
   // extraction failure on a found record (no Work Location rows rendered, or
   // none matched the separation date) — not a valid state, since a blank
   // department would silently ship to the HDH/non-HDH kronos-skip gate and the
-  // Kuali department fill. Fail loud rather than returning incomplete data,
-  // same contract as the jobCode check below.
+  // Kuali department fill. Fail loud rather than returning incomplete data.
   if (!workLocation.deptId || !workLocation.departmentDescription) {
     throw new Error(
       `Workforce Job Summary found EID '${emplId}' but could not extract a Department ID / Description `
@@ -940,7 +938,6 @@ export async function getJobSummaryIdentity(
     if (records.size !== 1 || !/^\d+$/.test([...records][0])) throw new Error(`Cannot identify one employment record for ${emplId}`);
     emplRecord = [...records][0];
     if (!workLocation.positionNumber) throw new Error(`No position number for ${emplId}, record ${emplRecord}`);
-    if (opts.jobCode && jobInfo.jobCode !== opts.jobCode) throw new Error(`Kuali job ${opts.jobCode} does not match UCPath job ${jobInfo.jobCode}`);
   }
   return {
     found: true,
