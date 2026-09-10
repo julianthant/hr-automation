@@ -34,7 +34,7 @@ Use this file to decide **what counts as maintained codebase documentation** ver
 |------|------|
 | `docs/engineering/` | Canonical — conventions + long-form architecture + module reference |
 | `docs/workflow/` | Canonical — workflow behavior, row shapes, delegation, and cancel/retry scopes |
-| `docs/rebuild/` | Approved/planned replacement architecture — docs 00–13 own design detail; `07-master-plan.md` is the only build sequence |
+| `docs/rebuild/` | Frozen rebuild architecture and governance baseline (canonical maintained rebuild docs live in hr-automation-rebuild) |
 | `docs/superpowers/` | Specs, plans, sketches, **session handoffs** (`handoffs/`) — tool/session output — ephemeral |
 | `.superpowers/` | Brainstorm mockups — gitignored — ephemeral |
 
@@ -57,7 +57,7 @@ These should stay accurate relative to the code and are fair game for stale-doc 
 | `docs/engineering/workflow-vocabulary.md` | Canonical terms for workflow rows, delegation variants, and the queue-surface model; lists legacy vocab to retire |
 | `docs/workflow/README.md` | Workflow delegation index: row units, global actions, cancellation rules, workflow inventory |
 | `docs/workflow/*.md` | Per-workflow behavior, delegation, row shape, and cancel/retry scope notes |
-| `docs/rebuild/00-charter.md`–`docs/rebuild/13-frontend-backend-integration.md` | Maintained rebuild design set; doc 07 sequences the work and the other numbered docs own contracts |
+| `docs/rebuild/00-charter.md`–`docs/rebuild/13-frontend-backend-integration.md` | Frozen rebuild design baseline; maintained rebuild docs live in hr-automation-rebuild |
 | `CLAUDE.md` (repo root) | Commands, kernel primer, high-level map (≤15k) |
 | `src/**/CLAUDE.md` | Module/workflow/system gotchas, invariants, lessons (≤8k each) |
 | `LESSONS.md` (repo root) | Cross-cutting operational lessons |
