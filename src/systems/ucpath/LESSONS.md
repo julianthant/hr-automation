@@ -481,14 +481,14 @@ results). Live batch: 216 EC forms, 208 filed.
 
 **Tags:** concurrent, separation, empl-record, position, duplicate, comments, initiator, readback
 
-## 2026-09-10 — A single-record TER receipt can bypass the employment-record chooser
+## 2026-09-10 — A prior TER receipt may not expose a termination job form
 
-**Tried:** `findTerminationForJob` always waited for the `Employment Record Number` combobox after opening the receipt's employee link, then clicked Continue before reading its job identity.
+**Tried:** `findTerminationForJob` opened every TER receipt's employee link and required either the `Employment Record Number` chooser or a rendered Position Number before it could decide whether the receipt matched the current job.
 
-**Failed because:** For separation document 4596, the receipt's employee drill-in opened the termination job form directly. There was no combobox or Continue button, so the duplicate check timed out for 30 seconds before any UCPath transaction was submitted.
+**Failed because:** For separation document 4596, prior receipt `T002047979` exposed neither surface after its employee drill-in. Its only disambiguating evidence was already on the verified receipt detail: the effective date. Requiring a job form prevented the current separation from being submitted.
 
-**Fix:** After the employee drill-in settles, use the chooser path only when the combobox exists. When it is absent, require the Position Number control to be present and let `readTerminationJob` prove the EID, employment record, position, and effective date; throw a contextual error if neither surface renders.
+**Fix:** Read and compare the receipt's effective date before opening its employee link. A different date proves a prior termination and is skipped without a job-form read. A matching date still requires the job form and exact EID, employment-record, position, date, and both-comment checks before reuse.
 
-**Tags:** ss-smart-hr, termination, receipt, single-record, employment-record, direct-form, transaction-check, separation
+**Tags:** ss-smart-hr, termination, receipt, effective-date, prior-termination, employment-record, transaction-check, separation
 
 **References:** `src/systems/ucpath/ss-smart-hr.ts` (`findTerminationForJob`); `tests/unit/systems/ucpath/separation-receipt.test.ts`.
