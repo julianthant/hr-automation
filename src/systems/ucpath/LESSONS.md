@@ -480,3 +480,15 @@ results). Live batch: 216 EC forms, 208 filed.
 **Fix:** Resolve the job from Kuali comments/title, verify its Job Summary record and position, select that record before the reason code, and require EID/record/position/exact-date agreement on duplicate checks and receipts. Wait for the LDW refresh, fill both comment textareas, and read their input values after submission. Seven blank-Initiator-Comment transactions were removed and replaced; 4605's verified replacement is T002230487 for record 0, position 41202096.
 
 **Tags:** concurrent, separation, empl-record, position, duplicate, comments, initiator, readback
+
+## 2026-09-10 — A single-record TER receipt can bypass the employment-record chooser
+
+**Tried:** `findTerminationForJob` always waited for the `Employment Record Number` combobox after opening the receipt's employee link, then clicked Continue before reading its job identity.
+
+**Failed because:** For separation document 4596, the receipt's employee drill-in opened the termination job form directly. There was no combobox or Continue button, so the duplicate check timed out for 30 seconds before any UCPath transaction was submitted.
+
+**Fix:** After the employee drill-in settles, use the chooser path only when the combobox exists. When it is absent, require the Position Number control to be present and let `readTerminationJob` prove the EID, employment record, position, and effective date; throw a contextual error if neither surface renders.
+
+**Tags:** ss-smart-hr, termination, receipt, single-record, employment-record, direct-form, transaction-check, separation
+
+**References:** `src/systems/ucpath/ss-smart-hr.ts` (`findTerminationForJob`); `tests/unit/systems/ucpath/separation-receipt.test.ts`.

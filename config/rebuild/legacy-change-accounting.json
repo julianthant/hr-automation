@@ -735,7 +735,7 @@
    "path": "src/systems/ucpath/LESSONS.md",
    "changeKind": "modified",
    "beforeSha256": "010e7a25f50d7e63b24355bb254ded76690c9278a6885285ef3a52101fc5f9a1",
-   "afterSha256": "5a34c289b6c838e1b7732fecbf384f9fa9929115cbe5f60cc663b640b4c9667e",
+   "afterSha256": "af1ac0442090f1ef66ee7e529d3ee3fb50750a7f83fe280776804e89c6262674",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-person-lookup",
@@ -746,7 +746,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "2026-08-05 (aba05c65): corrected the 2026-08-04 $op accessible-name lesson's blast-radius paragraph — it had declared production immune while the production-driven ssSmartHRTransactions group carried the same fragile shape (the doc 4493 failure); adds the sweep-every-Find-an-Existing-Value-group rule. 2026-08-20: lesson — Save and Submit can land on the Person Match Found review page the outcome poll never watched. 2026-08-20 (pm): lesson — SS Smart HR Name box is First Last; single match auto-opens the detail page. 2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
+   "impactRationale": "2026-08-05 (aba05c65): corrected the 2026-08-04 $op accessible-name lesson's blast-radius paragraph — it had declared production immune while the production-driven ssSmartHRTransactions group carried the same fragile shape (the doc 4493 failure); adds the sweep-every-Find-an-Existing-Value-group rule. 2026-08-20: lesson — Save and Submit can land on the Person Match Found review page the outcome poll never watched. 2026-08-20 (pm): lesson — SS Smart HR Name box is First Last; single match auto-opens the detail page. 2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: records the single-record TER direct-form receipt behavior found on separation 4596."
   },
   {
    "path": "src/systems/ucpath/SELECTORS.md",
@@ -854,7 +854,7 @@
    "path": "src/systems/ucpath/ss-smart-hr.ts",
    "changeKind": "modified",
    "beforeSha256": "6524118fb49e244442824d134484709530bf2a80a5be73bf183fd7d5cac847f2",
-   "afterSha256": "a77391a4e12b95e82cf1f0711d75e3f2fb3a91f31d89851b3648356cfef3dee2",
+   "afterSha256": "1b9d0a449ffaa2270d1318f0b7a0fe24596986c2009b60cf4a7e556be2af0bba",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -864,7 +864,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": " 2026-08-20 (pm): buildHireSearchName → First Last (live-verified; Last,First never matched); readSsSmartHrSearchOutcome handles the single-match auto-opened detail page for both the pre-submit hire probe and the receipt readback. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
+   "impactRationale": " 2026-08-20 (pm): buildHireSearchName → First Last (live-verified; Last,First never matched); readSsSmartHrSearchOutcome handles the single-match auto-opened detail page for both the pre-submit hire probe and the receipt readback. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: handles a single-record TER receipt whose employee drill-in opens the verified job form directly; the job identity remains required before reuse."
   },
   {
    "path": "src/systems/ucpath/termination-job.ts",
@@ -1659,7 +1659,7 @@
    "path": "tests/unit/systems/ucpath/separation-receipt.test.ts",
    "changeKind": "added",
    "beforeSha256": null,
-   "afterSha256": "5d108566cb042841e4366ae7656b85ce5150b5a51de231e471053224a17fb40e",
+   "afterSha256": "708ed66106435529c27419055c49896e9a5f14adb9dfe5e6360d1a89c8dcad29",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1668,7 +1668,7 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks."
+   "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks. 2026-09-10: pins direct-form TER receipt handling and verifies Continue is not clicked when no record chooser is rendered."
   },
   {
    "path": "tests/unit/systems/ucpath/ss-smart-hr.test.ts",

@@ -8,7 +8,7 @@ import {
   collapseSidebar,
   waitForPeopleSoftProcessing,
 } from "./navigate.js";
-import { getContentFrame, ssSmartHRTransactions, hrTasks, smartHR, comments } from "./selectors.js";
+import { getContentFrame, ssSmartHRTransactions, hrTasks, smartHR, comments, jobData } from "./selectors.js";
 import { safeClick, safeFill } from "../common/index.js";
 
 /**
@@ -1118,10 +1118,23 @@ async function findTerminationForJob(page: Page, eid: string, job: SeparationJob
     const status = (await ssSmartHRTransactions.transactionDetailApprovalStatus(frame).innerText()).trim();
     if (actualId !== id || !status) throw new Error(`Cannot verify termination receipt ${id}`);
     await safeClick(ssSmartHRTransactions.detailPersonLink(frame), { label: "termination receipt employee" });
-    await smartHR.employmentRecordSelect(frame).waitFor();
-    await safeClick(smartHR.continueButton(frame), { label: "termination receipt continue" });
     await waitForPeopleSoftProcessing(frame, 15_000);
-    await page.waitForLoadState("networkidle");
+    const employmentRecord = smartHR.employmentRecordSelect(frame);
+    if (await employmentRecord.count() === 1) {
+      await safeClick(smartHR.continueButton(frame), { label: "termination receipt continue" });
+      await waitForPeopleSoftProcessing(frame, 15_000);
+      await page.waitForLoadState("networkidle");
+    } else if (await jobData.positionNumberInput(frame).count() !== 1) {
+      throw new Error(
+        `Termination receipt ${id} did not open a verified job form after employee drill-in: ` +
+        "Employment Record Number and Position Number are both absent",
+      );
+    } else {
+      // A one-record receipt opens its termination form directly: no record chooser
+      // or Continue button is rendered. `readTerminationJob` below still proves the
+      // EID, employment record, position, and effective date before reuse.
+      log.step(`[SS Smart HR] Receipt ${id} opened its job form directly (single employment record)`);
+    }
     return status;
   };
   const matches: TerminationTransactionStatus[] = [];
