@@ -83,6 +83,18 @@ export const actionList = {
 // ─── Separation form: extraction / base fields ────────────────────────────
 
 export const separationForm = {
+  /** Current action dialog, including the task instruction. verified 2026-09-08
+   * @tags separation, task, instruction, dialog, kuali
+   */
+  actionDialog: (page: Page): Locator => page.getByRole("dialog", { name: "Action", exact: true }),
+  /** Requester's job-specific separation comment. verified 2026-09-08
+   * @tags separation, comments, concurrent, job, kuali
+   */
+  additionalComments: (page: Page): Locator => page.getByRole("textbox", { name: "Additional Separation Comments (Optional)", exact: true }),
+  /** Student title selected by the requester (conditional for student forms). verified 2026-09-08
+   * @tags separation, student, title, code, kuali
+   */
+  studentTitle: (page: Page): Locator => page.getByRole("combobox", { name: /Student Title Code/ }),
   /**
    * Employee name textbox (last, first format).
    * @tags employee, name, last, first, textbox, separation, kuali

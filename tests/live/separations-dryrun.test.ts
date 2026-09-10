@@ -1,3 +1,5 @@
+import { findExistingTerminationTransaction } from "../../src/systems/ucpath/transaction.js";
+import { readTerminationJob } from "../../src/systems/ucpath/termination-job.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
@@ -231,6 +233,21 @@ describe.skipIf(!ready)(
             skippedSteps.has("kuali-finalization"),
             `kuali-finalization (the Kuali finalization save) must be skipped in dry-run — skipped: [${[...skippedSteps].join(", ")}]`,
           );
+
+          // Opt-in readback probe for a fixture with an existing Pending transaction.
+          // Exercises concurrent-row selection and the receipt left on screen, without submitting.
+          if (process.env.HR_DRYRUN_VERIFY_PENDING === "1") {
+            const data = Object.assign({}, ...rows.map(row => row.data)) as Record<string, string>;
+            const job = { emplRecord: data.emplRecord, positionNumber: data.positionNumber, jobCode: data.jobCode };
+            const page = await session.page("ucpath");
+            const receipt = await findExistingTerminationTransaction(page, data.eid, data.terminationEffDate, job, data.separationComment);
+            assert.equal(receipt.txnNumber, data.transactionNumber);
+            const { getContentFrame } = await import("../../src/systems/ucpath/selectors.js");
+            const shown = await readTerminationJob(getContentFrame(page));
+            assert.equal(shown.emplRecord, job.emplRecord);
+            assert.equal(shown.positionNumber, job.positionNumber);
+            log.success(`[live/separations-dryrun] verified pending receipt ${receipt.txnNumber} for record ${job.emplRecord}, position ${job.positionNumber}`);
+          }
 
           log.success(
             `[live/separations-dryrun] doc #${DOC_ID} reached 'Dry Run Complete' — UCPath submit + Kuali finalization both skipped, no employee terminated, no document finalized`,

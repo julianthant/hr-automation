@@ -470,3 +470,35 @@ results). Live batch: 216 EC forms, 208 filed.
 
 **Tags:** uc-conc-hire, concurrent-hire, rehire, enter-transaction-details, empl-id, person-name-readback, person-id-already-exists, icok, job-data, tab-walk, cancel-draft, onboarding, live-verified
 **References:** `src/systems/ucpath/transaction.ts` (`fillTransactionDetailsEmplId`, `acknowledgePersonIdExistsDialog`, `waitForJobDataForm`, `readPersonalDataLegalName`, `cancelTransactionDraft`, `buildConcurrentHireCommentsText`), `src/workflows/onboarding/enter.ts` (`buildConcurrentHirePlan`), `src/workflows/onboarding/CLAUDE.md` (Rehire mode), `tests/unit/workflows/onboarding/workflow.test.ts`.
+
+## 2026-09-08 — Concurrent separations require employment-record and position matching
+
+**Tried:** Reused a termination by EID and nearby effective date, or selected the first same-name in-progress row. Manual submissions populated Comments without Initiator Comments.
+
+**Failed because:** Concurrent STDT 3 and STDT 4 positions share EID and effective date. Document 4605 incorrectly reused STDT 4 transaction T002227404 for its STDT 3 position. Employee-wide pending deletion would also remove the other job. The LDW override refresh can clear a comment filled before the round trip finishes; SS receipt body text omits textarea values even when populated.
+
+**Fix:** Resolve the job from Kuali comments/title, verify its Job Summary record and position, select that record before the reason code, and require EID/record/position/exact-date agreement on duplicate checks and receipts. Wait for the LDW refresh, fill both comment textareas, and read their input values after submission. Seven blank-Initiator-Comment transactions were removed and replaced; 4605's verified replacement is T002230487 for record 0, position 41202096.
+
+**Tags:** concurrent, separation, empl-record, position, duplicate, comments, initiator, readback
+
+## 2026-09-10 — A prior TER receipt may not expose a termination job form
+
+**Tried:** `findTerminationForJob` opened every TER receipt's employee link and required either the `Employment Record Number` chooser or a rendered Position Number before it could decide whether the receipt matched the current job.
+
+**Failed because:** For separation document 4596, prior receipt `T002047979` exposed neither surface after its employee drill-in. Its only disambiguating evidence was already on the verified receipt detail: the effective date. Requiring a job form prevented the current separation from being submitted.
+
+**Fix:** Read and compare the receipt's effective date before opening its employee link. A different date proves a prior termination and is skipped without a job-form read. A matching date still requires the job form and exact EID, employment-record, position, date, and both-comment checks before reuse.
+
+**Tags:** ss-smart-hr, termination, receipt, effective-date, prior-termination, employment-record, transaction-check, separation
+
+**References:** `src/systems/ucpath/ss-smart-hr.ts` (`findTerminationForJob`); `tests/unit/systems/ucpath/separation-receipt.test.ts`.
+
+## 2026-09-10 — Post-submit receipt recovery, duplicate Kuali requests, and historical receipt filtering
+
+**Tried:** In separations, relying solely on immediate post-submit readback for the transaction number, rejecting duplicate Kuali requests due to the differing document-reference comments, and opening historical Smart HR transaction rows without date pre-filtering.
+
+**Failed because:** Save & Submit readback can time out even though UCPath created the transaction, causing unnecessary failure or risk of re-submission. Duplicate Kuali forms (#4652, #4651 for #4653) describe the exact same termination but have different `Kuali form #<docId>.` references, causing exact string comparison on comments to reject valid duplicate reuse. In Smart HR transactions, clicking a historical (e.g. 2025) receipt row for an employee with multiple past actions opened obsolete forms or triggered unexpected dialogs.
+
+**Fix:** (1) When Save & Submit returns no transaction number, query SS Smart HR via `findTerminationTransactionStatus` by employee, employment record, position, and effective date to recover and verify the receipt and reuse the transaction number. (2) `commentsMatchTermination` permits document-reference differences (`Kuali form #<docId>.`) only after proving all substantive details (effective date, LDW, leave clauses) match, linking duplicate requests to the existing transaction. (3) In `findExistingTerminationForJob`, filter rows by `targetDate` before drill-in, support direct-form and record chooser paths, and surface unexpected dialogs with `readPeopleSoftDialogText`.
+
+**Tags:** separations, receipt-recovery, duplicate-kuali, comments, smart-hr, filter-date, dialog-text

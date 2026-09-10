@@ -66,6 +66,7 @@ export async function collapseSidebar(
  *  verified 2026-04-01 (button is <input id="#ICOK" onclick="closeMsg(this)">)
  */
 export async function dismissPeopleSoftDialog(page: Page): Promise<boolean> {
+  if (typeof page?.frames !== "function") return false;
   for (const f of page.frames()) {
     const clicked = await f.evaluate(() => {
       const btn = document.getElementById("#ICOK");
@@ -90,6 +91,7 @@ export async function dismissPeopleSoftDialog(page: Page): Promise<boolean> {
  * button, so walk the ptMod* containers. Returns "" when no dialog is up.
  */
 export async function readPeopleSoftDialogText(page: Page): Promise<string> {
+  if (typeof page?.frames !== "function") return "";
   for (const f of page.frames()) {
     const text = await f.evaluate(() => {
       if (!document.getElementById("#ICOK")) return "";
@@ -108,6 +110,7 @@ export async function readPeopleSoftDialogText(page: Page): Promise<string> {
 }
 
 export async function isPeopleSoftDialogPresent(page: Page): Promise<boolean> {
+  if (typeof page?.frames !== "function") return false;
   for (const f of page.frames()) {
     const present = await f
       .evaluate(() => document.getElementById("#ICOK") !== null)

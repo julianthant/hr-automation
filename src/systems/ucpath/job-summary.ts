@@ -16,6 +16,8 @@ export interface JobSummaryData {
   departmentDescription: string;
   jobCode: string;
   jobDescription: string;
+  emplRecord?: string;
+  positionNumber?: string;
 }
 
 /**
@@ -613,7 +615,7 @@ export function pickWorkLocationRow(
 export async function extractWorkLocation(
   page: Page,
   opts: { separationDate?: string } = {},
-): Promise<{ deptId: string; departmentDescription: string }> {
+): Promise<{ deptId: string; departmentDescription: string; positionNumber?: string }> {
   const root = await getFormRoot(page);
 
   log.step("[Job Summary] Clicking Work Location tab...");
@@ -699,7 +701,7 @@ export async function extractWorkLocation(
     (opts.separationDate ? `, latest ≤ separation ${opts.separationDate}` : ", latest") +
     `): Dept ID ${picked.deptId}, Department "${picked.departmentDescription}"`,
   );
-  return { deptId: picked.deptId, departmentDescription: picked.departmentDescription };
+  return { deptId: picked.deptId, departmentDescription: picked.departmentDescription, positionNumber: picked.positionNumber };
 }
 
 /** The Job Information data the separation needs (Job Code + its Description). */
@@ -873,9 +875,11 @@ export async function extractEmployeeName(page: Page): Promise<string> {
 export async function getJobSummaryIdentity(
   page: Page,
   emplId: string,
-  opts: { separationDate?: string } = {},
+  opts: { separationDate?: string; resolveJob?: boolean } = {},
 ): Promise<JobSummaryIdentity> {
   await navigateToWorkforceJobSummary(page);
+  // Search and resolve by EID alone. A Kuali job-code hint may be stale, so it
+  // must never constrain Workforce lookup or reject the resolved job.
   const found = await searchJobSummary(page, emplId);
   if (!found) {
     return { found: false, name: "", data: null };
@@ -897,8 +901,7 @@ export async function getJobSummaryIdentity(
   // extraction failure on a found record (no Work Location rows rendered, or
   // none matched the separation date) — not a valid state, since a blank
   // department would silently ship to the HDH/non-HDH kronos-skip gate and the
-  // Kuali department fill. Fail loud rather than returning incomplete data,
-  // same contract as the jobCode check below.
+  // Kuali department fill. Fail loud rather than returning incomplete data.
   if (!workLocation.deptId || !workLocation.departmentDescription) {
     throw new Error(
       `Workforce Job Summary found EID '${emplId}' but could not extract a Department ID / Description `
@@ -926,10 +929,21 @@ export async function getJobSummaryIdentity(
     );
   }
 
+  let emplRecord: string | undefined;
+  if (opts.resolveJob) {
+    const dump = await readFrozenGridDump(page);
+    const grids = dump.left.filter((grid) => grid.rows.length > 0);
+    if (grids.length !== 1) throw new Error(`Cannot identify the employment-record grid for ${emplId}`);
+    const records = new Set(grids[0].rows.map((row) => row[1]));
+    if (records.size !== 1 || !/^\d+$/.test([...records][0])) throw new Error(`Cannot identify one employment record for ${emplId}`);
+    emplRecord = [...records][0];
+    if (!workLocation.positionNumber) throw new Error(`No position number for ${emplId}, record ${emplRecord}`);
+  }
   return {
     found: true,
     name,
     data: {
+      ...(opts.resolveJob ? { emplRecord, positionNumber: workLocation.positionNumber } : {}),
       deptId: workLocation.deptId,
       departmentDescription: workLocation.departmentDescription,
       jobCode: jobInfo.jobCode,

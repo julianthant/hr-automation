@@ -166,7 +166,7 @@ const KRONOS_NOT_FOUND = {
 // getJobSummaryIdentity, before identity-check). The default (beforeEach) is a
 // FOUND record whose name matches KUALI_FIXTURE so identity-check skips.
 const JS_NAME_MISMATCH = { found: true, name: "Totally Different Person", data: null };
-const JS_SIMILAR = { found: true, name: "Jayden Balmaceda", data: null };
+const JS_SIMILAR = { found: true, name: "Jayden Balmaceda", data: { emplRecord: "0", positionNumber: "41202096", deptId: "", departmentDescription: "", jobCode: "004920", jobDescription: "STDT 3" } };
 
 const fakePage = { bringToFront: async () => {}, isClosed: () => false } as unknown;
 
@@ -259,7 +259,7 @@ beforeEach(() => {
   mocks.getJobSummaryIdentity.mockResolvedValue({
     found: true,
     name: "Test Employee",
-    data: { deptId: "", departmentDescription: "", jobCode: "", jobDescription: "" },
+    data: { emplRecord: "0", positionNumber: "41202096", deptId: "", departmentDescription: "", jobCode: "004920", jobDescription: "STDT 3" },
   });
   mocks.updateEmployeeName.mockResolvedValue(undefined);
   mocks.updateLastDayWorked.mockResolvedValue(undefined);
@@ -631,7 +631,7 @@ describe("separations handler — identity-check (conditional, Job-Summary-gated
     mocks.getJobSummaryIdentity.mockResolvedValueOnce({
       found: true,
       name: "Santos Hernandez",
-      data: { deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
+      data: { emplRecord: "0", positionNumber: "41202096", deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
     });
     const { ctx, probe } = makeFakeCtx(
       { docId: "4131" },
@@ -664,7 +664,7 @@ describe("separations handler — identity-check (conditional, Job-Summary-gated
     // the Job Summary name still mismatches (the "Keep original" choice).
     mocks.getJobSummaryIdentity.mockResolvedValueOnce({
       found: true, name: "Santos Hernandez",
-      data: { deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
+      data: { emplRecord: "0", positionNumber: "41202096", deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
     });
     const delegateSpy = vi.fn();
     const { ctx, probe } = makeFakeCtx({ docId: "4313", eidApproved: "10833507" });
@@ -683,7 +683,8 @@ describe("separations handler — identity-check (conditional, Job-Summary-gated
     assert.equal(mocks.getJobSummaryIdentity.mock.calls[0][1], "10833507", "Job Summary fetched with the approved EID");
   });
 
-  it("skips identity-check on the txn-prefilled resume path (UCPath already accepted the EID)", async () => {
+  it("verifies the saved receipt while retaining the explicit identity skip", async () => {
+    mocks.runTransactionCheck.mockResolvedValue({ status: "pending-reused", transactionNumber: "T123" });
     const { ctx, probe } = makeFakeCtx({
       docId: "4131",
       name: "Test Employee",
@@ -765,6 +766,9 @@ describe("separations handler — transaction-check (existing-termination branch
     assert.deepEqual(mocks.runTransactionCheck.mock.calls[0][2], {
       dryRun: true,
       separationDate: KUALI_FIXTURE.separationDate,
+      effectiveDate: "01/16/2026",
+      expectedComments: "Termination eff 01/16/2026. Last Day Worked 01/15/2026. Kuali form #4131.",
+      job: { emplRecord: "0", positionNumber: "41202096", jobCode: "004920" },
     });
   });
 
@@ -808,7 +812,8 @@ describe("separations handler — transaction-check (existing-termination branch
     assert.equal(mocks.runKualiFinalize.mock.calls.length, 0, "dry-run finalizes nothing");
   });
 
-  it("skips transaction-check on the txn-prefilled resume path", async () => {
+  it("checks the job and receipt on the txn-prefilled resume path", async () => {
+    mocks.runTransactionCheck.mockResolvedValue({ status: "pending-reused", transactionNumber: "T123" });
     const { ctx, probe } = makeFakeCtx({
       docId: "4131",
       name: "Test Employee",
@@ -819,8 +824,9 @@ describe("separations handler — transaction-check (existing-termination branch
       transactionNumber: "T123",
     });
     await runHandler(ctx, { docId: "4131" });
-    assert.ok(probe.skipped.includes("transaction-check"), "transaction-check skipped when txn # prefilled");
-    assert.equal(mocks.runTransactionCheck.mock.calls.length, 0, "transaction-check not invoked");
+    assert.ok(!probe.skipped.includes("transaction-check"));
+    assert.equal(mocks.runTransactionCheck.mock.calls.length, 1);
+    assert.equal(mocks.getJobSummaryIdentity.mock.calls.length, 1);
   });
 });
 
@@ -836,7 +842,7 @@ describe("separations handler — department gate (skip Kronos for non-HDH)", ()
   const JS_FOUND = (departmentDescription: string) => ({
     found: true,
     name: "Test Employee",
-    data: { deptId: "000123", departmentDescription, jobCode: "001234", jobDescription: "Analyst" },
+    data: { emplRecord: "0", positionNumber: "41202096", deptId: "000123", departmentDescription, jobCode: "001234", jobDescription: "Analyst" },
   });
 
   it("SKIPS kronos-search for a non-HDH department (not timekept in New Kronos)", async () => {
@@ -977,7 +983,7 @@ describe("INPUT_RUN_REGISTRY dry-run exposure", () => {
 
 // ─── Run mode "Skip UCPath transaction" (preset `skip-ucpath-transaction`) ───
 // Re-runs the Kuali side (extract → Job Summary → Kronos → finalization) with
-// NO Smart HR lookup/create, preserving the Transaction # already on the form.
+// Read-only Smart HR verification, preserving only a matching transaction number.
 describe("separations handler — run mode 'Skip UCPath transaction'", () => {
   const SKIP = ["transaction-check", "ucpath-transaction"] as const;
 
@@ -988,25 +994,27 @@ describe("separations handler — run mode 'Skip UCPath transaction'", () => {
     assert.deepEqual([...preset.skipSteps].sort(), [...SKIP].sort());
   });
 
-  it("skips transaction-check + ucpath-transaction, never touches Smart HR, preserves the form's txn #", async () => {
+  it("verifies the form receipt and skips creation", async () => {
+    mocks.runTransactionCheck.mockResolvedValue({ status: "pending-reused", transactionNumber: "T002216868" });
     mocks.readTransactionNumber.mockResolvedValue("T002216868");
     const { ctx, probe } = makeFakeCtx({ docId: "4540" }, { skipSteps: SKIP });
     await runHandler(ctx, { docId: "4540" });
-    assert.equal(mocks.runTransactionCheck.mock.calls.length, 0, "no SS Smart HR lookup");
+    assert.equal(mocks.runTransactionCheck.mock.calls.length, 1, "read-only receipt verification still required");
     assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0, "no Smart HR submit");
-    assert.ok(probe.skipped.includes("transaction-check"));
+    assert.ok(!probe.skipped.includes("transaction-check"));
     assert.ok(probe.skipped.includes("ucpath-transaction"));
     assert.equal(probe.data.transactionNumber, "T002216868");
     const finalizeArgs = mocks.runKualiFinalize.mock.calls[0][1] as { transactionNumber: string };
     assert.equal(finalizeArgs.transactionNumber, "T002216868", "finalization re-verifies against the PRESERVED number");
   });
 
-  it("still runs the Job Summary identity gate + Kuali dept/payroll fill (unlike edit-and-resume)", async () => {
+  it("still runs the Job Summary identity gate + Kuali dept/payroll fill", async () => {
+    mocks.runTransactionCheck.mockResolvedValue({ status: "pending-reused", transactionNumber: "T002216868" });
     mocks.readTransactionNumber.mockResolvedValue("T002216868");
     mocks.getJobSummaryIdentity.mockResolvedValue({
       found: true,
       name: "Test Employee",
-      data: { deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
+      data: { emplRecord: "0", positionNumber: "41202096", deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
     });
     const { ctx, probe } = makeFakeCtx({ docId: "4540" }, { skipSteps: SKIP });
     await runHandler(ctx, { docId: "4540" });
@@ -1027,7 +1035,8 @@ describe("separations handler — run mode 'Skip UCPath transaction'", () => {
     assert.equal(mocks.runKualiFinalize.mock.calls.length, 0, "must not finalize (would blank the txn field)");
   });
 
-  it("a prefilled txn # wins over the form read (no Kuali read needed)", async () => {
+  it("uses the prefilled number only after matching the live receipt", async () => {
+    mocks.runTransactionCheck.mockResolvedValue({ status: "pending-reused", transactionNumber: "T-PREFILLED" });
     mocks.readTransactionNumber.mockResolvedValue("T-FORM");
     const { ctx, probe } = makeFakeCtx(
       { docId: "4540", transactionNumber: "T-PREFILLED", name: "Test Employee", eid: "10772489",
@@ -1037,5 +1046,67 @@ describe("separations handler — run mode 'Skip UCPath transaction'", () => {
     await runHandler(ctx, { docId: "4540" });
     assert.equal(probe.data.transactionNumber, "T-PREFILLED");
     assert.equal(mocks.readTransactionNumber.mock.calls.length, 0);
+  });
+});
+
+
+describe("job identity and Task 1 safety", () => {
+  it("stops before any lookup or write when the current action is Task 2", async () => {
+    mocks.runKualiExtract.mockResolvedValue({ ...KUALI_FIXTURE, currentTask: 2, completedTask1Transaction: "T002226497" });
+    const { ctx, probe } = makeFakeCtx({ docId: "4589" });
+    await runHandler(ctx, { docId: "4589" });
+    assert.equal(probe.data.transactionNumber, "T002226497");
+    assert.equal(mocks.getJobSummaryIdentity.mock.calls.length, 0);
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
+    assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
+    assert.equal(mocks.fillTimekeeperTasks.mock.calls.length, 0);
+  });
+  it("does not use Kuali job comments to constrain Workforce resolution", async () => {
+    mocks.runKualiExtract.mockResolvedValue({ ...KUALI_FIXTURE, currentTask: 1, jobCodeHint: "004920", additionalComments: "Academic year position - STDT 3" });
+    const { ctx } = makeFakeCtx({ docId: "4605" });
+    await runHandler(ctx, { docId: "4605" });
+    const lookupOptions = mocks.getJobSummaryIdentity.mock.calls[0][2] as { jobCode?: string; resolveJob: boolean };
+    assert.equal(lookupOptions.jobCode, undefined);
+    assert.equal(lookupOptions.resolveJob, true);
+    assert.deepEqual(mocks.runUcpathTransaction.mock.calls[0][8], { emplRecord: "0", positionNumber: "41202096", jobCode: "004920" });
+    assert.equal(
+      mocks.runUcpathTransaction.mock.calls[0][4],
+      "Termination eff 01/16/2026. Last Day Worked 01/15/2026. Kuali form #4605.",
+    );
+  });
+  it("fails before submission when the resolved job has no record or position", async () => {
+    mocks.getJobSummaryIdentity.mockResolvedValue({ found: true, name: "Test Employee", data: { jobCode: "004920" } });
+    const { ctx } = makeFakeCtx({ docId: "4605" });
+    await assert.rejects(runHandler(ctx, { docId: "4605" }), /Missing employment record/);
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
+  });
+});
+
+
+describe("receipt verification regressions", () => {
+  it("rejects a copied transaction number when this job has no matching receipt", async () => {
+    const { ctx } = makeFakeCtx({ transactionNumber: "T-OTHER-JOB" });
+    await assert.rejects(() => runHandler(ctx, { docId: "4605" }), /cannot reuse.*T-OTHER-JOB/i);
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
+    assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
+  });
+  it("passes canonical comments into the receipt check", async () => {
+    const { ctx } = makeFakeCtx({});
+    await runHandler(ctx, { docId: "4605", dryRun: true });
+    const options = mocks.runTransactionCheck.mock.calls[0][2] as { expectedComments: string };
+    assert.equal(options.expectedComments,
+      "Termination eff 01/16/2026. Last Day Worked 01/15/2026. Kuali form #4605.");
+  });
+  it("holds future leave found during timecard reconciliation", async () => {
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+    const future = `${String(tomorrow.getMonth()+1).padStart(2,"0")}/${String(tomorrow.getDate()).padStart(2,"0")}/${tomorrow.getFullYear()}`;
+    mocks.runKronosSearch.mockResolvedValue({ ...KRONOS_NOT_FOUND, newK: {
+      status: "fulfilled", value: { found: true, lastPunchDate: "01/15/2026", sickDates: [future], holidayDates: [] },
+    }});
+    const { ctx } = makeFakeCtx({});
+    await assert.rejects(() => runHandler(ctx, { docId: "4605" }), /Separation Date cannot be in the future/);
+    assert.equal(mocks.runTransactionCheck.mock.calls.length, 0);
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
+    assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
   });
 });

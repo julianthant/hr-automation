@@ -1,3 +1,4 @@
+import { parseKualiSeparationTask, parseSeparationJobCode } from "../../domain/separation-job.js";
 import type { Locator, Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { gotoWithRetry } from "../../infra/browser/launch.js";
@@ -170,6 +171,10 @@ export interface KualiSeparationData {
   separationDate: string;
   terminationType: string;
   location: string;
+  additionalComments?: string;
+  jobCodeHint?: string;
+  currentTask?: 1 | 2;
+  completedTask1Transaction?: string;
 }
 
 /**
@@ -178,6 +183,22 @@ export interface KualiSeparationData {
  */
 export async function extractSeparationData(page: Page): Promise<KualiSeparationData> {
   log.step("Extracting separation data from Kuali form...");
+  const actionText = await separationForm.actionDialog(page).innerText();
+  const currentTask = parseKualiSeparationTask(actionText);
+  const completedTask1Transaction = currentTask === 2
+    ? actionText.match(/Transaction Number:\s*(T\d+)\b/)?.[1]
+    : undefined;
+  if (currentTask === 2 && !completedTask1Transaction) {
+    throw new Error("Kuali is at Task 2 but its completed Task 1 transaction number is missing; no fields were changed");
+  }
+  const additionalComments = (await separationForm.additionalComments(page).inputValue()).trim();
+  const title = separationForm.studentTitle(page);
+  const studentTitle = await title.count() === 0 ? "" : await title.evaluate((el) => {
+    const select = el as HTMLSelectElement;
+    if (!select.options[select.selectedIndex]) throw new Error("Kuali Student Title Code has no selected option");
+    return select.options[select.selectedIndex].text;
+  });
+  const jobCodeHint = parseSeparationJobCode(additionalComments, studentTitle);
 
   // Kuali form inputs come back whitespace-padded (observed live: EID with a
   // leading space, Location with a trailing space). Trim every extracted field
@@ -220,7 +241,7 @@ export async function extractSeparationData(page: Page): Promise<KualiSeparation
   }
 
   log.success("Separation data extracted");
-  return { employeeName, eid, lastDayWorked, separationDate, terminationType, location };
+  return { employeeName, eid, lastDayWorked, separationDate, terminationType, location, additionalComments, jobCodeHint, currentTask, completedTask1Transaction };
 }
 
 /**
@@ -659,4 +680,27 @@ export async function clickSave(page: Page): Promise<void> {
   await page.waitForTimeout(2_000);
 
   log.success("Kuali form saved");
+}
+
+
+/** Save Task 1 and reopen the same action to verify durable values, not just the draft DOM. */
+export async function saveAndVerifySeparation(page: Page, transactionNumber: string, effectiveDate: string): Promise<void> {
+  const task = parseKualiSeparationTask(await separationForm.actionDialog(page).innerText());
+  if (task !== 1) throw new Error("Refusing to save Kuali Task 2 from the separation Task 1 workflow");
+  const url = page.url();
+  const expectedComments = await timekeeperTasks.timekeeperComments(page).inputValue();
+  await transactionResults.transactionNumber(page).press("Tab");
+  await timekeeperTasks.timekeeperComments(page).press("Tab");
+  await clickSave(page);
+  // Closing the dialog precedes completion of the save POST. Never navigate away early.
+  await page.waitForLoadState("networkidle");
+  await page.goto(url);
+  const field = transactionResults.transactionNumber(page);
+  await field.waitFor();
+  const actual = await field.inputValue();
+  const actualDate = await finalTransactions.terminationEffDate(page).inputValue();
+  const actualComments = await timekeeperTasks.timekeeperComments(page).inputValue();
+  if (actual !== transactionNumber || actualDate !== effectiveDate || actualComments !== expectedComments) {
+    throw new Error(`Kuali save did not persist Task 1 values: expected ${transactionNumber}/${effectiveDate}, got ${actual}/${actualDate}; comments match=${actualComments === expectedComments}`);
+  }
 }
