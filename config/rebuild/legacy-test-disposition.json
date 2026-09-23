@@ -368,6 +368,11 @@
       "rebuildEvidenceIds": []
     },
     {
+      "path": "tests/unit/workflows/process-eid",
+      "disposition": "preserved",
+      "rebuildEvidenceIds": []
+    },
+    {
       "path": "tests/unit/workflows/separations",
       "disposition": "preserved",
       "rebuildEvidenceIds": []

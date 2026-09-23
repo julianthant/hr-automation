@@ -42,7 +42,7 @@
    "path": "src/core/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "297f6aedc0d14b0ac4b24071334853d689332969f79a1f21c961eb33c3c604bb",
-   "afterSha256": "8356f31a3805f30f8185579a105bf99326d5682e80bd309787325e3461bb9ba4",
+   "afterSha256": "74d3c52add4f349692f3a9a3e2908b246fe182c53280dec8576506a615dda9d6",
    "capabilityIds": [
     "legacy-cli-daemon"
    ],
@@ -59,6 +59,20 @@
    "afterSha256": "623d4e6b1eda3fa6283584d0498097a17cc11fdba62d01b7310f8e69aeba67b8",
    "capabilityIds": [
     "legacy-cli-daemon"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/core/daemon/enqueue-dispatch.ts",
+   "changeKind": "modified",
+   "beforeSha256": "b2520dd96d62dbccf1cfdf149ed13067dccdaa49f276cd21291c8f8372c803cb",
+   "afterSha256": "05e9054b19a02d5c7415b48815d6365849a9019c666a543667bedb4b1f03d204",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
    ],
    "rebuildRecheckIds": [
     "npm:test",
@@ -87,10 +101,38 @@
    "impactRationale": "Exports TERMINAL_CONTROL_STATES as the single terminal-state definition; every workflow that runs through the daemon consumes it."
   },
   {
+   "path": "src/core/kernel/types.ts",
+   "changeKind": "modified",
+   "beforeSha256": "e1a6bcad0a99f700487561f96793104277a783df220a05cb0b384a07aad0cd5e",
+   "afterSha256": "bb072a195212f263b158bf2b7c6a65ce9f6b0becef4da2a18f4b72f525578ac9",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/core/workflow-loaders.ts",
+   "changeKind": "modified",
+   "beforeSha256": "fd46ec8c35e4df834ec590dcccfa9e6161da55e3afdb3a3adc23433a216241fb",
+   "afterSha256": "bb4c8e7843209b885b3b6cdd138bfb7463cca92505344c8b0158c3f19ad5f9dc",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "src/dashboard/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "60199c6673bfd904b52c8a9f9e87ec4752bf0232bb03a9ab2174ea472e5a0349",
-   "afterSha256": "8c251aeb95c5910b4bbb5bc656a1f1859f6081db972d6a673d2431210dad589f",
+   "afterSha256": "4f310857fe12376cd634fa2067e41091e70e201e73e6174deb50413b0b281d8c",
    "capabilityIds": [
     "legacy-dashboard-log-panel"
    ],
@@ -223,14 +265,98 @@
    "preservation": "preserved"
   },
   {
+   "path": "src/dashboard/components/navigation/TopBar.tsx",
+   "changeKind": "modified",
+   "beforeSha256": "a0fdabfb5ec8936a1a0538580a71d32d9a96114e9b62ea190a43d93a3296a43b",
+   "afterSha256": "a7481c86d173e4a92369d01679c147f10b913089dbbc9651e7c11ddefe84111e",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/dashboard/components/queue-panel/EntryItem.tsx",
+   "changeKind": "modified",
+   "beforeSha256": "2ed1c946bf4b021ab7e50fac8dc5d4c7a987391ce46781c130f21dc08c789114",
+   "afterSha256": "9e727ba7307fbfb9ab4ae8be860bc42aaa8b0fc7981f62681b150dce79fb2505",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/dashboard/components/queue-panel/operation-row-variants.tsx",
+   "changeKind": "modified",
+   "beforeSha256": "3b715f4670aa5ed6ab7b834027e7f6d49642918dc636f8441ff8b61c53cb361b",
+   "afterSha256": "c4449c189798aea74a73a3f766fea1ad6a551ae73b816a9b81febf792e2a39da",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/dashboard/components/queue-panel/QueueEmptyCta.tsx",
+   "changeKind": "modified",
+   "beforeSha256": "48bb5efa04f4fefda9d4c3381cdc67b126255adbb3de3fece5675f1db2349504",
+   "afterSha256": "a2e900eb44953a0b36c173dae77c9416b407b7e9da8d59c5a9943099a956174d",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/dashboard/components/run-modal/SharePointDownloadButton.tsx",
+   "changeKind": "modified",
+   "beforeSha256": "178275817992aef10dbe44bc410bc998b1c3818a9c3f6ae6ef4c4801affbbf6a",
+   "afterSha256": "d73ccfe7906d995b013c633d52d78facdb01b9e9132290a3eedce5742495ef4b",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "src/dashboard/lib/input-run-registry.ts",
    "changeKind": "modified",
    "beforeSha256": "5a7b5d171d0065793c507dae8d8281cab384546952c136d68e6cc1df68856b97",
-   "afterSha256": "420ecaf7fcc67052ef8731e748635df220279ece1aef4503a0288e7d791c5966",
+   "afterSha256": "93a303c1fbc75b04bc0a33b956fcaba3dda1d04ba4ccf380efd38b05a18da978",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
    "impactRationale": "2026-08-21 (ef0b20ad, b0dbd37e): onboarding declares hire-type modes new-hire | rehire (folded as input.mode), placed in the run-settings gear.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/domain/dashboard-run-surfaces.ts",
+   "changeKind": "modified",
+   "beforeSha256": "4823353cb86ed2ad8bb5278a4aee4f3b4c2ff7c4278ca55186568bd50b4b8a03",
+   "afterSha256": "87559c018871fb33e53eec0cdc0c998a87cfdebe8482c972025427e7bbb206d1",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -287,6 +413,48 @@
    "preservation": "preserved"
   },
   {
+   "path": "src/domain/process-eid-status.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "a394f66e9b03de96d45df2a26d2f415765883d20edcda7c5e666bacfa58beddc",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/domain/queue-row-status-index.ts",
+   "changeKind": "modified",
+   "beforeSha256": "7ea5cfbc989aefce9c897e6a24130e6bcbccfb59b04217212762a2f79d8fe17e",
+   "afterSha256": "891999b8e3eae24f475b3ba3cb7a34212ca1e4c6cc26d88b370c8062a60a0df0",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/domain/queue-row-status.ts",
+   "changeKind": "modified",
+   "beforeSha256": "a39c0ceffd514b6226621ab28a6e9791f53ac762df2501a0039e1faabe67cb5a",
+   "afterSha256": "2afa20e0da3b89a6371b4e81ae4e25bb0fae37af637970dfaecc85989cc92f91",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "src/domain/separation-job.ts",
    "changeKind": "added",
    "beforeSha256": null,
@@ -300,6 +468,20 @@
    ],
    "preservation": "preserved",
    "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: adds commentsMatchTermination to permit duplicate Kuali request document reference difference only after substantive termination details match."
+  },
+  {
+   "path": "src/domain/settings/reference.ts",
+   "changeKind": "modified",
+   "beforeSha256": "8d64377744fd838987a747807ccff06d9bbed7742b39e726e80fd0f1f4d143e1",
+   "afterSha256": "02715b44d4b458bcc581fe1ca549ad07bff17d18b301f32c7a57320812814749",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
   },
   {
    "path": "src/domain/settings/types.ts",
@@ -369,6 +551,20 @@
    "preservation": "preserved"
   },
   {
+   "path": "src/scripts/codegen/export-schemas.ts",
+   "changeKind": "modified",
+   "beforeSha256": "d490759773bdeafa1010762b4b5fe35458b622b3b4dc4dbc2089561f45847702",
+   "afterSha256": "355115e888f47a17a0127bfb7173bceebc0c4cb714e38a43e903a9da884df7c4",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "src/services/ocr/env-keys.ts",
    "changeKind": "modified",
    "beforeSha256": "c9213498098dc6ef99904251deddf4d2e83d65cc6155e59a79a59fd8d29b2a8e",
@@ -400,12 +596,26 @@
    "path": "src/systems/crm/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "56ca550e235a8a481506e6838b887d5d61c604ab2160141926be1116c3c371e1",
-   "afterSha256": "373cb327edf429dd489c4b746882373d21710e0bba7957616fff2078e396f26e",
+   "afterSha256": "8f9be952f343d12b9341e45f0c062f4992e06d66ebab3007af64fa8adfa7a284",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-crm-doc-download"
    ],
    "impactRationale": "Documents resolveDefaultCrmDocIndices behavior for CRM iDocs downloads.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/crm/document-folder-subject.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "1c1a424129413b6b9153396c9644ebea61cd954d3b4c4aaaedf5ceab182e8720",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -432,7 +642,7 @@
    "path": "src/systems/crm/index.ts",
    "changeKind": "modified",
    "beforeSha256": "2195ed3ec26792ec4f675bd02d950b17ea79bbd733b6f98f511cf28731e5956b",
-   "afterSha256": "250cfb39cd4378566d9988bf3064ddf8e70628ba017812ac0e659d4c2a4f550a",
+   "afterSha256": "44af1935d3838b250e24769a6c698e7bbca658f2fa0019e2f2aece20d2f88420",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-crm-doc-download"
@@ -445,10 +655,24 @@
    "preservation": "preserved"
   },
   {
+   "path": "src/systems/crm/pick-latest-search-row.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "3d4f275bbf02db5e281073f634469e645c82d0b6fc792d9ffa4802ca53abfff6",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "src/systems/crm/search.ts",
    "changeKind": "modified",
    "beforeSha256": "2097fd99849250349bdecbec492e6a05f303d92710e1665a7c64e1012cc26569",
-   "afterSha256": "7b9509b5aaca4397c8c9e804fa55786484886d32748ae0d0ec0ee3b47112d826",
+   "afterSha256": "19d6bfa90cc530aa83dc8244a973675762231cf25fdc975aebcaa16ec50438a8",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
@@ -463,7 +687,7 @@
    "path": "src/systems/crm/SELECTORS.md",
    "changeKind": "modified",
    "beforeSha256": "d28933203c348c098a5a1377abe5240ed6be3cc92e10ad41d1428829d8384dcb",
-   "afterSha256": "904eb8f719b4e64102bee44004133f21cd54b2f6b720e9b5b83162ea49e2db72",
+   "afterSha256": "91cdaafc12ef96fa16993d51e506f2f43f0c0656cc7d02f313b2e961714005e4",
    "capabilityIds": [
     "legacy-workflow-emergency-contact"
    ],
@@ -534,10 +758,24 @@
    "preservation": "preserved"
   },
   {
+   "path": "src/systems/i9/login.ts",
+   "changeKind": "modified",
+   "beforeSha256": "85f08a3579b87e1f153891508b03bac5038985b90b9c2a7e48112133747a170b",
+   "afterSha256": "029576aefa958e71ee4c618b186491552f1bdfc39899beae56526e9dd9643414",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "src/systems/i9/navigate.ts",
    "changeKind": "modified",
    "beforeSha256": "bd1be3f086aa96a67354f75f5f3230777e6fdff3b6f52f63d2260a5a32637f14",
-   "afterSha256": "95b55268c1ba4fa6e8c8db80d68e1fbfd3e0b1aa0d4081ff503777daba8fdbc0",
+   "afterSha256": "25306285df87a1b2c3a993263cf476a8196e703c74beb346b326ab423cf0d4ff",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
@@ -552,7 +790,7 @@
    "path": "src/systems/i9/SELECTORS.md",
    "changeKind": "modified",
    "beforeSha256": "f8d9eba3213c717341d48a0060959e1a0bdc2f760161dfa408ba03a402d709ec",
-   "afterSha256": "dfc1cd69c54d20e8acd4f0399512937784cc1fdcff62c65fb674de0f5ba27241",
+   "afterSha256": "088a9700b7bd6c27012ed3d1b5a3665e8e94f6aba938eeccbeaa46f87f87fb0f",
    "capabilityIds": [
     "legacy-workflow-emergency-contact"
    ],
@@ -627,7 +865,7 @@
    "path": "src/systems/kuali/SELECTORS.md",
    "changeKind": "modified",
    "beforeSha256": "4ccd6c5a794d93e3fdb680346b48aaf8e9007db367b593012cfe00476add9882",
-   "afterSha256": "50919b6f98ad30942b8440573d69ca30293097d06eaa05f53d6a518adccd902c",
+   "afterSha256": "d6c9efe0b19ccd36377a6e232f4da8a8f6ec781f6571e7930b993b5a411d183b",
    "capabilityIds": [
     "legacy-workflow-emergency-contact",
     "legacy-workflow-separations"
@@ -690,7 +928,7 @@
    "path": "src/systems/new-kronos/SELECTORS.md",
    "changeKind": "modified",
    "beforeSha256": "adfe0e9c66fd86da965a0c2c71fd025cccdb89d1e42ad83a2f9d14072e1a9976",
-   "afterSha256": "faea1c03a6057d38b90d8033281966e32ee8cf55aad658f897c01e42e0a0b433",
+   "afterSha256": "576d93e1f7a5cea8a0cd7a5fdbeb5bb42a431482679bd44775457961249fa9a0",
    "capabilityIds": [
     "legacy-workflow-emergency-contact"
    ],
@@ -705,7 +943,7 @@
    "path": "src/systems/old-kronos/SELECTORS.md",
    "changeKind": "modified",
    "beforeSha256": "ce5d95fcee34b39fb3dcdfd6db23fd5b789676d56ef4a4a03518bce408dcb9c0",
-   "afterSha256": "b580530eea06bebebde783c7463ab4412d9355eced9d1f34a8c281329cd49cf6",
+   "afterSha256": "49c58bb947ff963fe4758d7a24d14be8470cd6c536fdb359a4d2f84a970e1626",
    "capabilityIds": [
     "legacy-workflow-emergency-contact"
    ],
@@ -720,7 +958,7 @@
    "path": "src/systems/onbase/SELECTORS.md",
    "changeKind": "modified",
    "beforeSha256": "eccb58b4eeeda6bf33b4c459a77078c4296c7f6e6fc65cc266a84570903f9f20",
-   "afterSha256": "2de6048c2e8b72f70757b84649b08fffa5f37856bb3d3a080cb850d772276464",
+   "afterSha256": "557909e97f5d940e293f7daa1e456aa4fe96595e6244e68001904ac4a3a11f39",
    "capabilityIds": [
     "legacy-workflow-emergency-contact"
    ],
@@ -735,7 +973,7 @@
    "path": "src/systems/servicenow/SELECTORS.md",
    "changeKind": "modified",
    "beforeSha256": "557de341ee92f0022e6a5d609042930ba7080edbf1d89185acdccefd826e323d",
-   "afterSha256": "0a9543371ee01429207221a8843ef9513bbba0bf62226093cc3d2db0021df328",
+   "afterSha256": "e0417e12988b56c72cbf7e221b6c50a5692202ba6a4203ced540e206fa14ec87",
    "capabilityIds": [
     "legacy-workflow-emergency-contact"
    ],
@@ -750,7 +988,7 @@
    "path": "src/systems/sharepoint/SELECTORS.md",
    "changeKind": "modified",
    "beforeSha256": "209fa8cdfc094c829c16217f5cde1ffa39ac58b793e27cc4fae46af04f7f6d61",
-   "afterSha256": "f4a48b47471cb05e48f12e8c6066773e0e60a56c82c05bfd29abc575d557abae",
+   "afterSha256": "db7b383acff6c94c8f092b1019d0395dcc73e3260fa6f1453c0711b7d599730d",
    "capabilityIds": [
     "legacy-workflow-emergency-contact"
    ],
@@ -765,7 +1003,7 @@
    "path": "src/systems/ucpath/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "c562816dd0f5b85109c6c6fd7b56703d32703f10c12a5ad5f5a3c834f84d8cff",
-   "afterSha256": "766a1ad3b0efc7acd9e9782a0f2c2e3b6e213e65435fb4685e7685e4c2bd47af",
+   "afterSha256": "3655b0cde6c0c63ebdd23acbd174cfdfa9ec0af6276d90eea34936d34f6b2d9f",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -797,7 +1035,7 @@
    "path": "src/systems/ucpath/job-summary.ts",
    "changeKind": "modified",
    "beforeSha256": "2450ee4adf5436b5053bd373093e41c1cc3edbf11e2848ce7ccac2207d1d4bbd",
-   "afterSha256": "907f6dab500140283aac3f0489a95a7d2cea6c324cc7ed502a9ba472830ae223",
+   "afterSha256": "b9f66a2f1f1001fcbcd9176935deeb28f185a25f33ebadff90118f603c1c55a7",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -812,7 +1050,7 @@
    "path": "src/systems/ucpath/LESSONS.md",
    "changeKind": "modified",
    "beforeSha256": "010e7a25f50d7e63b24355bb254ded76690c9278a6885285ef3a52101fc5f9a1",
-   "afterSha256": "cf3e42c83fb80268bb2514df21231104329e2465d13d7ad62ef0cf71dc34df60",
+   "afterSha256": "8fadc343f920dd510f825322bd9d88d825d5058e0d79052ef13ad85068427237",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-person-lookup",
@@ -864,7 +1102,7 @@
    "path": "src/systems/ucpath/SELECTORS.md",
    "changeKind": "modified",
    "beforeSha256": "57fb1caeac412725c3c5defb0430dd9d5d910db97d077328cf2f37368d6fb1f4",
-   "afterSha256": "3175f0dced3557a1a228a1d7d4eea475771cb86384a63a87bc7c0a411183da6f",
+   "afterSha256": "44935de974aa5205003879f03164147793966b4d0fa9bbda90396db21af5d218",
    "capabilityIds": [
     "legacy-workflow-i9-check",
     "legacy-workflow-onboarding",
@@ -882,7 +1120,7 @@
    "path": "src/systems/ucpath/selectors.ts",
    "changeKind": "modified",
    "beforeSha256": "4f6992525998eb6e3db8d2b3a4b67bb551aa0565e6a03710efd92a095d958aa5",
-   "afterSha256": "a51c0024c373c2249a9ab4d1c7dc84ea548b83980fe7082048b56249ff3d112c",
+   "afterSha256": "02e58204c930c400af4bc97333efefe971563b5411e314b4be6b0932415fb89b",
    "capabilityIds": [
     "legacy-workflow-i9-check",
     "legacy-workflow-onboarding",
@@ -900,7 +1138,7 @@
    "path": "src/systems/ucpath/ss-smart-hr.ts",
    "changeKind": "modified",
    "beforeSha256": "6524118fb49e244442824d134484709530bf2a80a5be73bf183fd7d5cac847f2",
-   "afterSha256": "5efc1a7d2d43530316c8a88ee21eb3ded7fc17a253c889c2f2ff96ad347e7de3",
+   "afterSha256": "2b3191723382ec10bb61bd6f2ef167f1f47586dfb4fbfcf81e3458c338e9a131",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -931,7 +1169,7 @@
    "path": "src/systems/ucpath/transaction.ts",
    "changeKind": "modified",
    "beforeSha256": "1edbfd04c254d3a9a780431899ec30569b746536b45e53c1e1194ad84237bf94",
-   "afterSha256": "9ab79d534bf2f672b47f7e11ba71cbf04013a78cc3f4a865c290188e29928580",
+   "afterSha256": "74a2dca1242926d7e27aeed3c3a0cc7e054643740018e84fc6eadf45bbf5ed9b",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -991,6 +1229,76 @@
    "preservation": "preserved"
   },
   {
+   "path": "src/tracker/dashboard/workflows.ts",
+   "changeKind": "modified",
+   "beforeSha256": "9ccba6adc6c56d8ee48341023a8cf8a7de74bec7a839502ffebbdf626e9ffb93",
+   "afterSha256": "a18a87aa078c5f33423607d5eed4d92914588ee0f2529045c435523162fd06dc",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/tracker/session-events.ts",
+   "changeKind": "modified",
+   "beforeSha256": "ed10574b62b89be81c07a45d38dcdf4e8d7467c7518ade8feb1efbdf93297436",
+   "afterSha256": "90e5bd8b85950d33dcab48a1eb78c5d225834ef3bdd054a5aa01398232e80374",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/crm-doc-download/CLAUDE.md",
+   "changeKind": "modified",
+   "beforeSha256": "198dab676d27808f672a5cf79af98e773098359bb5a60b1297c628cf14eb4c73",
+   "afterSha256": "0a61e2263f4daf185de286c03bcf15c03d60ecfc3e41244018141b91c5d26d99",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/crm-doc-download/folder-names.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "3bb935bcae98e2f972f394742621c8e2c48f4a8bf3c687138d82a51f48a23aad",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/crm-doc-download/workflow.ts",
+   "changeKind": "modified",
+   "beforeSha256": "11e43fee252b31a77bdbaa891d19786de960ec60addafb0c93921dbe22f226be",
+   "afterSha256": "391184dda1416054ca4b8611d4fbc38a24b29496d2f1e98f76f907117ce08839",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "src/workflows/emergency-contact/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "6986043e3a5755ec1f6bfb9794be564e40f9da7ec706bee18eb2038398111758",
@@ -1039,7 +1347,7 @@
    "path": "src/workflows/onboarding/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "f7c38194ca9ef657840af3a87e56bc5dbae307f5e471d0605e729ff0e01872c2",
-   "afterSha256": "82b21fc94fdfcc7c43a845ae584648045f7755c01f93bf6f63d5f860390c4a5e",
+   "afterSha256": "65f1f9f4029c515bea3e9e0be390d066e7d296a9dadcb10e886315c4a916c75e",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
@@ -1099,7 +1407,7 @@
    "path": "src/workflows/onboarding/roster.ts",
    "changeKind": "added",
    "beforeSha256": null,
-   "afterSha256": "331a245f66b1623df871507429c5b28b644a432a95aa1a85484e87b101a4d3b0",
+   "afterSha256": "f4ac06372b1f46acaae3cd60bb35fe3c9d3ab9400d2184d946f9b0ec0ac5f4ba",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
@@ -1129,7 +1437,7 @@
    "path": "src/workflows/onboarding/workflow.ts",
    "changeKind": "modified",
    "beforeSha256": "3fdbf1d1ed90700c5ad7aeaa93024083e6a319ecf778bdaf0874e8648c98b8a8",
-   "afterSha256": "7800a435dbc2e9d0599ee1439d3368ddf302d1cb1b6de703beff120515e36347",
+   "afterSha256": "3a90871f640e61903b8fb7a103419164de0896c186f3289eed7c3e5d38008a14",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
@@ -1141,10 +1449,94 @@
    "preservation": "preserved"
   },
   {
+   "path": "src/workflows/process-eid/CLAUDE.md",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "9e1e4f6ec1a4d8d9e4ccb48dcc5aeae749cdff8dd44e14036b9c1ba38e7e4841",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/process-eid/index.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "f620d46ea95e4fdb114faa70dd389597173c6835017b3949104d0a5f50f4ee94",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/process-eid/name-match.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "966cdc3ef73adc9565229c0d49317811a473d2e860457c7a4f63a56d8ab088fe",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/process-eid/roster.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "bb624a00db385001eb73c68fa42f3fbd988d169d6fdd9a8f706f2c4aa218d88c",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/process-eid/schema.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "7c596b42118fe340999664fa8f5b5c66fe6eba25ff6848249928bd8d8a062e4c",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/workflows/process-eid/workflow.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "84f9d7751d4b1835a9f206ea07b4aea603a6a612495b1082b4e4d321587203f7",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "src/workflows/separations/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "705842e6a4800e8775cd1b002207bfef73af656070dc1751bf539b1bee018893",
-   "afterSha256": "e147344ea6a1f363aa241932732e84600b0c61f303de92e6abc95a1043011bb2",
+   "afterSha256": "f73ffdf800707a7c50192697ca61651237a02c2f763800fba9e93289ba126673",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1154,6 +1546,20 @@
    ],
    "preservation": "preserved",
    "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists. 2026-08-21 (16ca8559): New Kronos NOT FOUND now needs the no-results sentinel to hold continuously for NO_RESULTS_STABLE_MS (2s) with no found signal — the sentinel is also the Employee Search panel's pre-search resting state; a single-tick verdict mis-resolved HDH EID 10837979 (doc 4546) NOT FOUND, skipped the timecard, and filed a wrong-dated termination. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: documents post-submit recovery via SS Smart HR, duplicate Kuali request handling via commentsMatchTermination, and historical receipt filtering."
+  },
+  {
+   "path": "src/workflows/separations/schema.ts",
+   "changeKind": "modified",
+   "beforeSha256": "742e3f4ab3617fa31b9cdda0fb6864abd8f50288b8a2516593d5d48db5373eb5",
+   "afterSha256": "3f019b96d7f6cf0f6e53a0970b341d0ff6768ec753ace984e94de5b97fc9ba25",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
   },
   {
    "path": "src/workflows/separations/steps/kuali-extract.ts",
@@ -1203,7 +1609,7 @@
    "path": "src/workflows/separations/steps/ucpath-transaction.ts",
    "changeKind": "modified",
    "beforeSha256": "bb300fe3deaff044d191fe1b25535467493ce2132cac33c52176af5071bb8ded",
-   "afterSha256": "28aa05fd49320fab5d3e94263c310e7a00bdd994703334dc18f3bd2814b3637b",
+   "afterSha256": "decb01d028636c5511eab580b673bfb1c5fc9747a90416b32a11379591507e50",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1218,7 +1624,7 @@
    "path": "src/workflows/separations/workflow.ts",
    "changeKind": "modified",
    "beforeSha256": "96a8ec7d7047ac00917d4a04cfdaf32c15d8fa97155ff61bc87a1d6734bdc60e",
-   "afterSha256": "adadfed294d48dfaf050b773287fd2c208e2c7c89850fae217e84f8c3985f1f9",
+   "afterSha256": "f83d3277356f9b9dad62617bf7d7c6cb32296926fcb28b562ac83b5345b8df8a",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1259,6 +1665,20 @@
    ],
    "preservation": "preserved",
    "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
+  },
+  {
+   "path": "tests/unit/architecture/evaluate-named-fn.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "a3f71ada6707444b4bee17fe000a0f2db6581b439717ee439b389ff9949a5646",
+   "afterSha256": "0580e7e574ca4cb4b14ca9ee518ca994ef55f556c3a1571133fa3fc06566c510",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
   },
   {
    "path": "tests/unit/architecture/fail-loud-catch-default.test.ts",
@@ -1354,6 +1774,20 @@
    ],
    "rebuildRecheckIds": [
     "npm:lint:legacy-tests-ratchet",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/architecture/instance-labels-coverage.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "c57650b62ae64bea52de4e8e129253932386bd4aae0c573f0abaafece301696e",
+   "afterSha256": "05e320657eabb1e7aff040a11a3e0cd48674b44dccd6a137cd9b580fcd0947ac",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
     "npm:test:architecture"
    ],
    "preservation": "preserved"
@@ -1474,10 +1908,24 @@
    "preservation": "preserved"
   },
   {
+   "path": "tests/unit/architecture/runtime-policy-coverage.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "29cff9f42b8b1f6d67702e4667fa54d7b5038a93fa77c61831e4c3d5b0c0503f",
+   "afterSha256": "9ba065feea24e3e6828c516c0453da046ef6225bdc541a93bc17eccd30cac056",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "tests/unit/architecture/wait-for-timeout-allowlist.test.ts",
    "changeKind": "modified",
    "beforeSha256": "d0f3949d6e35ef2889bde2db6b68bc842ce33fce34b2a44aacd9353682e83b0f",
-   "afterSha256": "df74c88053814458b5c57b1e3c4cf8a0747f21bf82730b12556b7c8c804d8221",
+   "afterSha256": "45e07525f69c2901b749a545a9ad6e488b406daf134e0ed2bf19ad84a600312a",
    "capabilityIds": [
     "legacy-dev-tool-architecture-guards"
    ],
@@ -1525,6 +1973,48 @@
    "afterSha256": "2b37d3813a5ce07f3746fe14e10d51bca018d4b1c3f33be22f6119ff1a4ee41a",
    "capabilityIds": [
     "legacy-cli-daemon"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/core/enqueue-dispatch-input-batch.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "483234ed7911ae88ceca8ec126cd5e8cfbcd9a71c3266b3da708fcbea211bef4",
+   "afterSha256": "033501bbdd1cef2e8e5e82cfc716fa9d40e5fc87aa6fc5b2031918b937529fd4",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/core/workflow-loaders.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "ee8eeab070d857c029239383e71a3f15fb9b165e1912e9b50b991581239f39c6",
+   "afterSha256": "f8e12e5678d15c680b79947ea858ab135233b3fd82c3ef3e2907a1562163282f",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/dashboard/input-run-registry.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "682bbb62b0242bf016ea5a8f5613ff2f83b681486c9c35c10ec805450693dd63",
+   "afterSha256": "4004e07112799e58301fb0d8efa61c57020b903cf13a7bd89e4148cc026136bf",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
    ],
    "rebuildRecheckIds": [
     "npm:test",
@@ -1610,6 +2100,20 @@
    "preservation": "preserved"
   },
   {
+   "path": "tests/unit/domain/process-eid-status.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "a53866d86b84c0549a1221a31a2576ec9e930c7a91eeb11e30a22b186e9f6fc8",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "tests/unit/domain/separation-job.test.ts",
    "changeKind": "added",
    "beforeSha256": null,
@@ -1640,6 +2144,20 @@
    "impactRationale": "Test updated alongside the 2026-08-05 Emergency Contact fix (gate fakes model the value-anchored read; waitForTimeout allowlist count reflects the removed name-fill sleep)."
   },
   {
+   "path": "tests/unit/systems/crm/document-folder-subject.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "a85cf9cca707dd1158f339b53db96d9608e6a69dcaaad4e0730f224813c6b638",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "tests/unit/systems/crm/idocs-download.test.ts",
    "changeKind": "modified",
    "beforeSha256": "2fd29c1fecbdb55b256364733837a6598e92dd25be4cbca71c263e102b823cb7",
@@ -1649,6 +2167,20 @@
     "legacy-workflow-crm-doc-download"
    ],
    "impactRationale": "Pins title-casing of ALL-CAPS CRM records, hyphen/apostrophe/multi-word surnames, and the canonical document names. 2026-08-20 (pm): pins the per-day folder path shape.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/systems/crm/pick-latest-search-row.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "ef334a46ef9b492822791543efde60654609ef689a60f502ad858aaa53464545",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -1720,7 +2252,7 @@
    "path": "tests/unit/systems/ucpath/separation-receipt.test.ts",
    "changeKind": "added",
    "beforeSha256": null,
-   "afterSha256": "8fb7f9338d6f9a6bf2a4bc4dcc1395be653b0e3fdf45c5689aa0adb0abe9833d",
+   "afterSha256": "b618c84b8dcf75aa46a0b59535e2444a7fc89d15f6402ac1cee6479e47fc49ea",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1735,7 +2267,7 @@
    "path": "tests/unit/systems/ucpath/ss-smart-hr.test.ts",
    "changeKind": "modified",
    "beforeSha256": "57506848064063459502da280dc9cb31d8a5dc6c5e9f44bc42bbf5be8b098f43",
-   "afterSha256": "73291d2779f6fd4b1a3e55a4424c8912a3ec404694b0066906ebd6c6809b58a4",
+   "afterSha256": "945afeedfaf198c96fdc12d36976e865201720c4fe9bd8ffb6673b3e49872099",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -1751,7 +2283,7 @@
    "path": "tests/unit/systems/ucpath/transaction.test.ts",
    "changeKind": "modified",
    "beforeSha256": "425eac4dcc2c7ee649533bee1e83fa3670dd51f46a30998600438b5f037dfcdb",
-   "afterSha256": "b163fed098f0bfba8f248d7301dc728df72969aee68c3d930109096fff701afb",
+   "afterSha256": "24d68a13273cb9833252df2c292a32a6bc5d4d9a2cce0c3c2804d9ffd292cd74",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -1762,6 +2294,20 @@
    ],
    "preservation": "preserved",
    "impactRationale": "2026-08-20: pins decidePersonMatchContinue / classifySubmitSignals / normalizers with the live Robles + Sun candidate tables. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353."
+  },
+  {
+   "path": "tests/unit/workflows/crm-doc-download/folder-names.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "d2eec5bc2b6eb7e61e0a0bdebf2560ce31fcb3f248d60f87daf30182a2aa47c2",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
   },
   {
    "path": "tests/unit/workflows/emergency-contact/enter.test.ts",
@@ -1782,7 +2328,7 @@
    "path": "tests/unit/workflows/onboarding/roster.test.ts",
    "changeKind": "added",
    "beforeSha256": null,
-   "afterSha256": "abf5cb7c538957e4c66196aebd8cc71f1e659f9358a95c32a946867fc0fd780e",
+   "afterSha256": "33121ea08159319bb8230f8c10403f71c4747421c92b753f6302765563f5bf5c",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
@@ -1824,10 +2370,52 @@
    "preservation": "preserved"
   },
   {
+   "path": "tests/unit/workflows/process-eid/name-match.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "0265df99fe055856390021e03114bfbb735ce5e7ee04550321c27a7f955b6485",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/workflows/process-eid/roster.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "656c35da3a31c5a30badbb617ffb9e7fe6e2dfee22a7e5ab4c9bbcc1584da1e7",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "tests/unit/workflows/process-eid/workflow.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "2997dc74c2531261e1a7abf2e4cf12202d65e336f5a82c304c1c7594cd0b5488",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "tests/unit/workflows/separations/dry-run.test.ts",
    "changeKind": "modified",
    "beforeSha256": "be2dc5e08e2d5169f681a85cc2ebf8f672ce777fedac7e01954585062b378a34",
-   "afterSha256": "1df4372360854e962ae88ce4cea9ffdbbc57762c6ba02c090732bd2997a67fc2",
+   "afterSha256": "1316990d3ee53e6eec845833fe835b7fe64bee7cfdf8e64b8980fd357d6e9135",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -1852,6 +2440,20 @@
    ],
    "preservation": "preserved",
    "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
+  },
+  {
+   "path": "tests/unit/workflows/separations/schema.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "ccd3c7e39562f57922ab9cc42504b3c59e343efa89bbd4eb7f8ae5d953738fc8",
+   "afterSha256": "9164d0b51abc4549871a805556dbc1b8e363d081dc36a01efcb14d9deb7664bc",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
   },
   {
    "path": "tests/unit/workflows/separations/steps.test.ts",
@@ -1882,6 +2484,20 @@
    ],
    "preservation": "preserved",
    "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
+  },
+  {
+   "path": "tests/unit/workflows/separations/ucpath-transaction-nav.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "75a2eda425deaf8c5287ff191abf6275212c32374893f6a8702d3469b92eeb51",
+   "capabilityIds": [
+    "legacy-workflow-process-eid"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
   },
   {
    "path": "tests/unit/workflows/sharepoint-download/sanitize-xlsx.test.ts",
