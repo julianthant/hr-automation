@@ -11,12 +11,35 @@ import {
   sanitizeCrmDocumentFilename,
   isCrmPdfResponse,
   DEFAULT_CRM_DOC_INDICES,
+  resolveDefaultCrmDocIndices,
   defaultCrmDocumentName,
   CRM_DOC_DEFAULT_NAMES,
 } from "../../../../src/systems/crm/idocs-download.js";
 
 test("DEFAULT_CRM_DOC_INDICES downloads Doc 1 and Doc 3", () => {
   assert.deepEqual(DEFAULT_CRM_DOC_INDICES, [0, 2]);
+});
+
+test("resolveDefaultCrmDocIndices returns [0, 2] when totalDocs is 9", () => {
+  assert.deepEqual(resolveDefaultCrmDocIndices(9), [0, 2]);
+});
+
+test("resolveDefaultCrmDocIndices omits EE Data Gathering Form (returns [0]) when totalDocs is 5", () => {
+  assert.deepEqual(resolveDefaultCrmDocIndices(5), [0]);
+});
+
+test("resolveDefaultCrmDocIndices only downloads EE Data Gathering Form when totalDocs is 9", () => {
+  assert.deepEqual(resolveDefaultCrmDocIndices(1), [0]);
+  assert.deepEqual(resolveDefaultCrmDocIndices(3), [0]);
+  assert.deepEqual(resolveDefaultCrmDocIndices(5), [0]);
+  assert.deepEqual(resolveDefaultCrmDocIndices(8), [0]);
+  assert.deepEqual(resolveDefaultCrmDocIndices(9), [0, 2]);
+  assert.deepEqual(resolveDefaultCrmDocIndices(10), [0]);
+});
+
+test("resolveDefaultCrmDocIndices falls back to DEFAULT_CRM_DOC_INDICES when totalDocs is undefined", () => {
+  assert.deepEqual(resolveDefaultCrmDocIndices(undefined), [0, 2]);
+  assert.deepEqual(resolveDefaultCrmDocIndices(), [0, 2]);
 });
 
 test("defaultCrmDocumentName names doc 1 and doc 3 by their known identity", () => {
@@ -46,7 +69,7 @@ test("buildCrmDocumentDownloadPath lands under data/onboarding/<YYYY-MM-DD>/ (to
   assert.equal(onboardingDateFolder(today), stamp);
   assert.equal(
     buildCrmDocumentDownloadPath({ firstName: "Jane", lastName: "Doe", middleName: "A" }),
-    join(PATHS.onboardingDocsDir, stamp, "Doe, Jane A EID"),
+    join(PATHS.onboardingDocsDir, stamp, "Doe, Jane A. EID"),
   );
   // An explicit date addresses that day's folder (no zip, plain folder).
   assert.equal(
@@ -56,17 +79,17 @@ test("buildCrmDocumentDownloadPath lands under data/onboarding/<YYYY-MM-DD>/ (to
   assert.match(PATHS.onboardingDocsDir, /data[/\\]onboarding$/);
 });
 
-test("buildCrmDocumentFolderName: Last, First Middle EID (no lived name)", () => {
+test("buildCrmDocumentFolderName: Last, First MiddleInitial. EID (no lived name)", () => {
   assert.equal(
     buildCrmDocumentFolderName({ firstName: "Jane", lastName: "Doe", middleName: "A" }),
-    "Doe, Jane A EID",
+    "Doe, Jane A. EID",
   );
 });
 
-test("buildCrmDocumentFolderName inserts the lived name parenthetically", () => {
+test("buildCrmDocumentFolderName inserts the lived first name parenthetically and middle initial with dot", () => {
   assert.equal(
     buildCrmDocumentFolderName({ firstName: "John", lastName: "Smith", middleName: "Michael", livedName: "Johnny" }),
-    "Smith, John (Johnny) Michael EID",
+    "Smith, John (Johnny) M. EID",
   );
 });
 
@@ -85,6 +108,21 @@ test("buildCrmDocumentFolderName lived name without middle", () => {
   assert.equal(
     buildCrmDocumentFolderName({ firstName: "Robert", lastName: "Roe", livedName: "Bob" }),
     "Roe, Robert (Bob) EID",
+  );
+});
+
+test("buildCrmDocumentFolderName splits compound firstName into first and middle when middleName is absent", () => {
+  assert.equal(
+    buildCrmDocumentFolderName({ firstName: "Helen Hengya", lastName: "Zhou", livedName: "Helen Hengya Zhou" }),
+    "Zhou, Helen H. EID",
+  );
+  assert.equal(
+    buildCrmDocumentFolderName({ firstName: "Victoria Ziling", lastName: "Yin", livedName: "Linda Yin" }),
+    "Yin, Victoria (Linda) Z. EID",
+  );
+  assert.equal(
+    buildCrmDocumentFolderName({ firstName: "Proudman Yuheng", lastName: "Chen", livedName: "Proudman Yuheng Chen" }),
+    "Chen, Proudman Y. EID",
   );
 });
 
@@ -151,17 +189,17 @@ test("isCrmPdfResponse rejects HTTP 200 html bodies", () => {
   );
 });
 
-test("buildCrmDocumentFolderName title-cases ALL-CAPS CRM records", () => {
+test("buildCrmDocumentFolderName title-cases ALL-CAPS CRM records and formats middle initial", () => {
   // CRM stores some records fully capitalised. The folder/zip name must look
-  // the same either way — `Alnasser, Ali Anwar EID`, never `ALNASSER, ALI ...`.
+  // the same either way — `Alnasser, Ali A. EID`, never `ALNASSER, ALI ...`.
   assert.equal(
     buildCrmDocumentFolderName({ firstName: "ALI", lastName: "ALNASSER", middleName: "ANWAR" }),
-    "Alnasser, Ali Anwar EID",
+    "Alnasser, Ali A. EID",
   );
   // ...and an already well-cased record is unchanged (idempotent).
   assert.equal(
     buildCrmDocumentFolderName({ firstName: "Jaden", lastName: "Campos", middleName: "Everhett" }),
-    "Campos, Jaden Everhett EID",
+    "Campos, Jaden E. EID",
   );
 });
 
@@ -176,7 +214,7 @@ test("buildCrmDocumentFolderName title-cases across hyphens, apostrophes, and mu
       lastName: "SALAS NEVAREZ",
       livedName: "VEE SALAS",
     }),
-    "Salas Nevarez, Vee (Vee Salas) EID",
+    "Salas Nevarez, Vee EID",
   );
 });
 

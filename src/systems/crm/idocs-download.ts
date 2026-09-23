@@ -7,12 +7,35 @@ import { PATHS } from "../../config.js";
 import { log } from "../../utils/log.js";
 import { tryRegisterDownloadedFile } from "../../tracker/files/register-download.js";
 import { titleCasePersonToken } from "../../domain/identity/person-name.js";
+import { idocsViewer } from "./selectors.js";
 
 const IDOCS_VIEWER_HOST = "crickportal-ext.bfs.ucsd.edu";
 const IDOCS_VIEWER_PATH = "/iDocsForSalesforce/Content/pdfjs/web/PDFjsViewer.aspx";
 const IDOCS_DOC_PATH = "/iDocsForSalesforce/iDocsForSalesforceDocumentServer";
 
 export const DEFAULT_CRM_DOC_INDICES = [0, 2] as const;
+
+/**
+ * Resolves the default CRM document indices to download based on the total number
+ * of documents on the record (`totalDocs`).
+ *
+ * Doc 1 (index 0) is the Signed Offer Letter.
+ * Doc 3 (index 2) is the EE Data Gathering Form.
+ *
+ * When totalDocs is 9 ("Doc: X of 9"), both the Signed Offer Letter and
+ * the EE Data Gathering Form are downloaded ([0, 2]).
+ * When totalDocs is 5 ("Doc: X of 5", or any count other than 9), the EE Data
+ * Gathering Form is skipped and only the Signed Offer Letter ([0]) is downloaded.
+ */
+export function resolveDefaultCrmDocIndices(totalDocs?: number): readonly number[] {
+  if (totalDocs === 9) {
+    return DEFAULT_CRM_DOC_INDICES;
+  }
+  if (totalDocs !== undefined && totalDocs > 0) {
+    return [0];
+  }
+  return DEFAULT_CRM_DOC_INDICES;
+}
 
 /**
  * Position-based default names for the CRM onboarding documents. The iDocs
@@ -88,23 +111,50 @@ export interface CrmIdocsViewerInfo {
 
 /**
  * The per-person onboarding folder NAME (no directory), formatted as
- * `Last, First (Lived) Middle EID`. The lived-name parenthetical and the
- * middle name are each included only when present. "EID" is a literal trailing
- * token (the operator's onboarding-folder convention), NOT the numeric employee
- * id — a pre-hire often has none yet.
+ * `LastName, FirstName (LivedFirstName) MiddleInitial. EID`. The lived-first-name
+ * parenthetical is included only when it differs from the legal first name.
+ * The middle initial is followed by a period and included only when middle name exists.
+ * "EID" is a literal trailing token.
  */
 export function buildCrmDocumentFolderName(subject: CrmDocumentDownloadSubject): string {
   // CRM stores some records fully capitalised ("ALI ALNASSER") and others in
   // ordinary case ("Jaden Campos"), so the raw values produce inconsistent
-  // folder names. Title-case every name component so the output is uniform —
-  // `Alnasser, Ali Anwar EID`, never `ALNASSER, ALI ANWAR EID` (2026-08-18).
+  // folder names. Title-case every name component so the output is uniform.
   const tc = (value: string): string =>
     value.trim().split(/\s+/).filter(Boolean).map(titleCasePersonToken).join(" ");
-  const livedRaw = subject.livedName?.trim();
-  const middleRaw = subject.middleName?.trim();
-  const lived = livedRaw ? ` (${tc(livedRaw)})` : "";
-  const middle = middleRaw ? ` ${tc(middleRaw)}` : "";
-  const raw = `${tc(subject.lastName)}, ${tc(subject.firstName)}${lived}${middle} EID`;
+  const last = tc(subject.lastName);
+
+  let rawFirst = subject.firstName.trim();
+  let rawMiddle = (subject.middleName ?? "").trim();
+  if (!rawMiddle && rawFirst.includes(" ")) {
+    const parts = rawFirst.split(/\s+/).filter(Boolean);
+    if (parts.length > 1) {
+      rawFirst = parts[0];
+      rawMiddle = parts.slice(1).join(" ");
+    }
+  }
+  const first = tc(rawFirst);
+
+  // Lived first name is included parenthetically only when it differs from legal first name
+  let livedStr = "";
+  if (subject.livedName && subject.livedName.trim()) {
+    const livedFirst = tc(subject.livedName.trim().split(/\s+/)[0]);
+    if (livedFirst.toLowerCase() !== first.toLowerCase() && livedFirst.length > 0) {
+      livedStr = ` (${livedFirst})`;
+    }
+  }
+
+  // Middle initial with a trailing period (e.g. " M.")
+  let middleStr = "";
+  if (rawMiddle) {
+    const m = rawMiddle.replace(/\.+$/, "");
+    const initial = m.charAt(0).toUpperCase();
+    if (initial) {
+      middleStr = ` ${initial}.`;
+    }
+  }
+
+  const raw = `${last}, ${first}${livedStr}${middleStr} EID`;
   return sanitizeOnboardingFolderName(raw);
 }
 
@@ -184,7 +234,16 @@ async function findCrmIdocsViewerInfo(page: Page, timeoutMs = 30_000): Promise<C
     if (frame) {
       const url = new URL(frame.url());
       const hash = url.searchParams.get("h");
-      const count = Number(url.searchParams.get("c") ?? "0");
+      let count = Number(url.searchParams.get("c") ?? "0");
+      if (!count || Number.isNaN(count)) {
+        try {
+          const numDocsText = await idocsViewer.numDocs(frame).textContent({ timeout: 1000 });
+          const match = numDocsText?.match(/\d+/);
+          if (match) count = Number(match[0]);
+        } catch {
+          // ignore DOM fallback error
+        }
+      }
       if (hash) return { hash, totalDocs: count };
     }
     await page.waitForTimeout(500);
@@ -356,7 +415,10 @@ export async function downloadCrmIdocsDocuments(
 ): Promise<DownloadedCrmDocument[]> {
   const p = options.logPrefix;
   const msg = (s: string) => (p ? `${p} ${s}` : s);
-  const indices = options.docIndices ?? DEFAULT_CRM_DOC_INDICES;
+  let indices = options.docIndices;
+  if (!indices && options.viewerInfo) {
+    indices = resolveDefaultCrmDocIndices(options.viewerInfo.totalDocs);
+  }
 
   // Already-done check. A completed download is the per-person FOLDER holding
   // every expected PDF (checked below). A sibling `.zip` is the 2026-08-18 →
@@ -367,10 +429,11 @@ export async function downloadCrmIdocsDocuments(
     return [];
   }
 
-  if (existsSync(folderPath)) {
+  const checkExisting = (idxList: readonly number[]): DownloadedCrmDocument[] | null => {
+    if (!existsSync(folderPath)) return null;
     const entries = readdirSync(folderPath);
     const found: DownloadedCrmDocument[] = [];
-    for (const idx of indices) {
+    for (const idx of idxList) {
       const expected = CRM_DOC_DEFAULT_NAMES[idx] ? `${CRM_DOC_DEFAULT_NAMES[idx]}.pdf` : null;
       const match = expected
         ? entries.find((f) => f === expected)
@@ -384,10 +447,16 @@ export async function downloadCrmIdocsDocuments(
         bytes: statSync(filePath).size,
       });
     }
-    if (found.length === indices.length) {
-      log.warn(msg(`All ${indices.length} PDFs already on disk -- skipping re-download`));
+    if (found.length === idxList.length) {
+      log.warn(msg(`All ${idxList.length} PDFs already on disk -- skipping re-download`));
       return found;
     }
+    return null;
+  };
+
+  if (indices) {
+    const existing = checkExisting(indices);
+    if (existing) return existing;
   }
 
   await ensureCrmDocumentDownloadFolder(folderPath);
@@ -403,6 +472,12 @@ export async function downloadCrmIdocsDocuments(
     log.step(msg("Locating iDocs PDF viewer for document hash..."));
     ({ hash, totalDocs } = await findCrmIdocsViewerInfo(page));
     log.step(msg(`iDocs viewer ready: totalDocs=${totalDocs}`));
+  }
+
+  if (!indices) {
+    indices = resolveDefaultCrmDocIndices(totalDocs);
+    const existing = checkExisting(indices);
+    if (existing) return existing;
   }
 
   const saved: DownloadedCrmDocument[] = [];
