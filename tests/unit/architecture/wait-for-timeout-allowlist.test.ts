@@ -119,8 +119,8 @@ const ALLOWLIST: CountAllowlist = {
     reason: "PeopleSoft Personal Data page settle waits across its dialogs/rows.",
   },
   "src/systems/ucpath/ss-smart-hr.ts": {
-    count: 8,
-    reason: "PeopleSoft SS Smart HR has no stable completion signal beyond its optional spinner: Process EID's verified name-search + exact-row drill use the same existing 3s/2s settles as the hire search/readback paths.",
+    count: 4,
+    reason: "Hire/termination search and TER drill still settle on the optional PeopleSoft spinner plus a short wait; Process EID and the SS Smart HR search-form entry now wait for the Name box, result row, detail id, or verified no-match banner.",
   },
   "src/systems/ucpath/transaction.ts": {
     count: 19,
