@@ -502,3 +502,48 @@ results). Live batch: 216 EC forms, 208 filed.
 **Fix:** (1) When Save & Submit returns no transaction number, query SS Smart HR via `findTerminationTransactionStatus` by employee, employment record, position, and effective date to recover and verify the receipt and reuse the transaction number. (2) `commentsMatchTermination` permits document-reference differences (`Kuali form #<docId>.`) only after proving all substantive details (effective date, LDW, leave clauses) match, linking duplicate requests to the existing transaction. (3) In `findExistingTerminationForJob`, filter rows by `targetDate` before drill-in, support direct-form and record chooser paths, and surface unexpected dialogs with `readPeopleSoftDialogText`.
 
 **Tags:** separations, receipt-recovery, duplicate-kuali, comments, smart-hr, filter-date, dialog-text
+
+## 2026-09-16 — Sequential SS Smart HR lookups must reuse the Name box, not the NUI_FRAMEWORK URL
+
+**Tried:** Process EID called `navigateToSsSmartHrTransactions` for every roster person, then settled each Name search with `waitForTimeout(3_000)` plus a swallowed `networkidle` (10–15s). The skip idea copied Workforce Job Summary's URL check.
+
+**Failed because:** Search, results grid, and auto-opened Transaction Details all keep the same HR-Tasks shell URL (`PT_AGSTARTPAGE_NUI.GBL`). A URL skip would leave the next person on a detail page with no Name box. PeopleSoft also rarely reaches network idle, so the swallowed idle wait commonly sat out the full timeout after the spinner was already gone. Live: a verified no-match banner appeared in 832ms; Return to Search restored the Name box from Hao Sun's auto-opened detail in 1.3s — and put `T001075636` back in Transaction ID even though Name was empty. The next person's Name search would AND-filter against that leftover T-id.
+
+**Fix:** `decideSsSmartHrSearchNavigation` skips only when the Name box is visible, clicks Return to Search when a prior lookup left Transaction Details open, and otherwise does the sidebar drill. Skip and Return to Search both click Clear before the next fill. Process EID then waits for detail Transaction ID, a `trPTS_CFG_CL_STD_RSL` row, or "No matching values were found" — never swallowed idle.
+
+**Tags:** ss-smart-hr, process-eid, skip-nav, return-to-search, networkidle, name-search, sequential, live-verified
+
+**Selector:** `ucpath.ssSmartHRTransactions.nameInput`, `ucpath.ssSmartHRTransactions.returnToSearchButton`, `ucpath.ssSmartHRTransactions.searchResultRows`, `ucpath.ssSmartHRTransactions.noMatchingValuesMessage`, `ucpath.ssSmartHRTransactions.clearButton`
+
+**References:** `src/systems/ucpath/LESSONS.md` 2026-06-22 ISS-B02 (Job Summary search-box skip); `src/systems/ucpath/ss-smart-hr.ts` (`decideSsSmartHrSearchNavigation`)
+
+## 2026-09-16 — A roster's transaction number is not evidence of WHOSE transaction it is
+
+**Tried:** Process EID keyed its lookup on the roster's Lived Name and used the roster's transaction number only as a filter on the results: search the name, require that exact T-id, read the routing strip's EID. Reading the EID was treated as the whole job.
+
+**Failed because:** The name is the weak key and the transaction number is the strong one, so this was inverted — a name search cannot separate two people who share a name, and a roster lived name frequently is not the name UCPath holds (`Rita Li` vs legal `Guangyi Li`, `Chris Campos` vs `Christopher Campos`). Worse, filtering by T-id makes a WRONG T-id look like "no transaction yet" rather than a data defect. Live on the operator's Sept-28 CSV, five rows carried a transaction number belonging to a different person entirely — `T002236424` is Michael Skaria (not Chaz Adams), `T002236428` is Stephen Kuo (not sanya dhir), `T002236431` is Tiffany Vo, `T002236500` is Helen Hengya Zhou, `T002237975` is Eryn Rataj — and a sixth number, `T002236430` (really Riley Lah), was listed against two roster rows at once. A block of T-ids had been pasted onto the wrong rows. Both were independently confirmed: the same T-ids resolve to those same names in the morning's name-keyed run.
+
+**Fix:** Search the Transaction ID box (`findTransactionEidByTransactionId`), then PROVE the row: read UCPath's own Hire Details name off `a[id^="NAME$"]` (refusing a multi-hire grid rather than reading row 0) and compare it against both roster spellings via `verifyUcpathTransactionName`. `same`/`similar` (one edit) is proof and is reported as the `Name Match` field; `different` against both fails the row with both names and records NO EID. Roster-side, a repeated transaction number fails only its own rows (`rosterConflict`, thrown before any search) so the other rows in the run still execute.
+
+**Tags:** ss-smart-hr, process-eid, transaction-id, name-verification, identity-proof, roster-defect, fail-loud, live-verified
+
+**Selector:** `ucpath.ssSmartHRTransactions.txnNumberTextbox`, `ucpath.ssSmartHRTransactions.transactionDetailHireNames`
+
+**References:** `src/workflows/process-eid/CLAUDE.md`; `src/workflows/process-eid/name-match.ts`; `src/systems/ucpath/LESSONS.md` 2026-09-16 (sequential Name-box reuse, same workflow)
+
+## 2026-09-17 — Save and Submit can land on "Select an Action" for inactive instances
+
+**Tried:** Polling only error banner / Person Match Found / confirmation OK after Save and Submit on a concurrent (UC_CONC_HIRE) hire; then clicking the Hire choice via `getByRole("radio", { name: /Create a new employee instance…/ })`.
+**Failed because:** (1) When the person already has inactive Employee Instances, UCPath replaces the confirmation with a "Select an Action" page and waits for another Save and Submit — the old poll timed out blind. (2) PeopleSoft does not expose that radio as an accessible name; the role-based click timed out while the option was visibly pre-selected (Juriana Garcia, 2026-09-17).
+**Fix:** `classifySubmitSignals` treats `selectAnActionHeading` as its own signal; `clickSaveAndSubmit` proves the Hire option label is present (`createNewEmployeeInstanceHireOption`), does NOT click the radio, clicks Save and Submit once more, and keeps polling (Person Match can precede this page).
+**Selector:** `smartHR.selectAnActionHeading`, `smartHR.createNewEmployeeInstanceHireOption` in `selectors.ts`
+**Tags:** select-action, inactive-instance, concurrent, rehire, save-submit, submit-poll, accessibility
+
+## 2026-09-18 — SS Smart HR Return to Search must require the transaction receipt id
+
+**Tried:** Treating a visible PeopleSoft "Return to Search" button as proof the prior SS Smart HR Transaction Details page was still open, then clicking it before the next Name search (`decideSsSmartHrSearchNavigation` → `return-to-search`).
+**Failed because:** The button label is shared across Find-an-Existing-Value components. Separations' `transaction-check` runs immediately after Workforce Job Summary detail, which also shows "Return to Search" — with no `#UC_SS_TRANSACT_UC_TRANSACT_ID`. The probe returned true, clicked Job Summary's Return, landed on the Job Summary search form, and timed out waiting for `#UC_SS_TBH_DVW_NAME` (live batch 2026-09-18: 19 of 24 docs failed at transaction-check with that timeout).
+**Fix:** `isSsSmartHrReturnToSearchEligible` requires BOTH the SS receipt marker (`transactionDetailTxnId`) AND the Return button. Job Summary detail → `navigate` (full sidebar drill). Real SS detail (e.g. T002123173) still → `return-to-search`.
+**Selector:** `ucpath.ssSmartHRTransactions.returnToSearchButton`, `ucpath.ssSmartHRTransactions.transactionDetailTxnId`
+**Tags:** ss-smart-hr, return-to-search, job-summary, false-positive, separations, transaction-check, live-verified
+**References:** `src/systems/ucpath/ss-smart-hr.ts` (`isSsSmartHrReturnToSearchEligible`); live Job Summary detail + SS T002123173 on 2026-09-18

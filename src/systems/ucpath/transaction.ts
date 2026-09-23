@@ -197,19 +197,22 @@ export function formatPersonMatchCandidate(c: PersonMatchCandidate): string {
 }
 
 /**
- * Pure per-tick classification of the three submit signals. The error banner
- * wins, then the Person Match Found page, then the confirmation OK marker. The
- * confirmation OK locator (`getByRole("button", { name: "OK" })`) can resolve to
- * unrelated OK-named controls on a busy page, so the named review page must be
- * checked BEFORE the generic success marker. Unit-pinned.
+ * Pure per-tick classification of the submit signals. Priority: error banner,
+ * then Person Match Found, then Select an Action (inactive-instance choice),
+ * then the confirmation OK marker. The confirmation OK locator
+ * (`getByRole("button", { name: "OK" })`) can resolve to unrelated OK-named
+ * controls on a busy page, so named review pages must be checked BEFORE the
+ * generic success marker. Unit-pinned.
  */
 export function classifySubmitSignals(
   errorVisible: boolean,
   personMatchVisible: boolean,
   successVisible: boolean,
-): "error" | "person-match" | "success" | "pending" {
+  selectActionVisible = false,
+): "error" | "person-match" | "select-action" | "success" | "pending" {
   if (errorVisible) return "error";
   if (personMatchVisible) return "person-match";
+  if (selectActionVisible) return "select-action";
   if (successVisible) return "success";
   return "pending";
 }
@@ -685,13 +688,16 @@ export interface PersonalDataInput {
   phone?: string;
   email?: string;
   i9ProfileId?: string;
+  preferredFirstName?: string;
+  preferredLastName?: string;
+  preferredMiddleName?: string;
 }
 
 /**
  * Fill all personal data fields on the Smart HR Transaction form.
  *
  * Fields: legal first/last/middle name, preferred first/last/middle name
- * (mirrored from legal when no lived name supplied), DOB, national ID (SSN),
+ * (uses preferred name if provided, else mirrors legal name), DOB, national ID (SSN),
  * address, phone (Mobile - Personal), email (Home), tracker profile ID.
  */
 export async function fillPersonalData(
@@ -722,22 +728,26 @@ export async function fillPersonalData(
     });
   }
 
-  // --- Preferred / Lived Name (mirror legal names when no lived name available) ---
+  // --- Preferred / Lived Name (uses preferred name if provided, else mirrors legal name) ---
+  const prefFirst = data.preferredFirstName || data.firstName;
+  const prefLast = data.preferredLastName || data.lastName;
+  const prefMiddle = data.preferredMiddleName ?? data.middleName;
+
   log.step("Filling preferred first name...");
-  await safeFill(personalDataSelectors.preferredFirstName(frame), data.firstName, {
+  await safeFill(personalDataSelectors.preferredFirstName(frame), prefFirst, {
     timeout: 10_000,
     label: "ucpath preferred first name",
   });
 
   log.step("Filling preferred last name...");
-  await safeFill(personalDataSelectors.preferredLastName(frame), data.lastName, {
+  await safeFill(personalDataSelectors.preferredLastName(frame), prefLast, {
     timeout: 10_000,
     label: "ucpath preferred last name",
   });
 
-  if (data.middleName) {
+  if (prefMiddle) {
     log.step("Filling preferred middle name...");
-    await safeFill(personalDataSelectors.preferredMiddleName(frame), data.middleName, {
+    await safeFill(personalDataSelectors.preferredMiddleName(frame), prefMiddle, {
       timeout: 10_000,
       label: "ucpath preferred middle name",
     });
@@ -1144,7 +1154,8 @@ export async function fillJobData(
   await page.waitForTimeout(1_000);
   // Blur to trigger PeopleSoft validation
   await page.keyboard.press("Tab");
-  await page.waitForTimeout(2_000);
+  await waitForPeopleSoftProcessing(frame, 15_000).catch(() => {});
+  await page.waitForTimeout(1_500);
 
   log.step("Filling compensation rate...");
   // VERIFIED fill: the Comp Rate Code blur above round-trips and replaces this
@@ -1184,6 +1195,25 @@ export async function fillJobData(
   await fillVerified(page, () => jobDataSelectors.expectedJobEndDateInput(frame), data.expectedJobEndDate, {
     label: "ucpath expected job end date",
   });
+
+  // Verify compensation rate did not get reset by subsequent field round-trips
+  const finalRate = await jobDataSelectors.compensationRateInput(frame).inputValue().catch(() => "");
+  const numFinal = Number(finalRate.replace(/,/g, ""));
+  const numExpected = Number(data.compensationRate.replace(/,/g, ""));
+  if (!Number.isFinite(numFinal) || numFinal !== numExpected) {
+    log.warn(
+      `[fillJobData] Compensation rate was reset (reads "${finalRate}", expected "${data.compensationRate}") — refilling...`,
+    );
+    await fillVerified(page, () => jobDataSelectors.compensationRateInput(frame), data.compensationRate, {
+      label: "ucpath compensation rate (post-check)",
+      settleMs: 2_000,
+      equals: (actual, expected) => {
+        const a = Number(actual.replace(/,/g, ""));
+        const b = Number(expected.replace(/,/g, ""));
+        return Number.isFinite(a) && Number.isFinite(b) && a === b;
+      },
+    });
+  }
 
   log.success("Job Data filled");
 }
@@ -1336,60 +1366,102 @@ export async function clickSaveAndSubmit(
   // poll below (20s cap, the real success marker for this irreversible submit).
   await waitForPeopleSoftProcessing(frame, 30_000);
 
-  // ── "Person Match Found" (Search/Match review) can replace the confirmation ──
-  // Poll the three named signals together: error banner, the Person Match
-  // heading, the confirmation OK. Before 2026-08-20 only the first and last
-  // were watched, so a submit that reached the review page timed out blind.
+  // ── Intermediate submit pages can replace the confirmation ──
+  // Poll named signals together: error banner, Person Match Found, Select an
+  // Action (inactive Employee Instances), then confirmation OK. Before
+  // 2026-08-20 only error + OK were watched (Person Match timed out blind);
+  // 2026-09-17 added Select an Action (Juriana Garcia concurrent hire).
   {
     const personMatchHeading = smartHR.personMatchFoundHeading(frame);
+    const selectActionHeading = smartHR.selectAnActionHeading(frame);
     const errorLoc = smartHR.errorBanner(frame);
     const okLoc = smartHR.confirmationOkButton(frame);
     const deadline = Date.now() + 30_000;
     let signal: ReturnType<typeof classifySubmitSignals> = "pending";
+    let handledSelectAction = false;
     while (Date.now() < deadline) {
       const errorVisible = (await errorLoc.count().catch(() => 0)) > 0;
       const matchVisible = await personMatchHeading.first().isVisible().catch(() => false);
+      const selectVisible = await selectActionHeading.first().isVisible().catch(() => false);
       const okVisible = await okLoc.first().isVisible().catch(() => false);
-      signal = classifySubmitSignals(errorVisible, matchVisible, okVisible);
+      signal = classifySubmitSignals(errorVisible, matchVisible, okVisible, selectVisible);
+      if (signal === "person-match") {
+        const candidates = await readPersonMatchCandidates(frame);
+        log.warn(
+          `[Submit] UCPath raised "Person Match Found" — ${candidates.length} possible person match(es) `
+          + `for ${opts.personName ?? employeeId ?? "<unknown>"}:`,
+        );
+        for (const c of candidates) log.warn(`[Submit]   ${formatPersonMatchCandidate(c)}`);
+        const decision = decidePersonMatchContinue(candidates, opts.hireIdentity ?? {}, opts.notMatchEids ?? []);
+        for (const r of decision.reasons) log.step(`[Submit]   ${r.personId}: ${r.reason}`);
+        if (!decision.proceed) {
+          const unresolved = decision.unresolved.map(formatPersonMatchCandidate).join("; ");
+          const unresolvedEids = decision.unresolved.map((c) => c.personId).join(",");
+          // Nothing is persisted on this page (live 2026-08-20: no Transactions-in-
+          // Progress row after it) — leave it; a re-run recreates the transaction.
+          return {
+            success: false,
+            error:
+              `UCPath raised "Person Match Found" on submit and ${decision.unresolved.length} of `
+              + `${candidates.length} candidate(s) could not be excluded by a hard identifier `
+              + `(DOB month/day or SSN last-4): ${unresolved || "<none>"}. The hire was NOT filed. `
+              + `Review each in UCPath (Person Org Summary); if none is this person, re-run with `
+              + `prefilledData.notMatchEids="${unresolvedEids}" (comma-separated EIDs the operator `
+              + `confirmed are NOT this hire); if one IS this person, this is a rehire — do not file.`,
+          };
+        }
+        log.success(
+          `[Submit] every Person Match candidate is excluded (hard-identifier mismatch or operator-reviewed) `
+          + `— clicking "Not a Match - Continue with Hire".`,
+        );
+        await dismissPeopleSoftModalMask(page);
+        await safeClick(smartHR.personMatchNotAMatchButton(frame), {
+          timeout: 10_000,
+          label: "ucpath person match: not a match - continue with hire",
+        });
+        await waitForPeopleSoftProcessing(frame, 30_000);
+        // Keep polling — Select an Action can follow Person Match on concurrent hires.
+        continue;
+      }
+      if (signal === "select-action") {
+        if (handledSelectAction) {
+          return {
+            success: false,
+            error:
+              `UCPath "Select an Action" page still present after Save and Submit `
+              + `(${opts.personName ?? employeeId ?? "<unknown>"}) — refusing to click again.`,
+          };
+        }
+        handledSelectAction = true;
+        // PeopleSoft does not expose the Hire radio via getByRole("radio")
+        // (live timeout 2026-09-17); the option arrives pre-selected. Prove
+        // the Hire label is on the page, then click Save and Submit again.
+        const hireOption = smartHR.createNewEmployeeInstanceHireOption(frame);
+        const hireVisible = await hireOption.first().isVisible().catch(() => false);
+        if (!hireVisible) {
+          return {
+            success: false,
+            error:
+              `UCPath "Select an Action" page is missing the expected Hire option `
+              + `"Create a new employee instance using Hire as the action." `
+              + `(${opts.personName ?? employeeId ?? "<unknown>"}) — refusing to submit.`,
+          };
+        }
+        log.step(
+          `[Submit] Select an Action (inactive Employee Instances) — `
+          + `Hire option present (pre-selected); clicking Save and Submit again.`,
+        );
+        await dismissPeopleSoftModalMask(page);
+        await waitForSaveEnabled(btn, { timeoutMs: 15_000 });
+        await safeClick(btn, {
+          timeout: 10_000,
+          label: "ucpath save and submit after select an action",
+        });
+        await waitForPeopleSoftProcessing(frame, 30_000);
+        continue;
+      }
       if (signal !== "pending") break;
       await sleep(500);
-    }
-    if (signal === "person-match") {
-      const candidates = await readPersonMatchCandidates(frame);
-      log.warn(
-        `[Submit] UCPath raised "Person Match Found" — ${candidates.length} possible person match(es) `
-        + `for ${opts.personName ?? employeeId ?? "<unknown>"}:`,
-      );
-      for (const c of candidates) log.warn(`[Submit]   ${formatPersonMatchCandidate(c)}`);
-      const decision = decidePersonMatchContinue(candidates, opts.hireIdentity ?? {}, opts.notMatchEids ?? []);
-      for (const r of decision.reasons) log.step(`[Submit]   ${r.personId}: ${r.reason}`);
-      if (!decision.proceed) {
-        const unresolved = decision.unresolved.map(formatPersonMatchCandidate).join("; ");
-        const unresolvedEids = decision.unresolved.map((c) => c.personId).join(",");
-        // Nothing is persisted on this page (live 2026-08-20: no Transactions-in-
-        // Progress row after it) — leave it; a re-run recreates the transaction.
-        return {
-          success: false,
-          error:
-            `UCPath raised "Person Match Found" on submit and ${decision.unresolved.length} of `
-            + `${candidates.length} candidate(s) could not be excluded by a hard identifier `
-            + `(DOB month/day or SSN last-4): ${unresolved || "<none>"}. The hire was NOT filed. `
-            + `Review each in UCPath (Person Org Summary); if none is this person, re-run with `
-            + `prefilledData.notMatchEids="${unresolvedEids}" (comma-separated EIDs the operator `
-            + `confirmed are NOT this hire); if one IS this person, this is a rehire — do not file.`,
-        };
-      }
-      log.success(
-        `[Submit] every Person Match candidate is excluded (hard-identifier mismatch or operator-reviewed) `
-        + `— clicking "Not a Match - Continue with Hire".`,
-      );
-      await dismissPeopleSoftModalMask(page);
-      await safeClick(smartHR.personMatchNotAMatchButton(frame), {
-        timeout: 10_000,
-        label: "ucpath person match: not a match - continue with hire",
-      });
-      await waitForPeopleSoftProcessing(frame, 30_000);
-      // Fall through to the ordinary error-vs-confirmation outcome wait below.
     }
   }
 

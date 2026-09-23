@@ -204,6 +204,31 @@ export const smartHR = {
     f.getByRole("button", { name: "Not a Match - Continue with Hire" }),
 
   /**
+   * "Select an Action" page heading — Save and Submit can land here when the
+   * person already has one or more inactive Employee Instances and UCPath
+   * requires an explicit hire-action choice before filing. Live 2026-09-17
+   * (Juriana Garcia concurrent hire: warning "inactive Employee Instances",
+   * Hire option already selected, Save and Submit again to proceed). Without
+   * this signal the submit poll timed out blind.
+   * verified 2026-09-17
+   * @tags select-action, inactive-instance, heading, submit, smart-hr
+   */
+  selectAnActionHeading: (f: FrameLocator): Locator =>
+    f.getByText("Select an Action", { exact: true }),
+
+  /**
+   * Hire-option label on the Select an Action page — PeopleSoft does NOT
+   * expose this control as an accessible `radio` name (live click via
+   * getByRole("radio", …) timed out 2026-09-17 while the option was visibly
+   * selected). Presence of this exact label proves the Hire choice is on
+   * the page; the radio arrives pre-selected, so handlers click Save and
+   * Submit without touching the radio. verified 2026-09-17
+   * @tags select-action, hire, option, submit, smart-hr
+   */
+  createNewEmployeeInstanceHireOption: (f: FrameLocator): Locator =>
+    f.getByText("Create a new employee instance using Hire as the action.", { exact: true }),
+
+  /**
    * "Possible Person Matches" grid rows on the Person Match Found page — every
    * data row carries a "Select" button in its first cell; header cells name the
    * columns (Person ID / Legal First Name / Legal Last Name / National ID /
@@ -686,6 +711,30 @@ export const jobSummary = {
       .locator('span[id*="PTS_CFG_CL_RSLT_NUI_SRCH13"]')
       .or(row.locator('td:has-text("Terminated")'))
       .or(row.locator('span:has-text("Terminated")'))
+      .first(),
+
+  /**
+   * Employment Record cell inside a single result row.
+   * On the live Fluid grid this is column 1 (span `PTS_CFG_CL_RSLT_NUI_SRCH1`).
+   * verified 2026-09-23
+   * @tags multi-row, empl-record, cell, fluid, job-summary
+   */
+  rowEmplRecordCell: (row: Locator): Locator =>
+    row
+      .locator('span[id*="PTS_CFG_CL_RSLT_NUI_SRCH1"]')
+      .or(row.locator("td").nth(1))
+      .first(),
+
+  /**
+   * Job Code cell inside a single result row.
+   * On the live Fluid grid this is column 11 (span `PTS_CFG_CL_RSLT_NUI_SRCH11`).
+   * verified 2026-09-23
+   * @tags multi-row, job-code, cell, fluid, job-summary
+   */
+  rowJobCodeCell: (row: Locator): Locator =>
+    row
+      .locator('span[id*="PTS_CFG_CL_RSLT_NUI_SRCH11"]')
+      .or(row.locator("td").nth(11))
       .first(),
 
   /**
@@ -1491,11 +1540,41 @@ export const ssSmartHRTransactions = {
     f.locator("#PTS_CFG_CL_WRK_PTS_SRCH_BTN"),
 
   /**
-   * Clear search criteria button. verified 2026-04-24
+   * Clear search criteria button. verified 2026-09-16
+   * (live leftover T001075636 after Hao Sun Return to Search)
    * @tags clear, button, ss-smart-hr
    */
   clearButton: (f: FrameLocator): Locator =>
     f.getByRole("button", { name: "Clear", exact: true }),
+
+  /**
+   * Result rows on the SS Smart HR Find-an-Existing-Value grid. Each row's
+   * `onclick` drills into Transaction Details. verified 2026-09-16
+   * (live Hao Sun grid after Return to Search)
+   * @tags result, row, grid, ss-smart-hr
+   */
+  searchResultRows: (f: FrameLocator): Locator =>
+    f.locator('tr[id^="trPTS_CFG_CL_STD_RSL"]'),
+
+  /**
+   * Verified empty-search banner. Absence is not proof of no match; this
+   * text is. verified 2026-09-16 (live "NoSuch ProcessEid 987654")
+   * @tags no-match, empty, search, ss-smart-hr
+   */
+  noMatchingValuesMessage: (root: Page | FrameLocator): Locator =>
+    root.getByText(/No matching values were found/i),
+
+  /**
+   * Return to Search on a Transaction Details page. Restores the Name box
+   * without a full HR-Tasks reload. The label is PeopleSoft-generic (Job
+   * Summary detail has the same button) — callers MUST also require an SS
+   * receipt marker (`transactionDetailTxnId`) before treating this as SS
+   * Smart HR detail (see `isSsSmartHrReturnToSearchEligible`).
+   * verified 2026-09-18 (live Job Summary false-positive + SS T002123173)
+   * @tags return, search, detail, ss-smart-hr
+   */
+  returnToSearchButton: (root: Page | FrameLocator): Locator =>
+    root.getByRole("button", { name: "Return to Search", exact: true }),
 
   /**
    * Drill into a specific transaction from the results grid by its Transaction
@@ -1558,6 +1637,23 @@ export const ssSmartHRTransactions = {
    */
   transactionDetailApprovalStatus: (root: Page | FrameLocator): Locator =>
     root.locator("#UC_SS_TRANSACT_APPR_STATUS"),
+
+  /**
+   * Transaction DETAIL page — the Hire Details grid's Name anchor(s). This is
+   * the name UCPATH holds for the transaction, the only way to prove a
+   * transaction number belongs to the person a roster row claims.
+   *
+   * One anchor PER GRID ROW (`NAME$0`, `NAME$1`, …). A single-hire transaction
+   * renders exactly one; the caller must fail loud on any other count rather
+   * than read row 0 of a multi-hire grid as "the" person. The sibling
+   * `span#NAME$span$0` wrapper is deliberately NOT matched (an `[id^="NAME$"]`
+   * probe returns both nodes per row) — the attribute selector avoids escaping
+   * the `$` a CSS id selector would need.
+   * verified 2026-09-16 (live T002236430 → `a#NAME$0` = "Riley Lah")
+   * @tags transaction, detail, hire, name, grid, anchor, ss-smart-hr
+   */
+  transactionDetailHireNames: (root: Page | FrameLocator): Locator =>
+    root.locator('a[id^="NAME$"]:not([id*="$span$"])'),
 
   /**
    * Transaction DETAIL page — routing strip for one exact transaction, e.g.

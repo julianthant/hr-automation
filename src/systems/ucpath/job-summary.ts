@@ -154,7 +154,11 @@ export async function navigateToWorkforceJobSummary(page: Page): Promise<void> {
  * auto-fallback was removed intentionally; upstream data needs to be
  * corrected rather than silently worked around.
  */
-export async function searchJobSummary(page: Page, emplId: string): Promise<boolean> {
+export async function searchJobSummary(
+  page: Page,
+  emplId: string,
+  opts: { preferredEmplRecord?: string; jobCodeHint?: string } = {},
+): Promise<boolean> {
   const root = await getFormRoot(page);
 
   log.step(`[Job Summary] Searching for Empl ID: ${emplId}`);
@@ -187,7 +191,7 @@ export async function searchJobSummary(page: Page, emplId: string): Promise<bool
   }
   log.success(`[Job Summary] Results loaded for ${emplId}`);
 
-  await ensureJobSummaryDetailPage(page, root, emplId);
+  await ensureJobSummaryDetailPage(page, root, emplId, opts);
   return true;
 }
 
@@ -253,6 +257,7 @@ async function ensureJobSummaryDetailPage(
   page: Page,
   root: Locator,
   emplId: string,
+  opts: { preferredEmplRecord?: string; jobCodeHint?: string } = {},
 ): Promise<void> {
   // Single-result auto-redirect (the common case): already on the detail page.
   if (await waitForDetailPage(page, 3_000)) return;
@@ -264,16 +269,59 @@ async function ensureJobSummaryDetailPage(
   const scopedTotal = await scopedRows.count().catch(() => 0);
   if (scopedTotal > 0) {
     log.step(`[Job Summary] Search-results grid for EID ${emplId} (${scopedTotal} row(s)) — scanning row statuses`);
+
+    // Probe rows in one evaluateAll pass if possible for fast, exact cell extraction
+    const scanned = await scopedRows
+      .evaluateAll((trs) =>
+        trs.map((tr) => {
+          const getSpan = (prefix: string) => {
+            const el = tr.querySelector(`span[id*="${prefix}"]`);
+            return el?.textContent?.trim() ?? "";
+          };
+          const tds = Array.from(tr.querySelectorAll("td")).map((td) =>
+            (td.textContent ?? "").replace(/\s+/g, " ").trim(),
+          );
+          return {
+            status: getSpan("PTS_CFG_CL_RSLT_NUI_SRCH13") || tds[13] || "",
+            emplRecord: getSpan("PTS_CFG_CL_RSLT_NUI_SRCH1") || tds[1] || "",
+            jobCode: getSpan("PTS_CFG_CL_RSLT_NUI_SRCH11") || tds[11] || "",
+          };
+        }),
+      )
+      .catch(() => null);
+
     const statuses: string[] = [];
     const nonTerminated: number[] = [];
+    const rowRecords: string[] = [];
+    const rowJobCodes: string[] = [];
+
     for (let i = 0; i < scopedTotal; i++) {
       const row = scopedRows.nth(i);
-      const statusText = (
-        await jobSummary.rowHrStatusCell(row).textContent({ timeout: 2_000 }).catch(() => "")
-      )?.trim() ?? "";
+      let statusText = scanned?.[i]?.status;
+      if (statusText === undefined || statusText === "") {
+        statusText = (
+          await jobSummary.rowHrStatusCell(row).textContent({ timeout: 2_000 }).catch(() => "")
+        )?.trim() ?? "";
+      }
+      let emplRecord = scanned?.[i]?.emplRecord;
+      if (emplRecord === undefined || emplRecord === "" || !/^\d+$/.test(emplRecord)) {
+        emplRecord = (
+          await jobSummary.rowEmplRecordCell(row).textContent({ timeout: 1_000 }).catch(() => "")
+        )?.trim() ?? "";
+      }
+      let jobCode = scanned?.[i]?.jobCode;
+      if (jobCode === undefined || jobCode === "" || !/^\d{6}$/.test(jobCode)) {
+        jobCode = (
+          await jobSummary.rowJobCodeCell(row).textContent({ timeout: 1_000 }).catch(() => "")
+        )?.trim() ?? "";
+      }
+
       statuses.push(statusText || "unknown");
+      rowRecords.push(emplRecord);
+      rowJobCodes.push(jobCode);
+
       if (/terminat/i.test(statusText)) {
-        log.debug(`[Job Summary] Row ${i + 1}/${scopedTotal} terminated — skipping`);
+        log.debug(`[Job Summary] Row ${i + 1}/${scopedTotal} (record=${emplRecord || "?"}, job=${jobCode || "?"}) terminated — skipping`);
         continue;
       }
       nonTerminated.push(i);
@@ -283,16 +331,47 @@ async function ensureJobSummaryDetailPage(
         `[Job Summary] Multi-row grid for EID ${emplId}: all ${scopedTotal} rows were Terminated — no actionable row to drill into. Verify the EID in Kuali Build, or the employee may already be fully separated.`,
       );
     }
-    if (nonTerminated.length > 1) {
-      throw new Error(
-        `[Job Summary] Multi-row grid for EID ${emplId}: ${nonTerminated.length} non-terminated rows found `
-        + `(concurrent jobs) — row statuses: ${statuses.join(", ")}. Cannot determine which job is being `
-        + `separated without disambiguation; resolve the correct position/job manually before re-running.`,
-      );
+
+    let rowIndex: number;
+    if (nonTerminated.length === 1) {
+      rowIndex = nonTerminated[0];
+    } else {
+      // Disambiguation among multiple non-terminated rows
+      if (opts.preferredEmplRecord !== undefined) {
+        const matches = nonTerminated.filter((idx) => rowRecords[idx] === opts.preferredEmplRecord);
+        if (matches.length === 1) {
+          rowIndex = matches[0];
+          log.step(
+            `[Job Summary] Disambiguated concurrent active jobs for EID ${emplId}: selected row ${rowIndex + 1}/${scopedTotal} with requested Empl Record ${opts.preferredEmplRecord} (job code ${rowJobCodes[rowIndex]})`,
+          );
+        } else {
+          throw new Error(
+            `[Job Summary] Multi-row grid for EID ${emplId}: requested Empl Record '${opts.preferredEmplRecord}' was not found among active rows (active rows: ${nonTerminated.map((idx) => `row ${idx + 1} [Empl Rec ${rowRecords[idx]}, Job ${rowJobCodes[idx]}]`).join(", ")}). Refusing to proceed with wrong job.`,
+          );
+        }
+      } else if (opts.jobCodeHint !== undefined) {
+        const matches = nonTerminated.filter((idx) => rowJobCodes[idx] === opts.jobCodeHint);
+        if (matches.length === 1) {
+          rowIndex = matches[0];
+          log.step(
+            `[Job Summary] Disambiguated concurrent active jobs for EID ${emplId}: selected row ${rowIndex + 1}/${scopedTotal} matching Job Code hint ${opts.jobCodeHint} (Empl Record ${rowRecords[rowIndex]})`,
+          );
+        } else {
+          throw new Error(
+            `[Job Summary] Multi-row grid for EID ${emplId}: ${nonTerminated.length} non-terminated rows found (concurrent jobs) — could not disambiguate with Job Code hint '${opts.jobCodeHint}' (candidates: ${nonTerminated.map((idx) => `row ${idx + 1} [Empl Rec ${rowRecords[idx]}, Job ${rowJobCodes[idx]}]`).join(", ")}). Resolve the correct position/job manually before re-running.`,
+          );
+        }
+      } else {
+        throw new Error(
+          `[Job Summary] Multi-row grid for EID ${emplId}: ${nonTerminated.length} non-terminated rows found `
+          + `(concurrent jobs) — row statuses: ${statuses.join(", ")}. Cannot determine which job is being `
+          + `separated without disambiguation; resolve the correct position/job manually before re-running.`,
+        );
+      }
     }
-    const rowIndex = nonTerminated[0];
+
     const row = scopedRows.nth(rowIndex);
-    log.step(`[Job Summary] Drilling into row ${rowIndex + 1}/${scopedTotal} (status='${statuses[rowIndex]}')`);
+    log.step(`[Job Summary] Drilling into row ${rowIndex + 1}/${scopedTotal} (status='${statuses[rowIndex]}', record='${rowRecords[rowIndex]}', job='${rowJobCodes[rowIndex]}')`);
     await safeClick(jobSummary.rowDrillInLink(row), {
       timeout: 10_000,
       label: "ucpath job summary row drill-in link",
@@ -875,12 +954,19 @@ export async function extractEmployeeName(page: Page): Promise<string> {
 export async function getJobSummaryIdentity(
   page: Page,
   emplId: string,
-  opts: { separationDate?: string; resolveJob?: boolean } = {},
+  opts: {
+    separationDate?: string;
+    resolveJob?: boolean;
+    preferredEmplRecord?: string;
+    jobCodeHint?: string;
+  } = {},
 ): Promise<JobSummaryIdentity> {
   await navigateToWorkforceJobSummary(page);
-  // Search and resolve by EID alone. A Kuali job-code hint may be stale, so it
-  // must never constrain Workforce lookup or reject the resolved job.
-  const found = await searchJobSummary(page, emplId);
+  // Search and resolve by EID. When concurrent active jobs exist, preferredEmplRecord or jobCodeHint disambiguates.
+  const found = await searchJobSummary(page, emplId, {
+    preferredEmplRecord: opts.preferredEmplRecord,
+    jobCodeHint: opts.jobCodeHint,
+  });
   if (!found) {
     return { found: false, name: "", data: null };
   }
@@ -937,6 +1023,11 @@ export async function getJobSummaryIdentity(
     const records = new Set(grids[0].rows.map((row) => row[1]));
     if (records.size !== 1 || !/^\d+$/.test([...records][0])) throw new Error(`Cannot identify one employment record for ${emplId}`);
     emplRecord = [...records][0];
+    if (opts.preferredEmplRecord !== undefined && emplRecord !== opts.preferredEmplRecord) {
+      throw new Error(
+        `Job Summary detail page for ${emplId} resolved Empl Record '${emplRecord}', but requested Empl Record was '${opts.preferredEmplRecord}'`,
+      );
+    }
     if (!workLocation.positionNumber) throw new Error(`No position number for ${emplId}, record ${emplRecord}`);
   }
   return {

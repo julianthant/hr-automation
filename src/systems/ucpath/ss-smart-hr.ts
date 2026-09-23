@@ -329,13 +329,145 @@ export function isWithinSeparationWindow(
 }
 
 /**
+ * Sequential SS Smart HR lookups must not key off the NUI_FRAMEWORK URL.
+ * Search, grid, and auto-opened detail all keep the same shell URL; the
+ * Name box is the only proof the Find-an-Existing-Value form is usable.
+ * A detail page left by the prior person is recovered with Return to Search
+ * instead of a full HR-Tasks reload.
+ *
+ * "Return to Search" alone is NOT enough: Workforce Job Summary (and other
+ * PeopleSoft Find-an-Existing-Value pages) expose the same button label.
+ * Separations' transaction-check runs right after Job Summary detail, so a
+ * bare Return-to-Search check clicked Job Summary's button, landed on the
+ * Job Summary search form, and timed out waiting for `#UC_SS_TBH_DVW_NAME`
+ * (live 2026-09-18, 19 docs). Gate on the SS transaction-detail receipt id.
+ */
+export type SsSmartHrSearchNavAction = "skip" | "return-to-search" | "navigate";
+
+export function decideSsSmartHrSearchNavigation(state: {
+  searchBoxPresent: boolean;
+  returnToSearchPresent: boolean;
+}): SsSmartHrSearchNavAction {
+  if (state.searchBoxPresent) return "skip";
+  if (state.returnToSearchPresent) return "return-to-search";
+  return "navigate";
+}
+
+/**
+ * Pure gate for the async Return-to-Search probe. Both signals required —
+ * a generic PeopleSoft "Return to Search" without the SS receipt is a
+ * different component (Job Summary detail was the live false positive).
+ */
+export function isSsSmartHrReturnToSearchEligible(state: {
+  detailReceiptPresent: boolean;
+  returnToSearchButtonPresent: boolean;
+}): boolean {
+  return state.detailReceiptPresent && state.returnToSearchButtonPresent;
+}
+
+async function ssSmartHrSearchBoxPresent(page: Page): Promise<boolean> {
+  return ssSmartHRTransactions.nameInput(getContentFrame(page)).isVisible().catch(() => false);
+}
+
+async function ssSmartHrDetailReceiptPresent(page: Page): Promise<boolean> {
+  for (const root of [page, getContentFrame(page)] as Array<Page | FrameLocator>) {
+    if (
+      await ssSmartHRTransactions
+        .transactionDetailTxnId(root)
+        .isVisible()
+        .catch(() => false)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function ssSmartHrReturnToSearchButtonPresent(page: Page): Promise<boolean> {
+  for (const root of [getContentFrame(page), page] as Array<Page | FrameLocator>) {
+    if (
+      await ssSmartHRTransactions
+        .returnToSearchButton(root)
+        .isVisible()
+        .catch(() => false)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function ssSmartHrReturnToSearchPresent(page: Page): Promise<boolean> {
+  return isSsSmartHrReturnToSearchEligible({
+    detailReceiptPresent: await ssSmartHrDetailReceiptPresent(page),
+    returnToSearchButtonPresent: await ssSmartHrReturnToSearchButtonPresent(page),
+  });
+}
+
+async function returnToSsSmartHrSearchForm(page: Page): Promise<void> {
+  const frame = getContentFrame(page);
+  const root = (
+    await ssSmartHRTransactions.returnToSearchButton(frame).isVisible().catch(() => false)
+  )
+    ? frame
+    : page;
+  await safeClick(ssSmartHRTransactions.returnToSearchButton(root), {
+    timeout: 10_000,
+    label: "ss smart hr return to search",
+  });
+  await ssSmartHRTransactions.nameInput(getContentFrame(page)).waitFor({
+    state: "visible",
+    timeout: 10_000,
+  });
+}
+
+/**
+ * Auto-opened Transaction Details + Return to Search restores the opened
+ * record's Transaction ID (live Hao Sun T001075636, 2026-09-16), not the
+ * Name that was searched. Filling the next person's Name on top of that
+ * leftover T-id AND-filters the search. Clear before every reused lookup.
+ */
+async function clearSsSmartHrSearchForm(page: Page): Promise<void> {
+  const frame = getContentFrame(page);
+  await safeClick(ssSmartHRTransactions.clearButton(frame), {
+    timeout: 10_000,
+    label: "ss smart hr clear search criteria",
+  });
+  await waitForPeopleSoftProcessing(frame, 10_000);
+  await ssSmartHRTransactions.nameInput(frame).waitFor({
+    state: "visible",
+    timeout: 10_000,
+  });
+}
+
+/**
  * Navigate to the SS Smart HR Transactions search page via the HR Tasks
  * sidebar (Smart HR Templates → SS Smart HR Transactions). Reuses
  * `navigateToSmartHR` to load the HR Tasks shell, then drills into the
  * self-service leaf (the exact-link selector distinguishes it from the plain
- * "Smart HR Transactions" leaf).
+ * "Smart HR Transactions" leaf). Sequential callers skip the reload when the
+ * Name box is already present, or click Return to Search when a prior lookup
+ * left the browser on Transaction Details. Both reuse paths Clear leftover
+ * criteria first: Return to Search after an auto-opened detail restores that
+ * transaction's T-id, which would AND-filter the next Name search.
  */
 export async function navigateToSsSmartHrTransactions(page: Page): Promise<void> {
+  const action = decideSsSmartHrSearchNavigation({
+    searchBoxPresent: await ssSmartHrSearchBoxPresent(page),
+    returnToSearchPresent: await ssSmartHrReturnToSearchPresent(page),
+  });
+  if (action === "skip") {
+    log.step("[SS Smart HR] Already on SS Smart HR search form — clearing leftover criteria");
+    await clearSsSmartHrSearchForm(page);
+    return;
+  }
+  if (action === "return-to-search") {
+    log.step("[SS Smart HR] On transaction detail — returning to search form");
+    await returnToSsSmartHrSearchForm(page);
+    await clearSsSmartHrSearchForm(page);
+    return;
+  }
+
   log.step("[SS Smart HR] Navigating to SS Smart HR Transactions...");
   await navigateToSmartHR(page);
 
@@ -343,17 +475,56 @@ export async function navigateToSsSmartHrTransactions(page: Page): Promise<void>
     timeout: 10_000,
     label: "ucpath smart hr templates sidebar link (ss)",
   });
-  await page.waitForTimeout(1_000);
+  await hrTasks.ssSmartHRTransactionsLink(page).waitFor({
+    state: "visible",
+    timeout: 10_000,
+  });
 
   await safeClick(hrTasks.ssSmartHRTransactionsLink(page), {
     timeout: 10_000,
     label: "ucpath ss smart hr transactions sidebar link",
   });
-  await page.waitForTimeout(3_000);
-  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  await ssSmartHRTransactions.nameInput(getContentFrame(page)).waitFor({
+    state: "visible",
+    timeout: 15_000,
+  });
 
   await collapseSidebar(page);
   log.success("[SS Smart HR] SS Smart HR Transactions page loaded");
+}
+
+/**
+ * After a Name search click, wait for one verified settlement: auto-opened
+ * detail, a results-grid row, or the "No matching values were found" banner.
+ * PeopleSoft rarely goes network-idle, so a swallowed idle wait just burns
+ * 10–15s after the spinner is already gone.
+ */
+async function waitForSsSmartHrNameSearchSettlement(
+  page: Page,
+  frame: FrameLocator,
+): Promise<void> {
+  await waitForPeopleSoftProcessing(frame, 15_000);
+  await ssSmartHRTransactions.transactionDetailTxnId(frame)
+    .or(ssSmartHRTransactions.transactionDetailTxnId(page))
+    .or(ssSmartHRTransactions.searchResultRows(frame).first())
+    .or(ssSmartHRTransactions.noMatchingValuesMessage(frame))
+    .or(ssSmartHRTransactions.noMatchingValuesMessage(page))
+    .first()
+    .waitFor({ state: "visible", timeout: 15_000 });
+}
+
+async function waitForSsSmartHrTransactionDetail(
+  page: Page,
+  frame: FrameLocator,
+  transactionId: string,
+): Promise<void> {
+  await waitForPeopleSoftProcessing(frame, 10_000);
+  await ssSmartHRTransactions.transactionDetailTxnId(frame)
+    .or(ssSmartHRTransactions.transactionDetailTxnId(page))
+    .or(ssSmartHRTransactions.transactionDetailRoutingStrip(frame, transactionId))
+    .or(ssSmartHRTransactions.transactionDetailRoutingStrip(page, transactionId))
+    .first()
+    .waitFor({ state: "visible", timeout: 10_000 });
 }
 
 /**
@@ -537,6 +708,12 @@ export interface TransactionEidLookupResult {
   eid: string;
   approvalStatus: string;
   effectiveDate: string;
+  /**
+   * The name UCPath holds on the transaction's Hire Details grid — the only
+   * evidence that a transaction number belongs to the person who supplied it.
+   * `""` when the transaction was not found.
+   */
+  ucpathName: string;
 }
 
 /** Verified PeopleSoft empty-search message; absence is not proof of no match. */
@@ -664,84 +841,112 @@ async function readTransactionRoutingStrip(
 }
 
 /**
- * Read-only Process EID lookup. Search by the roster's lived name, then require
- * the exact roster transaction number before reading the routing strip's ID.
- * Same-named people and older transactions are never selected by position.
+ * Read UCPath's own name for the open transaction (the "Hire Details" grid's
+ * Name anchor). A single-hire transaction renders exactly one anchor; any other
+ * count is refused rather than read positionally — row 0 of a multi-hire grid is
+ * not "the" person.
+ *
+ * Content frame FIRST: UCPath page-scope content is empty inside the
+ * `#main_target_win0` iframe, so probing the page first only logs a miss.
  */
-export async function findTransactionEidByName(
+async function readTransactionHireName(
   page: Page,
-  opts: { livedName: string; transactionId: string },
+  frame: FrameLocator,
+  transactionId: string,
+): Promise<string> {
+  for (const root of [frame, page] as Array<Page | FrameLocator>) {
+    const locator = ssSmartHRTransactions.transactionDetailHireNames(root);
+    const count = await locator.count();
+    if (count === 0) continue;
+    if (count !== 1) {
+      throw new Error(
+        `Transaction ${transactionId}: expected exactly one Hire Details name, found ${count} — ` +
+        `refusing to read one hire out of a multi-hire transaction`,
+      );
+    }
+    const name = (await locator.innerText({ timeout: 5_000 }))
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!name) {
+      throw new Error(
+        `Transaction ${transactionId}: the Hire Details name is blank on the detail page`,
+      );
+    }
+    return name;
+  }
+  throw new Error(
+    `Transaction ${transactionId}: the Hire Details name did not resolve at content-frame or page scope`,
+  );
+}
+
+/**
+ * Read-only Process EID lookup, keyed on the roster's TRANSACTION NUMBER —
+ * unique in UCPath, unlike a name (2026-09-16, replacing the lived-name search:
+ * a name search cannot distinguish two people who share a name, and a roster
+ * lived name is often not the name UCPath holds).
+ *
+ * Returns UCPath's own transaction name alongside the EID so the CALLER can
+ * prove the transaction belongs to the person who supplied it. This function
+ * deliberately does not judge the name — it reports it.
+ */
+export async function findTransactionEidByTransactionId(
+  page: Page,
+  opts: { transactionId: string },
 ): Promise<TransactionEidLookupResult> {
-  const livedName = opts.livedName.trim();
   const transactionId = opts.transactionId.trim().toUpperCase();
-  if (!livedName) throw new Error("Process EID requires a non-empty lived name");
   if (!SS_TXN_ID_RE.test(transactionId)) {
     throw new Error(`Process EID received invalid transaction number "${opts.transactionId}"`);
   }
+  const notFound: TransactionEidLookupResult = {
+    transactionFound: false,
+    transactionId,
+    eid: "",
+    approvalStatus: "",
+    effectiveDate: "",
+    ucpathName: "",
+  };
 
   await navigateToSsSmartHrTransactions(page);
   const frame = getContentFrame(page);
-  await safeFill(ssSmartHRTransactions.nameInput(frame), livedName, {
+  await safeFill(ssSmartHRTransactions.txnNumberTextbox(frame), transactionId, {
     timeout: 10_000,
-    label: "ss smart hr lived-name input (process eid)",
+    label: "ss smart hr transaction id input (process eid)",
   });
   await safeClick(ssSmartHRTransactions.searchButton(frame), {
     timeout: 10_000,
     label: "ss smart hr search button (process eid)",
   });
-  await page.waitForTimeout(3_000);
-  await waitForPeopleSoftProcessing(frame, 15_000);
-  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+  await waitForSsSmartHrNameSearchSettlement(page, frame);
 
   const outcome = await readSsSmartHrSearchOutcome(page, frame, "Process EID");
   if (outcome.kind === "none") {
+    // A transaction number UCPath does not have is a real outcome (a typo, or a
+    // transaction that was never submitted) — but only the VERIFIED no-match
+    // banner proves it. Anything else means the search did not settle.
     const bodyText = await smartHR.transactionBody(frame).innerText({
       timeout: 5_000,
     });
     if (!isSsSmartHrNoMatchText(bodyText)) {
       throw new Error(
-        `Process EID search for "${livedName}" did not render transaction results, ` +
+        `Process EID search for transaction ${transactionId} did not render transaction results, ` +
         `a transaction detail page, or the verified "No matching values were found" state`,
       );
     }
-    return {
-      transactionFound: false,
-      transactionId,
-      eid: "",
-      approvalStatus: "",
-      effectiveDate: "",
-    };
+    return notFound;
   }
 
   if (outcome.kind === "detail") {
-    if (!outcome.detail || outcome.detail.transactionId !== transactionId) {
-      return {
-        transactionFound: false,
-        transactionId,
-        eid: "",
-        approvalStatus: "",
-        effectiveDate: "",
-      };
-    }
+    if (!outcome.detail || outcome.detail.transactionId !== transactionId) return notFound;
   } else {
     const exactRow = outcome.rows.find(
       (row) => row.transactionId.trim().toUpperCase() === transactionId,
     );
-    if (!exactRow) {
-      return {
-        transactionFound: false,
-        transactionId,
-        eid: "",
-        approvalStatus: "",
-        effectiveDate: "",
-      };
-    }
+    if (!exactRow) return notFound;
     await safeClick(ssSmartHRTransactions.transactionResultRow(frame, transactionId), {
       timeout: 10_000,
       label: "ss smart hr exact transaction row (process eid)",
     });
-    await page.waitForTimeout(2_000);
-    await waitForPeopleSoftProcessing(frame, 10_000);
+    await waitForSsSmartHrTransactionDetail(page, frame, transactionId);
   }
 
   const receipt = await readSsSmartHrReceiptFields(page, frame, transactionId);
@@ -750,9 +955,10 @@ export async function findTransactionEidByName(
       `Transaction ${transactionId}: detail page could not prove its transaction ID and approval status`,
     );
   }
+  const ucpathName = await readTransactionHireName(page, frame, transactionId);
   const routing = await readTransactionRoutingStrip(page, frame, transactionId);
   log.step(
-    `[SS Smart HR] Process EID: name='${livedName}' txn='${transactionId}' ` +
+    `[SS Smart HR] Process EID: txn='${transactionId}' ucpathName='${ucpathName}' ` +
     `status='${receipt.approvalStatus}' eid='${routing.eid || "<pending>"}'`,
   );
   return {
@@ -761,6 +967,7 @@ export async function findTransactionEidByName(
     eid: routing.eid,
     approvalStatus: receipt.approvalStatus,
     effectiveDate: routing.effectiveDate,
+    ucpathName,
   };
 }
 
@@ -1293,7 +1500,12 @@ async function findTerminationForJob(page: Page, eid: string, job: SeparationJob
     }
     candidates = rows.filter(r => r.action.trim() === "TER").map(r => r.transactionId);
   }
-  const openReceipt = async (id: string): Promise<{ status: string; effectiveDate: string }> => {
+  const openReceipt = async (id: string): Promise<{
+    status: string;
+    effectiveDate: string;
+    /** Approved receipt whose Hire Details match, but employee drill-in hit a UCPath system dialog. */
+    drillInFailed?: boolean;
+  }> => {
     await navigateToSsSmartHrTransactions(page);
     await safeFill(ssSmartHRTransactions.txnNumberTextbox(frame), id, { label: "termination receipt number" });
     await safeClick(ssSmartHRTransactions.searchButton(frame), { label: "termination receipt search" });
@@ -1316,6 +1528,18 @@ async function findTerminationForJob(page: Page, eid: string, job: SeparationJob
     const dialogText = await readPeopleSoftDialogText(page);
     if (dialogText) {
       await dismissPeopleSoftDialog(page);
+      // Live 2026-09-18: Approved TERs filed by another initiator (e.g. T002160155)
+      // often raise a generic PeopleSoft "An error occurred…" dialog on the name
+      // link — the job form never opens. Transaction Details already proved
+      // TER + status + effdt; reuse Approved without the form rather than
+      // failing the whole separation (Kuali still needs the existing txn #).
+      if (status === "Approved") {
+        log.warn(
+          `[SS Smart HR] Approved receipt ${id} blocked job-form drill-in (${dialogText}) — ` +
+          `reusing from Transaction Details (effdt ${receiptEffectiveDate})`,
+        );
+        return { status, effectiveDate: receiptEffectiveDate, drillInFailed: true };
+      }
       throw new Error(`UCPath dialog on receipt ${id}: "${dialogText}"`);
     }
     const employmentRecord = smartHR.employmentRecordSelect(frame);
@@ -1327,6 +1551,13 @@ async function findTerminationForJob(page: Page, eid: string, job: SeparationJob
       const postDialog = await readPeopleSoftDialogText(page);
       if (postDialog) {
         await dismissPeopleSoftDialog(page);
+        if (status === "Approved") {
+          log.warn(
+            `[SS Smart HR] Approved receipt ${id} blocked job-form open (${postDialog}) — ` +
+            `reusing from Transaction Details (effdt ${receiptEffectiveDate})`,
+          );
+          return { status, effectiveDate: receiptEffectiveDate, drillInFailed: true };
+        }
         throw new Error(`UCPath dialog on receipt ${id}: "${postDialog}"`);
       }
       throw new Error(
@@ -1342,9 +1573,19 @@ async function findTerminationForJob(page: Page, eid: string, job: SeparationJob
     return { status, effectiveDate: receiptEffectiveDate };
   };
   const matches: TerminationTransactionStatus[] = [];
+  const approvedDetailOnly: TerminationTransactionStatus[] = [];
   for (const id of candidates) {
     const receipt = await openReceipt(id);
     if (!hireEffectiveDateMatches(receipt.effectiveDate, effectiveDate)) continue;
+    if (receipt.drillInFailed) {
+      approvedDetailOnly.push({
+        found: true,
+        transactionId: id,
+        approvalStatus: receipt.status,
+        effectiveDate,
+      });
+      continue;
+    }
     const actual = await readTerminationJob(frame);
     if (actual.eid !== eid) throw new Error(`Receipt ${id} belongs to ${actual.eid}, expected ${eid}`);
     if (!matchesSeparationJob(actual, job)) continue;
@@ -1355,23 +1596,61 @@ async function findTerminationForJob(page: Page, eid: string, job: SeparationJob
     if (receipt.status === "Approved" || receipt.status === "Pending") {
       const commVal = await comments.commentsTextarea(frame).inputValue();
       const initVal = await comments.initiatorCommentsTextarea(frame).inputValue();
-      if (!commentsMatchTermination(commVal, expectedComments) || !commentsMatchTermination(initVal, expectedComments)) {
-        throw new Error(`Termination ${id} has incorrect Comments or Initiator Comments; correct it before reuse`);
+      const commentsOk =
+        commentsMatchTermination(commVal, expectedComments) &&
+        commentsMatchTermination(initVal, expectedComments);
+      if (!commentsOk) {
+        // Pending drafts with wrong comments must not be reused. Approved TERs
+        // filed by another human often use different wording for the same
+        // EID/job/effdt — still reuse (live 2026-09-18 T002206471 / #4693).
+        if (receipt.status === "Pending") {
+          throw new Error(`Termination ${id} has incorrect Comments or Initiator Comments; correct it before reuse`);
+        }
+        log.warn(
+          `[SS Smart HR] Approved receipt ${id} comments differ from this run — ` +
+          `reusing anyway (job + effective date matched)`,
+        );
       }
       matches.push({ found: true, transactionId: id, approvalStatus: receipt.status, effectiveDate });
     } else if (!/^(Denied|Cancelled|Canceled|Refused)$/.test(receipt.status)) {
       throw new Error(`Unrecognized termination status ${receipt.status} for ${id}`);
     }
   }
-  if (matches.length > 1) throw new Error(`Multiple terminations match ${eid}/${job.emplRecord}/${job.positionNumber}/${effectiveDate}: ${matches.map(m => m.transactionId).join(", ")}`);
-  const match = matches[0];
-  if (match && match.transactionId !== candidates.at(-1)) {
+  if (matches.length > 1) {
+    throw new Error(
+      `Multiple terminations match ${eid}/${job.emplRecord}/${job.positionNumber}/${effectiveDate}: ` +
+      `${matches.map((m) => m.transactionId).join(", ")}`,
+    );
+  }
+  // Detail-only Approved reuse is only safe when a single same-effdt TER could
+  // not open its job form — otherwise concurrent jobs could collide.
+  if (!matches.length && approvedDetailOnly.length > 1) {
+    throw new Error(
+      `Multiple Approved terminations match ${eid}/${effectiveDate} but none opened a job form ` +
+      `(${approvedDetailOnly.map((m) => m.transactionId).join(", ")}); resolve manually`,
+    );
+  }
+  const match = matches[0] ?? (approvedDetailOnly.length === 1 ? approvedDetailOnly[0] : undefined);
+  const matchFromJobForm = Boolean(matches[0] && match && matches[0].transactionId === match.transactionId);
+  if (matchFromJobForm && match && match.transactionId !== candidates.at(-1)) {
     const receipt = await openReceipt(match.transactionId);
+    if (receipt.drillInFailed) {
+      throw new Error(`Termination ${match.transactionId} could not reopen its job form while restoring its audit receipt`);
+    }
     const actual = await readTerminationJob(frame);
     const commVal = await comments.commentsTextarea(frame).inputValue();
     const initVal = await comments.initiatorCommentsTextarea(frame).inputValue();
-    if (receipt.status !== match.approvalStatus || !hireEffectiveDateMatches(receipt.effectiveDate, effectiveDate) || actual.eid !== eid || actual.effectiveDate !== effectiveDate || !matchesSeparationJob(actual, job)
-      || !commentsMatchTermination(commVal, expectedComments) || !commentsMatchTermination(initVal, expectedComments)) {
+    const commentsOk =
+      commentsMatchTermination(commVal, expectedComments) &&
+      commentsMatchTermination(initVal, expectedComments);
+    if (
+      receipt.status !== match.approvalStatus ||
+      !hireEffectiveDateMatches(receipt.effectiveDate, effectiveDate) ||
+      actual.eid !== eid ||
+      actual.effectiveDate !== effectiveDate ||
+      !matchesSeparationJob(actual, job) ||
+      (match.approvalStatus === "Pending" && !commentsOk)
+    ) {
       throw new Error(`Termination ${match.transactionId} changed while restoring its audit receipt`);
     }
   }

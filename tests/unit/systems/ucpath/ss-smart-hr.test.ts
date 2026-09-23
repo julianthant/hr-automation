@@ -16,6 +16,8 @@ import {
   receiptMatchesRequestedTransaction,
   isSsSmartHrNoMatchText,
   parseTransactionRoutingStrip,
+  decideSsSmartHrSearchNavigation,
+  isSsSmartHrReturnToSearchEligible,
 } from "../../../../src/systems/ucpath/ss-smart-hr.js";
 import type { SsSmartHrRow } from "../../../../src/systems/ucpath/ss-smart-hr.js";
 
@@ -509,6 +511,83 @@ describe("isSsSmartHrNoMatchText", () => {
     );
     assert.equal(
       isSsSmartHrNoMatchText("SS Smart HR Transactions Search"),
+      false,
+    );
+  });
+});
+
+describe("decideSsSmartHrSearchNavigation", () => {
+  it("skips the HR-Tasks reload when the Name box is already on screen", () => {
+    assert.equal(
+      decideSsSmartHrSearchNavigation({
+        searchBoxPresent: true,
+        returnToSearchPresent: false,
+      }),
+      "skip",
+    );
+  });
+
+  it("returns to search from a prior person's auto-opened detail page", () => {
+    assert.equal(
+      decideSsSmartHrSearchNavigation({
+        searchBoxPresent: false,
+        returnToSearchPresent: true,
+      }),
+      "return-to-search",
+    );
+  });
+
+  it("navigates when neither the Name box nor Return to Search is present", () => {
+    assert.equal(
+      decideSsSmartHrSearchNavigation({
+        searchBoxPresent: false,
+        returnToSearchPresent: false,
+      }),
+      "navigate",
+    );
+  });
+
+  it("prefers skip when both the Name box and Return to Search exist", () => {
+    assert.equal(
+      decideSsSmartHrSearchNavigation({
+        searchBoxPresent: true,
+        returnToSearchPresent: true,
+      }),
+      "skip",
+    );
+  });
+});
+
+describe("isSsSmartHrReturnToSearchEligible", () => {
+  it("requires BOTH the SS receipt id and the Return to Search button", () => {
+    assert.equal(
+      isSsSmartHrReturnToSearchEligible({
+        detailReceiptPresent: true,
+        returnToSearchButtonPresent: true,
+      }),
+      true,
+    );
+  });
+
+  it("rejects a bare Return to Search (Job Summary detail false positive)", () => {
+    // Live 2026-09-18: Workforce Job Summary detail exposes "Return to Search"
+    // with no #UC_SS_TRANSACT_UC_TRANSACT_ID — treating that as SS Smart HR
+    // detail clicked the wrong button and timed out on the Name box.
+    assert.equal(
+      isSsSmartHrReturnToSearchEligible({
+        detailReceiptPresent: false,
+        returnToSearchButtonPresent: true,
+      }),
+      false,
+    );
+  });
+
+  it("rejects a receipt without Return to Search", () => {
+    assert.equal(
+      isSsSmartHrReturnToSearchEligible({
+        detailReceiptPresent: true,
+        returnToSearchButtonPresent: false,
+      }),
       false,
     );
   });

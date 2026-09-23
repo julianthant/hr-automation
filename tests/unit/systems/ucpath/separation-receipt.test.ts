@@ -6,11 +6,14 @@ vi.resetModules();
 const state = vi.hoisted(() => ({
   search: "", current: "", comments: "canonical", initiator: "canonical", opened: [] as string[],
   wrongId: false, directJobForm: false, receiptEffectiveDate: "09/02/2026", continueClicks: 0,
+  approvalStatus: "Pending", dialogText: "" as string,
 }));
 vi.mock("../../../../src/systems/ucpath/navigate.js", async (original) => ({
   ...await original<typeof import("../../../../src/systems/ucpath/navigate.js")>(),
   navigateToSmartHR: async () => { state.search = ""; state.current = ""; },
   collapseSidebar: async () => {}, waitForPeopleSoftProcessing: async () => {},
+  readPeopleSoftDialogText: async () => state.dialogText,
+  dismissPeopleSoftDialog: async () => { state.dialogText = ""; return true; },
 }));
 vi.mock("../../../../src/systems/common/index.js", async (original) => ({
   ...await original<typeof import("../../../../src/systems/common/index.js")>(),
@@ -42,11 +45,22 @@ vi.mock("../../../../src/systems/ucpath/selectors.js", async (original) => {
     comments: { ...real.comments, commentsTextarea: () => ({ inputValue: async () => state.comments }), initiatorCommentsTextarea: () => ({ inputValue: async () => state.initiator }) },
     ssSmartHRTransactions: {
       ...real.ssSmartHRTransactions,
+      // `navigateToSsSmartHrTransactions` probes these two before deciding to
+      // skip / return-to-search / navigate (2026-09-16 sequential reuse). Both
+      // absent = this stub is on neither the search form nor a detail page, so
+      // the separations path still does the full sidebar drill it asserts.
+      nameInput: () => ({ isVisible: async () => false, waitFor: async () => {} }),
+      returnToSearchButton: () => ({ isVisible: async () => false }),
       emplIdInput: () => ({ fill: async () => {} }),
       txnNumberTextbox: () => ({ fill: async (value: string) => { state.search = value; } }),
       searchButton: () => ({ click: async () => { state.current = state.search; if (state.current) state.opened.push(state.current); } }),
-      transactionDetailTxnId: () => ({ count: async () => state.current ? 1 : 0, innerText: async () => state.wrongId ? "T000000009" : state.current, filter: idle }),
-      transactionDetailApprovalStatus: () => ({ innerText: async () => "Pending" }),
+      transactionDetailTxnId: () => ({
+        count: async () => (state.current ? 1 : 0),
+        innerText: async () => (state.wrongId ? "T000000009" : state.current),
+        isVisible: async () => Boolean(state.current),
+        filter: idle,
+      }),
+      transactionDetailApprovalStatus: () => ({ innerText: async () => state.approvalStatus }),
       detailPersonLink: idle,
     },
   };
@@ -61,7 +75,13 @@ beforeAll(async () => {
 const page = { waitForTimeout: async () => {}, waitForLoadState: async () => {} } as unknown as Page;
 const job = { emplRecord: "0", positionNumber: "41202096", jobCode: "004920" };
 const options = { job, effectiveDate: "09/02/2026", expectedComments: "canonical" };
-beforeEach(() => { Object.assign(state, { search: "", current: "", comments: "canonical", initiator: "canonical", opened: [], wrongId: false, directJobForm: false, receiptEffectiveDate: "09/02/2026", continueClicks: 0 }); });
+beforeEach(() => {
+  Object.assign(state, {
+    search: "", current: "", comments: "canonical", initiator: "canonical", opened: [],
+    wrongId: false, directJobForm: false, receiptEffectiveDate: "09/02/2026", continueClicks: 0,
+    approvalStatus: "Pending", dialogText: "",
+  });
+});
 
 describe("job-scoped SS receipt reuse", () => {
   it("restores the matching receipt after inspecting a different concurrent job", async () => {
@@ -76,6 +96,34 @@ describe("job-scoped SS receipt reuse", () => {
       await assert.rejects(() => findTerminationTransactionStatus(page, "10599318", options), /incorrect Comments or Initiator/);
     });
   }
+  it("reuses an Approved receipt when comments differ (manual initiator)", async () => {
+    state.approvalStatus = "Approved";
+    state.comments = "Student Separation effective 6/13/2026 Reason: Look for another job";
+    state.initiator = "Student Separation effective 6/13/2026 Reason: Look for another job";
+    // Only one grid row so restore-path is not exercised
+    const result = await findTerminationTransactionStatus(page, "10599318", {
+      ...options,
+      expectedComments: "Termination eff 09/02/2026. Last Day Worked 09/01/2026. Kuali form #4671.",
+    });
+    assert.equal(result.found, true);
+    assert.equal(result.transactionId, "T000000001");
+    assert.equal(result.approvalStatus, "Approved");
+  });
+  it("reuses an Approved receipt when job-form drill-in raises a UCPath system dialog", async () => {
+    state.approvalStatus = "Approved";
+    state.dialogText = "An error occurred. Please consult your system log for details.";
+    const result = await findTerminationTransactionStatus(page, "10599318", options);
+    assert.equal(result.found, true);
+    assert.equal(result.transactionId, "T000000001");
+    assert.equal(result.approvalStatus, "Approved");
+  });
+  it("still fails Pending receipts on a UCPath system dialog", async () => {
+    state.dialogText = "An error occurred. Please consult your system log for details.";
+    await assert.rejects(
+      () => findTerminationTransactionStatus(page, "10599318", options),
+      /UCPath dialog on receipt/,
+    );
+  });
   it("rejects a receipt number that changed during navigation", async () => {
     state.wrongId = true;
     await assert.rejects(() => findTerminationTransactionStatus(page, "10599318", options), /Cannot verify termination receipt/);
