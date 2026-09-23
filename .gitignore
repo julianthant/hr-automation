@@ -87,6 +87,9 @@ generated/reports/
 #   .screenshot-verify/    selector verification screenshots
 #   .screenshot-verify-live/  live-workflow verification shots + tracker
 generated/.*/
+# One-off run-output directories (dated audit/batch artifacts, ad-hoc scripts)
+generated/audit-*/
+generated/separations-*/
 
 # OS
 .DS_Store
