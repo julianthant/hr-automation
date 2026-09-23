@@ -9,13 +9,18 @@ import {
 import { loginToUCPath } from "../../infra/auth/login.js";
 import { requireLogin } from "../../infra/auth/require-login.js";
 import {
-  findTransactionEidByName,
+  findTransactionEidByTransactionId,
   type TransactionEidLookupResult,
 } from "../../systems/ucpath/ss-smart-hr.js";
+import {
+  processEidNameMismatchMessage,
+  verifyUcpathTransactionName,
+} from "./name-match.js";
 import { loadProcessEidCandidates } from "./roster.js";
 import {
   ProcessEidInputSchema,
   isProcessEidPersonInput,
+  processEidSheetLabel,
   type ProcessEidInput,
   type ProcessEidPersonInput,
 } from "./schema.js";
@@ -75,7 +80,10 @@ export const processEidWorkflow = defineWorkflow<
   detailFields: [
     { key: "rosterRow", label: "Roster Row" },
     { key: "livedName", label: "Lived Name" },
+    { key: "legalName", label: "Legal Name", conditional: true },
     { key: "transactionId", label: "Transaction" },
+    { key: "ucpathName", label: "UCPath Name", conditional: true },
+    { key: "nameMatch", label: "Name Match", conditional: true },
     { key: "emplId", label: "EID" },
     { key: "eidResult", label: "Result" },
     { key: "approvalStatus", label: "Approval Status", conditional: true },
@@ -87,11 +95,12 @@ export const processEidWorkflow = defineWorkflow<
   operatorSubject: (input) =>
     isProcessEidPersonInput(input)
       ? buildOperatorSubject({ kind: "person", value: input.livedName })
-      : buildOperatorSubject({ kind: "roster", value: input.sheet }),
+      : buildOperatorSubject({ kind: "roster", value: processEidSheetLabel(input) }),
   initialData: (input) =>
     isProcessEidPersonInput(input)
       ? {
           livedName: input.livedName,
+          ...(input.legalName ? { legalName: input.legalName } : {}),
           transactionId: input.transactionId,
           rosterRow: String(input.rosterRow),
           sheet: input.sheet,
@@ -100,15 +109,18 @@ export const processEidWorkflow = defineWorkflow<
           ),
         }
       : {
-          sheet: input.sheet,
+          sheet: processEidSheetLabel(input),
           ...operatorSubjectData(
-            buildOperatorSubject({ kind: "roster", value: input.sheet }),
+            buildOperatorSubject({
+              kind: "roster",
+              value: processEidSheetLabel(input),
+            }),
           ),
         },
   deriveItemId: (input) =>
     isProcessEidPersonInput(input)
       ? `${input.sheet}:${input.rosterRow}:${input.transactionId}`
-      : input.sheet,
+      : processEidSheetLabel(input),
   handler: handleProcessEid,
 });
 
@@ -118,23 +130,34 @@ export async function handleProcessEid(
 ): Promise<void> {
   if (!isProcessEidPersonInput(input)) {
     throw new Error(
-      `Process EID sheet input "${input.sheet}" must be expanded before daemon execution`,
+      `Process EID sheet input "${processEidSheetLabel(input)}" must be expanded before daemon execution`,
     );
   }
   await ctx.step("lookup-eid", async () => {
+    // A roster defect this row cannot be looked up around (a transaction number
+    // shared with another row) fails here, before any UCPath search — the other
+    // rows in the same run are unaffected.
+    if (input.rosterConflict) throw new Error(input.rosterConflict);
+
     const page = await ctx.page("ucpath");
-    const result = await findTransactionEidByName(page, {
-      livedName: input.livedName,
+    const result = await findTransactionEidByTransactionId(page, {
       transactionId: input.transactionId,
     });
     const eidResult = deriveProcessEidResult(result);
+    const verdict = result.transactionFound
+      ? verifyUcpathTransactionName(result.ucpathName, input)
+      : undefined;
+
     ctx.updateData({
       livedName: input.livedName,
+      ...(input.legalName ? { legalName: input.legalName } : {}),
       transactionId: input.transactionId,
       rosterRow: String(input.rosterRow),
       sheet: input.sheet,
-      emplId: result.eid,
-      eidResult,
+      ucpathName: result.ucpathName,
+      ...(verdict ? { nameMatch: verdict.label } : {}),
+      emplId: verdict?.matched ? result.eid : "",
+      eidResult: verdict && !verdict.matched ? "Not found" : eidResult,
       approvalStatus: result.approvalStatus,
       effectiveDate: result.effectiveDate,
     });
@@ -143,6 +166,19 @@ export async function handleProcessEid(
       "processEidScreenshot",
       { systems: ["ucpath"] },
     );
+
+    // Name proof AFTER the screenshot so the mismatch is evidenced, not just
+    // asserted: the operator sees the UCPath page the mismatch was read from.
+    if (verdict && !verdict.matched) {
+      throw new Error(
+        processEidNameMismatchMessage({
+          transactionId: input.transactionId,
+          ucpathName: result.ucpathName,
+          livedName: input.livedName,
+          legalName: input.legalName,
+        }),
+      );
+    }
   });
 }
 
