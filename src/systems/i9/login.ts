@@ -123,31 +123,49 @@ export async function loginToI9(
  * later clicks would otherwise be misdiagnosed downstream with no trail
  * pointing back here.
  */
-async function dismissTrainingNotification(page: Page): Promise<void> {
+export async function dismissTrainingNotification(page: Page): Promise<void> {
+  const isTrainingUrl = page.url().toLowerCase().includes("training");
   const dismissBtn = loginSelectors.dismissNotificationButton(page);
-  const present = await clickIfPresent(dismissBtn, {
-    timeout: 5_000,
-    label: "i9 training dismiss button",
-  });
-  if (!present) {
+
+  if (isTrainingUrl) {
+    try {
+      await dismissBtn.waitFor({ state: "visible", timeout: 10_000 });
+    } catch {
+      // not visible within 10s
+    }
+  }
+
+  const isVisible = await dismissBtn.isVisible().catch(() => false);
+  if (!isVisible && !isTrainingUrl) {
     log.step("No training notification — continuing");
     return;
   }
 
-  log.step("Dismissing training notification...");
-  try {
-    // Confirm the dismiss dialog
-    await safeClick(loginSelectors.confirmYesButton(page), {
-      timeout: 5_000,
-      label: "i9 confirm yes button",
-    });
-    log.step("Training notification dismissed");
+  if (isVisible) {
+    log.step("Dismissing training notification...");
+    try {
+      // Confirm the dismiss dialog
+      await safeClick(dismissBtn, {
+        timeout: 5_000,
+        label: "i9 training dismiss button",
+      });
+      const confirmBtn = loginSelectors.confirmYesButton(page);
+      await confirmBtn.waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
+      await safeClick(confirmBtn, {
+        timeout: 5_000,
+        label: "i9 confirm yes button",
+      });
+      log.step("Training notification dismissed");
 
-    // Wait for dashboard to load
-    await page.waitForURL((url) => url.pathname === "/" || url.search.includes("mobile=false"), { timeout: 10_000 });
-  } catch (err) {
-    log.warn(
-      `I9 training notification was present but dismissal did not complete (confirm click or dashboard navigation failed) — page may still show the modal: ${errorMessage(err)}`,
-    );
+      // Wait for dashboard to load
+      await page.waitForURL(
+        (url) => !url.pathname.toLowerCase().includes("training"),
+        { timeout: 15_000 },
+      );
+    } catch (err) {
+      log.warn(
+        `I9 training notification was present but dismissal did not complete (confirm click or dashboard navigation failed) — page may still show the modal: ${errorMessage(err)}`,
+      );
+    }
   }
 }

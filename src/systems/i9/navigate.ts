@@ -2,6 +2,7 @@ import type { Locator, Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { classifyPlaywrightError } from "../../utils/errors.js";
 import { I9_APP_URL } from "../../config.js";
+import { dismissTrainingNotification } from "./login.js";
 
 /**
  * Force-close every visible Kendo UI window modal on the page. Idempotent.
@@ -51,6 +52,7 @@ export async function closeAllKendoWindows(page: Page): Promise<void> {
 export async function resetI9Page(page: Page): Promise<void> {
   await page.goto(I9_APP_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  await dismissTrainingNotification(page);
   const stale = await page.evaluate(() => document.querySelectorAll(".k-window").length).catch(() => -1);
   if (stale > 0) {
     log.warn(`[I9] ${stale} Kendo window(s) still present after reset navigation`);
