@@ -1377,14 +1377,13 @@ export async function clickSaveAndSubmit(
     const errorLoc = smartHR.errorBanner(frame);
     const okLoc = smartHR.confirmationOkButton(frame);
     const deadline = Date.now() + 30_000;
-    let signal: ReturnType<typeof classifySubmitSignals> = "pending";
     let handledSelectAction = false;
     while (Date.now() < deadline) {
       const errorVisible = (await errorLoc.count().catch(() => 0)) > 0;
       const matchVisible = await personMatchHeading.first().isVisible().catch(() => false);
       const selectVisible = await selectActionHeading.first().isVisible().catch(() => false);
       const okVisible = await okLoc.first().isVisible().catch(() => false);
-      signal = classifySubmitSignals(errorVisible, matchVisible, okVisible, selectVisible);
+      const signal = classifySubmitSignals(errorVisible, matchVisible, okVisible, selectVisible);
       if (signal === "person-match") {
         const candidates = await readPersonMatchCandidates(frame);
         log.warn(

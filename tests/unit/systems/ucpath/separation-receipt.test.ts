@@ -6,7 +6,7 @@ vi.resetModules();
 const state = vi.hoisted(() => ({
   search: "", current: "", comments: "canonical", initiator: "canonical", opened: [] as string[],
   wrongId: false, directJobForm: false, receiptEffectiveDate: "09/02/2026", continueClicks: 0,
-  approvalStatus: "Pending", dialogText: "" as string,
+  approvalStatus: "Pending", dialogText: "",
 }));
 vi.mock("../../../../src/systems/ucpath/navigate.js", async (original) => ({
   ...await original<typeof import("../../../../src/systems/ucpath/navigate.js")>(),
