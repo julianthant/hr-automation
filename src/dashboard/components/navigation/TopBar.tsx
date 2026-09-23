@@ -6,6 +6,7 @@ import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { SearchBar } from "./SearchBar";
 import { NotificationBell } from "./NotificationBell";
+import { SharePointDownloadButton } from "@/components/run-modal/SharePointDownloadButton";
 import type { NotificationEntityRef } from "@/lib/notifications";
 import type { SearchResultRow } from "@/components/shared/types";
 
@@ -48,6 +49,8 @@ interface TopBarProps {
  * Input-run enqueue (`InputRunPanel`) lives in the QueuePanel footer. PDF upload
  * (`TopBarRunButton`) mounts in the queue toolbar beside Retry when enabled for
  * the active workflow; photo Capture is an in-modal method of that Run modal.
+ * The SharePoint roster download sits in the right cluster — it belongs to no
+ * single workflow, so it is reachable from all of them.
  */
 export function TopBar({
   date, onDateChange, availableDates,
@@ -110,6 +113,9 @@ export function TopBar({
 
       {/* ── Failures + date navigator + utility slot — right edge ─ */}
       <div className="flex items-center gap-1 justify-self-end">
+        {/* Roster download — reachable from every workflow, because every
+            roster-backed run reads the file it leaves behind. */}
+        <SharePointDownloadButton />
         {onOpenNotification && failureCounts && (
           <NotificationBell
             failureCounts={failureCounts}
