@@ -92,6 +92,12 @@ describe("EmployeeDataSchema", () => {
     );
   });
 
+  it("normalizes truncated postal code suffix (e.g. 92092-100 -> 92092)", () => {
+    const data = { ...VALID_DATA, postalCode: "92092-100" };
+    const result = validateEmployeeData(data);
+    assert.equal(result.postalCode, "92092");
+  });
+
   it("reports ALL failing field names when multiple fields are missing", () => {
     const data = { ...VALID_DATA };
     const mutable = data as Record<string, string | undefined>;

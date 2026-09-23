@@ -97,6 +97,7 @@ import { runKualiFinalize } from "./steps/kuali-finalize.js";
 const SeparationTerminationInputSchema = z.object({
   docId: z.string().min(1),
   dryRun: z.boolean().optional(),
+  emplRecord: z.string().optional(),
 });
 export type SeparationTerminationInput = z.infer<typeof SeparationTerminationInputSchema>;
 
@@ -558,7 +559,10 @@ export const separationsWorkflow = defineWorkflow({
       // full-8-digit miss). Reads the detail-page NAME on a hit so the name can
       // be compared. Genuine selector/nav failures still throw (fail loud).
       const js = await getJobSummaryIdentity(ucpathPage, kualiData.eid, {
-        separationDate: kualiData.separationDate, resolveJob: true,
+        separationDate: kualiData.separationDate,
+        resolveJob: true,
+        preferredEmplRecord: input.emplRecord,
+        jobCodeHint: kualiData.jobCodeHint,
       });
       jobSummaryFound = js.found;
       jobSummaryName = js.name;
@@ -674,7 +678,10 @@ export const separationsWorkflow = defineWorkflow({
     {
       if (!jobSummaryData) {
         const js = await getJobSummaryIdentity(await ctx.page("ucpath"), kualiData.eid, {
-          separationDate: kualiData.separationDate, resolveJob: true,
+          separationDate: kualiData.separationDate,
+          resolveJob: true,
+          preferredEmplRecord: input.emplRecord,
+          jobCodeHint: kualiData.jobCodeHint,
         });
         if (!js.found || !js.data) throw new Error(`Cannot resolve the separation job for ${kualiData.eid}`);
         jobSummaryData = js.data;
@@ -890,6 +897,10 @@ export const separationsWorkflow = defineWorkflow({
         : ` (Kuali LDW — no Kronos override)`),
     );
     const hasLeave = timecard.sickDates.length > 0 || timecard.holidayDates.length > 0;
+    const leaveExtendedSepDate = hasLeave && (
+      (timecard.sickDates.length > 0 && timecard.sickDates[timecard.sickDates.length - 1] === separationDate) ||
+      (timecard.holidayDates.length > 0 && timecard.holidayDates[timecard.holidayDates.length - 1] === separationDate)
+    );
     log.step(
       `[Dates] Separation Date = ${separationDate}` +
       (noTimecardToDeriveFrom
@@ -897,17 +908,21 @@ export const separationsWorkflow = defineWorkflow({
           ? ` (Kuali Separation Date kept as-is — New Kronos not read, no timecard to derive from)`
           : ` (Kuali Separation Date kept as-is — the New Kronos timecard read FAILED, ` +
             `so there is no timecard to derive from; not claiming a Kronos-derived date)`
-        : hasLeave
+        : leaveExtendedSepDate
           ? ` (last day paid — last day worked extended by sick/holiday leave; ` +
             `Kuali had '${kualiData.separationDate}')`
-          : ` (= last day worked, no sick/holiday leave; Kuali had '${kualiData.separationDate}')`) +
+          : ` (= last day worked${hasLeave ? ", leave was on or before separation date" : ", no sick/holiday leave"}; Kuali had '${kualiData.separationDate}')`) +
       (separationDateChanged ? ` — will write back to Kuali` : ` — matches Kuali`),
     );
     log.step(`[Dates] Termination effective date = ${termEffDate} (separation date + 1 day)`);
-    if (hasLeave) {
+    if (leaveExtendedSepDate) {
       log.step(
         `[Dates] Leave from timecard — sick=${timecard.sickDates.length} ` +
         `holiday=${timecard.holidayDates.length} (extends separation date + drives comment clause)`,
+      );
+    } else if (hasLeave) {
+      log.step(
+        `[Dates] Leave from timecard was on or before separation date (${separationDate}) — does not extend separation date or comment clause`,
       );
     }
 
@@ -915,7 +930,11 @@ export const separationsWorkflow = defineWorkflow({
     validateLastDayWorked(separationDate, "Separation Date");
     const finalComments = buildTerminationComments(
       termEffDate, lastDayWorked, docId,
-      { sickDates: timecard.sickDates, holidayDates: timecard.holidayDates },
+      {
+        sickDates: timecard.sickDates,
+        holidayDates: timecard.holidayDates,
+        separationDate,
+      },
     );
     // A copied or saved number is a claim, not proof of this form's job.
     let requestedTransaction = txnNumberPrefilled ? String(prefilled.transactionNumber) : "";

@@ -28,6 +28,25 @@ export interface UcpathTransactionResult {
 }
 
 /**
+ * Whether to re-open Smart HR Transactions before `selectTemplate`.
+ *
+ * `alreadyAtSmartHR` is only trustworthy when the last UCPath navigation
+ * left the browser on the non-SS Smart HR list. An SS Smart HR lookup
+ * (`findTerminationTransactionStatus`) always moves the page onto the
+ * self-service search form — which has no template textbox — so the
+ * create path must navigate again (live 2026-09-18: after the return-to-
+ * search gate fix, every concurrent sep died filling UC_VOL_TERM on the
+ * SS page while logging "Already at Smart HR Transactions").
+ */
+export function decideUcpathTransactionSmartHrNav(state: {
+  alreadyAtSmartHR: boolean;
+  ranSsSmartHrLookup: boolean;
+}): "navigate" | "skip" {
+  if (state.ranSsSmartHrLookup) return "navigate";
+  return state.alreadyAtSmartHR ? "skip" : "navigate";
+}
+
+/**
  * Thrown when UCPath rejects the Empl ID on the "Enter Transaction Details"
  * page: the field renders red, "Continue" never advances, and the downstream
  * comments fill times out on a page that never loaded. We detect that stuck
@@ -109,12 +128,14 @@ export async function runUcpathTransaction(
       return { transactionNumber, submittedWithoutTxnNumber };
     }
 
+    let ranSsSmartHrLookup = false;
     if (job) {
       const ssExisting = await findTerminationTransactionStatus(ucpathPage, kualiData.eid, {
         job,
         effectiveDate: finalTermEffDate,
         expectedComments: finalComments,
       });
+      ranSsSmartHrLookup = true;
       if (ssExisting.found && ssExisting.transactionId) {
         log.warn(`[UCPath Txn] Existing termination transaction #${ssExisting.transactionId} found on SS Smart HR — skipping submit.`);
         transactionNumber = ssExisting.transactionId;
@@ -125,10 +146,13 @@ export async function runUcpathTransaction(
     }
 
     try {
-      // When findExistingTerminationTransaction left the page at Smart HR
-      // Transactions (alreadyAtSmartHR=true), skip the double navigation
-      // (~12s saving per doc). Otherwise navigate from scratch.
-      if (!lookupResult.alreadyAtSmartHR) {
+      // Skip re-nav only when the PRIOR lookup left us on non-SS Smart HR.
+      // An SS lookup (above) always leaves the browser on the SS search form.
+      const smartHrNav = decideUcpathTransactionSmartHrNav({
+        alreadyAtSmartHR: lookupResult.alreadyAtSmartHR,
+        ranSsSmartHrLookup,
+      });
+      if (smartHrNav === "navigate") {
         await navigateToSmartHR(ucpathPage);
         await clickSmartHRTransactions(ucpathPage);
       } else {

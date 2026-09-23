@@ -300,6 +300,11 @@ describe("SeparationInputSchema (separationsWorkflow.config.schema)", () => {
     assert.throws(() => schema.parse({ docId: "", dryRun: true }));
   });
 
+  it("preserves optional emplRecord field for disambiguating concurrent jobs", () => {
+    const parsed = schema.parse({ docId: "4709", emplRecord: "3" }) as { docId: string; emplRecord?: string };
+    assert.equal(parsed.emplRecord, "3");
+  });
+
   it("strips an unknown key — the exact reason dryRun MUST be declared", () => {
     const parsed = schema.parse({ docId: "4131", notAField: true }) as Record<
       string,
