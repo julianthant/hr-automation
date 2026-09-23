@@ -1,7 +1,8 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { extname, join, resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, extname, join, resolve } from "node:path";
 import ExcelJS from "exceljs";
 import { resolveRosterDirs } from "../../services/matching/roster-loader.js";
+import { parseCsv } from "../../utils/csv.js";
 import type {
   ProcessEidPersonInput,
   ProcessEidSheetInput,
@@ -9,12 +10,15 @@ import type {
 
 const ONBOARDING_ROSTER_NAME = /onboarding.*\.xlsx$/i;
 const LIVED_NAME_HEADER = /^lived\s*name$/i;
+const LEGAL_NAME_HEADER = /^legal\s*name$/i;
 const TRANSACTION_HEADER =
   /^(?:ucpath\s*)?transaction\s*(?:number|no\.?|#|id)$/i;
 const EID_HEADER =
   /^(?:ucpath\s*)?(?:employee\s*id|empl\s*id|eid|id)$/i;
 const ASSIGNED_EID = /^\d{5,}$/;
-const EMPTY_EID_LABEL = /^(?:pending|not\s*found|n\/?a|new)$/i;
+const EMPTY_EID_LABEL =
+  /^(?:pending|requested|not\s*found|n\/?a|new)$/i;
+const HEADER_SCAN_ROWS = 20;
 
 function cellText(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -87,8 +91,189 @@ function isMissingEid(value: string, rowNumber: number): boolean {
 }
 
 /**
- * Read one exact date-named worksheet and return only rows with a transaction
- * number but no assigned EID. No roster value is modified.
+ * One roster table, however it was stored: an `.xlsx` worksheet or a `.csv`
+ * file. `cells[n]` is file/sheet row `n + 1`, so every message and every
+ * `rosterRow` the operator sees counts the way the source does.
+ */
+export interface ProcessEidRosterTable {
+  /** Worksheet name, or the CSV's filename — the label rows are grouped under. */
+  label: string;
+  cells: string[][];
+}
+
+/**
+ * Select rows to look up: a transaction number present, an EID column that is
+ * still empty (blank / `Requested` / `Pending` / `New`), and a name to prove
+ * the transaction against. A row whose EID is already filled is never
+ * re-processed.
+ *
+ * Transaction numbers are indexed across EVERY row, not just the unassigned
+ * ones, so a number the roster lists twice is caught even when the other
+ * occurrence is already done. A repeat does NOT abort the whole roster — the
+ * ambiguity belongs to those rows, so each one carries a `rosterConflict` and
+ * fails loud on its own while the unambiguous rows still run.
+ */
+export function extractProcessEidCandidates(
+  table: ProcessEidRosterTable,
+): ProcessEidPersonInput[] {
+  let headerRow = 0;
+  let livedNameColumn = 0;
+  let legalNameColumn = 0;
+  let transactionColumn = 0;
+  let eidColumn = 0;
+  const scanTo = Math.min(HEADER_SCAN_ROWS, table.cells.length);
+  for (let index = 0; index < scanTo; index++) {
+    let rowLivedNameColumn = 0;
+    let rowLegalNameColumn = 0;
+    let rowTransactionColumn = 0;
+    let rowEidColumn = 0;
+    (table.cells[index] ?? []).forEach((text, columnIndex) => {
+      const column = columnIndex + 1;
+      if (LIVED_NAME_HEADER.test(text)) rowLivedNameColumn = column;
+      if (LEGAL_NAME_HEADER.test(text)) rowLegalNameColumn = column;
+      if (TRANSACTION_HEADER.test(text)) rowTransactionColumn = column;
+      if (EID_HEADER.test(text)) rowEidColumn = column;
+    });
+    if (rowLivedNameColumn && rowTransactionColumn && rowEidColumn) {
+      headerRow = index + 1;
+      livedNameColumn = rowLivedNameColumn;
+      legalNameColumn = rowLegalNameColumn;
+      transactionColumn = rowTransactionColumn;
+      eidColumn = rowEidColumn;
+      break;
+    }
+  }
+  if (!headerRow) {
+    throw new Error(
+      `Roster "${table.label}" must contain Lived Name, Transaction Number, and EID/UCPath ID headers in one row`,
+    );
+  }
+
+  const cellAt = (rowNumber: number, column: number): string =>
+    column ? (table.cells[rowNumber - 1]?.[column - 1] ?? "").trim() : "";
+
+  // Pass 1 — index every transaction number in the table, assigned or not.
+  const transactionRows = new Map<string, number[]>();
+  for (let rowNumber = headerRow + 1; rowNumber <= table.cells.length; rowNumber++) {
+    const transactionValue = cellAt(rowNumber, transactionColumn);
+    if (!transactionValue || !/^T/i.test(transactionValue)) continue;
+    if (!/^T\d{4,}$/i.test(transactionValue)) {
+      throw new Error(
+        `Process EID roster row ${rowNumber} has invalid transaction number "${transactionValue}"`,
+      );
+    }
+    const transactionId = transactionValue.toUpperCase();
+    const rows = transactionRows.get(transactionId);
+    if (rows) rows.push(rowNumber);
+    else transactionRows.set(transactionId, [rowNumber]);
+  }
+
+  // Pass 2 — keep only the rows that still need an EID.
+  const candidates: ProcessEidPersonInput[] = [];
+  for (const [transactionId, rows] of transactionRows) {
+    for (const rowNumber of rows) {
+      if (!isMissingEid(cellAt(rowNumber, eidColumn), rowNumber)) continue;
+      const livedName = cellAt(rowNumber, livedNameColumn);
+      const legalName = cellAt(rowNumber, legalNameColumn);
+      if (!livedName && !legalName) {
+        throw new Error(
+          `Process EID roster row ${rowNumber} has transaction ${transactionId} but no Lived Name or Legal Name`,
+        );
+      }
+      // A row with only one name spelling carries only `livedName` — the lived
+      // name is what the roster shows the operator, and a duplicate legal name
+      // adds nothing to search or to proof.
+      const searchName = livedName || legalName;
+      const others = rows.filter((row) => row !== rowNumber);
+      candidates.push({
+        source: "person",
+        livedName: searchName,
+        ...(legalName && legalName !== searchName ? { legalName } : {}),
+        transactionId,
+        sheet: table.label,
+        rosterRow: rowNumber,
+        ...(others.length > 0
+          ? {
+              rosterConflict:
+                `Roster "${table.label}" lists transaction ${transactionId} on rows ` +
+                `${[rowNumber, ...others].sort((a, b) => a - b).join(", ")} — ` +
+                `one transaction cannot belong to two people. Fix the roster before looking this row up.`,
+            }
+          : {}),
+      });
+    }
+  }
+  candidates.sort((a, b) => a.rosterRow - b.rosterRow);
+  if (candidates.length === 0) {
+    throw new Error(
+      `Roster "${table.label}" has no rows with a transaction number and a missing EID`,
+    );
+  }
+  return candidates;
+}
+
+function readCsvTable(rosterPath: string, sheet?: string): ProcessEidRosterTable {
+  if (sheet) {
+    throw new Error(
+      `A .csv roster holds one table, so worksheet "${sheet}" cannot be selected in ${rosterPath}`,
+    );
+  }
+  const cells = parseCsv(readFileSync(rosterPath, "utf8")).map((row) =>
+    row.map((cell) => cell.trim()),
+  );
+  return { label: basename(rosterPath), cells };
+}
+
+async function readXlsxTable(
+  rosterPath: string,
+  sheet?: string,
+): Promise<ProcessEidRosterTable> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(rosterPath);
+  const worksheet = selectWorksheet(workbook, rosterPath, sheet);
+  const cells: string[][] = [];
+  for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber++) {
+    const row = worksheet.getRow(rowNumber);
+    const values: string[] = [];
+    row.eachCell({ includeEmpty: true }, (cell, column) => {
+      values[column - 1] = cellText(cell.value);
+    });
+    cells.push(values);
+  }
+  return { label: worksheet.name, cells };
+}
+
+function selectWorksheet(
+  workbook: ExcelJS.Workbook,
+  rosterPath: string,
+  sheet?: string,
+): ExcelJS.Worksheet {
+  const available = workbook.worksheets.map((ws) => ws.name).join(", ");
+  if (!sheet) {
+    if (workbook.worksheets.length !== 1) {
+      throw new Error(
+        `${rosterPath} has ${workbook.worksheets.length} worksheets, so one must be named. ` +
+        `Available worksheets: ${available || "<none>"}`,
+      );
+    }
+    return workbook.worksheets[0];
+  }
+  const wanted = normalizedSheetName(sheet);
+  const matching = workbook.worksheets.filter(
+    (ws) => normalizedSheetName(ws.name) === wanted,
+  );
+  if (matching.length !== 1) {
+    throw new Error(
+      `Process EID expected exactly one worksheet named "${sheet}", found ${matching.length}. ` +
+      `Available worksheets: ${available || "<none>"}`,
+    );
+  }
+  return matching[0];
+}
+
+/**
+ * Read one roster table — a named `.xlsx` worksheet or a `.csv` file — and
+ * return only the rows that still need an EID. No roster value is modified.
  */
 export async function loadProcessEidCandidates(
   input: ProcessEidSheetInput,
@@ -99,102 +284,22 @@ export async function loadProcessEidCandidates(
     : findLatestProcessEidRosterPath(trackerDir);
   if (!rosterPath) {
     throw new Error(
-      "No local onboarding .xlsx roster was found. Download the onboarding roster first.",
-    );
-  }
-  if (extname(rosterPath).toLowerCase() !== ".xlsx") {
-    throw new Error(
-      `Process EID requires an .xlsx roster with date-named worksheets: ${rosterPath}`,
+      "No local onboarding .xlsx roster was found. Download the onboarding roster first, " +
+      "or start this run with the full path to a roster .xlsx/.csv.",
     );
   }
   if (!existsSync(rosterPath)) {
     throw new Error(`Process EID roster does not exist: ${rosterPath}`);
   }
-
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(rosterPath);
-  const wantedSheet = normalizedSheetName(input.sheet);
-  const matchingSheets = workbook.worksheets.filter(
-    (sheet) => normalizedSheetName(sheet.name) === wantedSheet,
-  );
-  if (matchingSheets.length !== 1) {
-    const available = workbook.worksheets.map((sheet) => sheet.name).join(", ");
+  const extension = extname(rosterPath).toLowerCase();
+  if (extension !== ".xlsx" && extension !== ".csv") {
     throw new Error(
-      `Process EID expected exactly one worksheet named "${input.sheet}", found ${matchingSheets.length}. ` +
-      `Available worksheets: ${available || "<none>"}`,
-    );
-  }
-  const worksheet = matchingSheets[0];
-
-  let headerRow = 0;
-  let livedNameColumn = 0;
-  let transactionColumn = 0;
-  let eidColumn = 0;
-  for (let rowNumber = 1; rowNumber <= Math.min(20, worksheet.rowCount); rowNumber++) {
-    let rowLivedNameColumn = 0;
-    let rowTransactionColumn = 0;
-    let rowEidColumn = 0;
-    worksheet.getRow(rowNumber).eachCell({ includeEmpty: true }, (cell, column) => {
-      const text = cellText(cell.value);
-      if (LIVED_NAME_HEADER.test(text)) rowLivedNameColumn = column;
-      if (TRANSACTION_HEADER.test(text)) rowTransactionColumn = column;
-      if (EID_HEADER.test(text)) rowEidColumn = column;
-    });
-    if (rowLivedNameColumn && rowTransactionColumn && rowEidColumn) {
-      headerRow = rowNumber;
-      livedNameColumn = rowLivedNameColumn;
-      transactionColumn = rowTransactionColumn;
-      eidColumn = rowEidColumn;
-      break;
-    }
-  }
-  if (!headerRow) {
-    throw new Error(
-      `Worksheet "${worksheet.name}" must contain Lived Name, Transaction Number, and EID/UCPath ID headers in one row`,
+      `Process EID reads .xlsx or .csv rosters, not "${extension || "<no extension>"}": ${rosterPath}`,
     );
   }
 
-  const candidates: ProcessEidPersonInput[] = [];
-  const transactionRows = new Map<string, number>();
-  for (let rowNumber = headerRow + 1; rowNumber <= worksheet.rowCount; rowNumber++) {
-    const row = worksheet.getRow(rowNumber);
-    const transactionValue = cellText(row.getCell(transactionColumn).value);
-    if (!transactionValue) continue;
-    if (!/^T/i.test(transactionValue)) continue;
-    if (!/^T\d{4,}$/i.test(transactionValue)) {
-      throw new Error(
-        `Process EID roster row ${rowNumber} has invalid transaction number "${transactionValue}"`,
-      );
-    }
-    if (!isMissingEid(cellText(row.getCell(eidColumn).value), rowNumber)) continue;
-
-    const transactionId = transactionValue.toUpperCase();
-    const priorRow = transactionRows.get(transactionId);
-    if (priorRow !== undefined) {
-      throw new Error(
-        `Worksheet "${worksheet.name}" repeats transaction ${transactionId} on rows ${priorRow} and ${rowNumber}`,
-      );
-    }
-    transactionRows.set(transactionId, rowNumber);
-
-    const livedName = cellText(row.getCell(livedNameColumn).value);
-    if (!livedName) {
-      throw new Error(
-        `Process EID roster row ${rowNumber} has transaction ${transactionId} but no Lived Name`,
-      );
-    }
-    candidates.push({
-      source: "person",
-      livedName,
-      transactionId,
-      sheet: worksheet.name,
-      rosterRow: rowNumber,
-    });
-  }
-  if (candidates.length === 0) {
-    throw new Error(
-      `Worksheet "${worksheet.name}" has no rows with a transaction number and a missing EID`,
-    );
-  }
-  return candidates;
+  const table = extension === ".csv"
+    ? readCsvTable(rosterPath, input.sheet)
+    : await readXlsxTable(rosterPath, input.sheet);
+  return extractProcessEidCandidates(table);
 }

@@ -9,7 +9,13 @@ export {
   ProcessEidInputSchema,
   ProcessEidPersonInputSchema,
   ProcessEidSheetInputSchema,
+  processEidSheetLabel,
 } from "./schema.js";
+export {
+  processEidNameMismatchMessage,
+  verifyUcpathTransactionName,
+} from "./name-match.js";
+export type { ProcessEidNameVerdict } from "./name-match.js";
 export type {
   ProcessEidInput,
   ProcessEidPersonInput,

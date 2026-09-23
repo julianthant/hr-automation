@@ -13,6 +13,7 @@ function lookupResult(
     eid: "",
     approvalStatus: "Pending",
     effectiveDate: "2026-09-28",
+    ucpathName: "Ineza Marekani",
     ...overrides,
   };
 }
@@ -37,6 +38,7 @@ describe("deriveProcessEidResult", () => {
           eid: "",
           approvalStatus: "",
           effectiveDate: "",
+          ucpathName: "",
         }),
       ),
       "Not found",

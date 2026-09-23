@@ -14,6 +14,7 @@
  * workflow-specific backend wiring.
  */
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { loadWorkflow } from "../workflow-loaders.js";
 import { runOptionsToDaemonFlags, type RunOptions } from "../../domain/run-options.js";
 import type { RegisteredWorkflow } from "../kernel/types.js";
@@ -188,6 +189,21 @@ function mergeRuntimeOptions(input: unknown, runtimeOptions: Record<string, unkn
   };
 }
 
+function readHttpRuntimeOptions(
+  input: unknown,
+  index: number,
+): Record<string, unknown> | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const value = (input as { __runtimeOptions?: unknown }).__runtimeOptions;
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(
+      `input ${index + 1} has invalid __runtimeOptions; expected an object`,
+    );
+  }
+  return value as Record<string, unknown>;
+}
+
 /**
  * Full pending-row data for dashboard-sourced enqueue requests. This layers
  * the generic serialized input with the same workflow hooks the kernel uses
@@ -261,26 +277,42 @@ export async function enqueueFromHttp(
   const resolvedTrackerDir = trackerDir ?? DEFAULT_DIR;
   let effectiveInputs = inputs;
   if (wf.config.expandHttpInputs) {
-    const parsedHttpInputs: unknown[] = [];
-    for (const input of inputs) {
-      const { cleaned } = splitPrefilled(input);
-      const result = wf.config.schema.safeParse(cleaned);
-      if (!result.success) {
-        return {
-          ok: false,
-          workflow: workflowName,
-          enqueued: 0,
-          error: `validation failed: ${result.error.message}`,
-        };
-      }
-      parsedHttpInputs.push(result.data);
-    }
     try {
-      effectiveInputs = [
+      const parsedHttpInputs: unknown[] = [];
+      const runtimeOptions = inputs.map(readHttpRuntimeOptions);
+      const sharedRuntimeOptions = runtimeOptions[0];
+      if (
+        runtimeOptions.some(
+          (value) => !isDeepStrictEqual(value, sharedRuntimeOptions),
+        )
+      ) {
+        throw new Error(
+          "all inputs in one expanded HTTP request must use identical __runtimeOptions",
+        );
+      }
+      for (const input of inputs) {
+        const { cleaned } = splitPrefilled(input);
+        const result = wf.config.schema.safeParse(cleaned);
+        if (!result.success) {
+          return {
+            ok: false,
+            workflow: workflowName,
+            enqueued: 0,
+            error: `validation failed: ${result.error.message}`,
+          };
+        }
+        parsedHttpInputs.push(result.data);
+      }
+      const expandedInputs = [
         ...await wf.config.expandHttpInputs(parsedHttpInputs, {
           trackerDir: resolvedTrackerDir,
         }),
       ];
+      effectiveInputs = sharedRuntimeOptions
+        ? expandedInputs.map((input) =>
+            mergeRuntimeOptions(input, sharedRuntimeOptions)
+          )
+        : expandedInputs;
     } catch (err) {
       return {
         ok: false,

@@ -117,7 +117,15 @@ test("enqueueFromHttp expands one Process EID worksheet request into roster memb
 
   const result = await enqueueFromHttp(
     "process-eid",
-    [{ source: "roster-sheet", sheet: "September 14", rosterPath }],
+    [{
+      source: "roster-sheet",
+      sheet: "September 14",
+      rosterPath,
+      __runtimeOptions: {
+        preset: "lookup-only",
+        skipSteps: ["unused-future-step"],
+      },
+    }],
     { trackerDir },
   );
 
@@ -150,11 +158,43 @@ test("enqueueFromHttp expands one Process EID worksheet request into roster memb
     ],
   );
   for (const input of queuedInputs) {
+    const runtimeOptions = input.__runtimeOptions as Record<string, unknown>;
+    assert.equal(runtimeOptions.preset, "lookup-only");
+    assert.deepEqual(runtimeOptions.skipSteps, ["unused-future-step"]);
     assert.equal(
-      (input.__runtimeOptions as Record<string, unknown>).rowShape,
+      runtimeOptions.rowShape,
       "operation-member",
     );
   }
+});
+
+test("enqueueFromHttp rejects conflicting runtime options before expanding inputs", async () => {
+  const result = await enqueueFromHttp(
+    "process-eid",
+    [
+      {
+        source: "person",
+        livedName: "Ineza Marekani",
+        transactionId: "T002235451",
+        sheet: "September 14",
+        rosterRow: 2,
+        __runtimeOptions: { preset: "first" },
+      },
+      {
+        source: "person",
+        livedName: "Hao Sun",
+        transactionId: "T002235452",
+        sheet: "September 14",
+        rosterRow: 3,
+        __runtimeOptions: { preset: "second" },
+      },
+    ],
+    { trackerDir: tempTrackerDir() },
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? "", /identical __runtimeOptions/);
+  assert.equal((await enqueueMock()).mock.calls.length, 0);
 });
 
 test("enqueueFromHttp pre-emits person-lookup input-run batches as batch members", async () => {

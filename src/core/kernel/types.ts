@@ -213,6 +213,8 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
    * Runs only in `enqueueFromHttp`, before operation grouping and pending-row
    * emission. Every returned item is schema-validated again. Direct daemon and
    * delegated enqueues bypass this hook and must already supply concrete items.
+   * Identical HTTP `__runtimeOptions` are copied from the selector request onto
+   * every expanded item; conflicting per-request options fail before enqueue.
    */
   expandHttpInputs?: (
     inputs: readonly TData[],
