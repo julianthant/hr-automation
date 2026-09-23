@@ -263,6 +263,90 @@ describe("buildTerminationComments", () => {
     );
   });
 
+  it("omits holiday clause when holiday pay is strictly before the separation date (#4709 case)", () => {
+    // Angela Perez (#4709): LDW 09/12/2026, Sep 09/12/2026, TermEff 09/13/2026, holiday 09/07/2026.
+    // Holiday pay was 5 days before separation date — does NOT determine/extend separation, so omitted.
+    const result = buildTerminationComments(
+      "09/13/2026",
+      "09/12/2026",
+      "4709",
+      { sickDates: [], holidayDates: ["09/07/2026"], separationDate: "09/12/2026" },
+    );
+    assert.equal(
+      result,
+      "Termination eff 09/13/2026. Last Day Worked 09/12/2026. Kuali form #4709.",
+    );
+  });
+
+  it("omits holiday clause when holiday pay is strictly before separation date without explicit separationDate", () => {
+    // Same case, deriving separationDate from terminationEffDate (09/13/2026 - 1 = 09/12/2026)
+    const result = buildTerminationComments(
+      "09/13/2026",
+      "09/12/2026",
+      "4709",
+      { sickDates: [], holidayDates: ["09/07/2026"] },
+    );
+    assert.equal(
+      result,
+      "Termination eff 09/13/2026. Last Day Worked 09/12/2026. Kuali form #4709.",
+    );
+  });
+
+  it("omits sick clause when sick leave is strictly before the separation date", () => {
+    // LDW 09/12/2026, Sep 09/12/2026, TermEff 09/13/2026, sick 09/05/2026.
+    const result = buildTerminationComments(
+      "09/13/2026",
+      "09/12/2026",
+      "4710",
+      { sickDates: ["09/05/2026"], holidayDates: [] },
+    );
+    assert.equal(
+      result,
+      "Termination eff 09/13/2026. Last Day Worked 09/12/2026. Kuali form #4710.",
+    );
+  });
+
+  it("omits both sick and holiday clauses when both are strictly before the separation date", () => {
+    const result = buildTerminationComments(
+      "09/13/2026",
+      "09/12/2026",
+      "4710",
+      { sickDates: ["09/03/2026"], holidayDates: ["09/07/2026"] },
+    );
+    assert.equal(
+      result,
+      "Termination eff 09/13/2026. Last Day Worked 09/12/2026. Kuali form #4710.",
+    );
+  });
+
+  it("emits only the holiday clause when sick leave is before separation date but holiday is on separation date", () => {
+    // LDW 09/01/2026, sick 09/05/2026, holiday 09/07/2026, Sep 09/07/2026, TermEff 09/08/2026.
+    const result = buildTerminationComments(
+      "09/08/2026",
+      "09/01/2026",
+      "4710",
+      { sickDates: ["09/05/2026"], holidayDates: ["09/07/2026"] },
+    );
+    assert.equal(
+      result,
+      "Termination eff 09/08/2026. Last Day Worked 09/01/2026. Holiday Pay on 09/07/2026. Kuali form #4710.",
+    );
+  });
+
+  it("emits only the sick clause when holiday pay is before separation date but sick leave is on separation date", () => {
+    // LDW 09/01/2026, holiday 09/07/2026, sick 09/10/2026, Sep 09/10/2026, TermEff 09/11/2026.
+    const result = buildTerminationComments(
+      "09/11/2026",
+      "09/01/2026",
+      "4710",
+      { sickDates: ["09/10/2026"], holidayDates: ["09/07/2026"] },
+    );
+    assert.equal(
+      result,
+      "Termination eff 09/11/2026. Last Day Worked 09/01/2026. Sick Leave on 09/10/2026. Kuali form #4710.",
+    );
+  });
+
   it("passes the doc id through verbatim (no trimming or transformation)", () => {
     const result = buildTerminationComments("03/15/2026", "03/14/2026", "DOC-42");
     assert.ok(result.includes("DOC-42"));

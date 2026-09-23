@@ -11,6 +11,7 @@ import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/d
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { isUcpathEmployeeId, parseEidList } from "../../domain/identity/eid.js";
 import { classifyNameSimilarity } from "../../services/matching/match.js";
+import { resolveOnboardingRosterPerson } from "./roster.js";
 import {
   buildIdentityApprovalPauseData,
   identityApprovalStatusExtensions,
@@ -22,6 +23,7 @@ import {
   selectLatestResult,
   navigateToSection,
   ExtractionError,
+  folderSubjectFromLegalLived,
 } from "../../systems/crm/index.js";
 import { TransactionError } from "../../systems/ucpath/types.js";
 import { searchPerson } from "../../systems/ucpath/navigate.js";
@@ -51,6 +53,7 @@ import {
   buildCrmDocumentDownloadPath,
   downloadCrmIdocsDocuments,
   readCrmIdocsViewerInfo,
+  resolveDefaultCrmDocIndices,
   type CrmIdocsViewerInfo,
 } from "../../systems/crm/idocs-download.js";
 import { OnboardingInputSchema } from "./schema.js";
@@ -248,18 +251,37 @@ export const onboardingWorkflow = defineWorkflow({
     let idocsViewerError: string | null = null;
 
     await ctx.step("crm-search", async () => {
-      await ctx.retry(
-        async () => {
-          log.step(`Searching for ${email}...`);
-          await searchByEmail(crmPage, email);
-        },
-        { attempts: 3 },
-      );
+      let crmRecordId =
+        typeof ctx.data.crmRecordId === "string" ? ctx.data.crmRecordId.trim() : "";
+      if (crmRecordId.includes("id=")) {
+        const idMatch = /[?&]id=([^&#]+)/.exec(crmRecordId);
+        if (idMatch?.[1]) {
+          crmRecordId = idMatch[1];
+        }
+      }
 
-      await ctx.retry(
-        () => selectLatestResult(crmPage),
-        { attempts: 3 },
-      );
+      if (crmRecordId) {
+        log.step(`Direct CRM record navigation for id ${crmRecordId}...`);
+        ctx.updateData({ crmRecordId });
+        await crmPage.goto(`https://act-crm.my.site.com/hr/ONB_ViewOnboarding?id=${crmRecordId}`, {
+          waitUntil: "domcontentloaded",
+          timeout: 15_000,
+        });
+        await crmPage.waitForLoadState("networkidle", { timeout: 15_000 });
+      } else {
+        await ctx.retry(
+          async () => {
+            log.step(`Searching for ${email}...`);
+            await searchByEmail(crmPage, email);
+          },
+          { attempts: 3 },
+        );
+
+        await ctx.retry(
+          () => selectLatestResult(crmPage),
+          { attempts: 3 },
+        );
+      }
 
       crmRecordFields = await ctx.retry(
         () => extractRecordPageFields(crmPage),
@@ -348,11 +370,29 @@ export const onboardingWorkflow = defineWorkflow({
     // delegating from onboarding would force a fresh CRM Duo + extra Chromium
     // launch per item (~30-90s wall) since the onboarding daemon's CRM session
     // can't be shared across daemons.
+    //
+    // Folder names use the onboarding-roster Legal vs Lived columns — the same
+    // mapping as crm-doc-download (`folderSubjectFromLegalLived`). CRM First
+    // Name is often the lived name, so naming from extraction produced
+    // `Yu, Cici EID` instead of `Yu, Fangjie (Cici) EID`.
+
+    let rosterPerson: Awaited<ReturnType<typeof resolveOnboardingRosterPerson>> | null = null;
+    const getRosterPerson = async () => {
+      if (rosterPerson) return rosterPerson;
+      rosterPerson = await resolveOnboardingRosterPerson({
+        email,
+        explicitRosterPath: input.rosterPath,
+        parentRunId: ctx.runId,
+        fallbackLastName: data?.lastName,
+      });
+      return rosterPerson;
+    };
 
     await ctx.step("pdf-download", async () => {
       const t0 = Date.now();
       log.debug("[Step: pdf-download] START");
       if (!data) throw new Error("extraction did not produce data");
+      const person = await getRosterPerson();
       try {
         if (!idocsViewerInfo) {
           throw new Error(
@@ -360,12 +400,17 @@ export const onboardingWorkflow = defineWorkflow({
               ?? "iDocs viewer hash was never captured on the CRM record page (crm-search did not run?)",
           );
         }
-        const folderPath = buildCrmDocumentDownloadPath({
-          firstName: data.firstName,
-          lastName: data.lastName,
-          middleName: data.middleName,
-        });
+        const folderPath = buildCrmDocumentDownloadPath(
+          folderSubjectFromLegalLived(person.rawLegalName, person.rawLivedName),
+        );
+        const docIndices = resolveDefaultCrmDocIndices(idocsViewerInfo.totalDocs);
+        if (idocsViewerInfo.totalDocs !== 9) {
+          log.step(
+            `CRM iDocs has ${idocsViewerInfo.totalDocs} doc(s) (not 9) — skipping EE Data Gathering Form, downloading Doc 1 only`,
+          );
+        }
         const saved = await downloadCrmIdocsDocuments(crmPage, folderPath, {
+          docIndices,
           workflow: "onboarding",
           itemId: email,
           runId: ctx.runId,
@@ -373,7 +418,7 @@ export const onboardingWorkflow = defineWorkflow({
           viewerInfo: idocsViewerInfo,
         });
         // The documents stay as a plain folder of PDFs inside the day's folder
-        // (`data/onboarding/<YYYY-MM-DD>/<Last, First Middle EID>/`) — no zip
+        // (`data/onboarding/<YYYY-MM-DD>/<Last, First (Lived) M. EID>/`) — no zip
         // (operator decision 2026-08-20; the 2026-08-18 one-zip-per-person
         // layout is retired). `pdfArchive` keeps its name for older rows /
         // readers but now points at the folder.
@@ -601,6 +646,36 @@ export const onboardingWorkflow = defineWorkflow({
           return "";
         }
 
+        // ── Legal Name Resolution from Onboarding Roster ──
+        // CRM's "First Name" and "Last Name" fields contain the employee's
+        // lived/preferred name in practice, but the I-9 Complete profile requires
+        // the legal name. The onboarding roster spreadsheet carries distinct
+        // "Legal Name" and "Lived Name" columns. Look up the person on the
+        // roster by email to get their authoritative legal name.
+        const person = await getRosterPerson();
+        const i9FirstName = person.legal.firstName;
+        const i9LastName = person.legal.lastName;
+        const i9MiddleName = person.legal.middleName;
+
+        const crmFullName = `${data.firstName} ${data.lastName}`.trim();
+        const i9FullName = `${i9FirstName} ${i9LastName}`.trim();
+        if (crmFullName.toLowerCase() !== i9FullName.toLowerCase()) {
+          log.step(
+            `[i9-creation] Using legal name from roster for I-9: "${i9FullName}" `
+            + `(CRM lived name was: "${crmFullName}")`,
+          );
+        } else {
+          log.step(`[i9-creation] Legal name verified against roster: "${i9FullName}"`);
+        }
+
+        ctx.updateData({
+          i9LegalName: person.rawLegalName,
+          i9LivedName: person.rawLivedName,
+          i9FirstName,
+          i9LastName,
+          ...(i9MiddleName ? { i9MiddleName } : {}),
+        });
+
         // ── SSN that is not really an SSN (2026-08-18) ──
         // A National ID in the 900-999 range is an ITIN or CRM's all-9s
         // "no SSN on file yet" placeholder. It is NOT an SSN: UCPath refuses it
@@ -612,7 +687,7 @@ export const onboardingWorkflow = defineWorkflow({
         const hasNoSsn = !usableSsn;
         if (hasNoSsn && data.ssn) {
           log.warn(
-            `National ID on file for ${data.firstName} ${data.lastName} begins 900-999 (ITIN range / `
+            `National ID on file for ${i9FirstName} ${i9LastName} begins 900-999 (ITIN range / `
             + `"no SSN yet" placeholder) — treating it as NO SSN: the I-9 profile is created with the `
             + `SSN field blank.`,
           );
@@ -646,15 +721,15 @@ export const onboardingWorkflow = defineWorkflow({
                 ssn: usableSsn.replace(/(\d{3})(\d{2})(\d{4})/, "$1-$2-$3"),
               })
             : searchI9Employee(i9Page, {
-                firstName: data!.firstName,
-                lastName: data!.lastName,
+                firstName: i9FirstName,
+                lastName: i9LastName,
               }),
           { attempts: 2 },
         );
         if (!usableSsn) {
           log.step(
-            `No SSN on file — searched I-9 by name instead `
-            + `("${data.firstName} ${data.lastName}"): ${searchResults.length} match(es)`,
+            `No SSN on file — searched I-9 by legal name instead `
+            + `("${i9FirstName} ${i9LastName}"): ${searchResults.length} match(es)`,
           );
         }
 
@@ -681,9 +756,9 @@ export const onboardingWorkflow = defineWorkflow({
         // Save, so an abandoned form leaves nothing behind.
         if (input.dryRun) {
           await fillI9EmployeeProfileWithoutSaving(i9Page, {
-            firstName: data.firstName,
-            middleName: data.middleName,
-            lastName: data.lastName,
+            firstName: i9FirstName,
+            middleName: i9MiddleName,
+            lastName: i9LastName,
             ...(usableSsn ? { ssn: usableSsn } : {}),
             dob: data.dob,
             email: data.email ?? email,
@@ -719,9 +794,9 @@ export const onboardingWorkflow = defineWorkflow({
         // create a duplicate because the authoritative SSN search happened
         // before this call. The next operator retry starts from that search.
         const i9Result = await createI9Employee(i9Page, {
-          firstName: data.firstName,
-          middleName: data.middleName,
-          lastName: data.lastName,
+          firstName: i9FirstName,
+          middleName: i9MiddleName,
+          lastName: i9LastName,
           ...(usableSsn ? { ssn: usableSsn } : {}),
           dob: data.dob,
           email: data.email ?? email,
@@ -753,6 +828,18 @@ export const onboardingWorkflow = defineWorkflow({
       let failedAtStep: string | null = null;
       try {
         if (!data) throw new Error("extraction did not produce data");
+
+        // ── Legal and Lived Names from Onboarding Roster for UCPath ──
+        const person = await getRosterPerson();
+        data = {
+          ...data,
+          firstName: person.legal.firstName,
+          lastName: person.legal.lastName,
+          middleName: person.legal.middleName ?? data.middleName,
+          preferredFirstName: person.preferred.firstName,
+          preferredLastName: person.preferred.lastName,
+          preferredMiddleName: person.preferred.middleName ?? data.middleName,
+        };
 
         const templateId = isRehire ? CONC_HIRE_TEMPLATE_ID : TEMPLATE_ID;
         log.debug(
@@ -812,6 +899,7 @@ export const onboardingWorkflow = defineWorkflow({
             ? buildConcurrentHirePlan(data, ucpathPage, rehireEmplId, {
                 dryRun: input.dryRun === true,
                 onTransactionNumber: (txn) => { submittedTxnNumber = txn; },
+                eidApproved: eidPreApproved,
               })
             : buildTransactionPlan(data, ucpathPage, i9ProfileId, {
                 dryRun: input.dryRun === true,

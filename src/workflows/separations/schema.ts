@@ -97,30 +97,47 @@ export function computeSeparationDate(
  *     present, only the LATEST one is reported (the leave day that actually
  *     determines the separation date) — never both. Holiday wins only when its
  *     latest date is strictly later than the latest sick date; sick wins ties.
- *   - Sick (any count): ` Sick Leave on <latest>.` — the latest sick date only,
- *     never a range. The separation date already extends to the latest sick day
- *     (see `computeSeparationDate`); the comment reports that single relevant day.
- *   - Holiday: 1 → ` Holiday Pay on <d>.`; ≥2 → ` Holiday Pay from <first> to <last>.`
+ *   - If sick leave or holiday pay is strictly before the separation date, it
+ *     did NOT extend the separation date beyond the last day worked — no leave
+ *     clause is emitted.
+ *   - Sick (any count, on/after separation date): ` Sick Leave on <latest>.` —
+ *     the latest sick date only, never a range. The separation date already
+ *     extends to the latest sick day (see `computeSeparationDate`); the comment
+ *     reports that single relevant day.
+ *   - Holiday (on/after separation date): 1 → ` Holiday Pay on <d>.`; ≥2 → ` Holiday Pay from <first> to <last>.`
  */
 export function buildTerminationComments(
   terminationEffDate: string,
   lastDayWorked: string,
   docId: string,
-  leave?: { sickDates?: string[]; holidayDates?: string[] },
+  leave?: { sickDates?: string[]; holidayDates?: string[]; separationDate?: string },
 ): string {
   const sickDates = leave?.sickDates ?? [];
   const holidayDates = leave?.holidayDates ?? [];
 
-  const latestSick = sickDates.length >= 1 ? sickDates[sickDates.length - 1] : null;
-  const latestHoliday = holidayDates.length >= 1 ? holidayDates[holidayDates.length - 1] : null;
+  const sepDate =
+    leave?.separationDate ?? computeSeparationDate(lastDayWorked, sickDates, holidayDates);
+  const sepDateTime = parseDate(sepDate).getTime();
+
+  // If holiday pay or sick leave is strictly before the separation date, it did NOT
+  // determine or extend the separation date — omit the comment clause.
+  const rawLatestSick = sickDates.length >= 1 ? sickDates[sickDates.length - 1] : null;
+  const latestSick =
+    rawLatestSick && parseDate(rawLatestSick).getTime() >= sepDateTime ? rawLatestSick : null;
+
+  const rawLatestHoliday = holidayDates.length >= 1 ? holidayDates[holidayDates.length - 1] : null;
+  const latestHoliday =
+    rawLatestHoliday && parseDate(rawLatestHoliday).getTime() >= sepDateTime ? rawLatestHoliday : null;
 
   const sickClause = latestSick ? ` Sick Leave on ${latestSick}.` : "";
 
   let holidayClause = "";
-  if (holidayDates.length === 1) {
-    holidayClause = ` Holiday Pay on ${holidayDates[0]}.`;
-  } else if (holidayDates.length >= 2) {
-    holidayClause = ` Holiday Pay from ${holidayDates[0]} to ${holidayDates[holidayDates.length - 1]}.`;
+  if (latestHoliday) {
+    if (holidayDates.length === 1) {
+      holidayClause = ` Holiday Pay on ${holidayDates[0]}.`;
+    } else if (holidayDates.length >= 2) {
+      holidayClause = ` Holiday Pay from ${holidayDates[0]} to ${holidayDates[holidayDates.length - 1]}.`;
+    }
   }
 
   // Only ONE leave clause is reported. With BOTH sick leave and holiday pay, keep

@@ -242,6 +242,9 @@ export function buildTransactionPlan(
     firstName: data.firstName,
     lastName: data.lastName,
     middleName: data.middleName,
+    preferredFirstName: data.preferredFirstName,
+    preferredLastName: data.preferredLastName,
+    preferredMiddleName: data.preferredMiddleName,
     dob: data.dob ?? "",
     ssn: ssnDigits,
     address: data.address,
@@ -482,6 +485,8 @@ export function buildConcurrentHirePlan(
     dryRun?: boolean;
     /** Receives the transaction number the SUBMIT itself read back (EID-keyed row). */
     onTransactionNumber?: (txnNumber: string) => void;
+    /** Whether the operator reviewed and approved this specific EID for this person */
+    eidApproved?: boolean;
   } = {},
 ): ActionPlan {
   const expectedName = `${data.firstName} ${data.lastName}`.trim();
@@ -593,12 +598,20 @@ export function buildConcurrentHirePlan(
       const legalName = `${legal.firstName} ${legal.lastName}`.trim();
       const tier = classifyNameSimilarity(expectedName, legalName);
       if (tier === "different") {
-        throw new Error(
-          `Personal Data tab is pre-filled for "${legalName}" (Empl ID ${emplId}), which does NOT match `
-          + `the CRM person "${expectedName}" — refusing to submit a concurrent hire for the wrong person.`,
-        );
+        if (options.eidApproved) {
+          log.step(
+            `[TabWalk] Personal Data loaded — legal name "${legalName}" accepted via operator-approved `
+            + `EID review for Empl ID ${emplId} (CRM expected "${expectedName}"); all 3 tabs visited`,
+          );
+        } else {
+          throw new Error(
+            `Personal Data tab is pre-filled for "${legalName}" (Empl ID ${emplId}), which does NOT match `
+            + `the CRM person "${expectedName}" — refusing to submit a concurrent hire for the wrong person.`,
+          );
+        }
+      } else {
+        log.step(`[TabWalk] Personal Data loaded — legal name "${legalName}" matches (${tier}); all 3 tabs visited`);
       }
-      log.step(`[TabWalk] Personal Data loaded — legal name "${legalName}" matches (${tier}); all 3 tabs visited`);
     },
   );
 

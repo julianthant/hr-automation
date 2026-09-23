@@ -46,6 +46,12 @@ export const EmployeeDataSchema = z.object({
     /^\d{2}\/\d{2}\/\d{4}$/,
     "Expected job end date must be in MM/DD/YYYY format",
   ).optional().or(z.literal("")),
+  /** Preferred / lived first name (from onboarding roster) */
+  preferredFirstName: z.string().optional(),
+  /** Preferred / lived last name (from onboarding roster) */
+  preferredLastName: z.string().optional(),
+  /** Preferred / lived middle name (from onboarding roster) */
+  preferredMiddleName: z.string().optional(),
 });
 
 export type EmployeeData = z.infer<typeof EmployeeDataSchema>;
@@ -61,6 +67,12 @@ export function validateEmployeeData(
   const cleaned: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(raw)) {
     cleaned[key] = value ?? undefined;
+  }
+
+  // Normalize 5-digit zip codes with incomplete 1-3 digit suffixes (e.g. "92092-100" -> "92092")
+  if (typeof cleaned.postalCode === "string") {
+    const m = cleaned.postalCode.match(/^(\d{5})-\d{1,3}$/);
+    if (m) cleaned.postalCode = m[1];
   }
 
   const result = EmployeeDataSchema.safeParse(cleaned);
@@ -108,5 +120,7 @@ export const OnboardingInputSchema = z.object({
    *   on the matched Empl ID (reason "Concurrent Hire - Non Dual Emp").
    */
   mode: z.enum(ONBOARDING_HIRE_MODES).optional(),
+  /** Explicit roster path override; when omitted, resolves the newest downloaded roster. */
+  rosterPath: z.string().optional(),
 });
 export type OnboardingInput = z.infer<typeof OnboardingInputSchema>;
