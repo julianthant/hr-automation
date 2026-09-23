@@ -18,13 +18,31 @@ interface SharePointDownloadOption {
 }
 
 /**
- * Workflow-agnostic SharePoint roster downloader. Renders an icon button
- * that opens a dropdown of registered spreadsheets. Used in two slots:
- * the TopBar input-run cluster (mounted via InputRunPanel) and the
- * QueuePanel header search row. Both copies hit the same
- * `/api/sharepoint-download/{list,run}` endpoints.
+ * Workflow-agnostic SharePoint roster downloader — the ONLY way to start a
+ * `sharepoint-download` run from the dashboard (the workflow takes a URL the
+ * backend resolves from `.env`, so it has neither a typed input-run box nor a
+ * file-upload modal). Two slots, both hitting
+ * `/api/sharepoint-download/{list,run}`:
+ *
+ *   - `icon` (default) — the TopBar utility cluster: always reachable, whatever
+ *     workflow is selected, because every roster-backed run reads whatever this
+ *     leaves behind.
+ *   - `labeled` — the SharePoint Download panel's own empty state, where an
+ *     icon-only control in a different part of the screen is not an answer to
+ *     "how do I run this?".
+ *
+ * Mounted 2026-09-16. Before that this component had ZERO importers: the
+ * workflow existed, its endpoints worked, and nothing in the dashboard could
+ * start it (operator: "the sharepoint download have no run modal to download
+ * the onboarding roster").
  */
-export function SharePointDownloadButton({ size = "h-8 w-8" }: { size?: string }) {
+export function SharePointDownloadButton({
+  size = "h-8 w-8",
+  variant = "icon",
+}: {
+  size?: string;
+  variant?: "icon" | "labeled";
+}) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [options, setOptions] = useState<SharePointDownloadOption[] | null>(null);
 
@@ -95,6 +113,8 @@ export function SharePointDownloadButton({ size = "h-8 w-8" }: { size?: string }
   const downloading = Boolean(downloadingId);
   const hasOptions = options && options.length > 0;
 
+  const labeled = variant === "labeled";
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -102,12 +122,21 @@ export function SharePointDownloadButton({ size = "h-8 w-8" }: { size?: string }
         title="Download a SharePoint spreadsheet"
         disabled={downloading || !hasOptions}
         className={cn(
-          "shrink-0 flex items-center justify-center rounded-lg bg-secondary border border-border text-muted-foreground transition-colors outline-none",
-          size,
-          "hover:text-foreground hover:bg-accent hover:border-primary",
-          "data-[state=open]:text-foreground data-[state=open]:bg-accent data-[state=open]:border-primary",
+          "shrink-0 flex items-center justify-center rounded-lg transition-colors outline-none",
           "focus-visible:ring-2 focus-visible:ring-primary",
           "disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer",
+          labeled
+            ? [
+                "h-9 gap-2 px-3.5 text-[13px] font-medium",
+                "bg-primary text-primary-foreground border border-primary",
+                "hover:bg-primary/90 hover:border-primary/90",
+              ]
+            : [
+                size,
+                "bg-secondary border border-border text-muted-foreground",
+                "hover:text-foreground hover:bg-accent hover:border-primary",
+                "data-[state=open]:text-foreground data-[state=open]:bg-accent data-[state=open]:border-primary",
+              ],
         )}
       >
         {downloading ? (
@@ -115,6 +144,7 @@ export function SharePointDownloadButton({ size = "h-8 w-8" }: { size?: string }
         ) : (
           <Download aria-hidden className="w-3.5 h-3.5" />
         )}
+        {labeled ? "Download spreadsheet" : null}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-0 w-auto">
         {!options ? (

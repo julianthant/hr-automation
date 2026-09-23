@@ -217,16 +217,29 @@ export function parsePersonLookupMatchInputs(raw: string): InputRunParseResult {
   return { ok: true, inputs };
 }
 
-/** Process exactly one date-named onboarding-roster worksheet per run. */
+/**
+ * Process exactly one roster table per run — either a worksheet label inside
+ * the newest local onboarding `.xlsx`, or the full path to a roster file the
+ * operator downloaded themselves (`.csv` has one table, so no label applies).
+ * The two are told apart by shape: a path has a separator or a known extension,
+ * a worksheet label has neither.
+ */
 export function parseProcessEidSheet(raw: string): InputRunParseResult {
-  const sheet = raw.replace(/\s+/g, " ").trim();
-  if (!sheet) {
-    return { ok: false, error: "Enter the onboarding roster worksheet label" };
+  const value = raw.replace(/\s+/g, " ").trim();
+  if (!value) {
+    return {
+      ok: false,
+      error: "Enter a roster worksheet label, or the full path to a roster .xlsx/.csv",
+    };
   }
-  return {
-    ok: true,
-    inputs: [{ source: "roster-sheet", sheet }],
-  };
+  const looksLikePath = value.includes("/") || /\.(?:csv|xlsx)$/i.test(value);
+  if (!looksLikePath) {
+    return { ok: true, inputs: [{ source: "roster-sheet", sheet: value }] };
+  }
+  if (!/\.(?:csv|xlsx)$/i.test(value)) {
+    return { ok: false, error: "A roster path must end in .csv or .xlsx" };
+  }
+  return { ok: true, inputs: [{ source: "roster-sheet", rosterPath: value }] };
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -310,7 +323,8 @@ export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfi
     ],
   },
   "process-eid": {
-    placeholder: "Enter the roster worksheet label (e.g. September 14)",
+    placeholder:
+      "Roster worksheet label (e.g. Onboarding) or a full path to a roster .xlsx/.csv",
     parseInput: parseProcessEidSheet,
   },
   "oath-signature": {

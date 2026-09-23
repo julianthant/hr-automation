@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RunModal } from "@/components/run-modal/RunModal";
+import { SharePointDownloadButton } from "@/components/run-modal/SharePointDownloadButton";
 import { isRunModalEnabled } from "@/lib/run-modal-registry";
 import { getInputRunConfig } from "@/lib/input-run-registry";
 
@@ -13,10 +14,23 @@ import { getInputRunConfig } from "@/lib/input-run-registry";
  *     the same RunModal as the top-bar launcher;
  *   - input-run workflows already have the InputRunPanel bar in the footer, so
  *     this just points the operator down to it;
+ *   - `sharepoint-download` starts from neither (its input is a URL the backend
+ *     resolves from `.env`), so it gets the spreadsheet picker itself;
  *   - anything else renders nothing.
  */
 export function QueueEmptyCta({ workflow }: { workflow: string }) {
   const [open, setOpen] = useState(false);
+
+  if (workflow === "sharepoint-download") {
+    return (
+      <div className="flex flex-col items-center gap-2">
+        <SharePointDownloadButton variant="labeled" />
+        <p className="text-xs text-muted-foreground">
+          Downloads land in the roster folder every roster-backed run reads.
+        </p>
+      </div>
+    );
+  }
 
   if (isRunModalEnabled(workflow)) {
     return (

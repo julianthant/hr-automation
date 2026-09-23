@@ -94,7 +94,34 @@ test("process-eid input run accepts one exact roster worksheet label", () => {
 test("process-eid input run rejects an empty worksheet label", () => {
   assert.deepEqual(parseProcessEidSheet(" \n\t "), {
     ok: false,
-    error: "Enter the onboarding roster worksheet label",
+    error: "Enter a roster worksheet label, or the full path to a roster .xlsx/.csv",
+  });
+});
+
+test("process-eid input run takes a roster file path instead of a worksheet label", () => {
+  assert.deepEqual(
+    parseProcessEidSheet("  /Users/me/Downloads/26-27 Student Applicants(Sept 28).csv  "),
+    {
+      ok: true,
+      inputs: [
+        {
+          source: "roster-sheet",
+          rosterPath: "/Users/me/Downloads/26-27 Student Applicants(Sept 28).csv",
+        },
+      ],
+    },
+  );
+  // A bare filename is a path too — it is the extension that decides.
+  assert.deepEqual(parseProcessEidSheet("roster.xlsx"), {
+    ok: true,
+    inputs: [{ source: "roster-sheet", rosterPath: "roster.xlsx" }],
+  });
+});
+
+test("process-eid input run rejects a path whose file cannot be a roster", () => {
+  assert.deepEqual(parseProcessEidSheet("/Users/me/Downloads/roster.pdf"), {
+    ok: false,
+    error: "A roster path must end in .csv or .xlsx",
   });
 });
 
