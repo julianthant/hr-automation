@@ -4,6 +4,8 @@ import { ExtractionError } from "./types.js";
 import { CRM_SEARCH_URL } from "../../config.js";
 import { search as searchSelectors } from "./selectors.js";
 import { clickIfPresent, safeClick } from "../common/index.js";
+import { pickLatestOnboardingSearchRowIndex, type CrmSearchRowPickInput } from "./pick-latest-search-row.js";
+import { errorMessage } from "../../utils/errors.js";
 
 /**
  * Search results page -- accepts email as query param.
@@ -42,59 +44,54 @@ export async function searchByEmail(
 }
 
 /**
- * Select the search result row with the latest "Offer Sent On" date.
+ * Select the search result row with the latest live "Offer Sent On" date.
  * Clicks the name link (first column) to navigate to the employee record.
  *
  * Table columns:
  *   Onboarding Name | Offer Sent On | Hiring Supervisor Last Name |
  *   Hiring Supervisor First Name | Process Stage
+ *
+ * Skips the header-ish "Search Results" row (no record link) and dead stages
+ * such as Offer Rescinded — those records have no iDocs viewer, so opening
+ * the newest date can look like "PDF.js never loaded".
  */
 export async function selectLatestResult(page: Page): Promise<void> {
   const rows = searchSelectors.resultRows(page);
+  await rows.locator("a").first().waitFor({ timeout: 15_000 }); // allow-inline-selector -- wait for a real record link, not the header row
 
   const count = await rows.count();
   if (count === 0) {
     throw new ExtractionError("No search results found");
   }
 
-  log.step(`Found ${count} result(s) -- selecting latest...`);
+  log.step(`Found ${count} result(s) -- selecting latest live offer...`);
 
-  let latestIndex = -1;
-  let latestDate = new Date(0);
-
+  const inputs: CrmSearchRowPickInput[] = [];
   for (let i = 0; i < count; i++) {
-    // "Offer Sent On" is column 2 (index 1). Compound path rooted in registry.
-    const dateCell = searchSelectors.nthResultRow(page, i).locator("td").nth(1); // allow-inline-selector -- compound .locator("td").nth(i)
-    const dateText = await dateCell.textContent();
-    if (dateText) {
-      const parsed = new Date(dateText.trim());
-      if (!isNaN(parsed.getTime()) && parsed > latestDate) {
-        latestDate = parsed;
-        latestIndex = i;
-      }
-    }
+    const cells = searchSelectors.resultRowCells(page, i);
+    const cellCount = await cells.count();
+    const hasNameLink = (await searchSelectors.resultRowNameLink(page, i).count()) > 0;
+    const offerSentOn = cellCount > 1 ? ((await cells.nth(1).textContent())?.trim() ?? "") : "";
+    const processStage = cellCount > 4 ? ((await cells.nth(4).textContent())?.trim() ?? "") : "";
+    inputs.push({ hasNameLink, offerSentOn, processStage });
   }
 
-  if (latestIndex === -1) {
-    throw new ExtractionError(
-      "CRM returned search rows but no parsable Offer Sent On date — check table format or locale.",
-    );
+  let latestIndex: number;
+  try {
+    latestIndex = pickLatestOnboardingSearchRowIndex(inputs);
+  } catch (err) {
+    throw new ExtractionError(errorMessage(err));
   }
 
-  // Click the name link in the first column to navigate to the employee
-  // record (not the row itself). Compound path rooted in registry.
-  const nameLink = searchSelectors
-    .nthResultRow(page, latestIndex)
-    .locator("td") // allow-inline-selector -- compound .locator("td").first().locator("a")
-    .first()
-    .locator("a"); // allow-inline-selector -- compound path continues
+  const picked = inputs[latestIndex];
+  log.step(
+    `Opening search row ${latestIndex} (${picked.processStage || "unknown stage"}, offer ${picked.offerSentOn || "undated"})`,
+  );
+
+  const nameLink = searchSelectors.resultRowNameLink(page, latestIndex);
   if (!(await clickIfPresent(nameLink, { label: "crm latest result name link" }))) {
-    // Fallback: click the name cell text directly
     await safeClick(
-      searchSelectors
-        .nthResultRow(page, latestIndex)
-        .locator("td") // allow-inline-selector -- compound cell click fallback
-        .first(),
+      searchSelectors.resultRowCells(page, latestIndex).first(),
       { label: "crm latest result name cell" },
     );
   }

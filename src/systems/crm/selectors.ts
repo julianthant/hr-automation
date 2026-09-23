@@ -1,4 +1,4 @@
-import type { Page, Locator } from "playwright";
+import type { Page, Locator, Frame } from "playwright";
 
 /**
  * ACT CRM (Salesforce) selector registry.
@@ -176,9 +176,29 @@ export const onboardingHistory = {
   historyRows: (page: Page): Locator => page.locator("table.detailList tr"),
 };
 
+// ─── iDocs PDF.js viewer (/iDocsForSalesforce/Content/pdfjs/web/PDFjsViewer.aspx) ─────────────
+
+export const idocsViewer = {
+  /**
+   * The total document count span in the PDF.js toolbar (e.g. " of 5", " of 9").
+   * Located next to `#documentNumber` input in `#toolbarViewerLeft`.
+   * verified 2026-09-15
+   * @tags idocs, pdfjs, toolbar, docCount, numDocs, crm
+   */
+  numDocs: (context: Page | Frame): Locator => context.locator("#numDocs"),
+
+  /**
+   * The current document number input in the PDF.js toolbar.
+   * verified 2026-09-15
+   * @tags idocs, pdfjs, toolbar, docNumber, crm
+   */
+  documentNumber: (context: Page | Frame): Locator => context.locator("#documentNumber"),
+};
+
 export const crmSelectors = {
   search,
   record,
   sectionNav,
   onboardingHistory,
+  idocsViewer,
 };

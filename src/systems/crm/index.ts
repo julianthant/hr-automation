@@ -1,9 +1,11 @@
 export { searchByEmail, searchCrmOnboardingRecords, selectLatestResult } from "./search.js";
+export { pickLatestOnboardingSearchRowIndex, isDeadOnboardingStage } from "./pick-latest-search-row.js";
+export type { CrmSearchRowPickInput } from "./pick-latest-search-row.js";
 export { navigateToSection } from "./navigate.js";
 export { extractField, extractCrmPersonName } from "./extract.js";
 export type { CrmPersonName } from "./extract.js";
 export { ExtractionError } from "./types.js";
-export { crmSelectors, onboardingHistory } from "./selectors.js";
+export { crmSelectors, onboardingHistory, idocsViewer } from "./selectors.js";
 export {
   readOnboardingOathHistory,
   findOathSignedTransition,
@@ -23,6 +25,7 @@ export type {
 } from "./onboarding-records.js";
 export {
   DEFAULT_CRM_DOC_INDICES,
+  resolveDefaultCrmDocIndices,
   buildCrmDocumentDownloadPath,
   onboardingDateFolder,
   buildCrmDocumentFolderName,
@@ -40,3 +43,5 @@ export type {
   CrmIdocsViewerInfo,
   CrmDocumentArchive,
 } from "./idocs-download.js";
+export { folderSubjectFromLegalLived } from "./document-folder-subject.js";
+export type { CrmDocumentFolderSubject } from "./document-folder-subject.js";
