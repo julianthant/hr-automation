@@ -662,10 +662,13 @@ describe("decidePersonMatchContinue", () => {
 
 describe("classifySubmitSignals", () => {
   test("error banner wins over everything", () => {
-    assert.equal(classifySubmitSignals(true, true, true), "error");
+    assert.equal(classifySubmitSignals(true, true, true, true), "error");
   });
-  test("Person Match Found is checked before the generic OK marker", () => {
-    assert.equal(classifySubmitSignals(false, true, true), "person-match");
+  test("Person Match Found is checked before Select an Action and OK", () => {
+    assert.equal(classifySubmitSignals(false, true, true, true), "person-match");
+  });
+  test("Select an Action is checked before the generic OK marker", () => {
+    assert.equal(classifySubmitSignals(false, false, true, true), "select-action");
   });
   test("confirmation OK alone → success", () => {
     assert.equal(classifySubmitSignals(false, false, true), "success");
