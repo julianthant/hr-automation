@@ -2,7 +2,6 @@ import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
   validateEmployeeData,
-  EmployeeDataSchema,
   OnboardingInputSchema,
   ONBOARDING_HIRE_MODES,
 } from "../../../../src/workflows/onboarding/schema.js";

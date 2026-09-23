@@ -3,7 +3,7 @@ import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { I9_URL } from "../../config.js";
 import { login as loginSelectors } from "./selectors.js";
-import { clickIfPresent, safeClick } from "../common/index.js";
+import { safeClick } from "../common/index.js";
 import {
   fillSsoCredentials,
   clickSsoSubmit,

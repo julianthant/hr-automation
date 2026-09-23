@@ -761,7 +761,7 @@
    "path": "src/systems/i9/login.ts",
    "changeKind": "modified",
    "beforeSha256": "85f08a3579b87e1f153891508b03bac5038985b90b9c2a7e48112133747a170b",
-   "afterSha256": "029576aefa958e71ee4c618b186491552f1bdfc39899beae56526e9dd9643414",
+   "afterSha256": "742a9dade9369af1625123ff39e52c6bfee08d511933b234efdf493951b1c586",
    "capabilityIds": [
     "legacy-workflow-process-eid"
    ],
@@ -1169,7 +1169,7 @@
    "path": "src/systems/ucpath/transaction.ts",
    "changeKind": "modified",
    "beforeSha256": "1edbfd04c254d3a9a780431899ec30569b746536b45e53c1e1194ad84237bf94",
-   "afterSha256": "74a2dca1242926d7e27aeed3c3a0cc7e054643740018e84fc6eadf45bbf5ed9b",
+   "afterSha256": "bef9a53a70b2b7101da1d23e7b0aa736c39441d7bec5e38a5a8806fbf12de7d1",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -1407,7 +1407,7 @@
    "path": "src/workflows/onboarding/roster.ts",
    "changeKind": "added",
    "beforeSha256": null,
-   "afterSha256": "f4ac06372b1f46acaae3cd60bb35fe3c9d3ab9400d2184d946f9b0ec0ac5f4ba",
+   "afterSha256": "528b94c4ea4d42787d48e6684cdbdbc1b487ad6fdc2ee47e57608c7cdef9d6b9",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
@@ -2252,7 +2252,7 @@
    "path": "tests/unit/systems/ucpath/separation-receipt.test.ts",
    "changeKind": "added",
    "beforeSha256": null,
-   "afterSha256": "b618c84b8dcf75aa46a0b59535e2444a7fc89d15f6402ac1cee6479e47fc49ea",
+   "afterSha256": "6ed7055213e447c86df9f54c3ff9c1839507c24abb74bd59d87702d06fa22ec9",
    "capabilityIds": [
     "legacy-workflow-separations"
    ],
@@ -2343,7 +2343,7 @@
    "path": "tests/unit/workflows/onboarding/schema.test.ts",
    "changeKind": "modified",
    "beforeSha256": "9bd06b90739256da2394301627248e01cb095d823d2585c2489936c5d2e3bde2",
-   "afterSha256": "39eef30fe8a57dbe6b3ab1e3f90ffae6d18e84b8ca8408c54b2520f3de821a61",
+   "afterSha256": "e937012047bb919e53661851ede85bc2c36f7b469f03b1a5e009ca5b2d668111",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],

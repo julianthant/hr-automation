@@ -50,8 +50,13 @@ function cellToString(value: unknown): string {
     if (typeof v.result === "string" || typeof v.result === "number") {
       return String(v.result);
     }
+    try {
+      return JSON.stringify(value) ?? "";
+    } catch {
+      return "[unserializable cell]";
+    }
   }
-  return String(value);
+  return "";
 }
 
 /**
