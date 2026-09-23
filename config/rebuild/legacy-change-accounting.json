@@ -116,10 +116,25 @@
    "impactRationale": "Reconciles preservation metadata for the already-committed dashboard demo launcher changes at base 9d19e414; no dashboard source is changed by this maintenance patch."
   },
   {
-   "path": "src/dashboard/components/dev/rebuild-demo/DESIGN.md",
+   "path": "src/dashboard/components/dev/rebuild-demo/demo-runstart-timeline.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "381ad54c9509a36c560b47fcd4d30519129182e99ff936800775903d64728338",
+   "capabilityIds": [
+    "legacy-dashboard-dev"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Reconciles preservation metadata for the already-committed dashboard demo launcher changes at base 9d19e414; no dashboard source is changed by this maintenance patch."
+  },
+  {
+   "path": "src/dashboard/components/dev/rebuild-demo/demo-wire.ts",
    "changeKind": "modified",
-   "beforeSha256": "9625d5894d56caa6113c381d1714138ed42d3dc1630b35e0c8704fb1163b5dfa",
-   "afterSha256": "3feb8d493bbc7e32c69b541de14cc6fe4a29e428809e73a77fe0393ea3e15df3",
+   "beforeSha256": "9b9bac0806065ff0674703e63cc4584b803328b0d475e20cf5d6c0a60f524b95",
+   "afterSha256": "8b7de8c77848b292cb9dff20b3c1a4f039c9fceba9866a01442ec3a9de4f21e3",
    "capabilityIds": [
     "legacy-dashboard-dev"
    ],
@@ -146,25 +161,10 @@
    "impactRationale": "Reconciles preservation metadata for the already-committed dashboard demo launcher changes at base 9d19e414; no dashboard source is changed by this maintenance patch."
   },
   {
-   "path": "src/dashboard/components/dev/rebuild-demo/demo-runstart-timeline.ts",
-   "changeKind": "added",
-   "beforeSha256": null,
-   "afterSha256": "381ad54c9509a36c560b47fcd4d30519129182e99ff936800775903d64728338",
-   "capabilityIds": [
-    "legacy-dashboard-dev"
-   ],
-   "rebuildRecheckIds": [
-    "npm:test",
-    "npm:test:architecture"
-   ],
-   "preservation": "preserved",
-   "impactRationale": "Reconciles preservation metadata for the already-committed dashboard demo launcher changes at base 9d19e414; no dashboard source is changed by this maintenance patch."
-  },
-  {
-   "path": "src/dashboard/components/dev/rebuild-demo/demo-wire.ts",
+   "path": "src/dashboard/components/dev/rebuild-demo/DESIGN.md",
    "changeKind": "modified",
-   "beforeSha256": "9b9bac0806065ff0674703e63cc4584b803328b0d475e20cf5d6c0a60f524b95",
-   "afterSha256": "8b7de8c77848b292cb9dff20b3c1a4f039c9fceba9866a01442ec3a9de4f21e3",
+   "beforeSha256": "9625d5894d56caa6113c381d1714138ed42d3dc1630b35e0c8704fb1163b5dfa",
+   "afterSha256": "3feb8d493bbc7e32c69b541de14cc6fe4a29e428809e73a77fe0393ea3e15df3",
    "capabilityIds": [
     "legacy-dashboard-dev"
    ],
@@ -397,25 +397,26 @@
    "preservation": "preserved"
   },
   {
-   "path": "src/systems/crm/SELECTORS.md",
+   "path": "src/systems/crm/CLAUDE.md",
    "changeKind": "modified",
-   "beforeSha256": "d28933203c348c098a5a1377abe5240ed6be3cc92e10ad41d1428829d8384dcb",
-   "afterSha256": "0c50e3a078c9dfcb47c11fdaabfd2fc225584f8ca710885ac907882c0859ad21",
+   "beforeSha256": "56ca550e235a8a481506e6838b887d5d61c604ab2160141926be1116c3c371e1",
+   "afterSha256": "373cb327edf429dd489c4b746882373d21710e0bba7957616fff2078e396f26e",
    "capabilityIds": [
-    "legacy-workflow-emergency-contact"
+    "legacy-workflow-onboarding",
+    "legacy-workflow-crm-doc-download"
    ],
+   "impactRationale": "Documents resolveDefaultCrmDocIndices behavior for CRM iDocs downloads.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
    ],
-   "preservation": "preserved",
-   "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+   "preservation": "preserved"
   },
   {
    "path": "src/systems/crm/idocs-download.ts",
    "changeKind": "modified",
    "beforeSha256": "ec88d824954439e7b22dd0e135acd52a6da978670e6d28f5d8506cefd385aed3",
-   "afterSha256": "eee79d4434e8bbdd436f5137c4d4cc4bde243db005f29b9b99a42233149eb2c6",
+   "afterSha256": "1a64daa80a81b9ae21a087814cccbbf5c94070f47f5b8243f6786314c95a4017",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-crm-doc-download"
@@ -431,7 +432,7 @@
    "path": "src/systems/crm/index.ts",
    "changeKind": "modified",
    "beforeSha256": "2195ed3ec26792ec4f675bd02d950b17ea79bbd733b6f98f511cf28731e5956b",
-   "afterSha256": "fa877a9a834e2eb89cc7833657b27514fb777d1c7b5ba41893850600a34f55a9",
+   "afterSha256": "250cfb39cd4378566d9988bf3064ddf8e70628ba017812ac0e659d4c2a4f550a",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-crm-doc-download"
@@ -444,24 +445,25 @@
    "preservation": "preserved"
   },
   {
-   "path": "src/systems/i9/LESSONS.md",
+   "path": "src/systems/crm/search.ts",
    "changeKind": "modified",
-   "beforeSha256": "5b1bc0d8b204c3b36a1e2eeefbd9637fa812048df0f1c619e4d31bc9ff09332f",
-   "afterSha256": "db26b3c419b6e1dbdc89d6166c7469a0f43dcae1de82449c9588a2fa3727d9d2",
+   "beforeSha256": "2097fd99849250349bdecbec492e6a05f303d92710e1665a7c64e1012cc26569",
+   "afterSha256": "7b9509b5aaca4397c8c9e804fa55786484886d32748ae0d0ec0ee3b47112d826",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
-   "impactRationale": "Lesson: Employee Profile Save & Continue confirmation can render late while the profile is saved; createI9Employee now polls named outcomes incl. the saved-profile route.",
+   "impactRationale": "Skips non-data/pagination rows in selectLatestResult when counting cells to prevent 30s timeouts on 50+ result grids.",
    "rebuildRecheckIds": [
+    "npm:test",
     "npm:test:architecture"
    ],
    "preservation": "preserved"
   },
   {
-   "path": "src/systems/i9/SELECTORS.md",
+   "path": "src/systems/crm/SELECTORS.md",
    "changeKind": "modified",
-   "beforeSha256": "f8d9eba3213c717341d48a0060959e1a0bdc2f760161dfa408ba03a402d709ec",
-   "afterSha256": "dfc1cd69c54d20e8acd4f0399512937784cc1fdcff62c65fb674de0f5ba27241",
+   "beforeSha256": "d28933203c348c098a5a1377abe5240ed6be3cc92e10ad41d1428829d8384dcb",
+   "afterSha256": "904eb8f719b4e64102bee44004133f21cd54b2f6b720e9b5b83162ea49e2db72",
    "capabilityIds": [
     "legacy-workflow-emergency-contact"
    ],
@@ -471,6 +473,21 @@
    ],
    "preservation": "preserved",
    "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+  },
+  {
+   "path": "src/systems/crm/selectors.ts",
+   "changeKind": "modified",
+   "beforeSha256": "4ff1fe161bdd5e1810bd11ff1ad755d90f320c1dddfd674e631b4dfcfac1da20",
+   "afterSha256": "edaa3e8b8d71ab88be8e5a4d922c9efc4d45f7293bcb59976e60390db19883c6",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Onboarding roster legal/lived name resolution for I-9 and UCPath transactions"
   },
   {
    "path": "src/systems/i9/create.ts",
@@ -503,6 +520,20 @@
    "preservation": "preserved"
   },
   {
+   "path": "src/systems/i9/LESSONS.md",
+   "changeKind": "modified",
+   "beforeSha256": "5b1bc0d8b204c3b36a1e2eeefbd9637fa812048df0f1c619e4d31bc9ff09332f",
+   "afterSha256": "db26b3c419b6e1dbdc89d6166c7469a0f43dcae1de82449c9588a2fa3727d9d2",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Lesson: Employee Profile Save & Continue confirmation can render late while the profile is saved; createI9Employee now polls named outcomes incl. the saved-profile route.",
+   "rebuildRecheckIds": [
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "src/systems/i9/navigate.ts",
    "changeKind": "modified",
    "beforeSha256": "bd1be3f086aa96a67354f75f5f3230777e6fdff3b6f52f63d2260a5a32637f14",
@@ -518,6 +549,21 @@
    "preservation": "preserved"
   },
   {
+   "path": "src/systems/i9/SELECTORS.md",
+   "changeKind": "modified",
+   "beforeSha256": "f8d9eba3213c717341d48a0060959e1a0bdc2f760161dfa408ba03a402d709ec",
+   "afterSha256": "dfc1cd69c54d20e8acd4f0399512937784cc1fdcff62c65fb674de0f5ba27241",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
+  },
+  {
    "path": "src/systems/i9/types.ts",
    "changeKind": "modified",
    "beforeSha256": "1e041226cb5d2d17c51049c8e0a958c617cc91b0dbe446aedfeea23b828f72ad",
@@ -526,6 +572,21 @@
     "legacy-workflow-onboarding"
    ],
    "impactRationale": "I9EmployeeInput.ssn is optional — a person with no SSN yet gets a profile with the field blank.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/kuali/index.ts",
+   "changeKind": "modified",
+   "beforeSha256": "205d1afa7ac17343841d7486fdcee1bf2a4e8c1f148c104cfc3c3a0f2d4cf00d",
+   "afterSha256": "1d462f6062ddb14942bbc5fa8a39e5651cb74c9087a9e24be63cd4840f7f12f2",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -548,6 +609,21 @@
    "impactRationale": "Job-scoped separations, both comment fields, Task 1 boundary and persisted Kuali receipt checks. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
   },
   {
+   "path": "src/systems/kuali/navigate.ts",
+   "changeKind": "modified",
+   "beforeSha256": "134485590fbd4e30d84be93ba704d72e5d674a0157b74c57be34370703eb874c",
+   "afterSha256": "881a35bccc9714c360a3bc4f620cfa8d9b90bbacf5d28c2685ccefbc9b2f55ee",
+   "capabilityIds": [
+    "legacy-workflow-separations"
+   ],
+   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved"
+  },
+  {
    "path": "src/systems/kuali/SELECTORS.md",
    "changeKind": "modified",
    "beforeSha256": "4ccd6c5a794d93e3fdb680346b48aaf8e9007db367b593012cfe00476add9882",
@@ -562,36 +638,6 @@
    ],
    "preservation": "preserved",
    "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors). 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
-  },
-  {
-   "path": "src/systems/kuali/index.ts",
-   "changeKind": "modified",
-   "beforeSha256": "205d1afa7ac17343841d7486fdcee1bf2a4e8c1f148c104cfc3c3a0f2d4cf00d",
-   "afterSha256": "1d462f6062ddb14942bbc5fa8a39e5651cb74c9087a9e24be63cd4840f7f12f2",
-   "capabilityIds": [
-    "legacy-workflow-separations"
-   ],
-   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values.",
-   "rebuildRecheckIds": [
-    "npm:test",
-    "npm:test:architecture"
-   ],
-   "preservation": "preserved"
-  },
-  {
-   "path": "src/systems/kuali/navigate.ts",
-   "changeKind": "modified",
-   "beforeSha256": "134485590fbd4e30d84be93ba704d72e5d674a0157b74c57be34370703eb874c",
-   "afterSha256": "881a35bccc9714c360a3bc4f620cfa8d9b90bbacf5d28c2685ccefbc9b2f55ee",
-   "capabilityIds": [
-    "legacy-workflow-separations"
-   ],
-   "impactRationale": "2026-08-20 (1994ad54): run mode 'Skip UCPath transaction' (preset skip-ucpath-transaction) — redo the Kuali side of a filed termination with no Smart HR lookup/create; Transaction # preserved from the Kuali form (new kuali readTransactionNumber), fail-loud when none exists. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values.",
-   "rebuildRecheckIds": [
-    "npm:test",
-    "npm:test:architecture"
-   ],
-   "preservation": "preserved"
   },
   {
    "path": "src/systems/kuali/selectors.ts",
@@ -625,21 +671,6 @@
    "impactRationale": "2026-08-21 (16ca8559): New Kronos NOT FOUND now needs the no-results sentinel to hold continuously for NO_RESULTS_STABLE_MS (2s) with no found signal — the sentinel is also the Employee Search panel's pre-search resting state; a single-tick verdict mis-resolved HDH EID 10837979 (doc 4546) NOT FOUND, skipped the timecard, and filed a wrong-dated termination."
   },
   {
-   "path": "src/systems/new-kronos/SELECTORS.md",
-   "changeKind": "modified",
-   "beforeSha256": "adfe0e9c66fd86da965a0c2c71fd025cccdb89d1e42ad83a2f9d14072e1a9976",
-   "afterSha256": "faea1c03a6057d38b90d8033281966e32ee8cf55aad658f897c01e42e0a0b433",
-   "capabilityIds": [
-    "legacy-workflow-emergency-contact"
-   ],
-   "rebuildRecheckIds": [
-    "npm:test",
-    "npm:test:architecture"
-   ],
-   "preservation": "preserved",
-   "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
-  },
-  {
    "path": "src/systems/new-kronos/navigate.ts",
    "changeKind": "modified",
    "beforeSha256": "49b2fa7c165bcc6a3c59620e192b0055ad46e758c412c5a1c8c655ebbe9508c6",
@@ -654,6 +685,21 @@
    ],
    "preservation": "preserved",
    "impactRationale": "2026-08-21 (16ca8559): New Kronos NOT FOUND now needs the no-results sentinel to hold continuously for NO_RESULTS_STABLE_MS (2s) with no found signal — the sentinel is also the Employee Search panel's pre-search resting state; a single-tick verdict mis-resolved HDH EID 10837979 (doc 4546) NOT FOUND, skipped the timecard, and filed a wrong-dated termination."
+  },
+  {
+   "path": "src/systems/new-kronos/SELECTORS.md",
+   "changeKind": "modified",
+   "beforeSha256": "adfe0e9c66fd86da965a0c2c71fd025cccdb89d1e42ad83a2f9d14072e1a9976",
+   "afterSha256": "faea1c03a6057d38b90d8033281966e32ee8cf55aad658f897c01e42e0a0b433",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Auto-regenerated selector catalog after the 2026-08-05 Emergency Contact selector additions (row-anchored editor ids + header value anchors)."
   },
   {
    "path": "src/systems/old-kronos/SELECTORS.md",
@@ -732,41 +778,6 @@
    "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
   },
   {
-   "path": "src/systems/ucpath/LESSONS.md",
-   "changeKind": "modified",
-   "beforeSha256": "010e7a25f50d7e63b24355bb254ded76690c9278a6885285ef3a52101fc5f9a1",
-   "afterSha256": "cf3e42c83fb80268bb2514df21231104329e2465d13d7ad62ef0cf71dc34df60",
-   "capabilityIds": [
-    "legacy-workflow-onboarding",
-    "legacy-workflow-person-lookup",
-    "legacy-workflow-separations"
-   ],
-   "rebuildRecheckIds": [
-    "npm:test",
-    "npm:test:architecture"
-   ],
-   "preservation": "preserved",
-   "impactRationale": "2026-08-05 (aba05c65): corrected the 2026-08-04 $op accessible-name lesson's blast-radius paragraph — it had declared production immune while the production-driven ssSmartHRTransactions group carried the same fragile shape (the doc 4493 failure); adds the sweep-every-Find-an-Existing-Value-group rule. 2026-08-20: lesson — Save and Submit can land on the Person Match Found review page the outcome poll never watched. 2026-08-20 (pm): lesson — SS Smart HR Name box is First Last; single match auto-opens the detail page. 2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: records the prior TER receipt behavior found on separation 4596: effective date is sufficient to skip a different event, while a matching date still requires job-form proof. 2026-09-10: records post-submit receipt recovery via SS Smart HR, duplicate Kuali request document reference tolerance with substantive equality check, and historical receipt date pre-filtering."
-  },
-  {
-   "path": "src/systems/ucpath/SELECTORS.md",
-   "changeKind": "modified",
-   "beforeSha256": "57fb1caeac412725c3c5defb0430dd9d5d910db97d077328cf2f37368d6fb1f4",
-   "afterSha256": "3175f0dced3557a1a228a1d7d4eea475771cb86384a63a87bc7c0a411183da6f",
-   "capabilityIds": [
-    "legacy-workflow-i9-check",
-    "legacy-workflow-onboarding",
-    "legacy-workflow-person-lookup",
-    "legacy-workflow-separations"
-   ],
-   "rebuildRecheckIds": [
-    "npm:test",
-    "npm:test:architecture"
-   ],
-   "preservation": "preserved",
-   "impactRationale": "2026-08-05 (aba05c65): regenerated catalog (npm run selectors:catalog) for the ssSmartHRTransactions re-anchoring; generated content only. 2026-08-20: catalog regenerated for the Person Match Found selectors. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
-  },
-  {
    "path": "src/systems/ucpath/index.ts",
    "changeKind": "modified",
    "beforeSha256": "799e4d5bdf7bbdc6767abd13469b87d1183a9fb19f1fe00dc8adc07f8df36d2f",
@@ -796,6 +807,23 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved"
+  },
+  {
+   "path": "src/systems/ucpath/LESSONS.md",
+   "changeKind": "modified",
+   "beforeSha256": "010e7a25f50d7e63b24355bb254ded76690c9278a6885285ef3a52101fc5f9a1",
+   "afterSha256": "cf3e42c83fb80268bb2514df21231104329e2465d13d7ad62ef0cf71dc34df60",
+   "capabilityIds": [
+    "legacy-workflow-onboarding",
+    "legacy-workflow-person-lookup",
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "2026-08-05 (aba05c65): corrected the 2026-08-04 $op accessible-name lesson's blast-radius paragraph — it had declared production immune while the production-driven ssSmartHRTransactions group carried the same fragile shape (the doc 4493 failure); adds the sweep-every-Find-an-Existing-Value-group rule. 2026-08-20: lesson — Save and Submit can land on the Person Match Found review page the outcome poll never watched. 2026-08-20 (pm): lesson — SS Smart HR Name box is First Last; single match auto-opens the detail page. 2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. 2026-09-10: records the prior TER receipt behavior found on separation 4596: effective date is sufficient to skip a different event, while a matching date still requires job-form proof. 2026-09-10: records post-submit receipt recovery via SS Smart HR, duplicate Kuali request document reference tolerance with substantive equality check, and historical receipt date pre-filtering."
   },
   {
    "path": "src/systems/ucpath/navigate.ts",
@@ -831,6 +859,24 @@
    ],
    "preservation": "preserved",
    "impactRationale": "Emergency Contact editor navigation/save: adds assertEmergencyContactPersisted (positive post-save proof); the save-outcome contract is part of the rebuild UCPath write-safety source of truth."
+  },
+  {
+   "path": "src/systems/ucpath/SELECTORS.md",
+   "changeKind": "modified",
+   "beforeSha256": "57fb1caeac412725c3c5defb0430dd9d5d910db97d077328cf2f37368d6fb1f4",
+   "afterSha256": "3175f0dced3557a1a228a1d7d4eea475771cb86384a63a87bc7c0a411183da6f",
+   "capabilityIds": [
+    "legacy-workflow-i9-check",
+    "legacy-workflow-onboarding",
+    "legacy-workflow-person-lookup",
+    "legacy-workflow-separations"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "2026-08-05 (aba05c65): regenerated catalog (npm run selectors:catalog) for the ssSmartHRTransactions re-anchoring; generated content only. 2026-08-20: catalog regenerated for the Person Match Found selectors. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
   },
   {
    "path": "src/systems/ucpath/selectors.ts",
@@ -885,7 +931,7 @@
    "path": "src/systems/ucpath/transaction.ts",
    "changeKind": "modified",
    "beforeSha256": "1edbfd04c254d3a9a780431899ec30569b746536b45e53c1e1194ad84237bf94",
-   "afterSha256": "00cf0a7c48f5b9e28456ed3e1c1a136a3ce5f16d8d5f8b08b19554d749feb41d",
+   "afterSha256": "9ab79d534bf2f672b47f7e11ba71cbf04013a78cc3f4a865c290188e29928580",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-separations"
@@ -993,7 +1039,7 @@
    "path": "src/workflows/onboarding/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "f7c38194ca9ef657840af3a87e56bc5dbae307f5e471d0605e729ff0e01872c2",
-   "afterSha256": "60fc4e02839b4a04ca88acdc10a5061b0be2f31028d0d900007e4f2b996f03d8",
+   "afterSha256": "82b21fc94fdfcc7c43a845ae584648045f7755c01f93bf6f63d5f860390c4a5e",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
@@ -1023,7 +1069,7 @@
    "path": "src/workflows/onboarding/enter.ts",
    "changeKind": "modified",
    "beforeSha256": "60def469803c032799e46f1aab66267bec2a592b857a04da7fb1e9a0796bc25b",
-   "afterSha256": "80bc66e41eb1e71b51a0d6ad4c8b4760836964bf0428aa3012f19ac93ebb01f2",
+   "afterSha256": "487706e42d72b2ceace2ce7df71645c86360d3a7aed07f1f0f2954ad30e96f6f",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
@@ -1050,14 +1096,29 @@
    "preservation": "preserved"
   },
   {
-   "path": "src/workflows/onboarding/schema.ts",
-   "changeKind": "modified",
-   "beforeSha256": "d4686635e0b9bdfa745163849bc95bb969114e1fdfff097a4249c7bf2df04056",
-   "afterSha256": "acc850876e3c034dca76d7340c7a09277bc8d1f227592ae6b349decc3ba963eb",
+   "path": "src/workflows/onboarding/roster.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "331a245f66b1623df871507429c5b28b644a432a95aa1a85484e87b101a4d3b0",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
-   "impactRationale": "Adds optional expectedJobEndDate (MM/DD/YYYY) to EmployeeData. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353.",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Onboarding roster legal/lived name resolution for I-9 and UCPath transactions"
+  },
+  {
+   "path": "src/workflows/onboarding/schema.ts",
+   "changeKind": "modified",
+   "beforeSha256": "d4686635e0b9bdfa745163849bc95bb969114e1fdfff097a4249c7bf2df04056",
+   "afterSha256": "73d1f7f27792a999f067be8d5819f692e1e79fc3845daca0dc1994dac9ff5192",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "Adds optional expectedJobEndDate (MM/DD/YYYY) to EmployeeData. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353. 2026-09-14: normalizes truncated postal codes (e.g. 92092-100 -> 92092).",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
@@ -1068,7 +1129,7 @@
    "path": "src/workflows/onboarding/workflow.ts",
    "changeKind": "modified",
    "beforeSha256": "3fdbf1d1ed90700c5ad7aeaa93024083e6a319ecf778bdaf0874e8648c98b8a8",
-   "afterSha256": "0201ccf1615fc4d089f4efc688f9a2896850519ec19034b1b4360eee90d772b6",
+   "afterSha256": "7800a435dbc2e9d0599ee1439d3368ddf302d1cb1b6de703beff120515e36347",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
@@ -1582,7 +1643,7 @@
    "path": "tests/unit/systems/crm/idocs-download.test.ts",
    "changeKind": "modified",
    "beforeSha256": "2fd29c1fecbdb55b256364733837a6598e92dd25be4cbca71c263e102b823cb7",
-   "afterSha256": "2de54a13fa42abcb9a620b2d5dd89f88f7fb4d589339fc0e74dea80cb83c58c3",
+   "afterSha256": "b76bdad4b2d0d1588d894a0701cd2a829ca2d49e6ed5825cdbec1eea3f0f31db",
    "capabilityIds": [
     "legacy-workflow-onboarding",
     "legacy-workflow-crm-doc-download"
@@ -1718,14 +1779,29 @@
    "impactRationale": "Test updated alongside the 2026-08-05 Emergency Contact fix (gate fakes model the value-anchored read; waitForTimeout allowlist count reflects the removed name-fill sleep)."
   },
   {
-   "path": "tests/unit/workflows/onboarding/schema.test.ts",
-   "changeKind": "modified",
-   "beforeSha256": "9bd06b90739256da2394301627248e01cb095d823d2585c2489936c5d2e3bde2",
-   "afterSha256": "cf527db24e35dbbb15103a4aa670aa4a193e2677d55f9036fe02a3064c08bd22",
+   "path": "tests/unit/workflows/onboarding/roster.test.ts",
+   "changeKind": "added",
+   "beforeSha256": null,
+   "afterSha256": "abf5cb7c538957e4c66196aebd8cc71f1e659f9358a95c32a946867fc0fd780e",
    "capabilityIds": [
     "legacy-workflow-onboarding"
    ],
-   "impactRationale": "2026-08-21 (ef0b20ad): pins OnboardingInputSchema.mode enum (new-hire | rehire, optional).",
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Onboarding roster legal/lived name resolution for I-9 and UCPath transactions"
+  },
+  {
+   "path": "tests/unit/workflows/onboarding/schema.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "9bd06b90739256da2394301627248e01cb095d823d2585c2489936c5d2e3bde2",
+   "afterSha256": "39eef30fe8a57dbe6b3ab1e3f90ffae6d18e84b8ca8408c54b2520f3de821a61",
+   "capabilityIds": [
+    "legacy-workflow-onboarding"
+   ],
+   "impactRationale": "2026-08-21 (ef0b20ad): pins OnboardingInputSchema.mode enum (new-hire | rehire, optional). 2026-09-14: adds test for truncated postal code normalization.",
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
