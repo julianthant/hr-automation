@@ -397,6 +397,7 @@ export const INSTANCE_LABELS: Record<string, string> = {
   separations: "Kuali",
   "i9-check": "I-9 Check",
   "person-lookup": "Person Lookup",
+  "process-eid": "Process EID",
   "kronos-reports": "Kronos",
   "work-study": "Work Study",
   "emergency-contact": "Emergency Contact",

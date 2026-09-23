@@ -525,6 +525,56 @@ export interface SsSmartHrSearchOutcome {
   detail?: { transactionId: string; approvalStatus: string; effectiveDate: string; action: string };
 }
 
+export interface TransactionRoutingStrip {
+  transactionId: string;
+  eid: string;
+  effectiveDate: string;
+}
+
+export interface TransactionEidLookupResult {
+  transactionFound: boolean;
+  transactionId: string;
+  eid: string;
+  approvalStatus: string;
+  effectiveDate: string;
+}
+
+/** Verified PeopleSoft empty-search message; absence is not proof of no match. */
+export function isSsSmartHrNoMatchText(text: string): boolean {
+  return /No matching values were found/i.test(text);
+}
+
+/**
+ * Parse the exact routing strip that binds a Smart HR transaction to its
+ * assigned Employee ID. `NEW` / `PENDING` are valid pre-assignment values and
+ * return an empty EID; any other non-numeric ID is an unreadable source value.
+ */
+export function parseTransactionRoutingStrip(
+  text: string,
+  expectedTransactionId: string,
+): TransactionRoutingStrip | null {
+  const match = text.match(
+    /Transaction:\s*(T\d{4,})\s*,\s*ID:\s*([^,]*)\s*,\s*Effdt:\s*(\d{4}-\d{1,2}-\d{1,2})\s*,/i,
+  );
+  if (!match) return null;
+  const transactionId = match[1].toUpperCase();
+  if (transactionId !== expectedTransactionId.trim().toUpperCase()) return null;
+  const rawId = match[2].trim();
+  let eid = "";
+  if (/^\d{5,}$/.test(rawId)) {
+    eid = rawId;
+  } else if (rawId && !/^(?:NEW|PENDING)$/i.test(rawId)) {
+    throw new Error(
+      `Transaction ${transactionId} has an unrecognized Employee ID value "${rawId}"`,
+    );
+  }
+  return {
+    transactionId,
+    eid,
+    effectiveDate: match[3],
+  };
+}
+
 /**
  * Pure: derive the hire action from the detail page's visible text. The
  * "Hire Details" grid renders the action code (`HIR`/`REH`) and the approval
@@ -580,6 +630,138 @@ async function readSsSmartHrSearchOutcome(
   }
   const rows = await scanSsSmartHrResults(frame);
   return rows.length > 0 ? { kind: "grid", rows } : { kind: "none", rows: [] };
+}
+
+async function readTransactionRoutingStrip(
+  page: Page,
+  frame: FrameLocator,
+  transactionId: string,
+): Promise<TransactionRoutingStrip> {
+  for (const root of [page, frame] as Array<Page | FrameLocator>) {
+    const locator = ssSmartHRTransactions.transactionDetailRoutingStrip(
+      root,
+      transactionId,
+    );
+    const count = await locator.count();
+    if (count === 0) continue;
+    if (count !== 1) {
+      throw new Error(
+        `Transaction ${transactionId}: expected exactly one routing strip, found ${count}`,
+      );
+    }
+    const text = await locator.innerText({ timeout: 5_000 });
+    const parsed = parseTransactionRoutingStrip(text, transactionId);
+    if (!parsed) {
+      throw new Error(
+        `Transaction ${transactionId}: routing strip did not match the expected Transaction/ID/Effdt format`,
+      );
+    }
+    return parsed;
+  }
+  throw new Error(
+    `Transaction ${transactionId}: the detail routing strip did not resolve at page or content-frame scope`,
+  );
+}
+
+/**
+ * Read-only Process EID lookup. Search by the roster's lived name, then require
+ * the exact roster transaction number before reading the routing strip's ID.
+ * Same-named people and older transactions are never selected by position.
+ */
+export async function findTransactionEidByName(
+  page: Page,
+  opts: { livedName: string; transactionId: string },
+): Promise<TransactionEidLookupResult> {
+  const livedName = opts.livedName.trim();
+  const transactionId = opts.transactionId.trim().toUpperCase();
+  if (!livedName) throw new Error("Process EID requires a non-empty lived name");
+  if (!SS_TXN_ID_RE.test(transactionId)) {
+    throw new Error(`Process EID received invalid transaction number "${opts.transactionId}"`);
+  }
+
+  await navigateToSsSmartHrTransactions(page);
+  const frame = getContentFrame(page);
+  await safeFill(ssSmartHRTransactions.nameInput(frame), livedName, {
+    timeout: 10_000,
+    label: "ss smart hr lived-name input (process eid)",
+  });
+  await safeClick(ssSmartHRTransactions.searchButton(frame), {
+    timeout: 10_000,
+    label: "ss smart hr search button (process eid)",
+  });
+  await page.waitForTimeout(3_000);
+  await waitForPeopleSoftProcessing(frame, 15_000);
+  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+
+  const outcome = await readSsSmartHrSearchOutcome(page, frame, "Process EID");
+  if (outcome.kind === "none") {
+    const bodyText = await smartHR.transactionBody(frame).innerText({
+      timeout: 5_000,
+    });
+    if (!isSsSmartHrNoMatchText(bodyText)) {
+      throw new Error(
+        `Process EID search for "${livedName}" did not render transaction results, ` +
+        `a transaction detail page, or the verified "No matching values were found" state`,
+      );
+    }
+    return {
+      transactionFound: false,
+      transactionId,
+      eid: "",
+      approvalStatus: "",
+      effectiveDate: "",
+    };
+  }
+
+  if (outcome.kind === "detail") {
+    if (!outcome.detail || outcome.detail.transactionId !== transactionId) {
+      return {
+        transactionFound: false,
+        transactionId,
+        eid: "",
+        approvalStatus: "",
+        effectiveDate: "",
+      };
+    }
+  } else {
+    const exactRow = outcome.rows.find(
+      (row) => row.transactionId.trim().toUpperCase() === transactionId,
+    );
+    if (!exactRow) {
+      return {
+        transactionFound: false,
+        transactionId,
+        eid: "",
+        approvalStatus: "",
+        effectiveDate: "",
+      };
+    }
+    await safeClick(ssSmartHRTransactions.transactionResultRow(frame, transactionId), {
+      timeout: 10_000,
+      label: "ss smart hr exact transaction row (process eid)",
+    });
+    await page.waitForTimeout(2_000);
+    await waitForPeopleSoftProcessing(frame, 10_000);
+  }
+
+  const receipt = await readSsSmartHrReceiptFields(page, frame, transactionId);
+  if (!receipt.transactionId || !receipt.approvalStatus) {
+    throw new Error(
+      `Transaction ${transactionId}: detail page could not prove its transaction ID and approval status`,
+    );
+  }
+  const routing = await readTransactionRoutingStrip(page, frame, transactionId);
+  log.step(
+    `[SS Smart HR] Process EID: name='${livedName}' txn='${transactionId}' ` +
+    `status='${receipt.approvalStatus}' eid='${routing.eid || "<pending>"}'`,
+  );
+  return {
+    transactionFound: true,
+    transactionId,
+    eid: routing.eid,
+    approvalStatus: receipt.approvalStatus,
+    effectiveDate: routing.effectiveDate,
+  };
 }
 
 export async function findExistingHireTransaction(

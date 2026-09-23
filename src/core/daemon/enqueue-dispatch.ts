@@ -259,6 +259,46 @@ export async function enqueueFromHttp(
   }
 
   const resolvedTrackerDir = trackerDir ?? DEFAULT_DIR;
+  let effectiveInputs = inputs;
+  if (wf.config.expandHttpInputs) {
+    const parsedHttpInputs: unknown[] = [];
+    for (const input of inputs) {
+      const { cleaned } = splitPrefilled(input);
+      const result = wf.config.schema.safeParse(cleaned);
+      if (!result.success) {
+        return {
+          ok: false,
+          workflow: workflowName,
+          enqueued: 0,
+          error: `validation failed: ${result.error.message}`,
+        };
+      }
+      parsedHttpInputs.push(result.data);
+    }
+    try {
+      effectiveInputs = [
+        ...await wf.config.expandHttpInputs(parsedHttpInputs, {
+          trackerDir: resolvedTrackerDir,
+        }),
+      ];
+    } catch (err) {
+      return {
+        ok: false,
+        workflow: workflowName,
+        enqueued: 0,
+        error: `input expansion failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    if (effectiveInputs.length === 0) {
+      return {
+        ok: false,
+        workflow: workflowName,
+        enqueued: 0,
+        error: "input expansion produced no queue items",
+      };
+    }
+  }
+
   let effectiveParentRunId = parentRunId;
   let operationCoordinatorRunId: string | undefined;
   let batchDisplayOrdinal: number | undefined;
@@ -270,15 +310,15 @@ export async function enqueueFromHttp(
   const forcesInputRunOperation =
     wf.config.runtimePolicy?.delegation?.alwaysOperationInputRun === true;
   const isDirectInputRunOperation =
-    (inputs.length > 1 || forcesInputRunOperation) && !effectiveParentRunId;
+    (effectiveInputs.length > 1 || forcesInputRunOperation) && !effectiveParentRunId;
   if (isDirectInputRunOperation) {
     operationCoordinatorRunId = randomUUID();
     effectiveParentRunId = operationCoordinatorRunId;
     batchDisplayOrdinal = allocateLowestBatchDisplayOrdinal(workflowName, resolvedTrackerDir);
   }
   const queuedInputs = isDirectInputRunOperation
-    ? inputs.map((input) => mergeRuntimeOptions(input, { rowShape: "operation-member" }))
-    : inputs;
+    ? effectiveInputs.map((input) => mergeRuntimeOptions(input, { rowShape: "operation-member" }))
+    : effectiveInputs;
 
   // Fail-fast schema validation here (ensureDaemonsAndEnqueue also does this,
   // but surfacing it early lets us return 400 with a precise message instead
@@ -330,7 +370,7 @@ export async function enqueueFromHttp(
       // (e.g. oath-signature: pdf→file, eid→person) this lets a non-person
       // coordinator render its file/catalog label instead of an empty
       // person-anchor title. Resolve against the cleaned first input.
-      const { cleaned: coordinatorInput } = splitPrefilled(inputs[0]);
+      const { cleaned: coordinatorInput } = splitPrefilled(effectiveInputs[0]);
       const coordinatorQueueRowKind = resolveQueueRowKindFromValue(
         wf.queueRowKind,
         coordinatorInput,

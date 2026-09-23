@@ -21,6 +21,7 @@
     "oath-signature:stop": "tsx --env-file=.env src/cli.ts daemon-stop oath-signature",
     "oath-upload:stop": "tsx --env-file=.env src/cli.ts daemon-stop oath-upload",
     "person-lookup:stop": "tsx --env-file=.env src/cli.ts daemon-stop person-lookup",
+    "process-eid:stop": "tsx --env-file=.env src/cli.ts daemon-stop process-eid",
     "emergency-contact:stop": "tsx --env-file=.env src/cli.ts daemon-stop emergency-contact",
     "i9-lookup:stop": "tsx --env-file=.env src/cli.ts daemon-stop i9-lookup",
     "onbase:stop": "tsx --env-file=.env src/cli.ts daemon-stop onbase",

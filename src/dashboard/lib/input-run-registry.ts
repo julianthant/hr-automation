@@ -217,6 +217,18 @@ export function parsePersonLookupMatchInputs(raw: string): InputRunParseResult {
   return { ok: true, inputs };
 }
 
+/** Process exactly one date-named onboarding-roster worksheet per run. */
+export function parseProcessEidSheet(raw: string): InputRunParseResult {
+  const sheet = raw.replace(/\s+/g, " ").trim();
+  if (!sheet) {
+    return { ok: false, error: "Enter the onboarding roster worksheet label" };
+  }
+  return {
+    ok: true,
+    inputs: [{ source: "roster-sheet", sheet }],
+  };
+}
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
@@ -296,6 +308,10 @@ export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfi
         crmCheckDefault: false,
       },
     ],
+  },
+  "process-eid": {
+    placeholder: "Enter the roster worksheet label (e.g. September 14)",
+    parseInput: parseProcessEidSheet,
   },
   "oath-signature": {
     placeholder: "Enter EIDs, comma-separated (e.g. 10873611, 10873075)",

@@ -33,6 +33,10 @@ export const WORKFLOW_LOADERS: Record<string, () => Promise<AnyRegisteredWorkflo
     const mod = await import("../workflows/person-lookup/index.js");
     return mod.personLookupWorkflow as unknown as AnyRegisteredWorkflow;
   },
+  "process-eid": async () => {
+    const mod = await import("../workflows/process-eid/index.js");
+    return mod.processEidWorkflow as unknown as AnyRegisteredWorkflow;
+  },
   onboarding: async () => {
     const mod = await import("../workflows/onboarding/index.js");
     return mod.onboardingWorkflow as unknown as AnyRegisteredWorkflow;

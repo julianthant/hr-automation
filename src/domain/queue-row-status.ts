@@ -37,6 +37,10 @@
 export type QueueRowDerivedStatus =
   | "needsReview"
   | "notFound"
+  // Process EID resolved the roster row's exact transaction to an Empl ID.
+  | "eidFound"
+  // The exact transaction exists but UCPath has not assigned an Empl ID yet.
+  | "eidPending"
   // separations EID-approval review: identity-check resolved a DIFFERENT EID by
   // name and PAUSED for operator approval instead of silently overriding. The
   // run is mechanically `done` (browsers released, queue proceeds); the row

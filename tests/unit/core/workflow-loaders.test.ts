@@ -15,6 +15,15 @@ test("person-lookup is daemon-spawnable", async () => {
   assert.equal(workflow.config.name, "person-lookup");
 });
 
+test("process-eid is daemon-spawnable and operator-startable", async () => {
+  assert.ok("process-eid" in WORKFLOW_LOADERS);
+  assert.ok(listWorkflowNames().includes("process-eid"));
+
+  const workflow = await WORKFLOW_LOADERS["process-eid"]();
+  assert.equal(workflow.config.name, "process-eid");
+  assert.equal(workflow.config.label, "Process EID");
+});
+
 test("retired person-match workflow has no daemon-loader alias", () => {
   assert.ok(!("person-match" in WORKFLOW_LOADERS));
   assert.ok(!listWorkflowNames().includes("person-match"));

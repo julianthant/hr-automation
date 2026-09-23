@@ -119,8 +119,8 @@ const ALLOWLIST: CountAllowlist = {
     reason: "PeopleSoft Personal Data page settle waits across its dialogs/rows.",
   },
   "src/systems/ucpath/ss-smart-hr.ts": {
-    count: 6,
-    reason: "Smart HR transaction submit settle waits (the 6th is readSubmittedHireReceipt's post-search settle, mirroring findExistingHireTransaction's).",
+    count: 8,
+    reason: "PeopleSoft SS Smart HR has no stable completion signal beyond its optional spinner: Process EID's verified name-search + exact-row drill use the same existing 3s/2s settles as the hire search/readback paths.",
   },
   "src/systems/ucpath/transaction.ts": {
     count: 19,

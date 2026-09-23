@@ -206,6 +206,19 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
    */
   inputSubject?: InputSubjectOrResolver<TData>
   /**
+   * Dashboard-HTTP intake expansion. Converts one validated operator request
+   * into the concrete daemon items that should be queued (for example, a
+   * roster-sheet selector into one person item per eligible row).
+   *
+   * Runs only in `enqueueFromHttp`, before operation grouping and pending-row
+   * emission. Every returned item is schema-validated again. Direct daemon and
+   * delegated enqueues bypass this hook and must already supply concrete items.
+   */
+  expandHttpInputs?: (
+    inputs: readonly TData[],
+    context: { trackerDir?: string },
+  ) => Promise<readonly TData[]>
+  /**
    * Optional per-workflow queue-row **status** rules — the status axis,
    * orthogonal to `queueRowKind` (title/subtitle). Lets a workflow promote a
    * row to a workflow-specific derived display status (e.g. person-lookup

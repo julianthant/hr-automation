@@ -13,6 +13,7 @@ import "../../workflows/onbase/index.js";
 import "../../workflows/onboarding/index.js";
 import "../../workflows/ocr/index.js";
 import "../../workflows/person-lookup/index.js";
+import "../../workflows/process-eid/index.js";
 import "../../workflows/separations/index.js";
 import "../../workflows/i9-check/index.js";
 import "../../workflows/sharepoint-download/index.js";

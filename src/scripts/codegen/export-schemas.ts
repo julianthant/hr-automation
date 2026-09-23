@@ -39,6 +39,7 @@ import * as onboarding from "../../workflows/onboarding/index.js";
 import * as oathSignature from "../../workflows/oath-signature/index.js";
 import * as oathUpload from "../../workflows/oath-upload/index.js";
 import * as personLookup from "../../workflows/person-lookup/index.js";
+import * as processEid from "../../workflows/process-eid/index.js";
 import * as separations from "../../workflows/separations/index.js";
 // separations/index.ts only re-exports helpers, not the schema itself — pull
 // the schema from the underlying module directly.
@@ -76,6 +77,7 @@ const SCHEMA_REGISTRY: SchemaEntry[] = [
   { workflowName: "oath-upload", schema: oathUpload.OathUploadInputSchema as unknown as AnySchema },
   { workflowName: "onboarding", schema: onboarding.EmployeeDataSchema as unknown as AnySchema },
   { workflowName: "person-lookup", schema: personLookup.PersonLookupItemSchema as unknown as AnySchema },
+  { workflowName: "process-eid", schema: processEid.ProcessEidInputSchema as unknown as AnySchema },
   { workflowName: "separations", schema: SeparationDataSchema as unknown as AnySchema },
   { workflowName: "work-study", schema: workStudy.WorkStudyInputSchema as unknown as AnySchema },
 ];

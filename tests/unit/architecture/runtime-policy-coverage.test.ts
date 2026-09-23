@@ -21,6 +21,7 @@ import { getAll } from "../../../src/core/kernel/registry.js";
 
 // Side-effect imports register every kernel workflow in the metadata registry.
 import "../../../src/workflows/person-lookup/workflow.js";
+import "../../../src/workflows/process-eid/workflow.js";
 import "../../../src/workflows/crm-doc-download/workflow.js";
 import "../../../src/workflows/emergency-contact/workflow.js";
 import "../../../src/workflows/i9-lookup/workflow.js";
