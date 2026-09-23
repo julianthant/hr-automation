@@ -22,6 +22,7 @@ npm run work-study:stop
 npm run kronos-pay-rule:stop
 npm run emergency-contact:stop
 npm run person-lookup:stop
+npm run process-eid:stop
 npm run oath-signature:stop
 npm run oath-upload:stop
 

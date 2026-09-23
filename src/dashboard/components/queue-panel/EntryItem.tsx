@@ -111,6 +111,22 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
     iconColor: "text-muted-foreground",
     label: "Not found",
   },
+  /** Process EID — exact roster transaction resolved to an assigned EID. */
+  eidFound: {
+    badge: "bg-success/12 text-success border border-success/30",
+    icon: CheckCircle2,
+    iconClass: "",
+    iconColor: "text-success",
+    label: "Found",
+  },
+  /** Process EID — transaction exists, but UCPath has not assigned an EID. */
+  eidPending: {
+    badge: "bg-warning/12 text-warning border border-warning/30",
+    icon: Clock,
+    iconClass: "",
+    iconColor: "text-warning",
+    label: "Pending",
+  },
   /** Separations — identity-check resolved a DIFFERENT EID and paused for the
    *  operator to pick which person to separate (action required → amber). */
   awaitingApproval: {

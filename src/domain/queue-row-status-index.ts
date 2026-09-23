@@ -21,6 +21,7 @@ import { separationsStatusExtensions } from "./separations-status.js";
 import { i9CheckStatusExtensions } from "./i9-check-status.js";
 import { identityApprovalStatusExtensions } from "./identity-approval.js";
 import { oathSignatureStatusExtensions } from "./oath-signature-status.js";
+import { processEidStatusExtensions } from "./process-eid-status.js";
 import { ocrStatusExtensions } from "../tracker/dashboard/ocr-status.js";
 
 registerWorkflowStatusExtensions("person-lookup", personLookupStatusExtensions);
@@ -30,4 +31,5 @@ registerWorkflowStatusExtensions("i9-check", i9CheckStatusExtensions);
 // person-search match) — same derived awaitingApproval/dismissed badge.
 registerWorkflowStatusExtensions("onboarding", identityApprovalStatusExtensions);
 registerWorkflowStatusExtensions("oath-signature", oathSignatureStatusExtensions);
+registerWorkflowStatusExtensions("process-eid", processEidStatusExtensions);
 registerWorkflowStatusExtensions("ocr", ocrStatusExtensions);

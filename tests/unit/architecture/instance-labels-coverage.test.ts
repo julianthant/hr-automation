@@ -23,6 +23,7 @@ import "../../../src/workflows/oath-upload/index.js";
 import "../../../src/workflows/onboarding/index.js";
 import "../../../src/workflows/ocr/index.js";
 import "../../../src/workflows/person-lookup/index.js";
+import "../../../src/workflows/process-eid/index.js";
 import "../../../src/workflows/separations/index.js";
 import "../../../src/workflows/sharepoint-download/index.js";
 import "../../../src/workflows/work-study/index.js";

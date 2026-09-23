@@ -47,6 +47,12 @@ Dashboard input runs use daemon mode when the workflow is registered in `src/cor
 - First run with no alive daemon spawns `tsx src/cli-daemon.ts <workflow>`, authenticates once, then enqueues work.
 - Later runs insert into SQLite `tasks` and wake alive daemons; no re-Duo.
 - Daemons race to claim queued work through SQLite, not JSONL.
+- A workflow may declare `expandHttpInputs(inputs, { trackerDir })` when one
+  dashboard request represents many concrete daemon items (Process EID:
+  worksheet label → eligible roster rows). Expansion runs only in
+  `enqueueFromHttp`, after the request shape is validated and before operation
+  grouping/pending emission; every expanded item is schema-validated again.
+  Direct/delegated daemon enqueues already carry concrete inputs and bypass it.
 - **Between items, the daemon resets every system's page to its `resetUrl`** — after EVERY completed item (done / failed / cancelled), not just cancels, and skipped only while `shuttingDown` (a daemon tearing chromium down has nothing to reset). This matches the in-process batch (`kernel/workflow.ts`) and pool (`kernel/pool-core.ts`) paths; all three run modes must agree, or page state leaks across items on whichever mode is the exception. See the 2026-07-31 lesson below.
 - Idle daemons keep sessions warm with periodic `session.healthCheck(system)`.
 - `npm run <workflow>:stop` drains in-flight work; `-- --force` marks it failed immediately.

@@ -1558,6 +1558,23 @@ export const ssSmartHRTransactions = {
    */
   transactionDetailApprovalStatus: (root: Page | FrameLocator): Locator =>
     root.locator("#UC_SS_TRANSACT_APPR_STATUS"),
+
+  /**
+   * Transaction DETAIL page — routing strip for one exact transaction, e.g.
+   * `Transaction: T002235451, ID: 10901366, Effdt: 2026-09-28, Unit: SDCMP`.
+   * This is the authoritative assigned-EID read for Process EID. The anchored
+   * text excludes the larger ancestor cell whose text starts with
+   * "Transaction Details".
+   * verified 2026-09-16 (live Ineza Marekani / T002235451)
+   * @tags transaction, eid, employee-id, routing, detail, ss-smart-hr
+   */
+  transactionDetailRoutingStrip: (
+    root: Page | FrameLocator,
+    transactionId: string,
+  ): Locator =>
+    root.getByText(
+      new RegExp(`^Transaction:\\s*${transactionId}\\s*,\\s*ID:`, "i"),
+    ),
 };
 
 // ─── Smart HR Transaction Status (filter + results dashboard) ─────────────

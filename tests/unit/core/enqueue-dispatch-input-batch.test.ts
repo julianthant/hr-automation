@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, beforeEach, vi } from "vitest";
 import assert from "node:assert/strict";
+import ExcelJS from "exceljs";
 
 import { enqueueFromHttp } from "../../../src/core/daemon/enqueue-dispatch.js";
 import { dateLocal, type TrackerEntry } from "../../../src/tracker/jsonl.js";
@@ -99,6 +100,61 @@ test("enqueueFromHttp marks multi-value input-run batches as normal batch member
   assert.equal((queuedInputs[0] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.preset, "lookup-only");
   assert.equal((queuedInputs[0] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.rowShape, "operation-member");
   assert.equal((queuedInputs[1] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.rowShape, "operation-member");
+});
+
+test("enqueueFromHttp expands one Process EID worksheet request into roster member rows", async () => {
+  const trackerDir = tempTrackerDir();
+  const rosterPath = join(trackerDir, "Onboarding Roster.xlsx");
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("September 14");
+  worksheet.addRows([
+    ["Lived Name", "Transaction Number", "EID"],
+    ["Ineza Marekani", "T002235451", ""],
+    ["Hao Sun", "T002235452", "Pending"],
+    ["Already Complete", "T002235453", "10901366"],
+  ]);
+  await workbook.xlsx.writeFile(rosterPath);
+
+  const result = await enqueueFromHttp(
+    "process-eid",
+    [{ source: "roster-sheet", sheet: "September 14", rosterPath }],
+    { trackerDir },
+  );
+
+  assert.equal(result.ok, true);
+  const mock = await enqueueMock();
+  const [, queuedInputs, , opts] = mock.mock.calls[0] as [
+    unknown,
+    Array<Record<string, unknown>>,
+    unknown,
+    { parentRunId?: string },
+  ];
+  assert.equal(typeof opts.parentRunId, "string");
+  assert.deepEqual(
+    queuedInputs.map(({ __runtimeOptions, ...input }) => input),
+    [
+      {
+        source: "person",
+        livedName: "Ineza Marekani",
+        transactionId: "T002235451",
+        sheet: "September 14",
+        rosterRow: 2,
+      },
+      {
+        source: "person",
+        livedName: "Hao Sun",
+        transactionId: "T002235452",
+        sheet: "September 14",
+        rosterRow: 3,
+      },
+    ],
+  );
+  for (const input of queuedInputs) {
+    assert.equal(
+      (input.__runtimeOptions as Record<string, unknown>).rowShape,
+      "operation-member",
+    );
+  }
 });
 
 test("enqueueFromHttp pre-emits person-lookup input-run batches as batch members", async () => {

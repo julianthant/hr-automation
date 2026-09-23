@@ -14,6 +14,8 @@ import {
   decideHireDuplicateSkip,
   HIRE_IN_FLIGHT_APPROVAL_STATUSES,
   receiptMatchesRequestedTransaction,
+  isSsSmartHrNoMatchText,
+  parseTransactionRoutingStrip,
 } from "../../../../src/systems/ucpath/ss-smart-hr.js";
 import type { SsSmartHrRow } from "../../../../src/systems/ucpath/ss-smart-hr.js";
 
@@ -445,5 +447,69 @@ describe("SS Smart HR auto-opened detail page readers (live page text, 2026-08-2
     assert.equal(detailPageEffdt(ALI), "2026-09-11");
     assert.equal(detailPageEffdt("Start Date 09/11/2026 HIR"), "09/11/2026");
     assert.equal(detailPageEffdt("nothing here"), "");
+  });
+});
+
+describe("parseTransactionRoutingStrip", () => {
+  it("extracts the assigned EID from the exact transaction routing strip", () => {
+    assert.deepEqual(
+      parseTransactionRoutingStrip(
+        "Transaction: T002235451, ID: 10901366, Effdt: 2026-09-28, Unit: SDCMP",
+        "T002235451",
+      ),
+      {
+        transactionId: "T002235451",
+        eid: "10901366",
+        effectiveDate: "2026-09-28",
+      },
+    );
+  });
+
+  it("represents a documented pending ID value as an empty EID", () => {
+    assert.deepEqual(
+      parseTransactionRoutingStrip(
+        "Transaction: T002235451, ID: PENDING, Effdt: 2026-09-28, Unit: SDCMP",
+        "T002235451",
+      ),
+      {
+        transactionId: "T002235451",
+        eid: "",
+        effectiveDate: "2026-09-28",
+      },
+    );
+  });
+
+  it("does not accept a different transaction's routing strip", () => {
+    assert.equal(
+      parseTransactionRoutingStrip(
+        "Transaction: T002235452, ID: 10901366, Effdt: 2026-09-28, Unit: SDCMP",
+        "T002235451",
+      ),
+      null,
+    );
+  });
+
+  it("fails loud for an unrecognized non-empty Employee ID value", () => {
+    assert.throws(
+      () =>
+        parseTransactionRoutingStrip(
+          "Transaction: T002235451, ID: UNKNOWN, Effdt: 2026-09-28, Unit: SDCMP",
+          "T002235451",
+        ),
+      /unrecognized Employee ID value "UNKNOWN"/,
+    );
+  });
+});
+
+describe("isSsSmartHrNoMatchText", () => {
+  it("recognizes only PeopleSoft's verified empty-search state", () => {
+    assert.equal(
+      isSsSmartHrNoMatchText("No matching values were found."),
+      true,
+    );
+    assert.equal(
+      isSsSmartHrNoMatchText("SS Smart HR Transactions Search"),
+      false,
+    );
   });
 });

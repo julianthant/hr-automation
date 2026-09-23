@@ -267,7 +267,7 @@ export function OperationRowUnified({
           "aria-pressed": selected,
           "aria-label": hasTitle
             ? `${name} — ${resolveOperationStatusLabel(displayParent, ocr).toLowerCase()}`
-            : `${counts.total} ${counts.total === 1 ? "document" : "documents"} — ${resolveOperationStatusLabel(displayParent, ocr).toLowerCase()}`,
+            : `${counts.total} ${counts.total === 1 ? "person" : "people"} — ${resolveOperationStatusLabel(displayParent, ocr).toLowerCase()}`,
           "data-queue-entry-id": parent.id,
           onKeyDown: (e) => {
             if (e.key === "Enter" || e.key === " ") {
@@ -303,7 +303,7 @@ export function OperationRowUnified({
                     workflow={parent.workflow}
                     id={parent.id}
                     runId={parent.runId}
-                    subject={hasTitle ? name : `${counts.total} ${counts.total === 1 ? "document" : "documents"}`}
+                    subject={hasTitle ? name : `${counts.total} ${counts.total === 1 ? "person" : "people"}`}
                   />
                 ),
               }
@@ -315,7 +315,7 @@ export function OperationRowUnified({
                   date,
                   actions: projection?.actions,
                   entry: displayParent,
-                  subject: hasTitle ? name : `${counts.total} ${counts.total === 1 ? "document" : "documents"}`,
+                  subject: hasTitle ? name : `${counts.total} ${counts.total === 1 ? "person" : "people"}`,
                   onDelete,
                 },
               }),

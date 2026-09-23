@@ -119,6 +119,8 @@ export const QUEUE_STATUSES: ReferenceItem[] = [
   { value: "cancelled", label: "Cancelled", description: "`failed` + `step: cancelled` — a deliberate operator cancel (orange), not a failure.", tag: "override" },
   { value: "needsReview", label: "Needs review", description: "Delegated OCR awaiting operator approval (derived; ocr).", tag: "derived" },
   { value: "notFound", label: "Not found", description: "Person Lookup: UCPath had no matching row (derived; status still done).", tag: "derived" },
+  { value: "eidFound", label: "Found", description: "Process EID: exact Smart HR transaction has an assigned EID (green; status still done).", tag: "derived" },
+  { value: "eidPending", label: "Pending", description: "Process EID: exact Smart HR transaction exists but no EID is assigned yet (amber; status still done).", tag: "derived" },
   { value: "awaitingApproval", label: "Awaiting approval", description: "Separations: identity-check resolved a different EID; paused for operator (derived).", tag: "derived" },
   { value: "dismissed", label: "Dismissed", description: "Separations: operator reviewed an awaiting-approval row and declined to re-queue (derived).", tag: "derived" },
 ];

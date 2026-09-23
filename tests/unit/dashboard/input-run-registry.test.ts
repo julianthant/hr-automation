@@ -7,6 +7,7 @@ import {
   parseCrmDocDownloadInputs,
   parsePersonLookupInputs,
   parsePersonLookupMatchInputs,
+  parseProcessEidSheet,
 } from "../../../src/dashboard/lib/input-run-registry.js";
 
 test("person-lookup input run accepts EIDs and names separated by semicolons", () => {
@@ -76,6 +77,24 @@ test("person-lookup Match mode surfaces the offending record when both identifie
   assert.deepEqual(parsePersonLookupMatchInputs("Reyes, Marta, X, x"), {
     ok: false,
     error: 'Person Lookup Match input "Reyes, Marta, X, x" cannot use x for both DOB and SSN',
+  });
+});
+
+test("process-eid input run accepts one exact roster worksheet label", () => {
+  assert.deepEqual(parseProcessEidSheet("  September   14  "), {
+    ok: true,
+    inputs: [{ source: "roster-sheet", sheet: "September 14" }],
+  });
+
+  const config = getInputRunConfig("process-eid");
+  assert.ok(config);
+  assert.match(config.placeholder, /worksheet label/i);
+});
+
+test("process-eid input run rejects an empty worksheet label", () => {
+  assert.deepEqual(parseProcessEidSheet(" \n\t "), {
+    ok: false,
+    error: "Enter the onboarding roster worksheet label",
   });
 });
 
