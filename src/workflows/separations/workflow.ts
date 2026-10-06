@@ -51,7 +51,7 @@ import {
 import type { SeparationTimecardData } from "../../systems/new-kronos/index.js";
 
 // UCPath (Job Summary fetch for the identity gate + identity-check re-fetch)
-import { getJobSummaryIdentity } from "../../systems/ucpath/index.js";
+import { getJobSummaryIdentity, readSeparationHireDate } from "../../systems/ucpath/index.js";
 import type { JobSummaryData } from "../../systems/ucpath/index.js";
 
 import {
@@ -482,16 +482,6 @@ export const separationsWorkflow = defineWorkflow({
     log.step(`Employee: ${kualiData.employeeName} | EID: ${kualiData.eid}`);
     log.step(`Type: ${kualiData.terminationType} (${isVol ? "VOL" : "INVOL"}) | Eff: ${kualiTermEffDate}`);
 
-    // ─── kronos date range — computed from the Kuali dates, which are stable
-    // across EID verification, so it's safe to compute up front. kronos-search
-    // itself runs LATER (after identity-check + transaction-check +
-    // ucpath-job-summary), with the verified EID — and only when the department
-    // gate didn't skip it (HDH employees only). ───
-    const { startDate: kronosStart, endDate: kronosEnd } = computeKronosDateRange(
-      kualiData.lastDayWorked, kualiData.separationDate,
-    );
-    log.step(`[New Kronos] Date range: ${kronosStart} – ${kronosEnd}`);
-
     // New Kronos separation timecard: last physical punch + sick/holiday days.
     // Empty default when kronos-search is skipped (prefill / preset paths) and
     // until the kronos-search step below fills it.
@@ -795,9 +785,15 @@ export const separationsWorkflow = defineWorkflow({
       await fillTimekeeperTasks(kp, timekeeperName);
       log.success("[Kuali] Timekeeper name filled (kronos-search skip path)");
     } else {
-      const phase1 = await ctx.step("kronos-search", () =>
-        runKronosSearch(ctx, kualiData, kronosStart, kronosEnd, timekeeperName),
-      );
+      let kronosStart = "";
+      let kronosEnd = "";
+      const phase1 = await ctx.step("kronos-search", async () => {
+        const hireDate = await readSeparationHireDate(await ctx.page("ucpath"), kualiData.eid, separationJob);
+        ({ startDate: kronosStart, endDate: kronosEnd } = computeKronosDateRange(hireDate, todayMmDdYyyy()));
+        ctx.updateData({ hireDate, kronosStartDate: kronosStart, kronosEndDate: kronosEnd });
+        log.step(`[New Kronos] Verified Last Hire through today: ${kronosStart} – ${kronosEnd}`);
+        return runKronosSearch(ctx, kualiData, kronosStart, kronosEnd, timekeeperName);
+      });
       if (phase1.newK.status === "fulfilled") {
         newKronosFound = phase1.newK.value.found;
         timecard = {

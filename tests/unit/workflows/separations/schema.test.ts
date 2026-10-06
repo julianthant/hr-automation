@@ -448,50 +448,26 @@ describe("getInitials", () => {
 });
 
 describe("computeKronosDateRange", () => {
-  it("expands ±1 month when lastDayWorked < separationDate", () => {
-    const result = computeKronosDateRange("03/10/2026", "03/20/2026");
-    assert.equal(result.startDate, "02/10/2026");
-    assert.equal(result.endDate, "04/20/2026");
+  it("covers hire through today without using claimed separation dates", () => {
+    assert.deepEqual(computeKronosDateRange("10/24/2025", "10/06/2026"), { startDate: "10/24/2025", endDate: "10/06/2026" });
   });
-
-  it("expands ±1 month when lastDayWorked > separationDate", () => {
-    const result = computeKronosDateRange("03/20/2026", "03/10/2026");
-    assert.equal(result.startDate, "02/10/2026");
-    assert.equal(result.endDate, "04/20/2026");
+  it("includes same-day hires", () => {
+    assert.deepEqual(computeKronosDateRange("06/08/2026", "06/08/2026"), { startDate: "06/08/2026", endDate: "06/08/2026" });
   });
-
-  it("expands to -1 month / +1 month when both dates are equal", () => {
-    const result = computeKronosDateRange("03/15/2026", "03/15/2026");
-    assert.equal(result.startDate, "02/15/2026");
-    assert.equal(result.endDate, "04/15/2026");
+  it("pads date boundaries", () => {
+    assert.equal(computeKronosDateRange("4/3/2026", "6/8/2026").startDate, "04/03/2026");
   });
-
-  it("crosses the year boundary backwards (Jan 15 → Dec 15 prev year)", () => {
-    const result = computeKronosDateRange("01/15/2026", "01/15/2026");
-    assert.equal(result.startDate, "12/15/2025");
-    assert.equal(result.endDate, "02/15/2026");
+  it("retains leap-day hires", () => {
+    assert.equal(computeKronosDateRange("02/29/2024", "10/06/2026").startDate, "02/29/2024");
   });
-
-  it("crosses the year boundary forwards (Dec 15 → Jan 15 next year)", () => {
-    const result = computeKronosDateRange("12/15/2026", "12/15/2026");
-    assert.equal(result.startDate, "11/15/2026");
-    assert.equal(result.endDate, "01/15/2027");
+  it("rejects future hires", () => assert.throws(() => computeKronosDateRange("10/07/2026", "10/06/2026"), /after current date/));
+  it("rejects impossible boundaries", () => {
+    assert.throws(() => computeKronosDateRange("02/29/2025", "10/06/2026"), /Invalid/);
+    assert.throws(() => computeKronosDateRange("01/01/2025", "04/31/2026"), /Invalid/);
   });
-
-  it("zero-pads single-digit months in output", () => {
-    const result = computeKronosDateRange("05/05/2026", "05/05/2026");
-    assert.equal(result.startDate, "04/05/2026");
-    assert.equal(result.endDate, "06/05/2026");
-  });
-
-  it("documents JS setMonth overflow on March 31: start rolls to March 3 (Feb 31 → Mar 3)", () => {
-    // Known JS Date quirk: setMonth(month - 1) on March 31 targets Feb 31, which
-    // doesn't exist, so Date normalizes it to March 3 (non-leap) / March 2 (leap).
-    // ±1 month widens the window anyway, so this under-expansion is harmless in
-    // practice — but worth pinning so a future refactor doesn't silently "fix" it.
-    const result = computeKronosDateRange("03/31/2026", "03/31/2026");
-    assert.equal(result.startDate, "03/03/2026");
-    assert.equal(result.endDate, "05/01/2026");
+  it("rejects missing or malformed boundaries", () => {
+    assert.throws(() => computeKronosDateRange("", "10/06/2026"), /Invalid/);
+    assert.throws(() => computeKronosDateRange("2025-10-24", "10/06/2026"), /Invalid/);
   });
 });
 

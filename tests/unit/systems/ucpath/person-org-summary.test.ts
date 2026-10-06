@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { isAcceptedHdhDepartment } from "../../../../src/domain/hdh/departments.js";
 import {
   PERSON_ORG_NAME_LABELS,
+  resolveSeparationHireDate,
   deriveAssignmentDetailsFromCells,
   parsePersonOrgNameInput,
   selectPreferredAssignmentDetails,
@@ -199,4 +200,24 @@ describe("selectPersonName", () => {
     assert.ok(PERSON_ORG_NAME_LABELS.includes("HR Status"));
     assert.equal(PERSON_ORG_NAME_LABELS.includes("Julian Zaw"), false);
   });
+});
+
+
+describe("resolveSeparationHireDate", () => {
+  const job = { emplRecord: "0", positionNumber: "10005710" };
+  const cells = ["0", "09/13/2026", "Active", "SDCMP", "10005710", "000412", "HOUSING/DINING/HOSPITALITY", "004921", "STDT 2", "06/30/2027", "0.44", "Student"];
+  const instance = { hireDate: "10/24/2025", assignments: [cells], complete: true };
+  it("uses Last Hire rather than later assignment EFFDT", () => {
+    assert.equal(resolveSeparationHireDate("10001979", "10001979", job, [instance]), "10/24/2025");
+  });
+  it("selects the matched employment instance", () => {
+    assert.equal(resolveSeparationHireDate("10001979", "10001979", job, [{ ...instance, hireDate: "01/01/2026", assignments: [["1", ...cells.slice(1)]] }, instance]), "10/24/2025");
+  });
+  it("rejects a stale employee", () => assert.throws(() => resolveSeparationHireDate("10002179", "10001979", job, [instance]), /identity mismatch/));
+  it("rejects incomplete pagination", () => assert.throws(() => resolveSeparationHireDate("10001979", "10001979", job, [{ ...instance, complete: false }]), /incomplete/));
+  it("rejects absent or ambiguous jobs", () => {
+    assert.throws(() => resolveSeparationHireDate("10001979", "10001979", { ...job, positionNumber: "other" }, [instance]), /found 0/);
+    assert.throws(() => resolveSeparationHireDate("10001979", "10001979", job, [instance, instance]), /found 2/);
+  });
+  it("rejects blank Last Hire without EFFDT substitution", () => assert.throws(() => resolveSeparationHireDate("10001979", "10001979", job, [{ ...instance, hireDate: "" }]), /Last Hire is blank/));
 });

@@ -966,3 +966,76 @@ export async function searchByEid(
   log.success(`searchByEid: resolved EID ${emplId} → ${result.name}`);
   return { ...result, emplId };
 }
+
+
+export interface SeparationHireInstance {
+  hireDate: string;
+  assignments: string[][];
+  complete: boolean;
+}
+
+/** Select the hire date belonging to the exact separation assignment. */
+export function resolveSeparationHireDate(
+  observedEid: string,
+  expectedEid: string,
+  job: { emplRecord: string; positionNumber: string },
+  instances: SeparationHireInstance[],
+): string {
+  if (observedEid.trim() !== expectedEid) throw new Error(`[UCPath] Hire-date identity mismatch: expected ${expectedEid}, observed ${observedEid}`);
+  if (!instances.length || instances.some(instance => !instance.complete)) {
+    throw new Error(`[UCPath] EID ${expectedEid}: Person Org Summary employment instances or assignments are incomplete`);
+  }
+  const matches = instances.filter(instance => instance.assignments.some(cells => {
+    const assignment = deriveAssignmentDetailsFromCells(cells);
+    return assignment?.emplRecord === job.emplRecord && assignment.positionNumber === job.positionNumber;
+  }));
+  if (matches.length !== 1) throw new Error(`[UCPath] EID ${expectedEid}: expected one hire-date instance for record ${job.emplRecord}, position ${job.positionNumber}; found ${matches.length}`);
+  const hireDate = matches[0].hireDate.trim();
+  if (!hireDate) throw new Error(`[UCPath] EID ${expectedEid}: Last Hire is blank for position ${job.positionNumber}`);
+  return hireDate;
+}
+
+/** Read Last Hire directly; assignment EFFDT is never a substitute. */
+export async function readSeparationHireDate(
+  page: Page,
+  eid: string,
+  job: { emplRecord: string; positionNumber: string },
+): Promise<string> {
+  const frame = await navigateToPersonOrgSummary(page);
+  await safeFill(personOrgSummary.lastNameInput(frame), "", { label: "clear last name" });
+  await safeFill(personOrgSummary.nameInput(frame), "", { label: "clear name" });
+  await safeFill(personOrgSummary.emplIdInput(frame), eid, { label: "hire-date employee ID" });
+  await safeClick(personOrgSummary.searchButton(frame), { label: "hire-date search" });
+  await personOrgSummary.personIdValue(frame).waitFor({ state: "visible", timeout: 15_000 });
+  await waitForPeopleSoftProcessing(frame);
+  const observedEid = await personOrgSummary.personIdValue(frame).innerText();
+  // verified 2026-10-06: each ORG Instance contains its own Last Hire and assignment grid.
+  for (let expansion = 0; expansion < 20; expansion++) {
+    const snapshot = await personOrgSummary.body(frame).evaluate(body => {
+      const sections = [...body.querySelectorAll<HTMLTableElement>('table[id^="ACE_$ICField94$"]')];
+      const employment = body.querySelector('[id="$ICField94$scroll$0"]');
+      const links = [...body.querySelectorAll<HTMLAnchorElement>("a")].filter(link => link.textContent?.trim() === "View All");
+      const totals = [...(employment?.textContent ?? "").matchAll(/(\d+) of (\d+)/g)];
+      const completeEmployment = totals.length > 0 && Number(totals[0][2]) === sections.length;
+      let expandIndex = completeEmployment ? -1 : links.findIndex(link => employment?.contains(link));
+      const instances = sections.map(section => {
+        const hireDate = section.querySelector('[id^="PER_INST_EMP_VW_LAST_HIRE_DT$"]')?.textContent?.trim() ?? "";
+        const grid = section.querySelector<HTMLTableElement>('table[id^="tdgbrPER_ASGN_EMP_VW$"]');
+        const assignments = grid ? [...grid.rows].map(row => [...row.cells].map(cell => cell.textContent?.trim() ?? "")) : [];
+        const count = section.textContent?.match(/Assignments[\s\S]*?(\d+) of (\d+)/);
+        const completeAssignments = !!count && Number(count[2]) === assignments.length;
+        if (completeEmployment && !completeAssignments && expandIndex === -1) expandIndex = links.findIndex(link => section.contains(link));
+        return { hireDate, assignments, complete: completeEmployment && completeAssignments };
+      });
+      return { instances, expandIndex };
+    });
+    if (snapshot.instances.length && snapshot.instances.every(instance => instance.complete)) {
+      return resolveSeparationHireDate(await personOrgSummary.personIdValue(frame).innerText(), eid, job, snapshot.instances);
+    }
+    if (snapshot.expandIndex === -1) return resolveSeparationHireDate(observedEid, eid, job, snapshot.instances);
+    await safeClick(personOrgSummary.viewAllLink(frame).nth(snapshot.expandIndex), { label: "expand hire-date employment instances or assignments" });
+    await page.waitForLoadState("networkidle", { timeout: 15_000 });
+    await waitForPeopleSoftProcessing(frame);
+  }
+  throw new Error(`[UCPath] EID ${eid}: could not load complete hire-date employment instances and assignments`);
+}

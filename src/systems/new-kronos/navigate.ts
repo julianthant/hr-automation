@@ -872,62 +872,117 @@ export function resolveSeparationTimecardDates(
   };
 }
 
-/**
- * Parse the New Kronos (WFD) timecard grid to extract:
- * - last day with an In/Out punch
- * - all days with a Sick pay code (matches /sick/i, e.g. "Sick - Hourly")
- * - all days with a Holiday pay code (matches /holiday/i, e.g. "Holiday - Hourly")
- *
- * Grid structure: `document.querySelectorAll(".ui-grid-viewport")` →
- *   [0] = pinned date column (rows like "Thu 4/23")
- *   [last] = data column; per-row cell indices:
- *     [0]=Schedule [1]=In [2]=Out [3]=Transfer [4]=Pay code [5]=Amount
- *     [6]=Shift [7]=Daily [8]=Period [9]=Absence
- *
- * Verified live 2026-06-18 against EIDs 10776990 (holiday) and 10001685 (sick).
- * Multiple data rows can share one date; the date column shows the date once,
- * so the last-seen date is carried forward across rows.
- *
- * `range` is the inclusive window the caller set the timecard view to (the
- * same start/end passed to `setDateRange`) — each parsed month/day resolves
- * its year against it (see `formatTimecardDate`).
- *
- * NOTE: keep `getTimecardLastDate` as-is — it is still used by `checkTimecardDates`.
- */
+/** Require every requested calendar day; visible rows alone are insufficient. */
+export function assertTimecardDateCoverage(
+  observed: { mon: number; day: number }[],
+  range: TimecardDateRange,
+): void {
+  const dates = new Set(observed.map(date => formatTimecardDate(date.mon, date.day, range)));
+  for (const day = new Date(range.start); day <= range.end; day.setDate(day.getDate() + 1)) {
+    const expected = `${String(day.getMonth() + 1).padStart(2, "0")}/${String(day.getDate()).padStart(2, "0")}/${day.getFullYear()}`;
+    if (!dates.has(expected)) throw new Error(`[New Kronos] Full timecard scan is missing date ${expected}`);
+  }
+}
+
+/** Split into continuous anniversary windows with each month/day occurring once. */
+export function splitTimecardDateRange(start: string, end: string): { startDate: string; endDate: string }[] {
+  const first = mmddyyyyToDate(start);
+  const last = mmddyyyyToDate(end);
+  if (first > last) throw new Error("[New Kronos] Timecard range starts after it ends");
+  const format = (date: Date): string => `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
+  const ranges: { startDate: string; endDate: string }[] = [];
+  for (const cursor = new Date(first); cursor <= last;) {
+    const next = new Date(cursor.getFullYear() + 1, cursor.getMonth(), cursor.getDate());
+    const through = new Date(next); through.setDate(through.getDate() - 1);
+    const stop = through < last ? through : last;
+    ranges.push({ startDate: format(cursor), endDate: format(stop) });
+    cursor.setTime(stop.getTime()); cursor.setDate(cursor.getDate() + 1);
+  }
+  return ranges;
+}
+
+/** Read every virtualized row and require every requested calendar day. */
 export async function getSeparationTimecardData(
   page: Page,
   range: TimecardDateRange,
 ): Promise<SeparationTimecardData> {
   log.step("[New Kronos] Parsing timecard for separation data (last punch, sick, holiday)...");
 
-  const raw = await page.evaluate(() => {
-    const vps = document.querySelectorAll(".ui-grid-viewport");
-    if (vps.length < 2) return { lastPunch: null, sick: [] as { mon: number; day: number }[], holiday: [] as { mon: number; day: number }[] };
-    const dateVp = vps[0];
-    const dataVp = vps[vps.length - 1];
-    const dRows = [...dateVp.querySelectorAll("[role=row]")];
-    const xRows = [...dataVp.querySelectorAll("[role=row]")];
-    let cur: { mon: number; day: number } | null = null;
-    let lastPunch: { mon: number; day: number } | null = null;
-    const sick: { mon: number; day: number }[] = [];
-    const holiday: { mon: number; day: number }[] = [];
-    for (let i = 0; i < Math.max(dRows.length, xRows.length); i++) {
-      const dt = dRows[i] ? dRows[i].textContent.replace(/\s+/g, " ").trim() : "";
-      const m = dt.match(/([A-Za-z]{3})\s+(\d+)\/(\d+)/);
-      if (m) cur = { mon: +m[2], day: +m[3] };
-      const cells = xRows[i]
-        ? [...xRows[i].querySelectorAll("[role=gridcell]")].map((c) =>
-            c.textContent.replace(/\s+/g, " ").trim(),
-          )
-        : [];
-      const inOut = (cells[1] ?? "") + " " + (cells[2] ?? "");
-      if (cur && /\d+:\d+\s*(AM|PM)/.test(inOut)) lastPunch = cur;
-      const pay = cells[4] ?? "";
-      if (cur && /sick/i.test(pay)) sick.push(cur);
-      if (cur && /holiday/i.test(pay)) holiday.push(cur);
+  const raw = await page.evaluate(async (bounds: { start: number[]; end: number[] }) => {
+    const start = new Date(bounds.start[0], bounds.start[1], bounds.start[2]);
+    const endDate = new Date(bounds.end[0], bounds.end[1], bounds.end[2]);
+    const weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dateKey = (date: Date): string => `${date.getMonth() + 1}/${date.getDate()}`;
+    const requested = new Map<string, { weekday: string; time: number }>();
+    for (const day = new Date(start); day <= endDate; day.setDate(day.getDate() + 1)) requested.set(dateKey(day), { weekday: weekdayNames[day.getDay()], time: day.getTime() });
+    const previous = new Date(start); previous.setDate(previous.getDate() - 1);
+    const following = new Date(endDate); following.setDate(following.getDate() + 1);
+    const padding = [previous, following].map(day => `${weekdayNames[day.getDay()]} ${dateKey(day)}`);
+    const snapshots = new Map<string, { date: { mon: number; day: number }; cells: string[] }>();
+    const viewports = (): HTMLElement[] => {
+      const vps = [...document.querySelectorAll<HTMLElement>(".ui-grid-viewport")];
+      if (vps.length !== 2) throw new Error(`[New Kronos] Expected two timecard viewports; found ${vps.length}`);
+      return vps;
+    };
+    const scroll = (top: number): void => {
+      const vps = viewports();
+      for (const vp of vps) {
+        vp.scrollTop = top;
+        vp.dispatchEvent(new Event("scroll", { bubbles: true }));
+      }
+    };
+    scroll(0);
+    let reachedEnd = false;
+    for (let pass = 0; pass < 2_000; pass++) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const [dateVp, dataVp] = viewports();
+      const dRows = [...dateVp.querySelectorAll<HTMLElement>("[role=row]")];
+      const xRows = [...dataVp.querySelectorAll<HTMLElement>("[role=row]")];
+      if (!dRows.length || dRows.length !== xRows.length || dataVp.clientHeight <= 0) {
+        throw new Error("[New Kronos] Missing or misaligned timecard rows");
+      }
+      let cur: { mon: number; day: number } | null = null;
+      let paddingRow = false;
+      for (let i = 0; i < dRows.length; i++) {
+        if (Math.abs(dRows[i].getBoundingClientRect().top - xRows[i].getBoundingClientRect().top) > 1) {
+          throw new Error("[New Kronos] Timecard date and punch rows are not aligned");
+        }
+        const match = dRows[i].textContent?.match(/([A-Za-z]{3})\s+(\d+)\/(\d+)/);
+        if (match) {
+          cur = { mon: Number(match[2]), day: Number(match[3]) };
+          const key = `${cur.mon}/${cur.day}`;
+          paddingRow = requested.get(key)?.weekday !== match[1] && padding.includes(`${match[1]} ${key}`);
+          if (!paddingRow && requested.get(key)?.weekday !== match[1]) throw new Error(`[New Kronos] Unexpected grid date ${match[0]} outside the requested calendar`);
+        }
+        if (paddingRow) continue;
+        const cells = [...xRows[i].querySelectorAll("[role=gridcell]")].map(cell => cell.textContent?.replace(/\s+/g, " ").trim() ?? "");
+        if (!cur) {
+          if (cells.some(Boolean)) throw new Error("[New Kronos] Timecard row has no associated date");
+          continue;
+        }
+        if (cells.length < 5) throw new Error("[New Kronos] Timecard row is missing punch or pay-code columns");
+        snapshots.set(JSON.stringify([cur, cells]), { date: cur, cells });
+      }
+      const end = dataVp.scrollHeight - dataVp.clientHeight;
+      if (dataVp.scrollTop >= end - 1) { reachedEnd = true; break; }
+      const next = Math.min(end, dataVp.scrollTop + Math.max(1, dataVp.clientHeight - 40));
+      scroll(next);
     }
-    return { lastPunch, sick, holiday };
+    if (!reachedEnd) throw new Error("[New Kronos] Full timecard scan did not reach the end");
+    const rows = [...snapshots.values()];
+    const punches = rows.filter(row => /\d+:\d+\s*(AM|PM)/.test(`${row.cells[1]} ${row.cells[2]}`));
+    punches.sort((a, b) => requested.get(`${a.date.mon}/${a.date.day}`)!.time - requested.get(`${b.date.mon}/${b.date.day}`)!.time);
+    return {
+      lastPunch: punches.at(-1)?.date ?? null,
+      sick: rows.filter(row => /sick/i.test(row.cells[4])).map(row => row.date),
+      holiday: rows.filter(row => /holiday/i.test(row.cells[4])).map(row => row.date),
+      observed: rows.map(row => row.date),
+    };
+  }, {
+    start: [range.start.getFullYear(), range.start.getMonth(), range.start.getDate()],
+    end: [range.end.getFullYear(), range.end.getMonth(), range.end.getDate()],
   });
+  assertTimecardDateCoverage(raw.observed, range);
 
   const resolved = resolveSeparationTimecardDates(raw, range);
 

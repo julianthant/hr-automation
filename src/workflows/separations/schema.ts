@@ -257,28 +257,23 @@ function parseDate(dateStr: string): Date {
   return new Date(y, m - 1, d);
 }
 
-/**
- * Compute the Kronos date range for timecard search.
- * Start = min(lastDayWorked, separationDate) - 1 month
- * End   = max(lastDayWorked, separationDate) + 1 month
- * Returns dates in M/D/YYYY format (for setDateRange digit typing).
- */
+/** Search the verified hire date through the current local date, inclusive. */
 export function computeKronosDateRange(
-  lastDayWorked: string,
-  separationDate: string,
+  hireDate: string,
+  currentDate: string,
 ): { startDate: string; endDate: string } {
-  const ldw = parseDate(lastDayWorked);
-  const sep = parseDate(separationDate);
-
-  const earlier = ldw <= sep ? ldw : sep;
-  const later = ldw >= sep ? ldw : sep;
-
-  const start = new Date(earlier);
-  start.setMonth(start.getMonth() - 1);
-
-  const end = new Date(later);
-  end.setMonth(end.getMonth() + 1);
-
+  const strictDate = (value: string): Date => {
+    if (!/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(value)) throw new Error(`Invalid hire-date search boundary: "${value}"`);
+    const date = parseDate(value);
+    const [month, day, year] = value.split("/").map(Number);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+      throw new Error(`Invalid hire-date search boundary: "${value}"`);
+    }
+    return date;
+  };
+  const start = strictDate(hireDate);
+  const end = strictDate(currentDate);
+  if (start > end) throw new Error(`Last Hire ${hireDate} is after current date ${currentDate}`);
   return { startDate: formatMmDdYyyy(start), endDate: formatMmDdYyyy(end) };
 }
 

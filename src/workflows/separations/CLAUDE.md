@@ -74,6 +74,12 @@ Saved, copied, and operator-prefilled transaction numbers are unverified claims.
 - Duplicate Kuali requests (#4652, #4651 for #4653) describing the same termination are recognized via `commentsMatchTermination`. Once all substantive details (EID, job, effective date, LDW, leave clauses) are proven identical, the differing document reference (`Kuali form #<docId>.`) is permitted, the existing transaction is linked in Kuali, and the original UCPath comments are preserved. Substantive date, job, or comment mismatches continue to be rejected.
 - In Smart HR transactions lookup (`findExistingTerminationForJob`), rows are filtered by `targetDate` before employee drill-in to prevent opening historical (e.g. 2025) receipts. Both verified direct-form and employment-record chooser paths are handled explicitly, and unexpected PeopleSoft dialogs are surfaced with their actual text via `readPeopleSoftDialogText`.
 
+## Timecard search window
+
+For HDH employees whose timecard step is not explicitly skipped, read Person Organizational Summary Last Hire after identity and separation-job verification. Match the observed Person ID, employment record and position to that job; require complete employment-instance and assignment pagination and a nonblank, valid Last Hire no later than today. Assignment EFFDT and Kuali claimed dates never substitute for Last Hire. Stamp `hireDate`, `kronosStartDate` and `kronosEndDate` for the run.
+
+Search Last Hire through the current local date, inclusive. Read continuous anniversary windows, keeping shorter spans whole across New Year so yearless grid dates remain unambiguous; scroll every segment fully and require every requested calendar day. Missing dates, incomplete grids or identity drift abort before receipt reuse or submission. Explicit prefilled/skip and non-HDH paths retain their existing behavior.
+
 ## Date model (2026-06-22 rework — READ THIS)
 
 The old "Kuali separation date is authoritative, never overridden" model is **gone** (it was wrong — operator-confirmed). Both dates are now derived from the New Kronos timecard. The reconciliation is:

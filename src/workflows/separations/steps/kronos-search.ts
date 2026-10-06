@@ -7,6 +7,7 @@ import {
   setDateRange as setNewKronosDateRange,
   getSeparationTimecardData,
   mmddyyyyToDate,
+  splitTimecardDateRange,
 } from "../../../systems/new-kronos/index.js";
 import type { SeparationTimecardData } from "../../../systems/new-kronos/index.js";
 import { fillTimekeeperTasks } from "../../../systems/kuali/index.js";
@@ -65,15 +66,18 @@ export async function runNewKronosTimecard(
     );
   }
   await page.waitForTimeout(3_000);
-  await setNewKronosDateRange(page, kronosStart, kronosEnd);
-  // Resolve grid dates against the SAME window the view was just set to —
-  // formatTimecardDate picks the year that lands inside it (fail-loud on a
-  // date outside the range), instead of stamping "now"'s year (the Dec→Jan
-  // year bug).
-  const timecard = await getSeparationTimecardData(page, {
-    start: mmddyyyyToDate(kronosStart),
-    end: mmddyyyyToDate(kronosEnd),
-  });
+  const timecard: SeparationTimecardData = { lastPunchDate: null, sickDates: [], holidayDates: [] };
+  for (const window of splitTimecardDateRange(kronosStart, kronosEnd)) {
+    await setNewKronosDateRange(page, window.startDate, window.endDate);
+    const parsed = await getSeparationTimecardData(page, {
+      start: mmddyyyyToDate(window.startDate), end: mmddyyyyToDate(window.endDate),
+    });
+    const identity = await verifyNewKronosTimecardEmployee(page, eid);
+    if (!identity.ok) throw new Error(`[New Kronos] EID ${eid}: employee changed during timecard scan`);
+    if (parsed.lastPunchDate) timecard.lastPunchDate = parsed.lastPunchDate;
+    timecard.sickDates.push(...parsed.sickDates);
+    timecard.holidayDates.push(...parsed.holidayDates);
+  }
   return { found: true, ...timecard };
 }
 

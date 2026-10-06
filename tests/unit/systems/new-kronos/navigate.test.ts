@@ -12,9 +12,13 @@
 
 import { describe, it, vi } from "vitest";
 import assert from "node:assert/strict";
+import type { Page } from "playwright";
 
 import {
   resolveSearchResult,
+  getSeparationTimecardData,
+  splitTimecardDateRange,
+  assertTimecardDateCoverage,
   resolveSearchPresence,
   createSearchOutcomeSettler,
   NO_RESULTS_STABLE_MS,
@@ -391,5 +395,69 @@ describe("createSearchOutcomeSettler", () => {
     s.observe(false, true, 0);
     assert.equal(s.observe(false, true, NO_RESULTS_STABLE_MS - 1), "pending");
     assert.equal(s.observe(false, true, NO_RESULTS_STABLE_MS), "not-found");
+  });
+});
+
+
+describe("complete hire-to-current timecard coverage", () => {
+  it("splits multiple years without gaps or ambiguous yearless dates", () => {
+    assert.deepEqual(splitTimecardDateRange("10/24/2024", "10/06/2026"), [
+      { startDate: "10/24/2024", endDate: "10/23/2025" },
+      { startDate: "10/24/2025", endDate: "10/6/2026" },
+    ]);
+  });
+  it("keeps a same-day range", () => assert.deepEqual(splitTimecardDateRange("06/08/2026", "06/08/2026"), [{ startDate: "6/8/2026", endDate: "6/8/2026" }]));
+  it("rejects reversed and malformed ranges", () => {
+    assert.throws(() => splitTimecardDateRange("06/09/2026", "06/08/2026"));
+    assert.throws(() => splitTimecardDateRange("bad", "06/08/2026"));
+  });
+  const range = { start: new Date(2024, 1, 28), end: new Date(2024, 2, 1) };
+  it("accepts complete leap-day coverage and duplicate pay rows", () => {
+    assertTimecardDateCoverage([{ mon: 2, day: 28 }, { mon: 2, day: 29 }, { mon: 2, day: 29 }, { mon: 3, day: 1 }], range);
+  });
+  it("rejects a skipped virtualized date even when a later punch exists", () => {
+    assert.throws(() => assertTimecardDateCoverage([{ mon: 2, day: 28 }, { mon: 3, day: 1 }], range), /missing date 02\/29\/2024/);
+  });
+  it("rejects empty grids and dates outside the requested range", () => {
+    assert.throws(() => assertTimecardDateCoverage([], range), /missing date/);
+    assert.throws(() => assertTimecardDateCoverage([{ mon: 1, day: 1 }], range));
+  });
+});
+
+
+describe("virtualized separation timecard reader", () => {
+  it("scrolls past initially rendered dates and excludes verified overnight padding", async () => {
+    const labels = ["Tue 12/30", "Wed 12/31", "Thu 1/1", "Fri 1/2"];
+    const makeViewport = (dates: boolean) => ({
+      scrollTop: 0, clientHeight: 100, scrollHeight: 400,
+      dispatchEvent: () => true,
+      querySelectorAll() {
+        const index = Math.floor(this.scrollTop / 100);
+        return [{
+          textContent: dates ? labels[index] : "",
+          getBoundingClientRect: () => ({ top: 0 }),
+          querySelectorAll: () => ["", index === 1 || index === 3 ? "1:00 PM" : "", "", "", ""].map(textContent => ({ textContent })),
+        }];
+      },
+    });
+    const viewports = [makeViewport(true), makeViewport(false)];
+    vi.stubGlobal("document", { querySelectorAll: () => viewports });
+    vi.stubGlobal("requestAnimationFrame", (callback: () => void) => { callback(); return 1; });
+    const page = {
+      locator: () => ({ count: async () => 2 }),
+      evaluate: async (callback: (bounds: { start: number[]; end: number[] }) => unknown, bounds: { start: number[]; end: number[] }) => callback(bounds),
+    } as unknown as Page;
+    try {
+      assert.deepEqual(await getSeparationTimecardData(page, { start: new Date(2025, 11, 31), end: new Date(2026, 0, 2) }), { lastPunchDate: "01/02/2026", sickDates: [], holidayDates: [] });
+      assert.equal(viewports[1].scrollTop, 300);
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it("rejects a missing grid instead of substituting an empty timecard", async () => {
+    const locator = { count: async () => 0, filter: () => locator, isVisible: async () => false };
+    vi.stubGlobal("document", { querySelectorAll: () => [] });
+    const page = { locator: () => locator, evaluate: async (callback: (bounds: unknown) => unknown, bounds: unknown) => callback(bounds) } as unknown as Page;
+    try {
+      await assert.rejects(getSeparationTimecardData(page, { start: new Date(2026, 0, 1), end: new Date(2026, 0, 3) }), /Expected two timecard viewports; found 0/);
+    } finally { vi.unstubAllGlobals(); }
   });
 });

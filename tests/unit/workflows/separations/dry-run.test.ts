@@ -46,6 +46,7 @@ const mocks = vi.hoisted(() => {
     // Job Summary re-fetch the handler runs after an identity-check EID
     // correction (real fn navigates UCPath — stub it).
     getJobSummaryIdentity: vi.fn(),
+    readSeparationHireDate: vi.fn(),
     // Kuali name write the identity-check "similar" branch makes (real fn drives
     // a live Kuali form — stub it).
     updateEmployeeName: vi.fn(),
@@ -102,6 +103,7 @@ vi.mock("../../../../src/systems/new-kronos/index.js", async (importOriginal) =>
 vi.mock("../../../../src/systems/ucpath/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../../src/systems/ucpath/index.js")>()),
   getJobSummaryIdentity: mocks.getJobSummaryIdentity,
+  readSeparationHireDate: mocks.readSeparationHireDate,
 }));
 // Stub only the Kuali name write the identity-check "similar" branch makes on a
 // live run; keep every other kuali export real (isVoluntaryTermination, the
@@ -238,6 +240,7 @@ function makeFakeCtx(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.readSeparationHireDate.mockResolvedValue("01/01/2025");
   mocks.runKualiExtract.mockResolvedValue(KUALI_FIXTURE);
   mocks.runKronosSearch.mockResolvedValue(KRONOS_NOT_FOUND);
   // transaction-check: default to "no existing termination" (create normally).
@@ -443,7 +446,7 @@ describe("separations handler — found timecard without a verified last punch",
     { docId: "4753", eid: "10001979", name: "Person 1204", positionNumber: "10005710" },
     { docId: "4755", eid: "10002179", name: "Hu, Lawrence", positionNumber: "10005392" },
   ]) {
-    it(`rejects #${item.docId}'s empty August–October window before receipt reuse or submission`, async () => {
+    it(`rejects #${item.docId}'s empty hire-to-current window before receipt reuse or submission`, async () => {
       mocks.runKualiExtract.mockResolvedValue({
         ...KUALI_FIXTURE, employeeName: item.name, eid: item.eid,
         lastDayWorked: "09/12/2026", separationDate: "09/12/2026",
@@ -459,7 +462,7 @@ describe("separations handler — found timecard without a verified last punch",
       });
       const { ctx } = makeFakeCtx({ docId: item.docId });
       await assert.rejects(runHandler(ctx, { docId: item.docId }),
-        new RegExp(`${item.eid}.*08/12/2026.*10/12/2026.*no physical punch`));
+        new RegExp(`${item.eid}.*01/01/2025.*no physical punch`));
       assert.equal(mocks.runTransactionCheck.mock.calls.length, 0);
       assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
       assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
@@ -1120,6 +1123,31 @@ describe("receipt verification regressions", () => {
     }});
     const { ctx } = makeFakeCtx({});
     await assert.rejects(() => runHandler(ctx, { docId: "4605" }), /Separation Date cannot be in the future/);
+    assert.equal(mocks.runTransactionCheck.mock.calls.length, 0);
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
+    assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
+  });
+});
+
+
+describe("separations hire-date search window", () => {
+  it("passes the verified Last Hire through today to Kronos", async () => {
+    mocks.readSeparationHireDate.mockResolvedValue("10/24/2025");
+    const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
+    await runHandler(ctx, { docId: "4131", dryRun: true });
+    assert.equal(mocks.readSeparationHireDate.mock.calls[0][1], KUALI_FIXTURE.eid);
+    assert.deepEqual(mocks.readSeparationHireDate.mock.calls[0][2], { emplRecord: "0", positionNumber: "10005858", jobCode: "004920" });
+    assert.equal(mocks.runKronosSearch.mock.calls[0][2], "10/24/2025");
+    const now = new Date();
+    const today = `${String(now.getMonth() + 1).padStart(2, "0")}/${String(now.getDate()).padStart(2, "0")}/${now.getFullYear()}`;
+    assert.equal(mocks.runKronosSearch.mock.calls[0][3], today);
+    assert.equal(probe.data.hireDate, "10/24/2025");
+  });
+  it("stops before Kronos, receipt reuse or submission when hire-date lookup fails", async () => {
+    mocks.readSeparationHireDate.mockRejectedValue(new Error("Last Hire is blank"));
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await assert.rejects(runHandler(ctx, { docId: "4131" }), /Last Hire is blank/);
+    assert.equal(mocks.runKronosSearch.mock.calls.length, 0);
     assert.equal(mocks.runTransactionCheck.mock.calls.length, 0);
     assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
     assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
