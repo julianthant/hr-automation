@@ -352,7 +352,17 @@ async function waitForOnbaseAuthLanding(page: Page, timeoutMs = 15_000): Promise
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const url = page.url();
-    if (url.includes("a5.ucsd.edu") || url.includes("duosecurity.com")) return;
+    if (new URL(url).hostname === "a5.ucsd.edu") {
+      // Verified 2026-10-06: warm OnBase SSO skips credentials and lands here.
+      const continueLogin = page.getByRole("button", { name: "Continue Log In", exact: true });
+      if (await continueLogin.isVisible()) {
+        await continueLogin.click({ timeout: 5_000 });
+        await page.waitForURL((next) => next.hostname !== "a5.ucsd.edu", { timeout: 15_000 });
+        continue;
+      }
+      return;
+    }
+    if (url.includes("duosecurity.com")) return;
     if (await isOnbaseForbidden(page)) return;
     if (await isOnbaseAuthenticated(page)) return;
     if (await isSsoFormReady(page)) return;

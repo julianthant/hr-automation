@@ -166,6 +166,37 @@ describe("OnBase authenticated probe", () => {
 });
 
 describe("loginToOnBase", () => {
+  it("continues a warm SSO training reminder before probing the login form", async () => {
+    const page = fakeOnbasePage();
+    let currentUrl = "https://a5.ucsd.edu/tritON/profile/SAML2/Redirect/SSO?execution=e3s1";
+    page.url = vi.fn(() => currentUrl);
+    const click = vi.fn(async () => {
+      currentUrl = "https://ucsd.hylandcloud.com/251ids/NavPanel.aspx";
+      page.menuVisible = true;
+    });
+    page.getByRole = vi.fn((_role: string, options?: {name?: string | RegExp}) => ({ isVisible: async () => options?.name === "Continue Log In" || page.menuVisible, click })) as unknown as Page["getByRole"];
+    page.waitForURL = vi.fn(async () => undefined);
+    const { loginToOnBase } = await import("../../../../src/infra/auth/login.js");
+
+    await expect(loginToOnBase(page)).resolves.toBe(true);
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(mocks.fillSsoCredentials).not.toHaveBeenCalled();
+    expect(mocks.pollDuoApproval).not.toHaveBeenCalled();
+  });
+
+  it("propagates a failed reminder click instead of claiming authentication", async () => {
+    const page = fakeOnbasePage();
+    page.url = vi.fn(() => "https://a5.ucsd.edu/tritON/profile/SAML2/Redirect/SSO");
+    page.getByRole = vi.fn((_role: string, options?: {name?: string | RegExp}) => ({
+      isVisible: async () => options?.name === "Continue Log In",
+      click: async () => { throw new Error("reminder click failed"); },
+    })) as unknown as Page["getByRole"];
+    const { loginToOnBase } = await import("../../../../src/infra/auth/login.js");
+
+    await expect(loginToOnBase(page)).rejects.toThrow("reminder click failed");
+    expect(mocks.fillSsoCredentials).not.toHaveBeenCalled();
+  });
+
   it("reloads a post-Duo NavPanel 403 before accepting OnBase auth", async () => {
     vi.resetModules();
     vi.doMock("../../../../src/systems/onbase/selectors.js", () => ({

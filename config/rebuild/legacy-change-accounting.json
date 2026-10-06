@@ -502,16 +502,17 @@
    "path": "src/infra/auth/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "4be112bffe41b4df16b72476be624af45faf29d82a9fcdfc82c5b5dc84a9fecd",
-   "afterSha256": "1029563a18f05065e052ae7d07467aa32c1c5cd0d0192199374b387c7d792539",
+   "afterSha256": "3e0e4debd554f427340bf9d606d1f01f2294aedc577ef2c1be074b54256a43b7",
    "capabilityIds": [
-    "legacy-workflow-emergency-contact"
+    "legacy-workflow-emergency-contact",
+    "legacy-workflow-onbase"
    ],
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "Changed as part of the 2026-08-05 Emergency Contact identity-gate/row-anchoring/save-proof fix."
+   "impactRationale": "Changed as part of the 2026-08-05 Emergency Contact identity-gate/row-anchoring/save-proof fix. OnBase warm SSO reminder handling is documented."
   },
   {
    "path": "src/infra/auth/duo-webauthn.ts",
@@ -2514,6 +2515,36 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved"
+  },
+  {
+   "path": "src/infra/auth/login.ts",
+   "changeKind": "modified",
+   "beforeSha256": "b011566f652ed8b5354c17b4202a8dfce9e97b0813aadc4c182830dede0e194b",
+   "capabilityIds": [
+    "legacy-workflow-onbase"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "afterSha256": "1c712997e9be39c94d74df1f1fb36084a2beddb2154bb630e39c7a0156cff03d",
+   "impactRationale": "OnBase warm SSO continues the verified training reminder before probing credentials; failed clicks and redirects propagate."
+  },
+  {
+   "path": "tests/unit/infra/auth/onbase-login.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "d45f2415167e865abb80c9f6a2f7e7420a0a7f934c15f2e33900cf49c1b9bb0f",
+   "capabilityIds": [
+    "legacy-workflow-onbase"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "afterSha256": "2d2aea632e6c8b7b178a22b3af9713337d8c9dc1d8d5ed7a306c776153aa2228",
+   "impactRationale": "OnBase warm SSO continues the verified training reminder before probing credentials; failed clicks and redirects propagate."
   }
  ]
 }

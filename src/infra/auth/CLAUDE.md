@@ -115,6 +115,8 @@ Submit button: always `button[name="_eventId_proceed"]` (avoids collision with "
 
 ## Gotchas
 
+- Warm OnBase SSO can land on the UCSD training reminder before any credentials form. `waitForOnbaseAuthLanding` continues the visible "Continue Log In" button, waits for the SSO redirect to leave a5, and then requires the usual authenticated menu probe. Reminder click or redirect failures propagate.
+
 - **Duo MFA is manual** — automation pauses and polls for user phone approval
 - **Duo serialization** — historically all sessions submitted Duo prompts strictly sequentially because simultaneous prompts collided. The kernel now uses one global parallel-staggered chain for any ≥2-system workflow (5s submit gap, 2s pre-submit settle, 1-Duo concurrency cap). The legacy `authChain` field was removed on 2026-05-27 — there is no opt-out per workflow; tuning lives on `LaunchOpts` for tests.
 - UCPath may redirect back to campus discovery page after Duo — retry loop (3x) handles this
