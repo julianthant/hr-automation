@@ -47,29 +47,14 @@ export async function runNewKronosTimecard(
   await selectNewKronosResult(page);
   const okTimecard = await clickNewKronosGoToTimecard(page, eid);
   if (!okTimecard) {
-    // The employee WAS found in New Kronos but the Go To → Timecard navigation
-    // failed — a MECHANICAL failure, NOT "this person has no Kronos timecard".
-    // Returning an empty timecard here used to SILENTLY fall the handler back to
-    // the Kuali Last Day Worked for an HDH employee who DOES have a timecard (the
-    // timecard is ground truth for the LDW), while the browser stayed on the
-    // PREVIOUS employee's timecard. Fail loud instead so the operator sees it,
-    // rather than masquerading as "no punches found". New Kronos runs in a
-    // settled `ctx.parallel` block, so this throw is logged + non-fatal (the run
-    // still completes on the Kuali fallback) — but it is now VISIBLE, not
-    // swallowed. (2026-06-24)
+    // A found employee whose timecard cannot open has unknown dates.
     throw new Error(
       `[New Kronos] EID ${eid} was found but the Go To → Timecard navigation failed — ` +
       `could not open the timecard to read the last punch / sick / holiday days. ` +
       `Not silently using the Kuali dates for a found HDH employee.`,
     );
   }
-  // Confirm the timecard that opened is THIS employee's — Go To → Timecard can
-  // leave the PREVIOUS employee's timecard on screen (stale selection), and
-  // reading that grid would attribute the wrong person's punches to this
-  // separation (live bug: search 10603110 → Yang/10001853 still displayed,
-  // 2026-06-24). Fail loud on a positive wrong-person signal. This throw is
-  // logged + non-fatal in the settled parallel block (the run completes on the
-  // Kuali fallback) but is now VISIBLE, not silently wrong.
+  // Require the authoritative header EID before reading any punches.
   const idCheck = await verifyNewKronosTimecardEmployee(page, eid);
   if (!idCheck.ok) {
     throw new Error(

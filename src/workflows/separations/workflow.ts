@@ -501,14 +501,6 @@ export const separationsWorkflow = defineWorkflow({
       holidayDates: [],
     };
     let newKronosFound = false;
-    // Did we actually GET an answer from New Kronos? True only when the
-    // kronos-search timecard branch FULFILLED — i.e. the timecard was opened and
-    // parsed (including the legitimate "employee not in New Kronos" answer).
-    // Stays FALSE when the branch REJECTED (e.g. found-but-Go-To-Timecard-failed),
-    // which means we know NOTHING about this employee's punches. That is not the
-    // same as "no punches", and must never be used to derive a date — see the
-    // separation-date gate below.
-    let timecardRead = false;
 
     // INPUT-based reasons to skip kronos-search — computed UP FRONT because the
     // Job-Summary fetch + identity-check below skip on the same conditions:
@@ -808,20 +800,28 @@ export const separationsWorkflow = defineWorkflow({
       );
       if (phase1.newK.status === "fulfilled") {
         newKronosFound = phase1.newK.value.found;
-        timecardRead = true;
         timecard = {
           lastPunchDate: phase1.newK.value.lastPunchDate,
           sickDates: phase1.newK.value.sickDates,
           holidayDates: phase1.newK.value.holidayDates,
         };
+        if (newKronosFound && !timecard.lastPunchDate) {
+          throw new Error(
+            `[New Kronos] EID ${kualiData.eid} (doc ${input.docId}), range ${kronosStart} – ${kronosEnd}: ` +
+            `no physical punch was found in the open timecard. Kuali Last Day Worked ` +
+            `${kualiData.lastDayWorked} is unverified; check earlier timecards and correct the source dates. ` +
+            `Not reusing or submitting a termination with unverified dates.`,
+          );
+        }
       } else {
         logSettledRejection("New Kronos", phase1.newK);
+        throw new Error(
+          `[New Kronos] Timecard read failed for EID ${kualiData.eid} (doc ${input.docId}): ` +
+          `${errorMessage(phase1.newK.reason)}. Not reusing or submitting a termination with unverified dates.`,
+          { cause: phase1.newK.reason },
+        );
       }
-      // FAIL LOUD (root CLAUDE.md): a New Kronos rejection is intentionally
-      // non-fatal (the Kuali dates are the documented fallback — see
-      // runNewKronosTimecard), but the Kuali timekeeper name has NO fallback,
-      // so a rejected timekeeper fill must abort the run rather than pass
-      // silently with the field left blank on the separation form.
+      // A required timekeeper fill must also succeed before finalization.
       if (logSettledRejection("Kuali Timekeeper", phase1.kualiTimekeeper)) {
         throw new Error(
           `[Kuali] Timekeeper name fill FAILED for EID ${kualiData.eid} (doc ${input.docId}) — ` +
@@ -860,30 +860,8 @@ export const separationsWorkflow = defineWorkflow({
     const lastDayWorked = timecard.lastPunchDate ?? kualiData.lastDayWorked;
     const ldwChanged =
       timecard.lastPunchDate != null && timecard.lastPunchDate !== kualiData.lastDayWorked;
-    // Separation Date: only DERIVE it (last day paid = last day worked +
-    // sick/holiday leave) when a New Kronos timecard was actually READ. When
-    // kronos-search was SKIPPED — non-HDH employees (not timekept in New Kronos),
-    // or the prefill / "Transactions only" paths — there is NO timecard to derive
-    // from, so keep the Kuali Separation Date VERBATIM. Re-deriving it from the
-    // LDW in that case produced a spurious "Updated Separation Date … per Kronos
-    // timesheet" comment + write-back for non-HDH employees whose Kuali separation
-    // date legitimately differs from their LDW, even though Kronos was never read
-    // (live: Bookstore "Nakagawa, Matthew K", 06/15 → 06/14 "per Kronos"). No
-    // timecard read → no timecard-derived change → no comment. (Note: an HDH
-    // employee whose timecard RAN but returned no punch still derives via the
-    // LDW — that path read the timecard; only the skip paths keep Kuali's date.)
-    //
-    // The SAME rule must cover a kronos-search that RAN but whose timecard read
-    // REJECTED (`!timecardRead`) — e.g. the employee was found but Go To →
-    // Timecard failed. That is not an answer of "no punches", it is the absence
-    // of an answer, so deriving a date from it and stamping "per Kronos
-    // timesheet" on the Kuali form asserts a timesheet we never opened. Live
-    // damage (2026-07-31): 20/21 found employees hit the Go To failure and three
-    // of them — docs 4445, 4461, 4471 — wrote a changed Separation Date back to
-    // Kuali citing a timesheet that was never read. Gating on `timecardRead`
-    // keeps Kuali's date verbatim in exactly that case (fail-loud: no
-    // unverified fallback).
-    const noTimecardToDeriveFrom = kronosSkipped || !timecardRead;
+    // Derive paid-through dates only when the Kronos step ran.
+    const noTimecardToDeriveFrom = kronosSkipped;
     const separationDate = noTimecardToDeriveFrom
       ? kualiData.separationDate
       : computeSeparationDate(lastDayWorked, timecard.sickDates, timecard.holidayDates);
@@ -904,10 +882,7 @@ export const separationsWorkflow = defineWorkflow({
     log.step(
       `[Dates] Separation Date = ${separationDate}` +
       (noTimecardToDeriveFrom
-        ? kronosSkipped
-          ? ` (Kuali Separation Date kept as-is — New Kronos not read, no timecard to derive from)`
-          : ` (Kuali Separation Date kept as-is — the New Kronos timecard read FAILED, ` +
-            `so there is no timecard to derive from; not claiming a Kronos-derived date)`
+        ? ` (Kuali Separation Date kept as-is — New Kronos not read, no timecard to derive from)`
         : leaveExtendedSepDate
           ? ` (last day paid — last day worked extended by sick/holiday leave; ` +
             `Kuali had '${kualiData.separationDate}')`

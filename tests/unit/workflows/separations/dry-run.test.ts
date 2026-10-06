@@ -438,6 +438,37 @@ describe("separations handler — dry-run terminal", () => {
   });
 });
 
+describe("separations handler — found timecard without a verified last punch", () => {
+  for (const item of [
+    { docId: "4753", eid: "10001979", name: "Person 1204", positionNumber: "10005710" },
+    { docId: "4755", eid: "10002179", name: "Hu, Lawrence", positionNumber: "10005392" },
+  ]) {
+    it(`rejects #${item.docId}'s empty August–October window before receipt reuse or submission`, async () => {
+      mocks.runKualiExtract.mockResolvedValue({
+        ...KUALI_FIXTURE, employeeName: item.name, eid: item.eid,
+        lastDayWorked: "09/12/2026", separationDate: "09/12/2026",
+      });
+      mocks.getJobSummaryIdentity.mockResolvedValue({
+        found: true, name: item.name,
+        data: { emplRecord: "0", positionNumber: item.positionNumber, deptId: "000412",
+          departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004921", jobDescription: "STDT 2" },
+      });
+      mocks.runKronosSearch.mockResolvedValue({
+        newK: { status: "fulfilled", value: { found: true, lastPunchDate: null, sickDates: [], holidayDates: [] } },
+        kualiTimekeeper: { status: "fulfilled", value: undefined },
+      });
+      const { ctx } = makeFakeCtx({ docId: item.docId });
+      await assert.rejects(runHandler(ctx, { docId: item.docId }),
+        new RegExp(`${item.eid}.*08/12/2026.*10/12/2026.*no physical punch`));
+      assert.equal(mocks.runTransactionCheck.mock.calls.length, 0);
+      assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
+      assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
+      assert.equal(mocks.updateLastDayWorked.mock.calls.length, 0);
+      assert.equal(mocks.updateSeparationDate.mock.calls.length, 0);
+    });
+  }
+});
+
 describe("separationsWorkflow.config.systems (Old Kronos removed)", () => {
   it("declares exactly 3 systems: kuali, new-kronos, ucpath", async () => {
     const { separationsWorkflow } = await import(
@@ -514,7 +545,7 @@ describe("separations handler — live Separation Date write-back to Kuali", () 
     mocks.runKronosSearch.mockResolvedValueOnce({
       newK: {
         status: "fulfilled" as const,
-        value: { found: true, lastPunchDate: null, sickDates: [], holidayDates: ["01/16/2026"] },
+        value: { found: true, lastPunchDate: "01/15/2026", sickDates: [], holidayDates: ["01/16/2026"] },
       },
       kualiTimekeeper: { status: "fulfilled" as const, value: undefined },
     });
@@ -529,39 +560,18 @@ describe("separations handler — live Separation Date write-back to Kuali", () 
     assert.equal(mocks.updateSeparationDate.mock.calls.length, 0, "dry-run writes nothing");
   });
 
-  it("keeps Kuali's Separation Date VERBATIM when the New Kronos timecard read REJECTED", async () => {
-    // Regression (2026-07-31, live): the employee was FOUND in New Kronos but
-    // Go To → Timecard failed, so `runNewKronosTimecard` threw and the settled
-    // `newK` branch REJECTED. `kronosSkipped` is false on that path (the step
-    // RAN), so the handler used to fall through to the derive branch with an
-    // EMPTY timecard — producing sep = Kuali LDW 01/15 != Kuali sep 01/16 →
-    // a write-back stamped "Updated Separation Date … per Kronos timesheet"
-    // for a timesheet that was never opened. Three real Kuali docs (4445,
-    // 4461, 4471) were modified this way.
-    //
-    // A rejected read is the ABSENCE of an answer, not "no punches": keep
-    // Kuali's date and write nothing.
+  it("rejects a failed timecard read before receipt lookup or either transaction write", async () => {
     mocks.runKronosSearch.mockResolvedValueOnce({
-      newK: {
-        status: "rejected" as const,
-        reason: new Error(
-          "[New Kronos] EID 10772489 was found but the Go To → Timecard navigation failed",
-        ),
-      },
-      kualiTimekeeper: { status: "fulfilled" as const, value: undefined },
+      newK: { status: "rejected", reason: new Error("Go To → Timecard navigation failed") },
+      kualiTimekeeper: { status: "fulfilled", value: undefined },
     });
-    const { ctx, probe } = makeFakeCtx({ docId: "4131" });
-    await runHandler(ctx, { docId: "4131" });
-    assert.equal(
-      mocks.updateSeparationDate.mock.calls.length,
-      0,
-      "no Separation Date write-back when the timecard read failed",
-    );
-    assert.equal(
-      probe.data.separationDate,
-      "01/16/2026",
-      "Kuali's Separation Date is kept verbatim, not re-derived from the LDW",
-    );
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await assert.rejects(runHandler(ctx, { docId: "4131" }), /Timecard read failed.*10772489.*navigation failed/);
+    assert.equal(mocks.runTransactionCheck.mock.calls.length, 0);
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
+    assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
+    assert.equal(mocks.updateLastDayWorked.mock.calls.length, 0);
+    assert.equal(mocks.updateSeparationDate.mock.calls.length, 0);
   });
 });
 
