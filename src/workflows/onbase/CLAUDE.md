@@ -30,8 +30,11 @@ nothing; see `src/systems/onbase/LESSONS.md` 2026-07-02). The ONLY required fiel
 it leaves blank is **Document Name** (constant `EMERGENCY CONTACT INFORMATION`).
 So OCR's real job is to read the **UCPath ID** per page; the `*` fallback fields
 on `OnbaseInput` (names, dept, VC) are used ONLY when the keyset returns nothing
-(bad/unknown ID) — but note Department/VC come ONLY from the keyset, so a keyset
-miss is unrecoverable, not fallback-fillable. See `src/systems/onbase/CLAUDE.md`.
+(bad/unknown ID) — reviewed corrections from edit-and-resume may supply names and department/VC
+keywords when Employee Lookup has no match. Verify those values against UCPath
+and the OnBase department keyset before resuming. Corrections cannot change the
+source page, document type, UCPath ID, or dry-run boundary; required-keyword
+validation still blocks incomplete imports. See `src/systems/onbase/CLAUDE.md`.
 
 ## Handler steps
 
@@ -47,8 +50,8 @@ miss is unrecoverable, not fallback-fillable. See `src/systems/onbase/CLAUDE.md`
    Select Employee, which autofills every keyword; NOT Tab-autofill — see
    `src/systems/onbase/LESSONS.md` 2026-07-02). Tri-state semantics: `selected`
    → proceed; `no-match` (a DATA problem) → fill what fallback can supply, then
-   **fail loud** on anything still blank (Department/Vice-Chancellor come only
-   from the keyset); a STALLED postback **throws** (kernel-retryable) — a slow
+   **fail loud** on anything still blank; independently verified edit-and-resume
+   corrections can supply Department/Vice-Chancellor values. a STALLED postback **throws** (kernel-retryable) — a slow
    cluster is never mislabeled "person not found". Then set Document Name.
 4. `import` — `waitForImportEnabled` (enablement commits via an async postback;
    a single sample can read a transient disabled state). Dry-run screenshots,
@@ -82,7 +85,7 @@ commits a document.
   Running the Employee Lookup modal (key-icon → fill UCPath ID → Find → Select
   Employee) autofills names, department + code, vice chancellor + code, titles,
   hire dates, status. Only Document Name is left to set. Treat OCR-extracted
-  names/dept/VC as fallback only — but a keyset miss (no OnBase match) is
-  terminal, since Dept/VC come ONLY from the keyset. **Typing the UCPath ID + Tab
+  names/dept/VC as fallback only. A keyset miss requires verified correction
+  values for every required keyword before importing. **Typing the UCPath ID + Tab
   does nothing** (the old `enterUcpathIdAndTab` was wrong; now
   `lookupEmployeeViaKeyset`). See `src/systems/onbase/LESSONS.md` (2026-07-02).

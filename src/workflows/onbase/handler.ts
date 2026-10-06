@@ -23,7 +23,7 @@ import {
   ONBASE_PDF_FILE_TYPE,
   ONBASE_EMPLOYEE_LOOKUP_KEYSET,
 } from "../../systems/onbase/index.js";
-import type { OnbaseInput } from "./schema.js";
+import { OnbaseInputSchema, type OnbaseInput } from "./schema.js";
 
 export const onbaseSteps = [
   "authenticate",
@@ -47,7 +47,17 @@ export interface OnbaseHandlerOpts {
  * keyset autofills every one of these. Document Name is set unconditionally
  * elsewhere; UCPath ID is already entered.
  */
-function fallbackKeywordValues(input: OnbaseInput): Record<string, string | undefined> {
+const fallbackCorrectionsSchema = OnbaseInputSchema.pick({
+  lastName: true, firstName: true, middleName: true, suffix: true,
+  departmentName: true, departmentCode: true,
+  viceChancellor: true, viceChancellorCode: true,
+});
+
+export function fallbackKeywordValues(
+  original: OnbaseInput,
+  corrections: Record<string, unknown> = {},
+): Record<string, string | undefined> {
+  const input = { ...original, ...fallbackCorrectionsSchema.parse(corrections) };
   return {
     "Last Name": input.lastName,
     "First Name": input.firstName,
@@ -86,7 +96,8 @@ function resolvePdfPath(input: OnbaseInput, trackerDir: string | undefined): str
  * modal's UCPath ID → Find → Select Employee, which autofills every keyword) →
  * set Document Name constant → verify the required keywords are filled →
  * Import. On a genuine keyset no-match, fill what fallback data can supply and
- * fail loud on anything still missing (Department/VC come only from the keyset).
+ * fail loud on anything still missing. Reviewed edit-and-resume values may
+ * supply Department/VC keywords after independent verification.
  */
 export async function onbaseHandler(
   ctx: Ctx<OnbaseSteps, OnbaseInput>,
@@ -136,7 +147,7 @@ export async function onbaseHandler(
     await setDocumentName(page, input.documentName);
 
     if (!autofilled) {
-      const fallback = fallbackKeywordValues(input);
+      const fallback = fallbackKeywordValues(input, ctx.data);
       for (const [label, value] of Object.entries(fallback)) {
         if (value && value.trim()) await fillKeyword(page, label, value.trim());
       }
@@ -163,8 +174,8 @@ export async function onbaseHandler(
 
     // Fail loud if any required ("red") keyword is still blank — never import an
     // incompletely-keyed document. Department Name/Code + Vice Chancellor +/code
-    // come ONLY from the keyset, so a keyset miss (unknown/mis-OCR'd UCPath ID)
-    // cannot be recovered from OCR fallback — say so explicitly.
+    // must be supplied by Employee Lookup or reviewed correction data; a
+    // keyset miss without those values cannot proceed.
     const missing = Object.entries(values)
       .filter(([, v]) => !v.trim())
       .map(([label]) => label);
