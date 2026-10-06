@@ -707,22 +707,38 @@ export async function fillPersonalData(
 ): Promise<void> {
   log.step("Filling personal data...");
 
+  const fields: Array<{ resolve: () => Locator; expected: string; label: string }> = [];
+  const normalize = (value: string, label: string) =>
+    /national id|phone number/.test(label) ? value.replace(/\D/g, "") : value.trim();
+  const fill = async (resolve: () => Locator, value: string, opts: { timeout: number; label: string }) => {
+    fields.push({ resolve, expected: value, label: opts.label });
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await safeFill(resolve(), value, opts);
+      await resolve().press("Tab");
+      await waitForPeopleSoftProcessing(frame, 15_000);
+      const actual = await resolve().inputValue({ timeout: 10_000 });
+      if (normalize(actual, opts.label) === normalize(value, opts.label)) return;
+      if (attempt === 3) throw new Error(`${opts.label}: readback mismatch after 3 fill attempts`);
+      log.warn(`${opts.label}: value lost during refresh; retrying the same field`);
+    }
+  };
+
   // --- Legal Name ---
   log.step("Filling legal first name...");
-  await safeFill(personalDataSelectors.legalFirstName(frame), data.firstName, {
+  await fill(() => personalDataSelectors.legalFirstName(frame), data.firstName, {
     timeout: 10_000,
     label: "ucpath legal first name",
   });
 
   log.step("Filling legal last name...");
-  await safeFill(personalDataSelectors.legalLastName(frame), data.lastName, {
+  await fill(() => personalDataSelectors.legalLastName(frame), data.lastName, {
     timeout: 10_000,
     label: "ucpath legal last name",
   });
 
   if (data.middleName) {
     log.step("Filling legal middle name...");
-    await safeFill(personalDataSelectors.legalMiddleName(frame), data.middleName, {
+    await fill(() => personalDataSelectors.legalMiddleName(frame), data.middleName, {
       timeout: 10_000,
       label: "ucpath legal middle name",
     });
@@ -734,20 +750,20 @@ export async function fillPersonalData(
   const prefMiddle = data.preferredMiddleName ?? data.middleName;
 
   log.step("Filling preferred first name...");
-  await safeFill(personalDataSelectors.preferredFirstName(frame), prefFirst, {
+  await fill(() => personalDataSelectors.preferredFirstName(frame), prefFirst, {
     timeout: 10_000,
     label: "ucpath preferred first name",
   });
 
   log.step("Filling preferred last name...");
-  await safeFill(personalDataSelectors.preferredLastName(frame), prefLast, {
+  await fill(() => personalDataSelectors.preferredLastName(frame), prefLast, {
     timeout: 10_000,
     label: "ucpath preferred last name",
   });
 
   if (prefMiddle) {
     log.step("Filling preferred middle name...");
-    await safeFill(personalDataSelectors.preferredMiddleName(frame), prefMiddle, {
+    await fill(() => personalDataSelectors.preferredMiddleName(frame), prefMiddle, {
       timeout: 10_000,
       label: "ucpath preferred middle name",
     });
@@ -755,7 +771,7 @@ export async function fillPersonalData(
 
   // --- Date of Birth ---
   log.step("Filling date of birth...");
-  await safeFill(personalDataSelectors.dateOfBirth(frame), data.dob, {
+  await fill(() => personalDataSelectors.dateOfBirth(frame), data.dob, {
     timeout: 10_000,
     label: "ucpath date of birth",
   });
@@ -763,7 +779,7 @@ export async function fillPersonalData(
   // --- National ID (SSN) ---
   if (data.ssn) {
     log.step("Filling national ID...");
-    await safeFill(personalDataSelectors.nationalId(frame), data.ssn, {
+    await fill(() => personalDataSelectors.nationalId(frame), data.ssn, {
       timeout: 10_000,
       label: "ucpath national id",
     });
@@ -773,27 +789,27 @@ export async function fillPersonalData(
 
   // --- Address ---
   log.step("Filling address...");
-  await safeFill(personalDataSelectors.addressLine1(frame), data.address, {
+  await fill(() => personalDataSelectors.addressLine1(frame), data.address, {
     timeout: 10_000,
     label: "ucpath address line 1",
   });
 
   if (data.city) {
-    await safeFill(personalDataSelectors.city(frame), data.city, {
+    await fill(() => personalDataSelectors.city(frame), data.city, {
       timeout: 10_000,
       label: "ucpath city",
     });
   }
 
   if (data.state) {
-    await safeFill(personalDataSelectors.state(frame), data.state, {
+    await fill(() => personalDataSelectors.state(frame), data.state, {
       timeout: 10_000,
       label: "ucpath state",
     });
   }
 
   if (data.postalCode) {
-    await safeFill(personalDataSelectors.postalCode(frame), data.postalCode, {
+    await fill(() => personalDataSelectors.postalCode(frame), data.postalCode, {
       timeout: 10_000,
       label: "ucpath postal code",
     });
@@ -810,7 +826,7 @@ export async function fillPersonalData(
     log.step("Phone type selected");
 
     log.step("Filling phone number...");
-    await safeFill(personalDataSelectors.phoneNumberInput(frame), data.phone, {
+    await fill(() => personalDataSelectors.phoneNumberInput(frame), data.phone, {
       timeout: 10_000,
       label: "ucpath phone number",
     });
@@ -833,7 +849,7 @@ export async function fillPersonalData(
     log.step("Email type selected");
 
     log.step("Filling email address...");
-    await safeFill(personalDataSelectors.emailAddressInput(frame), data.email, {
+    await fill(() => personalDataSelectors.emailAddressInput(frame), data.email, {
       timeout: 10_000,
       label: "ucpath email address",
     });
@@ -842,13 +858,19 @@ export async function fillPersonalData(
   // --- Tracker Profile ID (I9) ---
   if (data.i9ProfileId) {
     log.step("Filling tracker profile ID...");
-    await safeFill(personalDataSelectors.trackerProfileIdInput(frame), data.i9ProfileId, {
+    await fill(() => personalDataSelectors.trackerProfileIdInput(frame), data.i9ProfileId, {
       timeout: 10_000,
       label: "ucpath tracker profile id",
     });
   }
 
-  log.success("Personal data filled");
+  for (const { resolve, expected, label } of fields) {
+    const actual = await resolve().inputValue({ timeout: 10_000 });
+    if (normalize(actual, label) !== normalize(expected, label)) {
+      throw new Error(`${label}: final personal-data readback mismatch; refusing to leave the tab`);
+    }
+  }
+  log.success("Personal data filled and verified");
 }
 
 // ─── STEP 5: Comments + Initiator Comments ───

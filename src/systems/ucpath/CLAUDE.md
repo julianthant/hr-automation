@@ -32,7 +32,7 @@ Position number fill in `fillJobData` triggers a page refresh that **changes gri
 3. `enterEffectiveDate` — MM/DD/YYYY
 4. `clickCreateTransaction` — checks for errors, returns `TransactionResult`
 5. `selectReasonCode` — dropdown + Continue (JS fallback via `submitAction_win0()`)
-6. `fillPersonalData` — name, DOB, SSN, address, phone (Mobile-Personal), email (Home), tracker profile ID
+6. `fillPersonalData` — name, DOB, SSN, address, phone (Mobile-Personal), email (Home), tracker profile ID. Each fill blurs its own control and verifies the freshly resolved value after processing. A final readback verifies every written field before changing tabs; a lost value retries the same field, while corruption of an earlier field fails before submission.
 7. `fillComments` — both Comments and Initiator Comments textareas
 8. Separations only: `fillTerminationLastDateWorked` — checks Override Last Date Worked (waiting for ITS fragment refresh — the checkbox `onclick` runs `submitAction_win0`, so its node is replaced), fills the reconciled date and blurs it (the date field only runs `addchg_win0` — no round-trip, so it must NOT be made to wait for a refresh), then positively verifies both freshly resolved controls. UC_VOL_TERM pre-checks the override and pre-fills the date with effdt − 1; we write and verify our own value anyway
 9. `clickJobDataTab` / `fillJobData` — position, classification, comp rate, rate value, end date

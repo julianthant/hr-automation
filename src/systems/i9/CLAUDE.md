@@ -6,6 +6,10 @@ Automates I9 Complete (Tracker I-9 by Mitratech) for employment verification: lo
 
 Since **2026-07-01** I-9 login goes through the **UCOP portal** (`I9_URL` = `https://i9complete.ucop.edu`), **not** the old standalone `stse.i9complete.com` email/password vendor login. `loginToI9` (`login.ts`) drives: UCOP landing → click "Tracker I-9 Complete Application" → `samlproxy.ucop.edu` WAYF (select "University of California, San Diego") → UCSD TritON Shibboleth SSO (`a5.ucsd.edu`) → **Duo** → lands on the app host `I9_APP_URL` (`https://wwwe.i9complete.com`). It reuses the shared UCSD SSO helpers (`fillSsoCredentials` / `clickSsoSubmit` / `pollDuoApproval` / `requestDuoApproval`) and **UCPath credentials** — so hands-off Duo WebAuthn covers it like every other UCSD system, and there are no I-9-specific env credentials anymore. Deep-links (e.g. `create.ts`'s `saveAndContinue`) use `I9_APP_URL` directly (previously derived via `I9_URL.replace("stse.","wwwe.")`, which the UCOP entry URL broke).
 
+## Worksite selection
+
+`selectWorksite` waits for the requested department option to become visible before counting it. Department numbers must contain six digits; exactly one option must match the `6-<department>` prefix. The selected dropdown text must retain that exact prefix before profile creation proceeds.
+
 ## Before mapping a new selector
 
 1. Run `npm run selector:search "<your intent>"` and review the top matches across all systems.

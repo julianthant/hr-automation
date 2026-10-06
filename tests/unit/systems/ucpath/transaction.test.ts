@@ -2,6 +2,7 @@ import { describe, test } from "vitest";
 import assert from "node:assert/strict";
 import type { FrameLocator, Locator, Page } from "playwright";
 import {
+  fillPersonalData,
   buildConcurrentHireCommentsText,
   extractSmartHrTransactionNumber,
   rowMatchesTerminationEid,
@@ -684,5 +685,48 @@ describe("buildConcurrentHireCommentsText (UC_CONC_HIRE rehire mode, 2026-08-21)
       buildConcurrentHireCommentsText("09/11/2026", "10005380", "1169086"),
       "Concurrent Hire as Dining Student Effective 09/11/2026. PCN 10005380. Job number #1169086.",
     );
+  });
+});
+
+
+describe("fillPersonalData refresh safety", () => {
+  function fixture(mode: "lost-address" | "corrupted-name" | "unreadable") {
+    const values = new Map<string, string>();
+    let addressWrites = 0;
+    const field = (name: string) => ({
+      fill: async (value: string) => {
+        if (name === "Address Line 1" && addressWrites++ === 0) {
+          if (mode === "corrupted-name") values.set("Legal Last Name", "Lopez9450");
+          return;
+        }
+        values.set(name, value);
+      },
+      press: async () => undefined,
+      inputValue: async () => {
+        if (mode === "unreadable") throw new Error("frame detached");
+        return values.get(name) ?? "";
+      },
+    });
+    const frame = {
+      getByRole: (_role: string, opts: { name: string }) => field(opts.name),
+      locator: () => ({ first: () => ({ waitFor: async () => undefined }) }),
+    } as unknown as FrameLocator;
+    const page = { waitForTimeout: async () => undefined } as unknown as Page;
+    return { frame, page, values, writes: () => addressWrites };
+  }
+  const input = { firstName: "Isabella", lastName: "Lopez", dob: "01/02/2007", address: "9450 Example Rd" };
+  test("retries a fill lost during a fragment refresh", async () => {
+    const f = fixture("lost-address");
+    await fillPersonalData(f.page, f.frame, input);
+    assert.equal(f.values.get("Address Line 1"), input.address);
+    assert.equal(f.writes(), 2);
+  });
+  test("refuses to leave the tab when a later fill corrupts an earlier name", async () => {
+    const f = fixture("corrupted-name");
+    await assert.rejects(fillPersonalData(f.page, f.frame, input), /legal last name.*readback/i);
+  });
+  test("propagates an unreadable field instead of treating it as verified", async () => {
+    const f = fixture("unreadable");
+    await assert.rejects(fillPersonalData(f.page, f.frame, input), /frame detached/);
   });
 });

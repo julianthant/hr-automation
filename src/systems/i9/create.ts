@@ -397,8 +397,9 @@ async function fillEmployeeProfile(page: Page, input: I9EmployeeInput): Promise<
  * Select worksite from dropdown by matching department number.
  * Worksite options are formatted as "6-{deptNum} DESCRIPTION".
  */
-async function selectWorksite(page: Page, departmentNumber: string): Promise<void> {
-  const optionPattern = new RegExp(`6-${departmentNumber}`);
+export async function selectWorksite(page: Page, departmentNumber: string): Promise<void> {
+  if (!/^\d{6}$/.test(departmentNumber)) throw new Error(`Invalid I-9 department number: ${departmentNumber}`);
+  const optionPattern = new RegExp(`^6-${departmentNumber}(?:\\s|$)`);
 
   // The Worksite list is a Kendo dropdown that ANIMATES open. Clicking an option
   // while that animation is in flight fails with "element is not stable", and if
@@ -415,24 +416,24 @@ async function selectWorksite(page: Page, departmentNumber: string): Promise<voi
     await safeClick(worksiteDropdown, { timeout: 5_000, label: "i9 worksite dropdown" });
 
     const option = profile.worksiteOption(page, optionPattern);
-    if ((await option.count()) === 0) {
-      await page.keyboard.press("Escape");
-      throw new Error(`No worksite found matching department number: ${departmentNumber}`);
-    }
-
     const target = option.first();
     try {
-      // Wait for the animation to settle so the click lands on a stable node.
       await target.waitFor({ state: "visible", timeout: 5_000 });
+      const count = await option.count();
+      if (count !== 1) throw new Error(`Expected one worksite for department ${departmentNumber}, found ${count}`);
       await target.scrollIntoViewIfNeeded({ timeout: 3_000 });
       await target.click({ timeout: 8_000 });
-      log.step(`Worksite selected: dept ${departmentNumber}`);
+      const selected = (await worksiteDropdown.innerText()).trim();
+      if (!optionPattern.test(selected)) {
+        throw new Error(`Worksite readback does not match department ${departmentNumber}`);
+      }
+      log.step(`Worksite selected and verified: dept ${departmentNumber}`);
       return;
     } catch (err) {
       if (attempt === attempts) {
         throw new Error(
-          `Worksite option "6-${departmentNumber}" was present but could not be clicked after `
-          + `${attempts} attempts (Kendo dropdown animation): ${errorMessage(err)}`,
+          `Worksite option "6-${departmentNumber}" could not be uniquely selected and verified after `
+          + `${attempts} attempts: ${errorMessage(err)}`,
           { cause: err },
         );
       }
