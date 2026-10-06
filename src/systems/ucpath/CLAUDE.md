@@ -74,6 +74,8 @@ Used by separations' `transaction-check` step (see `src/workflows/separations/CL
 
 ## Gotchas
 
+- Emergency-contact save errors use the outer `#ptModTable_0` Message dialog; its header also has the same alertdialog role. Scope error text and OK to the outer table. Primary-conflict recovery preserves the requested contact by name, because a newly added row can follow an existing row.
+
 - Sidebar overlay intercepts clicks on iframe buttons — must collapse via "Navigation Area" button
 - Every form fill has `{ timeout: 10_000 }` and 2-5s waits for PeopleSoft roundtrips
 - Error detection: `.PSERROR`, `#ALERTMSG`, `.ps_alert-error` selectors

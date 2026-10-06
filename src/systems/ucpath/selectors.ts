@@ -1876,27 +1876,19 @@ export const emergencyContact = {
     page.getByRole("button", { name: "Save", exact: true }).first(),
 
   /**
-   * PeopleSoft "Message" alert dialog raised after a failed editor save
-   * (e.g. the (1000,110) only-one-primary-contact conflict).
-   * NEEDS LIVE VERIFY — factored out of the emergency-contact
-   * primary-conflict recovery WIP, not yet confirmed via playwright-cli.
-   * verified 2026-07-08
+   * Outer PeopleSoft Message dialog; its header also has role alertdialog.
+   * verified 2026-10-06 (primary-contact conflict, nested header + table)
    * @tags message, dialog, alert, error, save, emergency-contact
    */
   messageDialog: (page: Page): Locator =>
-    page.getByRole("alertdialog", { name: "Message" }),
+    page.locator("#ptModTable_0"),
 
   /**
-   * OK button inside the "Message" alert dialog — dismisses the save error.
-   * NEEDS LIVE VERIFY — factored out of the emergency-contact
-   * primary-conflict recovery WIP, not yet confirmed via playwright-cli.
-   * verified 2026-07-08
+   * OK button within the outer Message dialog. verified 2026-10-06
    * @tags ok, button, message, dialog, emergency-contact
    */
   messageDialogOkButton: (page: Page): Locator =>
-    page
-      .getByRole("alertdialog", { name: "Message" })
-      .getByRole("button", { name: "OK" }),
+    page.locator("#ptModTable_0").getByRole("button", { name: "OK", exact: true }),
 
   /**
    * Page-level PeopleSoft error banner on the emergency contact editor

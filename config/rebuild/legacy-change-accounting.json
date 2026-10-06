@@ -1004,17 +1004,18 @@
    "path": "src/systems/ucpath/CLAUDE.md",
    "changeKind": "modified",
    "beforeSha256": "c562816dd0f5b85109c6c6fd7b56703d32703f10c12a5ad5f5a3c834f84d8cff",
-   "afterSha256": "3655b0cde6c0c63ebdd23acbd174cfdfa9ec0af6276d90eea34936d34f6b2d9f",
+   "afterSha256": "742f9ca8da0e179c987706c31e11eef4f8706947db9fa7e7ea5f928ade365f38",
    "capabilityIds": [
     "legacy-workflow-onboarding",
-    "legacy-workflow-separations"
+    "legacy-workflow-separations",
+    "legacy-workflow-emergency-contact"
    ],
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
+   "impactRationale": "2026-08-20 (a6519d9e): Workforce Job Summary Effective Date is zipped from the frozen LEFT grid table (tdgbl*) onto the RIGHT tab table (tdgbr*) by index; the old first-date-cell read took Job Information's Expected Job End Date as the effective date and filled Kuali Payroll Title 004921/STDT 2 for two STDT 3 employees (docs 4540/4541). pairFrozenGridRows fails loud on count/column drift. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. Emergency-contact primary-conflict recovery uses the verified outer dialog and preserves the requested contact by name."
   },
   {
    "path": "src/systems/ucpath/index.ts",
@@ -1084,7 +1085,7 @@
    "path": "src/systems/ucpath/personal-data.ts",
    "changeKind": "modified",
    "beforeSha256": "a4f17333ef0f7c15b019834de6aa5c439764ff1b90a246cceefa08f3bf3bb5c7",
-   "afterSha256": "6bb4c067ef52f0ca321705e57fef3490e65a7d0f99937c1c301dcbb99855659e",
+   "afterSha256": "c745ff23bc1352eec1667fdbe97fdb6f631ffd433ac245a5a7ab0f7dbd253e86",
    "capabilityIds": [
     "legacy-workflow-emergency-contact",
     "legacy-workflow-onboarding",
@@ -1097,43 +1098,45 @@
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "Emergency Contact editor navigation/save: adds assertEmergencyContactPersisted (positive post-save proof); the save-outcome contract is part of the rebuild UCPath write-safety source of truth."
+   "impactRationale": "Emergency Contact editor navigation/save: adds assertEmergencyContactPersisted (positive post-save proof); the save-outcome contract is part of the rebuild UCPath write-safety source of truth. Emergency-contact primary-conflict recovery uses the verified outer dialog and preserves the requested contact by name."
   },
   {
    "path": "src/systems/ucpath/SELECTORS.md",
    "changeKind": "modified",
    "beforeSha256": "57fb1caeac412725c3c5defb0430dd9d5d910db97d077328cf2f37368d6fb1f4",
-   "afterSha256": "44935de974aa5205003879f03164147793966b4d0fa9bbda90396db21af5d218",
+   "afterSha256": "9a5a51250fa1e3a36b5e41576d6e0e466fc50e2570294e7dfd5b9bfb36935e6d",
    "capabilityIds": [
     "legacy-workflow-i9-check",
     "legacy-workflow-onboarding",
     "legacy-workflow-person-lookup",
-    "legacy-workflow-separations"
+    "legacy-workflow-separations",
+    "legacy-workflow-emergency-contact"
    ],
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "2026-08-05 (aba05c65): regenerated catalog (npm run selectors:catalog) for the ssSmartHRTransactions re-anchoring; generated content only. 2026-08-20: catalog regenerated for the Person Match Found selectors. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
+   "impactRationale": "2026-08-05 (aba05c65): regenerated catalog (npm run selectors:catalog) for the ssSmartHRTransactions re-anchoring; generated content only. 2026-08-20: catalog regenerated for the Person Match Found selectors. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. Emergency-contact primary-conflict recovery uses the verified outer dialog and preserves the requested contact by name."
   },
   {
    "path": "src/systems/ucpath/selectors.ts",
    "changeKind": "modified",
    "beforeSha256": "4f6992525998eb6e3db8d2b3a4b67bb551aa0565e6a03710efd92a095d958aa5",
-   "afterSha256": "02e58204c930c400af4bc97333efefe971563b5411e314b4be6b0932415fb89b",
+   "afterSha256": "db80949aed6c011d759cbf439b0f479c78446d8f13571fe90156fe68fdf2db32",
    "capabilityIds": [
     "legacy-workflow-i9-check",
     "legacy-workflow-onboarding",
     "legacy-workflow-person-lookup",
-    "legacy-workflow-separations"
+    "legacy-workflow-separations",
+    "legacy-workflow-emergency-contact"
    ],
    "rebuildRecheckIds": [
     "npm:test",
     "npm:test:architecture"
    ],
    "preservation": "preserved",
-   "impactRationale": "2026-08-05 (aba05c65): re-anchored every ssSmartHRTransactions search arm after PeopleSoft folded the Find-an-Existing-Value operator select (<field>$op) into each input's accessible name ('Empl ID begins with', 'Approval Status =', ...), which made all exact:true arms match zero elements and killed separations transaction-check live (doc 4493). Anchored ^Label regex + live-probed record.field id arms, same repair personOrgSummary received 2026-08-04. Locator resolution only; no contract change. 2026-08-20: smartHR.personMatchFoundHeading / personMatchNotAMatchButton / personMatchCandidateRows — the Person Match Found review page, mapped from live failure screenshots. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values."
+   "impactRationale": "2026-08-05 (aba05c65): re-anchored every ssSmartHRTransactions search arm after PeopleSoft folded the Find-an-Existing-Value operator select (<field>$op) into each input's accessible name ('Empl ID begins with', 'Approval Status =', ...), which made all exact:true arms match zero elements and killed separations transaction-check live (doc 4493). Anchored ^Label regex + live-probed record.field id arms, same repair personOrgSummary received 2026-08-04. Locator resolution only; no contract change. 2026-08-20: smartHR.personMatchFoundHeading / personMatchNotAMatchButton / personMatchCandidateRows — the Person Match Found review page, mapped from live failure screenshots. 2026-08-21 (ed1509d2/ef0b20ad/b0dbd37e): Rehire run mode — UC_CONC_HIRE concurrent hire on an existing Empl ID, no I-9 (EID fill + name readback, Person-ID-exists dialog ack, Job Data landing, draft cancel on dry run); first live run T002217353. 2026-09-08: verifies separation employment record/position and exact date, both UCPath comment fields, the Kuali Task 1 boundary, and durable saved values. Emergency-contact primary-conflict recovery uses the verified outer dialog and preserves the requested contact by name."
   },
   {
    "path": "src/systems/ucpath/ss-smart-hr.ts",
@@ -2545,6 +2548,21 @@
    "preservation": "preserved",
    "afterSha256": "2d2aea632e6c8b7b178a22b3af9713337d8c9dc1d8d5ed7a306c776153aa2228",
    "impactRationale": "OnBase warm SSO continues the verified training reminder before probing credentials; failed clicks and redirects propagate."
+  },
+  {
+   "path": "tests/unit/systems/ucpath/personal-data.test.ts",
+   "changeKind": "modified",
+   "beforeSha256": "91ed2fc625c9011f690e7fc94513548ca4ba95a71bbae4e5741e38da669e8832",
+   "capabilityIds": [
+    "legacy-workflow-emergency-contact"
+   ],
+   "rebuildRecheckIds": [
+    "npm:test",
+    "npm:test:architecture"
+   ],
+   "preservation": "preserved",
+   "impactRationale": "Emergency-contact save errors use the verified outer Message dialog and primary-conflict recovery preserves the requested contact by name.",
+   "afterSha256": "aad41ee242e6d2a223ecdde25bd66a69bd4757679284d1a33636704b5a05afbf"
   }
  ]
 }

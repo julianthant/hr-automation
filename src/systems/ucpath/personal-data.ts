@@ -189,9 +189,10 @@ export function isEmergencyContactPrimaryConflictMessage(text: string): boolean 
 
 async function readVisibleEmergencyContactSaveError(page: Page): Promise<string | null> {
   const dialog = emergencyContact.messageDialog(page);
-  if (await dialog.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    const text = await dialog.innerText({ timeout: 2_000 }).catch(() => "");
-    return text.trim() || null;
+  if (await dialog.isVisible({ timeout: 2_000 })) {
+    const text = await dialog.innerText({ timeout: 2_000 });
+    if (!text.trim()) throw new Error("Emergency contact save error dialog has no readable message");
+    return text.trim();
   }
   const banner = emergencyContact.saveErrorBanner(page);
   if (await banner.isVisible({ timeout: 1_000 }).catch(() => false)) {
@@ -258,9 +259,9 @@ export async function demoteOtherPrimaryContacts(
   let demoted = 0;
 
   for (let i = 0; i < nameInputs.length; i++) {
-    if (i === keepRowIndex) continue;
+    if (!keepName && i === keepRowIndex) continue;
     if (keepName) {
-      const rowName = await nameInputs[i].inputValue({ timeout: 2_000 }).catch(() => "");
+      const rowName = await nameInputs[i].inputValue({ timeout: 2_000 });
       if (rowName.trim() === keepName) continue;
     }
     const cb = primaryCheckboxes.nth(i);
@@ -285,7 +286,7 @@ export async function demoteOtherPrimaryContacts(
 async function uncheckPrimaryContactForName(page: Page, contactName: string): Promise<boolean> {
   const nameInputs = await emergencyContact.contactNameInputs(page).all();
   for (let i = 0; i < nameInputs.length; i++) {
-    const rowName = await nameInputs[i].inputValue({ timeout: 2_000 }).catch(() => "");
+    const rowName = await nameInputs[i].inputValue({ timeout: 2_000 });
     if (rowName.trim() !== contactName.trim()) continue;
     return uncheckPrimaryContactAtRow(page, i);
   }
