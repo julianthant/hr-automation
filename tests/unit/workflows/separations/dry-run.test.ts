@@ -1153,3 +1153,33 @@ describe("separations hire-date search window", () => {
     assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
   });
 });
+
+
+describe("separation correction safety", () => {
+  it("reads Supply Chain timecards instead of assuming there is no payroll evidence", async () => {
+    mocks.getJobSummaryIdentity.mockResolvedValue({ found: true, name: "Test Employee", data: {
+      emplRecord: "0", positionNumber: "10005858", deptId: "000719",
+      departmentDescription: "Supply Chain Services", jobCode: "004920", jobDescription: "STDT 3",
+    } });
+    const { ctx } = makeFakeCtx({ docId: "4720" });
+    await runHandler(ctx, { docId: "4720", dryRun: true });
+    assert.equal(mocks.runKronosSearch.mock.calls.length, 1);
+  });
+
+  it("rechecks timecards when an old run prefills LDW", async () => {
+    const { ctx } = makeFakeCtx({ docId: "4605", lastDayWorked: "01/15/2026" });
+    await runHandler(ctx, { docId: "4605", dryRun: true });
+    assert.equal(mocks.runKronosSearch.mock.calls.length, 1);
+  });
+
+  it("blocks an unresolved cancellation note before receipt reuse or submission", async () => {
+    mocks.runKualiExtract.mockResolvedValue({ ...KUALI_FIXTURE,
+      sourceComments: "UCPath cancelled: Last Date Worked Misalignment. Please resubmit.",
+    });
+    const { ctx } = makeFakeCtx({ docId: "4608" });
+    await assert.rejects(runHandler(ctx, { docId: "4608" }), /correction.*review/i);
+    assert.equal(mocks.runTransactionCheck.mock.calls.length, 0);
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
+    assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
+  });
+});
