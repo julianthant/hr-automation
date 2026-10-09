@@ -21,6 +21,12 @@ const VALID_DATA: Record<string, string> = {
 };
 
 describe("EmployeeDataSchema", () => {
+  it("preserves a second address line, including a genuinely blank line", () => {
+    for (const address2 of ["30037", "Apt 2B", ""]) {
+      assert.equal(validateEmployeeData({ ...VALID_DATA, address2 }).address2, address2);
+    }
+    assert.equal(validateEmployeeData({ ...VALID_DATA, address2: null }).address2, undefined);
+  });
   it("accepts valid employee data with all 10 fields", () => {
     const result = validateEmployeeData(VALID_DATA);
 

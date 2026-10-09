@@ -682,6 +682,7 @@ export interface PersonalDataInput {
   dob: string;
   ssn?: string; // without dashes — just digits; optional for international students
   address: string;
+  address2?: string;
   city?: string;
   state?: string;
   postalCode?: string;
@@ -793,6 +794,13 @@ export async function fillPersonalData(
     timeout: 10_000,
     label: "ucpath address line 1",
   });
+
+  if (data.address2) {
+    await fill(() => personalDataSelectors.addressLine2(frame), data.address2, {
+      timeout: 10_000,
+      label: "ucpath address line 2",
+    });
+  }
 
   if (data.city) {
     await fill(() => personalDataSelectors.city(frame), data.city, {

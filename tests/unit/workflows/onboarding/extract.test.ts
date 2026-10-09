@@ -1,7 +1,31 @@
-import { describe, it } from "vitest";
+import { describe, it, vi } from "vitest";
 import assert from "node:assert/strict";
+import type { Page } from "playwright";
 import { parseAppointmentNumber } from "../../../../src/workflows/onboarding/extract.js";
 import { ExtractionError } from "../../../../src/systems/crm/types.js";
+
+describe("extractRawFields", () => {
+  it("extracts Address Line 2 independently of Address Line 1 and normalizes empty placeholders", async (t) => {
+    vi.resetModules();
+    const extractField = vi.fn(async (_page: Page, _label: string): Promise<string | null> => null);
+    vi.doMock("../../../../src/systems/crm/extract.js", () => ({ extractField }));
+    t.onTestFinished(() => {
+      vi.doUnmock("../../../../src/systems/crm/extract.js");
+      vi.resetModules();
+    });
+    const { extractRawFields } = await import("../../../../src/workflows/onboarding/extract.js");
+    for (const address2 of ["30037", "Apt 2B", "N/A", null]) {
+      extractField.mockImplementation(async (_page, label) => {
+        if (label === "Address Line 1") return "9450 Example Rd";
+        if (label === "Address Line 2") return address2;
+        return null;
+      });
+      const raw = await extractRawFields({} as Page);
+      assert.equal(raw.address, "9450 Example Rd");
+      assert.equal(raw.address2, address2 === "N/A" ? "" : address2);
+    }
+  });
+});
 
 /**
  * `parseAppointmentNumber` is the pure logic behind the appointment field of

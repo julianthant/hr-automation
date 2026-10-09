@@ -715,6 +715,17 @@ describe("fillPersonalData refresh safety", () => {
     return { frame, page, values, writes: () => addressWrites };
   }
   const input = { firstName: "Isabella", lastName: "Lopez", dob: "01/02/2007", address: "9450 Example Rd" };
+  test("fills and verifies Address Line 2 without changing Address Line 1", async () => {
+    const f = fixture("lost-address");
+    await fillPersonalData(f.page, f.frame, { ...input, address2: "30037" });
+    assert.equal(f.values.get("Address Line 1"), input.address);
+    assert.equal(f.values.get("Address Line 2"), "30037");
+  });
+  test("keeps a blank second address line blank", async () => {
+    const f = fixture("lost-address");
+    await fillPersonalData(f.page, f.frame, { ...input, address2: "" });
+    assert.equal(f.values.get("Address Line 2"), undefined);
+  });
   test("retries a fill lost during a fragment refresh", async () => {
     const f = fixture("lost-address");
     await fillPersonalData(f.page, f.frame, input);

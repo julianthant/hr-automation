@@ -60,6 +60,8 @@ A `T…` transaction NUMBER is issued regardless of outcome — live `T002204014
 
 ## Gotchas
 
+- CRM `Address Line 2` is carried as optional `address2` through validation, tracker data, and the Smart HR personal-data fill. Preserve mailbox/apartment text separately from Address Line 1; CRM empty placeholders remain blank. Nonblank values use the same fill-and-readback verification as Address Line 1.
+
 - SSN/DOB are optional (international students) but wage requires `$` prefix
 - Appointment field: extracts just the number from "Casual/Restricted 5" → `"5"`
 - Department number parsed from parenthesized text: `"Computer Science (000412)"` → `"000412"`

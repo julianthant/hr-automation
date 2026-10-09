@@ -324,6 +324,7 @@ export const onboardingWorkflow = defineWorkflow({
       dob: d.dob ?? "",
       ssn: maskSsn(d.ssn),
       address: d.address,
+      address2: d.address2 ?? "",
       city: d.city,
       state: d.state,
       postalCode: d.postalCode,

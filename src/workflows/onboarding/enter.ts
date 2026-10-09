@@ -248,6 +248,7 @@ export function buildTransactionPlan(
     dob: data.dob ?? "",
     ssn: ssnDigits,
     address: data.address,
+    address2: data.address2,
     city: data.city,
     state: data.state,
     postalCode: data.postalCode,

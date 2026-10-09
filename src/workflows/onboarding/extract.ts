@@ -20,6 +20,7 @@ const FIELD_MAP: Record<string, string[]> = {
   middleName: ["Middle Name", "Middle Initial"],
   ssn: ["SSN (National ID)", "SSN", "Social Security Number"],
   address: ["Address Line 1", "Address", "Street Address"],
+  address2: ["Address Line 2"],
   city: ["City"],
   state: ["State"],
   postalCode: ["Postal Code", "Zip Code", "ZIP"],

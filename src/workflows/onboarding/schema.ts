@@ -11,6 +11,7 @@ export const EmployeeDataSchema = z.object({
     "SSN must be in XXX-XX-XXXX format",
   ).optional().or(z.literal("")),
   address: z.string().min(1, "Address is required"),
+  address2: z.string().optional(),
   city: z.string().min(1, "City is required"),
   state: z.string().length(2, "State must be a 2-letter code (e.g., CA)"),
   postalCode: z.string().regex(

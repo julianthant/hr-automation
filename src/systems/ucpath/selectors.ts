@@ -315,6 +315,12 @@ export const personalData = {
   addressLine1: (f: FrameLocator): Locator =>
     f.getByRole("textbox", { name: "Address Line 1" }),
   /**
+   * Address Line 2 textbox. verified 2026-10-09
+   * @tags address, line, apartment, textbox, personal-data
+   */
+  addressLine2: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Address Line 2", exact: true }),
+  /**
    * City textbox.
    * @tags city, address, textbox, personal-data
    */
