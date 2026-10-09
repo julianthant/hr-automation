@@ -1,0 +1,257 @@
+import type { Page, FrameLocator } from "playwright";
+import { ActionPlan } from "../../systems/ucpath/action-plan.js";
+import { clickSaveAndSubmit } from "../../systems/ucpath/index.js";
+import { getContentFrame } from "../../systems/ucpath/navigate.js";
+import { payPathActions, hrTasks, smartHR } from "../../systems/ucpath/selectors.js";
+import { log } from "../../utils/log.js";
+import { UCPATH_SMART_HR_URL, TIMEOUTS } from "../../config.js";
+import { gotoWithRetry } from "../../infra/browser/launch.js";
+import type { WorkStudyInput } from "./schema.js";
+
+/** Mutable context populated during plan execution. */
+export interface WorkStudyContext {
+  employeeName: string;
+}
+
+// --- Helpers ---
+
+async function waitForPageReady(page: Page): Promise<void> {
+  await page.waitForTimeout(3_000);
+  await page.waitForLoadState("networkidle", { timeout: TIMEOUTS.navigation }).catch(() => {});
+}
+
+function buildCommentsText(effectiveDate: string): string {
+  return `Updated pool id to F per work study award ${effectiveDate}`;
+}
+
+// --- Navigation ---
+
+/**
+ * Navigate to the PayPath Actions page via the HR Tasks Activity Guide sidebar.
+ * Must go through the sidebar so the content loads inside the PeopleSoft iframe.
+ * SELECTOR: verified via playwright-cli 2026-03-17
+ */
+async function navigateToPayPathActions(page: Page): Promise<void> {
+  log.step("Navigating to HR Tasks...");
+  // gotoWithRetry refreshes through transient "site didn't load" failures
+  // (network hiccups, navigation timeouts) instead of a one-shot goto.
+  await gotoWithRetry(page, UCPATH_SMART_HR_URL, hrTasks.payPathLink(page));
+  await waitForPageReady(page);
+
+  // Click PayPath/Additional Pay in sidebar to expand sub-items
+  log.step("Expanding PayPath/Additional Pay...");
+  await hrTasks.payPathLink(page).click({ timeout: TIMEOUTS.normal });
+  await page.waitForTimeout(TIMEOUTS.uiSettle);
+
+  // Click PayPath Actions sub-item
+  log.step("Clicking PayPath Actions...");
+  await hrTasks.payPathActionsLink(page).click({ timeout: TIMEOUTS.normal });
+  await waitForPageReady(page);
+  log.success("PayPath Actions search page loaded");
+}
+
+async function searchEmployee(
+  page: Page,
+  frame: FrameLocator,
+  emplId: string,
+  ctx: WorkStudyContext,
+): Promise<void> {
+  log.step(`Searching for Empl ID: ${emplId}...`);
+  await payPathActions.emplIdInput(frame).fill(emplId, { timeout: TIMEOUTS.normal });
+  log.step("Filled Empl ID, clicking Search...");
+  await payPathActions.searchButton(frame).click({ timeout: TIMEOUTS.normal });
+  // PeopleSoft reloads the iframe content after search — wait for the
+  // resulting employee-name readback to render instead of a blind flat pause
+  // (best-effort: the "payroll in progress" alert branch below can render
+  // instead, in which case this simply times out and falls through to it).
+  await payPathActions.employeeNameDisplay(frame)
+    .waitFor({ state: "visible", timeout: TIMEOUTS.normal })
+    .catch(() => {});
+  await page.waitForLoadState("networkidle", { timeout: TIMEOUTS.navigation }).catch(() => {});
+
+  // Dismiss any PeopleSoft alert dialog (e.g. "payroll in progress" warning).
+  // Fail-loud rule: never OK an alert unread. No message-text selector is
+  // registered for this dialog (only the OK button), so we can't quote its
+  // contents here — NEEDS-LIVE: map the dialog's message-text element via
+  // playwright-cli, add it to `payPathActions` in selectors.ts, then log the
+  // actual text instead of this generic warning.
+  const okBtn = payPathActions.alertOkButton(page);
+  if (await okBtn.isVisible({ timeout: TIMEOUTS.uiSettle }).catch(() => false)) {
+    log.warn(
+      `PeopleSoft alert dialog present for Empl ID ${emplId} — dismissing unread (no message-text selector available; see NEEDS-LIVE note above)`,
+    );
+    await okBtn.click({ timeout: TIMEOUTS.fast });
+    await page.waitForTimeout(TIMEOUTS.uiSettle);
+  }
+
+  // Extract employee name from Position Data header. Fail-loud rule: an
+  // unreadable/empty identity readback must NOT be swallowed to '' and
+  // allowed to proceed toward a real PayPath submit — throw instead.
+  const nameEl = payPathActions.employeeNameDisplay(frame);
+  const name = await nameEl.textContent({ timeout: TIMEOUTS.fast }).catch(() => null);
+  const trimmedName = name?.trim() ?? "";
+  if (!trimmedName) {
+    throw new Error(
+      `Work-study identity check failed for Empl ID ${emplId}: employee name readback was empty or unreadable after search. Refusing to proceed to PayPath submit.`,
+    );
+  }
+  ctx.employeeName = trimmedName;
+  log.success(`Employee record loaded: ${ctx.employeeName}`);
+
+  // NEEDS-LIVE: this only confirms *a* name was displayed, not that it's the
+  // right one. `payPathActions` has no Empl ID readback selector for the
+  // Position Data header (only NAME_DISPLAY), and `WorkStudyInput` carries no
+  // expected name to compare against — so a true identity-match assertion
+  // (displayed Empl ID === `emplId`) can't be grounded from this file today.
+  // Map that selector live, add it to selectors.ts, then compare it to
+  // `emplId` here and throw on mismatch before Save and Submit.
+}
+
+async function collapseSidebar(page: Page): Promise<void> {
+  const sidebarBtn = smartHR.sidebarNavigationToggle(page);
+  const isExpanded = await sidebarBtn.getAttribute("aria-expanded").catch(() => null);
+  if (isExpanded === "true") {
+    log.step("Collapsing sidebar...");
+    await sidebarBtn.click({ timeout: TIMEOUTS.fast });
+    await page.waitForTimeout(1_000);
+  }
+}
+
+// --- Position Data tab ---
+
+async function fillPositionData(
+  _page: Page,
+  frame: FrameLocator,
+  effectiveDate: string,
+): Promise<void> {
+  log.step("Filling Position Data tab...");
+
+  log.step(`  Effective Date: ${effectiveDate}`);
+  await payPathActions.effectiveDateInput(frame)
+    .fill(effectiveDate, { timeout: 20_000 });
+
+  log.step("  Position Change Reason: JRL");
+  await payPathActions.positionChangeReasonInput(frame)
+    .fill("JRL", { timeout: TIMEOUTS.normal });
+
+  log.step("  Position Pool: F");
+  await payPathActions.positionPoolInput(frame)
+    .fill("F", { timeout: TIMEOUTS.normal });
+
+  log.success("Position Data filled");
+}
+
+// --- Job Data tab ---
+
+async function clickJobDataTab(page: Page, frame: FrameLocator): Promise<void> {
+  log.step("Clicking Job Data tab...");
+  await payPathActions.jobDataTab(frame).click({ timeout: TIMEOUTS.normal });
+  await waitForPageReady(page);
+  log.success("Job Data tab loaded");
+}
+
+async function fillJobDataComments(
+  frame: FrameLocator,
+  comments: string,
+): Promise<void> {
+  log.step(`  Job Data Comments: ${comments}`);
+  await payPathActions.jobDataCommentsInput(frame)
+    .fill(comments, { timeout: TIMEOUTS.normal });
+  log.success("Job Data Comments filled");
+}
+
+// --- Additional Pay Data tab ---
+
+async function clickAdditionalPayTab(page: Page, frame: FrameLocator): Promise<void> {
+  log.step("Clicking Additional Pay Data tab...");
+  await payPathActions.additionalPayDataTab(frame).click({ timeout: TIMEOUTS.normal });
+  await waitForPageReady(page);
+  log.success("Additional Pay Data tab loaded");
+}
+
+async function fillInitiatorComments(
+  frame: FrameLocator,
+  comments: string,
+): Promise<void> {
+  log.step(`  Initiator's Comments: ${comments}`);
+  await payPathActions.initiatorsCommentsInput(frame)
+    .fill(comments, { timeout: TIMEOUTS.normal });
+  log.success("Initiator's Comments filled");
+}
+
+// --- ActionPlan builder ---
+
+/**
+ * Build an ActionPlan for the Work Study PayPath transaction.
+ *
+ * Steps:
+ *  1. Navigate to PayPath Actions
+ *  2. Collapse sidebar
+ *  3. Search for employee by Empl ID
+ *  4. Fill Position Data: effective date, reason JRL, pool F
+ *  5. Click Job Data tab
+ *  6. Fill Job Data Comments
+ *  7. Click Additional Pay Data tab
+ *  8. Fill Initiator's Comments
+ *  9. Save and Submit
+ */
+export function buildWorkStudyPlan(
+  input: WorkStudyInput,
+  page: Page,
+  ctx: WorkStudyContext,
+): ActionPlan {
+  const plan = new ActionPlan();
+  const comments = buildCommentsText(input.effectiveDate);
+
+  plan.add(
+    "Navigate to PayPath Actions",
+    () => navigateToPayPathActions(page),
+  );
+
+  plan.add(
+    "Collapse sidebar",
+    () => collapseSidebar(page),
+  );
+
+  plan.add(
+    `Search for Empl ID: ${input.emplId}`,
+    () => searchEmployee(page, getContentFrame(page), input.emplId, ctx),
+  );
+
+  plan.add(
+    `Fill Position Data (eff date: ${input.effectiveDate}, reason: JRL, pool: F)`,
+    () => fillPositionData(page, getContentFrame(page), input.effectiveDate),
+  );
+
+  plan.add(
+    "Click Job Data tab",
+    () => clickJobDataTab(page, getContentFrame(page)),
+  );
+
+  plan.add(
+    `Fill Job Data Comments: ${comments}`,
+    () => fillJobDataComments(getContentFrame(page), comments),
+  );
+
+  plan.add(
+    "Click Additional Pay Data tab",
+    () => clickAdditionalPayTab(page, getContentFrame(page)),
+  );
+
+  plan.add(
+    `Fill Initiator's Comments: ${comments}`,
+    () => fillInitiatorComments(getContentFrame(page), comments),
+  );
+
+  plan.add(
+    "Save and Submit",
+    async () => {
+      const result = await clickSaveAndSubmit(page, getContentFrame(page), input.emplId);
+      if (!result.success) {
+        throw new Error(result.error ?? "Save and Submit failed");
+      }
+    },
+  );
+
+  return plan;
+}

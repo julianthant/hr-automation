@@ -1,0 +1,39 @@
+import { test } from "vitest";
+import assert from "node:assert/strict";
+import {
+  queueTitleData,
+  readQueueTitle,
+  rootQueueTitleData,
+} from "../../../src/domain/queue-title.js";
+
+test("queueTitleData stamps title and kind", () => {
+  assert.deepEqual(queueTitleData({ kind: "single", title: "Person 905" }), {
+    __queueTitle: "Person 905",
+    __queueTitleKind: "single",
+  });
+  assert.deepEqual(queueTitleData({ kind: "operation", title: "  Emergency Contact · #3456  " }), {
+    __queueTitle: "Emergency Contact · #3456",
+    __queueTitleKind: "operation",
+  });
+  assert.deepEqual(queueTitleData({ kind: "single", title: "   " }), {});
+  assert.deepEqual(queueTitleData(undefined), {});
+});
+
+test("rootQueueTitleData preserves the inherited root title", () => {
+  assert.deepEqual(rootQueueTitleData("Oath · #90ab"), {
+    __queueTitle: "Oath · #90ab",
+    __queueTitleKind: "delegation",
+    __queueRootTitle: "Oath · #90ab",
+    parentSubject: "Oath · #90ab",
+  });
+  assert.deepEqual(rootQueueTitleData("   "), {});
+  assert.deepEqual(rootQueueTitleData(undefined), {});
+});
+
+test("readQueueTitle prefers root title over local title", () => {
+  assert.equal(readQueueTitle({ __queueRootTitle: "  Oath · #90ab  ", __queueTitle: "Person 905" }), "Oath · #90ab");
+  assert.equal(readQueueTitle({ __queueTitle: "Person 905" }), "Person 905");
+  assert.equal(readQueueTitle({ __queueRootTitle: "   ", __queueTitle: "  Person 905  " }), "Person 905");
+  assert.equal(readQueueTitle({}), undefined);
+  assert.equal(readQueueTitle(undefined), undefined);
+});

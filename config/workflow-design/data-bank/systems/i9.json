@@ -1,0 +1,1180 @@
+{
+  "system": "i9",
+  "label": "I-9",
+  "operations": [
+    {
+      "id": "i9.dashboard.createNewI9Link#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Dashboard — Create New I-9: New Employee link",
+      "selectorFqn": "i9Selectors.dashboard.createNewI9Link",
+      "summary": "\"Create New I-9 : New Employee\" entry link.",
+      "role": "link",
+      "accessibleName": "create new I9: new employee",
+      "verified": "2026-03-16",
+      "tags": [
+        "create",
+        "new",
+        "i9",
+        "employee",
+        "link",
+        "dashboard"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:74"
+    },
+    {
+      "id": "i9.dashboard.searchOptionsButton#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Dashboard — Search Options button",
+      "selectorFqn": "i9Selectors.dashboard.searchOptionsButton",
+      "summary": "Search Options button (opens search dialog).",
+      "sourceRef": "src/systems/i9/selectors.ts:81",
+      "verified": "2026-03-16",
+      "tags": [
+        "search",
+        "options",
+        "button",
+        "dashboard",
+        "i9"
+      ],
+      "note": "ID-anchored (#divSearchOptions), not an accessible role — inferred click from name and usage context."
+    },
+    {
+      "id": "i9.dashboardUrl#wait",
+      "kind": "wait",
+      "system": "i9",
+      "label": "Wait for dashboard URL after notification dismiss",
+      "summary": "waitForURL: pathname === '/' or search includes 'mobile=false'",
+      "sourceRef": "src/systems/i9/login.ts"
+    },
+    {
+      "id": "i9.i9Complete#navigate",
+      "kind": "navigate",
+      "system": "i9",
+      "label": "Navigate to I9 Complete login page",
+      "url": "{I9_URL}",
+      "sourceRef": "src/systems/i9/login.ts"
+    },
+    {
+      "id": "i9.login.confirmYesButton#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Login — Confirm Yes (training notification)",
+      "selectorFqn": "i9Selectors.login.confirmYesButton",
+      "note": "Only executed when training notification was present",
+      "sourceRef": "src/systems/i9/selectors.ts:52",
+      "summary": "Training-notification confirm \"Yes\".",
+      "role": "button",
+      "accessibleName": "Yes",
+      "verified": "2026-03-16",
+      "tags": [
+        "training",
+        "notification",
+        "confirm",
+        "yes",
+        "button",
+        "i9"
+      ]
+    },
+    {
+      "id": "i9.login.dismissNotificationButton#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Login — Dismiss training notification",
+      "selectorFqn": "i9Selectors.login.dismissNotificationButton",
+      "note": "Graceful — entire notification branch is in a try/catch; no-op if popup absent",
+      "sourceRef": "src/systems/i9/selectors.ts:45",
+      "summary": "Training-notification dismiss button.",
+      "role": "button",
+      "accessibleName": "Dismiss the Notification",
+      "verified": "2026-03-16",
+      "tags": [
+        "training",
+        "notification",
+        "dismiss",
+        "button",
+        "i9"
+      ]
+    },
+    {
+      "id": "i9.login.loginButton#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Login — Log in button",
+      "selectorFqn": "i9Selectors.login.loginButton",
+      "sourceRef": "src/systems/i9/selectors.ts:38",
+      "summary": "Log in button.",
+      "role": "button",
+      "accessibleName": "Log in",
+      "verified": "2026-03-16",
+      "tags": [
+        "login",
+        "submit",
+        "button",
+        "i9"
+      ]
+    },
+    {
+      "id": "i9.login.loginError#assert",
+      "kind": "assert",
+      "system": "i9",
+      "label": "Assert login succeeded via classifyI9LoginResult",
+      "selectorFqn": "login.loginError",
+      "summary": "Throws with clear .env credential hint if loginError is visible, URL is /Account/Login, or redirect never arrived",
+      "sourceRef": "src/systems/i9/login.ts"
+    },
+    {
+      "id": "i9.login.loginError#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Login — Credential error message",
+      "summary": "Login validation error shown on /Account/Login when the submit is refused.",
+      "selectorFqn": "i9Selectors.login.loginError",
+      "verified": "2026-06-24",
+      "tags": [
+        "login",
+        "error",
+        "validation",
+        "incorrect",
+        "invalid",
+        "credentials",
+        "i9"
+      ],
+      "note": "Anchored on regex /username or password.*(incorrect|invalid)/i; used to fail fast on bad credentials rather than waiting out the post-login navigation timeout.",
+      "sourceRef": "src/systems/i9/selectors.ts:63"
+    },
+    {
+      "id": "i9.login.nextButton#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Login — Next button",
+      "selectorFqn": "i9Selectors.login.nextButton",
+      "sourceRef": "src/systems/i9/selectors.ts:24",
+      "summary": "Next button (email-first login flow).",
+      "role": "button",
+      "accessibleName": "Next",
+      "verified": "2026-03-16",
+      "tags": [
+        "next",
+        "login",
+        "button",
+        "i9"
+      ]
+    },
+    {
+      "id": "i9.login.passwordInput#fill",
+      "kind": "fill",
+      "system": "i9",
+      "label": "Login — Password (fill)",
+      "selectorFqn": "i9Selectors.login.passwordInput",
+      "sourceRef": "src/systems/i9/selectors.ts:30",
+      "summary": "Password textbox.",
+      "role": "textbox",
+      "accessibleName": "Password*",
+      "verified": "2026-03-16",
+      "tags": [
+        "password",
+        "login",
+        "textbox",
+        "i9"
+      ]
+    },
+    {
+      "id": "i9.login.passwordInput#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Login — Password (scrape)",
+      "summary": "Password textbox.",
+      "selectorFqn": "i9Selectors.login.passwordInput",
+      "role": "textbox",
+      "accessibleName": "Password*",
+      "verified": "2026-03-16",
+      "tags": [
+        "password",
+        "login",
+        "textbox",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:30"
+    },
+    {
+      "id": "i9.login.usernameInput#fill",
+      "kind": "fill",
+      "system": "i9",
+      "label": "Login — Username / Email (fill)",
+      "selectorFqn": "i9Selectors.login.usernameInput",
+      "note": "Derived from I9_USER_ID; appends @example.edu if no @ present",
+      "sourceRef": "src/systems/i9/selectors.ts:17",
+      "summary": "Email / username textbox.",
+      "role": "textbox",
+      "accessibleName": "Username or Email*",
+      "verified": "2026-03-16",
+      "tags": [
+        "username",
+        "email",
+        "login",
+        "textbox",
+        "i9"
+      ]
+    },
+    {
+      "id": "i9.login.usernameInput#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Login — Username / Email (scrape)",
+      "summary": "Email / username textbox.",
+      "selectorFqn": "i9Selectors.login.usernameInput",
+      "role": "textbox",
+      "accessibleName": "Username or Email*",
+      "verified": "2026-03-16",
+      "tags": [
+        "username",
+        "email",
+        "login",
+        "textbox",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:17"
+    },
+    {
+      "id": "i9.loginRedirect#wait",
+      "kind": "wait",
+      "system": "i9",
+      "label": "Race: wait for wwwe.i9complete.com redirect vs login error visible",
+      "summary": "Promise.race([waitForURL(wwwe.i9complete.com, 15s), login.loginError.waitFor(visible, 15s)]) — whichever fires first",
+      "sourceRef": "src/systems/i9/login.ts"
+    },
+    {
+      "id": "i9.networkIdle#wait",
+      "kind": "wait",
+      "system": "i9",
+      "label": "Wait for network idle after summary navigation",
+      "summary": "page.waitForLoadState('networkidle', { timeout: 5000 }) — graceful catch no-op",
+      "sourceRef": "src/systems/i9/signer.ts"
+    },
+    {
+      "id": "i9.profile.dob#fill",
+      "kind": "fill",
+      "system": "i9",
+      "label": "Profile — Date of Birth (fill)",
+      "selectorFqn": "i9Selectors.profile.dob",
+      "note": "jQuery datepicker is force-hidden via JS after fill so it does not block worksite dropdown",
+      "summary": "Date of Birth textbox.",
+      "role": "textbox",
+      "accessibleName": "Date of Birth",
+      "tags": [
+        "dob",
+        "date-of-birth",
+        "textbox",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:116"
+    },
+    {
+      "id": "i9.profile.dob#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Profile — Date of Birth (scrape)",
+      "summary": "Date of Birth textbox.",
+      "selectorFqn": "i9Selectors.profile.dob",
+      "role": "textbox",
+      "accessibleName": "Date of Birth",
+      "tags": [
+        "dob",
+        "date-of-birth",
+        "textbox",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:116"
+    },
+    {
+      "id": "i9.profile.duplicateDialog#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Profile — Duplicate Employee Record dialog",
+      "summary": "Duplicate Employee Record dialog.",
+      "selectorFqn": "i9Selectors.profile.duplicateDialog",
+      "role": "dialog",
+      "accessibleName": "Duplicate Employee Record",
+      "verified": "2026-04-16",
+      "tags": [
+        "duplicate",
+        "employee",
+        "dialog",
+        "profile",
+        "i9"
+      ],
+      "note": "Use to detect the duplicate-record dialog before deciding to select an existing record vs. creating new.",
+      "sourceRef": "src/systems/i9/selectors.ts:172"
+    },
+    {
+      "id": "i9.profile.duplicateFirstRow#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Profile — Duplicate dialog first row (select existing record)",
+      "summary": "First row of the duplicate-dialog grid (select existing record).",
+      "selectorFqn": "i9Selectors.profile.duplicateFirstRow",
+      "role": "row",
+      "verified": "2026-04-16",
+      "tags": [
+        "duplicate",
+        "row",
+        "grid",
+        "dialog",
+        "profile",
+        "i9"
+      ],
+      "note": "Uses .getByRole(\"grid\").last().getByRole(\"row\").first() — the last grid in the dialog is the results grid.",
+      "sourceRef": "src/systems/i9/selectors.ts:179"
+    },
+    {
+      "id": "i9.profile.email#fill",
+      "kind": "fill",
+      "system": "i9",
+      "label": "Profile — Employee Email Address (fill)",
+      "selectorFqn": "i9Selectors.profile.email",
+      "summary": "Employee's Email Address textbox.",
+      "role": "textbox",
+      "accessibleName": "Employee's Email Address",
+      "tags": [
+        "email",
+        "address",
+        "textbox",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:122"
+    },
+    {
+      "id": "i9.profile.email#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Profile — Employee Email Address (scrape)",
+      "summary": "Employee's Email Address textbox.",
+      "selectorFqn": "i9Selectors.profile.email",
+      "role": "textbox",
+      "accessibleName": "Employee's Email Address",
+      "tags": [
+        "email",
+        "address",
+        "textbox",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:122"
+    },
+    {
+      "id": "i9.profile.errorSummary#assert",
+      "kind": "assert",
+      "system": "i9",
+      "label": "Assert no validation error after Save & Continue",
+      "selectorFqn": "i9.profile.errorSummary",
+      "summary": "If errorSummary visible → return I9Result failure object (does not throw); caller retries"
+    },
+    {
+      "id": "i9.profile.errorSummary#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Profile — Error Summary heading",
+      "summary": "Error summary heading (validation errors).",
+      "selectorFqn": "i9Selectors.profile.errorSummary",
+      "role": "heading",
+      "accessibleName": "Error Summary:",
+      "verified": "2026-03-16",
+      "tags": [
+        "error",
+        "summary",
+        "heading",
+        "validation",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:151"
+    },
+    {
+      "id": "i9.profile.firstName#fill",
+      "kind": "fill",
+      "system": "i9",
+      "label": "Profile — First Name (fill)",
+      "selectorFqn": "i9Selectors.profile.firstName",
+      "summary": "First (Given) Name textbox.",
+      "role": "textbox",
+      "accessibleName": "First Name (Given Name)*",
+      "tags": [
+        "first-name",
+        "given-name",
+        "name",
+        "textbox",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:92"
+    },
+    {
+      "id": "i9.profile.firstName#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Profile — First Name (scrape)",
+      "summary": "First (Given) Name textbox.",
+      "selectorFqn": "i9Selectors.profile.firstName",
+      "role": "textbox",
+      "accessibleName": "First Name (Given Name)*",
+      "tags": [
+        "first-name",
+        "given-name",
+        "name",
+        "textbox",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:92"
+    },
+    {
+      "id": "i9.profile.lastName#fill",
+      "kind": "fill",
+      "system": "i9",
+      "label": "Profile — Last Name (fill)",
+      "selectorFqn": "i9Selectors.profile.lastName",
+      "summary": "Last (Family) Name textbox.",
+      "role": "textbox",
+      "accessibleName": "Last Name (Family Name)*",
+      "tags": [
+        "last-name",
+        "family-name",
+        "name",
+        "textbox",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:104"
+    },
+    {
+      "id": "i9.profile.lastName#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Profile — Last Name (scrape)",
+      "summary": "Last (Family) Name textbox.",
+      "selectorFqn": "i9Selectors.profile.lastName",
+      "role": "textbox",
+      "accessibleName": "Last Name (Family Name)*",
+      "tags": [
+        "last-name",
+        "family-name",
+        "name",
+        "textbox",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:104"
+    },
+    {
+      "id": "i9.profile.loaderOverlay#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Profile — Mobile loader overlay (wait anchor)",
+      "summary": "Mobile loader overlay (wait for it to hide post-save).",
+      "selectorFqn": "i9Selectors.profile.loaderOverlay",
+      "verified": "2026-03-16",
+      "tags": [
+        "loader",
+        "overlay",
+        "mobile",
+        "profile",
+        "i9"
+      ],
+      "note": "CSS-anchored (.mobile-responsive-loader); used as a wait-for-hidden anchor after Save & Continue, not for reading content.",
+      "sourceRef": "src/systems/i9/selectors.ts:165"
+    },
+    {
+      "id": "i9.profile.middleName#fill",
+      "kind": "fill",
+      "system": "i9",
+      "label": "Profile — Middle Name (fill)",
+      "selectorFqn": "i9Selectors.profile.middleName",
+      "note": "Conditional — only executed when middleName is non-empty",
+      "summary": "Middle Name textbox.",
+      "role": "textbox",
+      "accessibleName": "Middle Name",
+      "tags": [
+        "middle-name",
+        "name",
+        "textbox",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:98"
+    },
+    {
+      "id": "i9.profile.middleName#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Profile — Middle Name (scrape)",
+      "summary": "Middle Name textbox.",
+      "selectorFqn": "i9Selectors.profile.middleName",
+      "role": "textbox",
+      "accessibleName": "Middle Name",
+      "tags": [
+        "middle-name",
+        "name",
+        "textbox",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:98"
+    },
+    {
+      "id": "i9.profile.okButtonFirst#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Profile — OK button (confirmation dialog)",
+      "summary": "Generic OK button (first) on confirmation dialogs.",
+      "selectorFqn": "i9Selectors.profile.okButtonFirst",
+      "role": "button",
+      "accessibleName": "OK",
+      "verified": "2026-03-16",
+      "tags": [
+        "ok",
+        "button",
+        "confirmation",
+        "dialog",
+        "profile",
+        "i9"
+      ],
+      "note": ".first() — targets the first OK button when multiple may be present.",
+      "sourceRef": "src/systems/i9/selectors.ts:158"
+    },
+    {
+      "id": "i9.profile.saveContinueButton#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Profile — Save & Continue button",
+      "selectorFqn": "i9Selectors.profile.saveContinueButton",
+      "summary": "Save & Continue button.",
+      "role": "button",
+      "accessibleName": "Save & Continue",
+      "verified": "2026-03-16",
+      "tags": [
+        "save",
+        "continue",
+        "button",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:144"
+    },
+    {
+      "id": "i9.profile.ssn#fill",
+      "kind": "fill",
+      "system": "i9",
+      "label": "Profile — SSN (fill)",
+      "selectorFqn": "i9Selectors.profile.ssn",
+      "note": "9 digits, NO dashes (e.g. \"123456789\"). Search dialog uses a different selector (search.ssnInput) which expects dashes.",
+      "summary": "U.S. Social Security Number textbox.",
+      "role": "textbox",
+      "accessibleName": "U.S. Social Security Number",
+      "tags": [
+        "ssn",
+        "social-security",
+        "textbox",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:110"
+    },
+    {
+      "id": "i9.profile.ssn#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Profile — SSN (scrape)",
+      "summary": "U.S. Social Security Number textbox.",
+      "selectorFqn": "i9Selectors.profile.ssn",
+      "role": "textbox",
+      "accessibleName": "U.S. Social Security Number",
+      "tags": [
+        "ssn",
+        "social-security",
+        "textbox",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:110"
+    },
+    {
+      "id": "i9.profile.viewEditSelectedButton#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Profile — View/Edit Selected Record button",
+      "summary": "View/Edit Selected Record button (inside duplicate dialog).",
+      "selectorFqn": "i9Selectors.profile.viewEditSelectedButton",
+      "role": "button",
+      "accessibleName": "View/Edit Selected Record",
+      "verified": "2026-04-16",
+      "tags": [
+        "view",
+        "edit",
+        "selected",
+        "record",
+        "button",
+        "duplicate",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:186"
+    },
+    {
+      "id": "i9.profile.worksiteListbox#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Open worksite dropdown",
+      "selectorFqn": "i9.profile.worksiteListbox"
+    },
+    {
+      "id": "i9.profile.worksiteListbox#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Profile — Worksite (scrape)",
+      "summary": "Worksite listbox.",
+      "selectorFqn": "i9Selectors.profile.worksiteListbox",
+      "role": "listbox",
+      "accessibleName": "Worksite *",
+      "verified": "2026-03-16",
+      "tags": [
+        "worksite",
+        "listbox",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:129"
+    },
+    {
+      "id": "i9.profile.worksiteListbox#select",
+      "kind": "select",
+      "system": "i9",
+      "label": "Profile — Worksite (select)",
+      "summary": "Worksite listbox.",
+      "selectorFqn": "i9Selectors.profile.worksiteListbox",
+      "role": "listbox",
+      "accessibleName": "Worksite *",
+      "verified": "2026-03-16",
+      "tags": [
+        "worksite",
+        "listbox",
+        "profile",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:129"
+    },
+    {
+      "id": "i9.profile.worksiteOption#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Profile — Worksite option (click to select)",
+      "selectorFqn": "i9Selectors.profile.worksiteOption",
+      "summary": "Worksite option by regex (matches `6-{deptNum}` prefix).",
+      "role": "option",
+      "verified": "2026-03-16",
+      "tags": [
+        "worksite",
+        "option",
+        "regex",
+        "profile",
+        "i9"
+      ],
+      "note": "Parameterized: takes a RegExp `pattern`. Options are formatted as `6-{deptNum} DESCRIPTION`; throws before save if no worksite matches the department number.",
+      "sourceRef": "src/systems/i9/selectors.ts:137"
+    },
+    {
+      "id": "i9.remoteI9.createI9Button#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Remote I-9 — Create I-9 button",
+      "selectorFqn": "i9Selectors.remoteI9.createI9Button",
+      "summary": "Create I-9 button.",
+      "role": "button",
+      "accessibleName": "Create I-9",
+      "verified": "2026-03-16",
+      "tags": [
+        "create",
+        "i9",
+        "button",
+        "remote"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:211"
+    },
+    {
+      "id": "i9.remoteI9.createI9OkButton#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Remote I-9 — OK confirm after Create I-9",
+      "selectorFqn": "i9Selectors.remoteI9.createI9OkButton",
+      "summary": "OK confirm after Create I-9 click.",
+      "role": "button",
+      "accessibleName": "OK",
+      "verified": "2026-03-16",
+      "tags": [
+        "ok",
+        "confirm",
+        "button",
+        "i9",
+        "remote"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:218"
+    },
+    {
+      "id": "i9.remoteI9.remoteSection1OnlyRadio#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Remote I-9 — Section 1 Only radio",
+      "selectorFqn": "i9Selectors.remoteI9.remoteSection1OnlyRadio",
+      "summary": "Remote - Section 1 Only radio.",
+      "role": "radio",
+      "accessibleName": "Remote - Section 1 Only",
+      "verified": "2026-03-16",
+      "tags": [
+        "remote",
+        "section",
+        "radio",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:197"
+    },
+    {
+      "id": "i9.remoteI9.startDateInput#fill",
+      "kind": "fill",
+      "system": "i9",
+      "label": "Remote I-9 — Start Date (fill)",
+      "selectorFqn": "i9Selectors.remoteI9.startDateInput",
+      "summary": "Start Date textbox.",
+      "role": "textbox",
+      "accessibleName": "Start Date*",
+      "verified": "2026-03-16",
+      "tags": [
+        "start",
+        "date",
+        "textbox",
+        "remote",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:204"
+    },
+    {
+      "id": "i9.remoteI9.startDateInput#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Remote I-9 — Start Date (scrape)",
+      "summary": "Start Date textbox.",
+      "selectorFqn": "i9Selectors.remoteI9.startDateInput",
+      "role": "textbox",
+      "accessibleName": "Start Date*",
+      "verified": "2026-03-16",
+      "tags": [
+        "start",
+        "date",
+        "textbox",
+        "remote",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:204"
+    },
+    {
+      "id": "i9.search.accessRestrictedAlert#assert",
+      "kind": "assert",
+      "system": "i9",
+      "label": "Detect access-restricted alert on zero results",
+      "selectorFqn": "search.accessRestrictedAlert",
+      "summary": "count() > 0 means record exists but operator's account lacks scope (unable-to-access); 0 means genuine not-found",
+      "sourceRef": "src/systems/i9/signer.ts"
+    },
+    {
+      "id": "i9.search.accessRestrictedAlert#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Search — Access-restricted alert",
+      "summary": "Access-restricted search alert when the operator lacks permission to view matched employees.",
+      "selectorFqn": "i9Selectors.search.accessRestrictedAlert",
+      "verified": "2026-06-06",
+      "tags": [
+        "search",
+        "results",
+        "alert",
+        "access",
+        "restricted",
+        "no-access",
+        "i9"
+      ],
+      "note": "Anchored on regex /has not been granted access/i; distinguishes \"unable to access\" from a genuine zero-result \"not found\"; lookupSection2Signer returns status: \"unable-to-access\" when this is visible.",
+      "sourceRef": "src/systems/i9/selectors.ts:304"
+    },
+    {
+      "id": "i9.search.clearFiltersLink#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Search — Clear Search Filters & Results link",
+      "selectorFqn": "i9Selectors.search.clearFiltersLink",
+      "sourceRef": "src/systems/i9/selectors.ts:237",
+      "summary": "Clear Search Filters & Results link.",
+      "role": "link",
+      "accessibleName": "Clear Search Filters & Results",
+      "verified": "2026-03-16",
+      "tags": [
+        "clear",
+        "filters",
+        "link",
+        "search",
+        "i9"
+      ]
+    },
+    {
+      "id": "i9.search.dialog#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Search — Dialog container",
+      "summary": "The search dialog itself.",
+      "selectorFqn": "i9Selectors.search.dialog",
+      "role": "dialog",
+      "accessibleName": "Search for Existing Employee",
+      "verified": "2026-03-16",
+      "tags": [
+        "search",
+        "dialog",
+        "i9"
+      ],
+      "note": "Used as a container anchor for dialog-scoped child selectors.",
+      "sourceRef": "src/systems/i9/selectors.ts:231"
+    },
+    {
+      "id": "i9.search.dialog#wait",
+      "kind": "wait",
+      "system": "i9",
+      "label": "Wait for search dialog to become visible",
+      "selectorFqn": "search.dialog",
+      "summary": "searchI9Employee opens the search dialog on the I9 dashboard",
+      "sourceRef": "src/systems/i9/search.ts"
+    },
+    {
+      "id": "i9.search.employeeIdInput#fill",
+      "kind": "fill",
+      "system": "i9",
+      "label": "Search — Employee ID (fill)",
+      "summary": "Employee ID textbox (dialog-scoped).",
+      "selectorFqn": "i9Selectors.search.employeeIdInput",
+      "role": "textbox",
+      "accessibleName": "Employee ID",
+      "verified": "2026-03-16",
+      "tags": [
+        "employee",
+        "id",
+        "textbox",
+        "search",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:280"
+    },
+    {
+      "id": "i9.search.employeeIdInput#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Search — Employee ID (scrape)",
+      "summary": "Employee ID textbox (dialog-scoped).",
+      "selectorFqn": "i9Selectors.search.employeeIdInput",
+      "role": "textbox",
+      "accessibleName": "Employee ID",
+      "verified": "2026-03-16",
+      "tags": [
+        "employee",
+        "id",
+        "textbox",
+        "search",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:280"
+    },
+    {
+      "id": "i9.search.firstNameInput#fill",
+      "kind": "fill",
+      "system": "i9",
+      "label": "Search — First Name (fill)",
+      "selectorFqn": "i9Selectors.search.firstNameInput",
+      "sourceRef": "src/systems/i9/selectors.ts:253",
+      "summary": "First Name textbox (dialog-scoped, regex for flexibility).",
+      "role": "textbox",
+      "accessibleName": "/First Name/",
+      "verified": "2026-03-16",
+      "tags": [
+        "first-name",
+        "name",
+        "textbox",
+        "search",
+        "i9"
+      ],
+      "note": "Scoped inside the \"Search for Existing Employee\" dialog; accessible name matched by regex /First Name/."
+    },
+    {
+      "id": "i9.search.firstNameInput#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Search — First Name (scrape)",
+      "summary": "First Name textbox (dialog-scoped, regex for flexibility).",
+      "selectorFqn": "i9Selectors.search.firstNameInput",
+      "role": "textbox",
+      "accessibleName": "/First Name/",
+      "verified": "2026-03-16",
+      "tags": [
+        "first-name",
+        "name",
+        "textbox",
+        "search",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:253"
+    },
+    {
+      "id": "i9.search.lastNameInput#fill",
+      "kind": "fill",
+      "system": "i9",
+      "label": "Search — Last Name (fill)",
+      "selectorFqn": "i9Selectors.search.lastNameInput",
+      "sourceRef": "src/systems/i9/selectors.ts:244",
+      "summary": "Last Name textbox (dialog-scoped).",
+      "role": "textbox",
+      "accessibleName": "Last Name",
+      "verified": "2026-03-16",
+      "tags": [
+        "last-name",
+        "name",
+        "textbox",
+        "search",
+        "i9"
+      ],
+      "note": "Scoped inside the \"Search for Existing Employee\" dialog."
+    },
+    {
+      "id": "i9.search.lastNameInput#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Search — Last Name (scrape)",
+      "summary": "Last Name textbox (dialog-scoped).",
+      "selectorFqn": "i9Selectors.search.lastNameInput",
+      "role": "textbox",
+      "accessibleName": "Last Name",
+      "verified": "2026-03-16",
+      "tags": [
+        "last-name",
+        "name",
+        "textbox",
+        "search",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:244"
+    },
+    {
+      "id": "i9.search.profileIdInput#fill",
+      "kind": "fill",
+      "system": "i9",
+      "label": "Search — Profile ID (fill)",
+      "summary": "Profile ID textbox (dialog-scoped).",
+      "selectorFqn": "i9Selectors.search.profileIdInput",
+      "role": "textbox",
+      "accessibleName": "Profile ID",
+      "verified": "2026-03-16",
+      "tags": [
+        "profile",
+        "id",
+        "textbox",
+        "search",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:271"
+    },
+    {
+      "id": "i9.search.profileIdInput#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Search — Profile ID (scrape)",
+      "summary": "Profile ID textbox (dialog-scoped).",
+      "selectorFqn": "i9Selectors.search.profileIdInput",
+      "role": "textbox",
+      "accessibleName": "Profile ID",
+      "verified": "2026-03-16",
+      "tags": [
+        "profile",
+        "id",
+        "textbox",
+        "search",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:271"
+    },
+    {
+      "id": "i9.search.resultRows#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Search — Results grid rows",
+      "selectorFqn": "i9Selectors.search.resultRows",
+      "summary": "Results grid rows.",
+      "sourceRef": "src/systems/i9/selectors.ts:312",
+      "role": "row",
+      "verified": "2026-03-16",
+      "tags": [
+        "results",
+        "grid",
+        "rows",
+        "search",
+        "i9"
+      ],
+      "note": "Uses .getByRole(\"grid\").last().getByRole(\"row\") inside the dialog — the last grid is the results grid; earlier grids contain headers."
+    },
+    {
+      "id": "i9.search.ssnInput#fill",
+      "kind": "fill",
+      "system": "i9",
+      "label": "Search — SSN (fill)",
+      "selectorFqn": "i9Selectors.search.ssnInput",
+      "note": "Search uses dashes format (\"000-00-0000\"), unlike the profile form which uses 9 digits no dashes.",
+      "sourceRef": "src/systems/i9/selectors.ts:262",
+      "summary": "SSN textbox (dialog-scoped).",
+      "role": "textbox",
+      "accessibleName": "Social Security Number",
+      "verified": "2026-03-16",
+      "tags": [
+        "ssn",
+        "social-security",
+        "textbox",
+        "search",
+        "i9"
+      ]
+    },
+    {
+      "id": "i9.search.ssnInput#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Search — SSN (scrape)",
+      "summary": "SSN textbox (dialog-scoped).",
+      "selectorFqn": "i9Selectors.search.ssnInput",
+      "role": "textbox",
+      "accessibleName": "Social Security Number",
+      "verified": "2026-03-16",
+      "tags": [
+        "ssn",
+        "social-security",
+        "textbox",
+        "search",
+        "i9"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:262"
+    },
+    {
+      "id": "i9.search.submitButton#click",
+      "kind": "click",
+      "system": "i9",
+      "label": "Search — Submit (Search) button",
+      "selectorFqn": "i9Selectors.search.submitButton",
+      "sourceRef": "src/systems/i9/selectors.ts:290",
+      "summary": "Search submit button (page-scoped — there's only one).",
+      "role": "button",
+      "accessibleName": "Search",
+      "verified": "2026-03-16",
+      "tags": [
+        "search",
+        "submit",
+        "button",
+        "i9"
+      ]
+    },
+    {
+      "id": "i9.searchResults#wait",
+      "kind": "wait",
+      "system": "i9",
+      "label": "Wait 1s for results grid to populate",
+      "summary": "page.waitForTimeout(1000) — results grid populates asynchronously",
+      "sourceRef": "src/systems/i9/search.ts"
+    },
+    {
+      "id": "i9.summary.auditTrailHeaderRow#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Summary — Audit Trail header row (table populated anchor)",
+      "summary": "Electronic I-9 Audit Trail header row. Anchor for \"the audit table has populated\".",
+      "selectorFqn": "i9Selectors.summary.auditTrailHeaderRow",
+      "role": "row",
+      "accessibleName": "/Audit History Event/",
+      "verified": "2026-06-06",
+      "tags": [
+        "audit-trail",
+        "header",
+        "row",
+        "summary",
+        "i9"
+      ],
+      "note": "Wait on this before counting signedSection2Row — the summary heading renders before the audit table populates, so an early count() reads 0 and mis-classifies a signed record as unsigned.",
+      "sourceRef": "src/systems/i9/selectors.ts:350"
+    },
+    {
+      "id": "i9.summary.auditTrailHeaderRow#wait",
+      "kind": "wait",
+      "system": "i9",
+      "label": "Wait for audit-trail table header row",
+      "selectorFqn": "summary.auditTrailHeaderRow",
+      "summary": ".first().waitFor(visible, 10s) — heading renders before audit table; must wait on header before counting signedSection2Row to prevent race (early count 0 mis-classifies signed as unsigned)",
+      "sourceRef": "src/systems/i9/signer.ts"
+    },
+    {
+      "id": "i9.summary.heading#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Summary — I-9 Record Summary heading (render anchor)",
+      "summary": "I-9 Record Summary heading. Anchor for \"summary view has rendered\".",
+      "selectorFqn": "i9Selectors.summary.heading",
+      "role": "heading",
+      "accessibleName": "I-9 Record Summary Information",
+      "verified": "2026-04-22",
+      "tags": [
+        "summary",
+        "heading",
+        "i9",
+        "record"
+      ],
+      "sourceRef": "src/systems/i9/selectors.ts:339"
+    },
+    {
+      "id": "i9.summary.heading#wait",
+      "kind": "wait",
+      "system": "i9",
+      "label": "Wait for summary view heading",
+      "selectorFqn": "summary.heading",
+      "summary": "waitForSummaryView: summary.heading OR getByText('Electronic I-9 Audit Trail') OR getByText('Audit History') — .first().waitFor(visible, 10s)",
+      "sourceRef": "src/systems/i9/signer.ts"
+    },
+    {
+      "id": "i9.summary.signedSection2Row#scrape",
+      "kind": "scrape",
+      "system": "i9",
+      "label": "Summary — Signed Section 2 audit row",
+      "selectorFqn": "i9Selectors.summary.signedSection2Row",
+      "summary": "Electronic I-9 Audit Trail row whose event cell reads \"Signed Section 2\".",
+      "sourceRef": "src/systems/i9/selectors.ts:364",
+      "role": "row",
+      "accessibleName": "/Signed Section 2/",
+      "tags": [
+        "audit-trail",
+        "signed",
+        "section2",
+        "row",
+        "i9"
+      ],
+      "note": ".first() guards against amended records with multiple Section 2 signings. Signer name is the LAST cell (Created By) of this row. Absent on paper-imported (historical) records. Row cells verified live 2026-06-06: [\"2\", \"10/29/2021 7:53:31 PM\", \"Signed Section 2\", \"KENIA QUINONEZ\"]."
+    },
+    {
+      "id": "i9.summaryPage#navigate",
+      "kind": "navigate",
+      "system": "i9",
+      "label": "Navigate directly to I-9 summary page",
+      "url": "/form-I9/summary/{profileId}/{i9Id}",
+      "summary": "Deterministic URL built from search hit IDs; waitUntil:domcontentloaded then networkidle(5s). Paper imports redirect to /form-I9-historical/…",
+      "sourceRef": "src/systems/i9/signer.ts"
+    }
+  ]
+}

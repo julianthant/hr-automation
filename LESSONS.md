@@ -1,0 +1,105 @@
+# Lessons Learned
+
+Cross-codebase patterns and mistakes to avoid. Read this before non-trivial work.
+
+## 2026-07-31 — Pre-tree rebuild gates need explicit activation and semantic baselines
+
+**Tried:** Prepare rebuild lint, coverage, isolation, preservation, and change-accounting gates while `temp_src` and `tests/rebuild` were still absent, starting from the legacy suite's aggregate ESLint totals and source-text checks that future guard files mentioned `temp_src`.
+
+**Failed because:** An unmatched future glob either fails too early or gets weakened into a vacuous pass, while checking only child test directories misses an empty `tests/rebuild` activation root. A coverage exclusion whose activation glob equals its exclusion glob can never detect staleness. Source-text mentions do not prove a ratchet executes, shallow guard discovery misses nested tests, and import-only isolation scans miss dynamic imports, process/filesystem bridges, proxy/remount calls, and runtime configuration that declares isolated values without consuming them. A scanner that reports only recognized legacy strings is still open by default: `let`, computed targets, or an imported capability hidden in a bind/wrapper erase the evidence and silently pass. A closed call-name list is not a closed capability boundary either: ordinary module-family exports (`unlinkSync`, HTTP `get`, browser `launch`, `Worker` constructors) and computed runtime-global members bypass it without ever using a listed name. Applying that strict normal form indiscriminately to preserved legacy code is also unusable: activating a real rebuild tree produced hundreds of false violations from ordinary side-local dynamic operations such as `process.env[name]`. A blanket legacy exemption then opened the inverse hole, because newly added unresolved sinks could hide rebuild crossings. Aggregate lint counts likewise allow one diagnostic to disappear and a different one to take its place; comparing only with `HEAD` loses the stable origin after Phase 1a commits accumulate.
+
+**Fix:** Treat absence as a named pre-activation state and require a non-empty runnable file set as soon as either side's root exists. Give every coverage exclusion a distinct exact owner root plus `planned|active` status. Register executable ratchet auditors with adversarial fixtures, recursively reconcile guard files, and parse the architecture command exactly. For isolation, enforce a finite TypeScript-AST normal form: direct loader/sink calls and constructors must consume one provable literal/const/current-runtime token, unresolved load-bearing targets fail in the owning closed bridge class, and imported/namespace capabilities may appear only as direct audited callees — never aliases, binds, wrappers, returns, arguments, computed selections, or re-exports. Apply that full rule to all rebuild files and every new, modified, or hash-mismatched legacy file. Only a legacy path whose complete SHA-256 exactly matches the preservation manifest may use preservation-mode scanning, which still rejects every statically resolved cross-tree module/resource/port/profile reference; exact manifest coverage and hashes are themselves audited. Classify every non-type binding/member by a closed, manifest-pinned module-family catalog (filesystem, network/route, process/worker, module loader, browser/profile), not a method-name sample; reject computed runtime-global member selection independently in strict files. Require exact config values plus unshadowed named factory imports to flow through the manifest-declared property of a direct top-level composition call. Pin legacy lint debt by repo-relative path, rule, semantic message, columns, and source-line SHA-256 with multiplicity; anchor preservation/change accounting to the explicit Phase-0 commit.
+
+**Tags:** rebuild, architecture-guards, lint, coverage, non-vacuity, fingerprints, preservation, change-accounting, runtime-isolation, activation
+
+## 2026-07-16 — In-process workflows need their own immutable retry authority
+
+**Tried:** Retry `/api/ocr/prepare` by merging the latest non-empty tracker `data.*` fields and reconstructing a new `PrepareInput`, mirroring daemon retry behavior without a task row.
+
+**Failed because:** Tracker rows are presentation projections, not complete launch contracts. The reconstruction dropped `pdfFileId`, `targetWorkflow`, `dryRun`, `runOptions`, reupload identity, and operation scope, so retrying a delegated OCR operation could silently become a standalone run with different behavior. OCR prepare runs in the dashboard process and therefore have no `tasks.original_input_json` to read.
+
+**Fix:** Persist the strict, complete prepare request before returning 202, keyed by exact `(session_id, run_id)` with a version and integrity hash. Retry reads only that record and validates it again; missing legacy or corrupt records require an explicit PDF re-upload. Never reconstruct executable workflow input from tracker display data.
+
+**Tags:** ocr, retry, in-process, original-input, sqlite, tracker, delegation, operation, fail-loud
+
+## 2026-07-15 — A tracker terminal is recovery evidence; a task-store terminal is execution authority
+
+**Tried:** Treat daemon terminal writes, queue audit writes, tracker rows, and shutdown requeues as independent best-effort cleanup steps after a handler returned.
+
+**Failed because:** A process can crash after the tracker terminal row reaches disk but before SQLite records the matching terminal task state. Blind dead-worker recovery then requeues the exact run and can repeat a real HR submission. The inverse gap is also dangerous: a terminal SQLite write that throws ambiguously cannot safely be treated as either applied or retryable, and a one-phase run-registry token can strand the only terminal writer when its emit throws.
+
+**Fix:** Fence terminal and requeue transitions by owner, current attempt, and claim generation; return explicit applied/terminal/lease-lost/not-found outcomes; append queue audit only after an applied transition. Terminalization retries and read-reconciles, then moves an exact still-owned claim to `blocked` when persistence stays uncertain. Recovery reconciles an exact-run terminal tracker event before requeueing a dead or lease-expired claim. Terminal-row reservations commit only after emit and roll back after emit failure. An unconfirmed safety block retains the run and prevents another claim.
+
+**Tags:** kernel, daemon, task-store, terminalization, recovery, claim-generation, sqlite, tracker, requeue, fail-loud
+
+## Selector Mapping
+
+- **Always search before mapping:** `npm run selector:search "<intent>"` first. If found, USE IT — don't remap.
+- **Never guess selectors.** Map via `playwright-cli snapshot`, verify with JSDoc + `// verified <date>`, run `npm run selectors:catalog`.
+- **Fallback chains for brittle selectors:** When PeopleSoft grid IDs mutate, use up to 6-deep `.or()` chains.
+- **Maintain lessons when you learn them:** Before adding a lesson, search the relevant `LESSONS.md` / `CLAUDE.md` for the same topic. Update, merge, or remove stale contradictory guidance instead of adding a redundant entry.
+
+## Shared Code vs Workflow-Local
+
+- **Shared:** Used by 2+ workflows, or 1 workflow + tracker/dashboard/core/OCR → `src/domain/` or `src/core/`
+- **Workflow-local:** Single workflow only → `src/workflows/<workflow>/`
+- **Anti-pattern:** Duplicating a function across workflows. Refactor to shared before it spreads.
+
+## Kernel Patterns
+
+- **Always declare operatorSubject:** Used by queue rows, toasts, logs. Prefer EID-based over freeform names.
+- **Use ctx.step, not inline error handling:** The kernel wraps your step blocks, screenshots on failure, emits correctly.
+- **Live-page probes for dupe-protection:** Check the live page before submitting (e.g., `findExistingTerminationTransaction`, "no oath signature" sentinel). EID match beats name match — Kuali↔UCPath name variants silently miss dupes.
+- **Understand authChain:** Onboarding runs 2 Duos (CRM, UCPath+I9). Separations runs 4. Check the workflow's `systems` list.
+
+## Architecture Guards
+
+- **Run before commits:** `npm run test:architecture` enforces no inline selectors, no default exports, lesson format, catalog sync.
+- **These gates prevent anti-patterns from creeping in.** Violations block PRs for a reason.
+
+## Daemon Mode
+
+- **Default for most CLI commands.** `-n, --new` spawns additional; `-p, --parallel <N>` ensures N alive.
+- **Multi-daemon dispatch:** Atomic SQLite `UPDATE … RETURNING` claim inside a transaction. Whichever daemon's UPDATE wins grabs the row — dynamic load balancing without a coordinator. The `.queue.jsonl` audit file is informational only.
+- **Graceful drain:** `:stop` soft-stops; `-- --force` marks in-flight failed and exits immediately.
+
+## Common Mistakes
+
+1. **Inline `page.locator("...")` in system files** — all selectors go through `selectors.ts`. The `inline-selectors` test guard rejects this.
+2. **Default exports in `src/`** — use named exports only. Barrel exports OK.
+3. **Reusing Excel trackers as observability** — dashboard JSONL is the source of truth. Xlsx writers are for historical use only.
+4. **Guessing at PeopleSoft behavior** — every quirk has been hit. Read the system's CLAUDE.md first.
+5. **Building your own auth-ready promises** — the kernel's `authChain` handles this. Don't roll your own.
+6. **Assuming selectors are stable** — map via `playwright-cli`, never guess. Brittle selectors cause silent failures.
+
+## Continuous Improvement
+
+- **Update CLAUDE.md after every lesson.** Bump `// verified` dates in `selectors.ts` when you re-verify. These files are the only memory between sessions.
+- **Keep lessons current, not append-only.** New entries are fine for genuinely new failure modes, but stale or redundant lessons should be updated, merged, or removed so future sessions do not follow outdated guidance.
+
+## Migrations
+
+- **2026-05-26: Cancellation unified via `runRegistry` (Contract 5 Phase 1).** Two parallel cancel runtimes — the daemon's `state.cancelTarget` + `state.currentRunController` pair, and a separate `Map` in `src/core/daemon/in-process-runs.ts` with its own `register`/`unregister`/`cancel` API + direct `session.killChromeHard()` — collapsed into one `src/core/run-registry.ts` keyed by `runId`. Every `runOneItem` / `runWorkflow` invocation registers a `RunHandle` (controller + session + optional `RunControlAudit` for in-process SQLite writes) on entry and unregisters in `finally`. Every cancel trigger (daemon `cancel_task`, HTTP `/cancel-current`, dashboard in-process route, browser-disconnect, daemon shutdown) calls `runRegistry.cancel(runId, { reason, hardKillAfterMs? })`. `cancel` aborts the controller (Page-proxy auto-injection makes any in-flight Playwright call reject within ms), writes the SQLite audit trail when present, and schedules a watchdog hard-kill chromium fallback after `hardKillAfterMs` (default 5000ms; 0 disables, used by daemon shutdown) only if the run hasn't unregistered by then — covers pre-handler launch hangs (e.g. Duo). Daemon's `cancelTarget` / `currentRunController` / `inFlight` triple collapses into `state.activeRun: RunHandle | null`. **Lesson:** the kernel between-step probe MUST read `controller.signal.aborted` directly (not a daemon-supplied `isCancelRequested` callback); when the daemon's `isCancelRequested` field went away with `state.cancelTarget`, an early implementation passed `undefined` and the stepper never observed cancellation between steps — daemon tests caught it. `run-one-item.ts` now always builds a probe that reads the controller signal, with the caller's optional `isCancelRequested` mirrored INTO the controller (not out of it). Architecture guard: `tests/unit/architecture/cancel-mechanism.test.ts` blocks reintroduction of the legacy fields and the in-process-runs API.
+
+- **2026-05-23: Archetype stamping enforced at the type level (Contract 1).** `emitTrackerRow` in `src/tracker/jsonl-io.ts` requires `data: StampedData` (`Record<string, string> & { archetype: RowArchetype }`). Every kernel + control + OCR emit site now routes through it; `trackEvent` / `trackEventForDate` remain only as `@deprecated` shims for the tracker module itself and the `tracked-workflow.ts` SIGINT handler. Control-layer cancel / retry rows inherit archetype from the prior row via `resolveRowArchetype` so they don't drop the row's shape. `resolveRowArchetype` throws on rows with an invalid stamped `data.archetype`; missing archetype falls back to `single`. Architecture guard: `tests/unit/architecture/tracker-row-emission.test.ts` (blocks new direct callers + new `appendFileSync` writes to `*.jsonl` paths). Supersedes the 2026-05-17 write-side-contract lesson — that contract is now type-enforced, not convention.
+
+- **2026-05-08: SQLite/JSONL parallel-path parity checklist.** Tier 3's `findPriorEntriesByKey` SQLite migration drifted from its JSONL fallback in two non-obvious ways: (1) JSONL trimmed candidate values via `String(value).trim()`; SQLite used exact `=` until a follow-up wrapped it in `TRIM(...)`. (2) JSONL's date cutoff was local time (`new Date(d + "T00:00:00").getTime()`); SQLite used UTC (`cutoff.toISOString().slice(0, 10)`), shifting the boundary by a day for late-evening queries in negative-UTC zones. Both bugs would silently lose hits in prod without surfacing as test failures (dev data is mostly clean and the timezone-boundary case requires running queries past local midnight UTC ≈ 5pm PT). When migrating any JSONL-walking handler to SQLite, write a parity checklist before shipping: (a) **whitespace** — does the JSONL path call `.trim()` / `.toLowerCase()` / etc on candidate values? Mirror in SQL via `TRIM`, `LOWER`. (b) **timezone** — does any date cutoff use `dateLocal()` / `new Date()` parsing? Mirror in SQL with the same local-time derivation, never `toISOString().slice(0, 10)`. (c) **wildcards** — does the JSONL path use `String.includes`? SQL `LIKE` interprets `%` and `_` as wildcards; escape them via `REPLACE` chains + `ESCAPE` clause if the SQL match should be literal-only. (d) **null vs empty** — JSONL's `entry.data?.[key] === value` treats missing-data and missing-key the same; `json_extract(..., '$.' || @key)` returns `NULL` for both, so `IS NOT NULL` gating before the comparison is fine. (e) **dedup semantics** — JSONL Map walks reduce to "latest per key"; SQL aggregation may need `MAX(ts) GROUP BY key` or a CTE that picks the latest. The Tier 3 Task 7 deviation pivoted to the `items` table specifically because it pre-stores latest-per-(workflow, tracker_date, item_id), eliminating the GROUP BY — but that's not always available; default to "verify the dedup explicitly."
+
+- **2026-06-17: Separations batch (5 regression fixes).** Auth idle-refresh guard + Duo WebAuthn re-arm on stale CDP session; TerminalDrawer authenticating-bucket fix (daemons doing Duo shown as idle); short-EID → person-lookup delegation for non-`^10\d{6}$` EIDs from Kuali; modal-mask `dismissPeopleSoftModalMask` before UCPath Continue + comments fill + Old/New Kronos overlay fixes; per-system audit screenshots (Kuali 3-slice, UCPath 2-slice, Kronos viewport-centered). Regression checks encoded in `.claude/skills/e2e-test/` (verification.md lenses + SKILL.md Phase B).
+
+- **2026-05-07: Node 26 floor pinned; better-sqlite3 + picocolors removed.** Project now requires Node ≥26.0.0 (`engines` + `.nvmrc=26.1.0`). Two userland deps replaced by built-ins:
+  - `better-sqlite3` → `node:sqlite` via the `src/infra/sqlite/` compat shim. Removes the only native-build dependency from the repo — `npm install` no longer needs `node-gyp` / Xcode CLI tools / Python. `transaction(db, fn)` helper fills the `db.transaction()` gap that `node:sqlite` doesn't expose, and supports nesting via SAVEPOINT (the codebase actually does nest in a few task-store paths, contrary to the plan's original assumption). SQLite engine semantics identical (both libs link the same SQLite); only the JS bindings changed. `setAllowUnknownNamedParameters(true)` is enabled in the wrapper to match better-sqlite3's silent-ignore-extra-params behavior, which is pervasive in the call sites.
+  - `picocolors` → `node:util.styleText`. Honors `NO_COLOR` / `FORCE_COLOR` / TTY detection natively.
+  Six hand-rolled `AbortController + setTimeout` patterns replaced with `AbortSignal.timeout(ms)` (fetch timeouts) or `node:timers/promises` `setTimeout(ms, value, { signal })` (abortable sleeps). Native TS execution intentionally rejected — codebase uses `.js` extensions in relative imports, and Node 26's strip-types mode does not rewrite them. `tsx` remains the runtime executor; `npm run dashboard:watch` uses `tsx watch` for backend hot-reload. Permission model documented for opt-in sandboxing but not enabled by default. `@types/node` pinned to `^25.6.0` (DefinitelyTyped hadn't published a 26.x series at migration time; 25.6.2 already includes typings for `DatabaseSync`/`StatementSync`, `styleText`, and `node:timers/promises` setTimeout — the typings later tasks needed).
+
+## 2026-08-20 — Duo Autopilot's WebAuthn counter can permanently wedge a warm browser profile (flag only; fix NOT applied here)
+
+**Tried:** Nothing in this repo yet — this is a recorded EXPOSURE, not a fixed defect. The rebuild repo root-caused its own "browser-profile wedge" (repeated 60 s login timeouts on a previously-working profile while a fresh profile logs in normally) and the root cause applies verbatim to this repo's `duo-autopilot/src/background.js:174`, which advances `signCount` by `+ 1` on every ceremony.
+
+**Failed because:** Duo's WebAuthn signature counter is per-CREDENTIAL and lives server-side; one credential serves every UCSD system and every browser profile on this machine, across BOTH repos. Each profile keeps a private counter copy in `chrome.storage.local`. A cold profile import stamps its copy to unix-now ("monotonic across fresh profiles"), while a warm profile's sign path only does `+ 1` — so any cold-profile login ANYWHERE (including the rebuild's pre-authorized live verification passes) jumps the shared server counter to now, and every warm profile stamped earlier is left permanently behind. Duo reads the non-advancing counter as a CLONED-KEY signal, renders "Your login request using your security key was canceled or timed out", and BURNS the binding: the profile keeps refusing even when later attempts present counters far ahead. Live-proven in the rebuild 2026-08-19 (forced-stale counter → 60.01 s refusal with zero `PS_TOKEN`; three subsequent advancing-counter attempts still refused; fresh profile recovered in 18.94 s, credential undamaged).
+
+**Fix:** In THIS repo, none applied — operator decision 2026-08-20 is flag-only, do not modify legacy code. Workaround when a profile wedges: delete that profile directory; the credential itself is fine. The reference fix, if ever authorized here, is one rule: every ceremony presents `max(stored + 1, nowUnixSeconds)` — the floor at wall-clock seconds is the one value every profile shares. Reference implementation: rebuild repo `duo-autopilot/src/sign-count.js` (rebuild commit `08cb5e4`, decision D243, evidence in rebuild `docs/migrations/separations.md` §9.21).
+
+**Tags:** duo, webauthn, signcount, auth, browser-profile, wedge, cross-repo, flag-only
+
+**References:** hr-automation-rebuild `08cb5e4` (D243/D244), rebuild `docs/migrations/separations.md` §9.21, rebuild `tests/unit/duo-sign-count.test.ts`

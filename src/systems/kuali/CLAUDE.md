@@ -1,0 +1,42 @@
+# Kuali Module
+
+Kuali Build separation form automation: extraction and form filling for employee termination workflows.
+
+## Before mapping a new selector
+
+1. Run `npm run selector:search "<your intent>"` and review the top matches across all systems.
+2. If a selector matches your intent, USE IT — do not map a new one.
+3. If [`LESSONS.md`](./LESSONS.md) has a relevant entry, read it first to avoid repeating a known failure.
+4. Otherwise, map a new selector following the conventions in [`selectors.ts`](./selectors.ts):
+   a. Add the selector function with JSDoc (one-line summary, `@tags`, `verified YYYY-MM-DD`).
+   b. Run `npm run selectors:catalog` to regenerate [`SELECTORS.md`](./SELECTORS.md).
+   c. If you discovered a non-obvious failure mode along the way, append a lesson to [`LESSONS.md`](./LESSONS.md) following its template.
+   d. Verify the inline-selector test still passes: `npx vitest run tests/unit/systems/inline-selectors.test.ts`.
+
+See [`SELECTORS.md`](./SELECTORS.md) for the auto-generated catalog of every selector this module exports.
+
+Example intents for `npm run selector:search`: [`common-intents.txt`](./common-intents.txt).
+
+## Gotchas
+
+- Hardcoded Kuali space ID: `https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb`
+- Uses `getByRole("textbox", { name: "exact label*" })` extensively — brittle if labels change
+- Department combobox match is **dept-ID-code-first** (`pickDepartmentOptionIndex`): Tier 0 matches the UCPath `deptId` against the option's leading `"<code> - "` prefix (Kuali renders every option as `"<deptId> - <Name>"`, e.g. `"000141 - Early Childhood Education Center"` — verified 2026-06-30). The code is exact + drift-proof, so it beats the name-substring fallbacks (Tier 1 desc⊆option, Tier 2 option-name⊆desc). Skips the `"- - -"` placeholder. **Always pass `deptId` into `fillFinalTransactions`** — name-only matching silently fails on abbreviation drift (UCPath `"EARLY CHILDHOOD EDU. CENTER"` vs Kuali `"…Education Center"`).
+- Type of Termination extracted via `.evaluate()` on combobox (gets visible text, not internal value)
+- Location field is optional — 3s timeout, silent failure
+- "Does not need Final Pay (student employee)" is hardcoded — assumes all separations are students
+- Throws generic `Error` for missing documents (not custom error class)
+- **`clickDocument` filters via the Action List search box** — the list paginates at 25 rows/page, so instead of paging it types the doc number into `actionList.searchInput`, clicks `actionList.searchGoButton` ("GO"), then clicks the matching row. Two live-verified gotchas: there are **two** "Search" textboxes (the Action List one is scoped to `.kp-input-group:has(.kp-input-button-right)`; the global nav search top-right has no GO), and Kuali search is **substring** (`"414"`→4140–4149), so `actionList.docLink` is **anchored** (`^\s*<n>\s*$`) to hit the exact row. Empty results ⇒ doc genuinely not in the Action List.
+- **`clickSave` targets navbar**: Scrolls to top first, then targets `[class*="action-bar"] button:has-text("Save")` or `nav button:has-text("Save")` before falling back to generic `button[name="Save"]` — avoids clicking wrong save button in modals or other form sections
+- `fillTransactionResults` fills fields only — does NOT save. Must call `clickSave()` separately after all form sections are filled
+
+## Gotchas (Additional)
+
+- **Date field verification after fill** — `updateLastDayWorked`, `updateSeparationDate`, and `fillFinalTransactions` termination date fields must verify the value after fill. Kuali date inputs sometimes don't accept the value on first attempt. If the readback doesn't match, retry using `type()` (character-by-character) instead of `fill()`.
+- **clickSave false-positive error detection** — Removed overly aggressive error detection from `clickSave` that was triggering on benign page elements. The save button click + network idle wait is sufficient confirmation.
+
+## Lessons Learned
+
+- **2026-04-10: Date fields not accepting fill()** — Kuali date inputs occasionally ignore Playwright's `fill()` call. The input appears filled visually but the internal value doesn't update, causing downstream date mismatches. Fix: after every date fill, read back the input value and compare. If mismatch, clear and retry with `type()` which sends individual keystrokes. Always verify date fields after filling.
+- **2026-04-10: clickSave false error detection** — `clickSave` had error-checking logic that matched benign DOM elements as errors, causing the workflow to report "save failed" when the save actually succeeded. Removed the false-positive checks. The save is confirmed by waiting for network idle after clicking.
+- **2026-06-16: Kuali form inputs return whitespace-padded values** — A live read-only run (doc #4241) extracted an EID of `" 10090196"` (leading space) and Location `"Catering "` (trailing space). The padding broke `SeparationDataSchema`'s `eid: ^\d{5,}$` and risked the vol/invol exact-match on `terminationType`. Fix: `extractSeparationData` now `.trim()`s every extracted field (`employeeName`, `eid`, `lastDayWorked`, `separationDate`, `terminationType`, `location`). This is normalization of the same value — NOT a cross-source correction. A wrong Kuali EID must still fail loudly (no Workforce/name-search fallback). See `LESSONS.md`.

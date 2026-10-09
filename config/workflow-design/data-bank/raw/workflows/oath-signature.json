@@ -1,0 +1,282 @@
+{
+  "workflow": "oath-signature",
+  "systems": ["ucpath"],
+  "steps": [
+    {
+      "step": "ucpath-auth",
+      "label": "Authenticate to UCPath (deferred)",
+      "system": "ucpath",
+      "sourceRef": "src/workflows/oath-signature/workflow.ts",
+      "note": "UCPath auth is deferred from kernel session launch to this step so a fan-out signer child only Duos AFTER OCR approval. loginToUCPath is idempotent — a daemon Duos once on the first item and reuses the warm session for all subsequent items (including across betweenItems:reset, which keeps cookies).",
+      "operations": [
+        {
+          "id": "control.loginToUCPath#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Call loginToUCPath (idempotent UCPath + Duo MFA)",
+          "summary": "loginToUCPath(page, undefined, ctx.signal). Returns ok boolean; throws 'UCPath authentication failed' on false. Duo MFA fires only on first item per daemon session.",
+          "sourceRef": "src/workflows/oath-signature/workflow.ts"
+        }
+      ]
+    },
+    {
+      "step": "transaction",
+      "label": "Add Oath Signature Date to UCPath Person Profile",
+      "system": "ucpath",
+      "sourceRef": "src/workflows/oath-signature/enter.ts",
+      "note": "Executes an ActionPlan (buildOathSignaturePlan) of 8 named sub-steps in order. The plan operates on the #ptifrmtgtframe / TargetContent frame (Person Profile, not Smart HR frame). Duplicate guard is live-page only: probe noOathSentinel after profile load; if oath already exists, skip add+save and mark 'Skipped (Existing Oath)'. dryRun skips Save and calls beforeCommit hook for a screenshot proof.",
+      "operations": [
+        {
+          "id": "ucpath.personProfiles#navigate",
+          "kind": "navigate",
+          "system": "ucpath",
+          "label": "Navigate to Person Profiles component URL",
+          "url": "https://ucphrprdpub.universityofcalifornia.edu/psp/ucphrprd/EMPLOYEE/HRMS/c/SETUP_PROFILE_MANAGEMENT.JPM_PERSON_PROFILE.GBL",
+          "summary": "page.goto(UCPATH_PERSON_PROFILES_URL, { waitUntil: 'domcontentloaded', timeout: 30000 }). Direct component URL; lands on Person Profiles search form, not Smart HR.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.networkidle#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait for page networkidle after navigation",
+          "summary": "page.waitForLoadState('networkidle', { timeout: 15000 }) — graceful (catch no-op). Guards PeopleSoft roundtrip before probing frame.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.emplIdInput#assert",
+          "kind": "assert",
+          "system": "ucpath",
+          "label": "Probe search form visibility (emplIdInput)",
+          "selectorFqn": "oathSignature.emplIdInput",
+          "summary": "isPersonProfilesSearchFormVisible: emplIdInput.isVisible({ timeout: 2000 }). Returns boolean — true means search form is ready; false triggers recovery branch.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "control.searchFormRecovery#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Recovery branch: return to search form if profile page retained",
+          "summary": "If emplIdInput not visible: check returnToSearchButton.isVisible({ timeout: 2000 }). If visible: click it → waitForLoadState(networkidle) → waitForPersonProfilesSearchForm (emplIdInput.waitFor visible 10s). If neither visible: throw 'Person Profiles search form is not visible and Return to Search is unavailable'. PeopleSoft can reopen the prior profile on direct URL load; this recovers cleanly for daemon item N+1.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.emplIdInput#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Focus EID search input before clear",
+          "selectorFqn": "oathSignature.emplIdInput",
+          "summary": "input.click({ timeout: 10000 }) — graceful (catch no-op). Ensures focus before .fill() to avoid append on retained prior value.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.emplIdInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Clear EID input (reset retained prior EID)",
+          "selectorFqn": "oathSignature.emplIdInput",
+          "inputVar": "",
+          "summary": "input.fill('', { timeout: 10000 }) — graceful. Return-to-Search retains the prior EID between daemon iterations; blind fill() can append or mismatch without this clear.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.emplIdInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Empl ID into search input",
+          "selectorFqn": "oathSignature.emplIdInput",
+          "inputVar": "{emplId}",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.searchButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Submit EID search",
+          "selectorFqn": "oathSignature.searchButton",
+          "summary": "EID is unique in PeopleSoft — search lands directly on the Person Profile detail page (no results list).",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.networkidle#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait for networkidle after EID search (profile load)",
+          "summary": "page.waitForLoadState('networkidle', { timeout: 15000 }) — graceful. Guards PeopleSoft profile render before scraping name / probing oath sentinel.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.employeeNameDisplay#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scrape employee name from Person Profile",
+          "selectorFqn": "oathSignature.employeeNameDisplay",
+          "outputVar": "{name}",
+          "summary": "textContent({ timeout: 3000 }) — graceful catch sets ctx.employeeName = ''. Written to tracker via ctx.updateData({ name }) at step end if non-empty.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.noOathSentinel#assert",
+          "kind": "assert",
+          "system": "ucpath",
+          "label": "Probe 'no oath' sentinel for duplicate guard",
+          "selectorFqn": "oathSignature.noOathSentinel",
+          "summary": "noOathSentinel.isVisible({ timeout: 3000 }). UCPath shows 'There are currently no Oath Signature Date for this profile...' when section is empty. Sentinel present → safe to add (ctx.alreadyHasOath=false). Sentinel absent → oath row exists (ctx.alreadyHasOath=true) → skip add+save.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "control.alreadyHasOath#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Gate: skip add+save if oath already exists",
+          "summary": "If ctx.alreadyHasOath=true: all remaining plan ops (addNewOathLink, oathDateInput, oathOkButton, saveButton) are skipped via early-return guards. Handler then calls ctx.updateData({ status: 'Skipped (Existing Oath)' }) and returns without error.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.addNewOathLink#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click 'Add New Oath Signature Date' link",
+          "selectorFqn": "oathSignature.addNewOathLink",
+          "summary": "Conditional: skipped if ctx.alreadyHasOath=true. The Add New Oath Link has duplicate accessible names in PeopleSoft; prefer the stable PeopleSoft id selector with role fallback second.",
+          "note": "Conditional: only executed when ctx.alreadyHasOath=false.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.networkidle#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait for networkidle after Add New (detail form load)",
+          "summary": "waitForPageReady: page.waitForLoadState('networkidle', { timeout: 15000 }) — graceful. Guarded by !alreadyHasOath.",
+          "note": "Conditional: only when ctx.alreadyHasOath=false.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.oathDateInput#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Focus oath date input before clear (when overriding date)",
+          "selectorFqn": "oathSignature.oathDateInput",
+          "summary": "input.click({ timeout: 10000 }) — graceful. Only reached when input.date is provided AND !alreadyHasOath.",
+          "note": "Conditional: only when input.date is provided AND ctx.alreadyHasOath=false.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.oathDateInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Clear oath date input before filling override",
+          "selectorFqn": "oathSignature.oathDateInput",
+          "inputVar": "",
+          "note": "Conditional: only when input.date is provided AND ctx.alreadyHasOath=false.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.oathDateInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill oath signature date",
+          "selectorFqn": "oathSignature.oathDateInput",
+          "inputVar": "{date}",
+          "summary": "input.fill(date, { timeout: 10000 }). Format must be MM/DD/YYYY (PeopleSoft date textbox). When date is omitted, UCPath prefills today's date — this step is skipped and the prefill is accepted as-is.",
+          "note": "Conditional: only when input.date is provided AND ctx.alreadyHasOath=false.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.oathOkButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click OK to stage the oath row",
+          "selectorFqn": "oathSignature.oathOkButton",
+          "summary": "Stages the new oath signature date row in the PeopleSoft form (not yet committed to DB). Conditional: skipped if alreadyHasOath.",
+          "note": "Conditional: only when ctx.alreadyHasOath=false.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.networkidle#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait for networkidle after OK (return to profile view)",
+          "summary": "waitForPageReady: page.waitForLoadState('networkidle', { timeout: 15000 }) — graceful. Guarded by !alreadyHasOath.",
+          "note": "Conditional: only when ctx.alreadyHasOath=false.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "control.dryRun#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Gate: skip Save if dryRun mode",
+          "summary": "shouldCommitOathSignature = !dryRun && !alreadyHasOath. If dryRun: call options.beforeCommit() (captures dry-run screenshot), log 'Dry run: skipped UCPath Save', set ctx.updateData({ status: 'Dry Run Complete', dryRunProofCaptured: 'true' }). Branches to Return-to-Search without clicking Save.",
+          "note": "Conditional: only evaluated when ctx.alreadyHasOath=false.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.saveButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Save to commit oath signature to UCPath DB",
+          "selectorFqn": "oathSignature.saveButton",
+          "summary": "Writes the staged oath date row to PeopleSoft DB. Save click fires only when !dryRun && !alreadyHasOath.",
+          "note": "Conditional: only when ctx.alreadyHasOath=false AND input.dryRun=false.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.networkidle#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait for networkidle after Save (DB write completion)",
+          "summary": "page.waitForLoadState('networkidle', { timeout: 20000 }) — graceful. Longer timeout than other waits because Save writes to PeopleSoft DB. Only reached on the live (non-dryRun, non-duplicate) path.",
+          "note": "Conditional: only on live save path.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.returnToSearchButton#assert",
+          "kind": "assert",
+          "system": "ucpath",
+          "label": "Check returnToSearchButton visibility before clicking",
+          "selectorFqn": "oathSignature.returnToSearchButton",
+          "summary": "btn.isVisible({ timeout: 2000 }) — graceful. Button is absent on the search form itself, so this is a no-op on the first item if already on the search form. Present after viewing/editing a profile.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.returnToSearchButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Return to Search to restore clean search state",
+          "selectorFqn": "oathSignature.returnToSearchButton",
+          "summary": "Restores the search form so the daemon browser is clean for the next EID. Idempotent — skipped if button not visible (already on search form).",
+          "note": "Conditional: only when returnToSearchButton.isVisible = true.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.networkidle#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait for networkidle after Return to Search",
+          "summary": "waitForPageReady: page.waitForLoadState('networkidle', { timeout: 15000 }) — graceful.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        },
+        {
+          "id": "ucpath.oathSignature.emplIdInput#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Confirm search form ready (emplIdInput visible)",
+          "selectorFqn": "oathSignature.emplIdInput",
+          "summary": "waitForPersonProfilesSearchForm: emplIdInput.waitFor({ state: 'visible', timeout: 10000 }). Confirms the browser is clean and ready for the next EID before the step completes.",
+          "sourceRef": "src/workflows/oath-signature/enter.ts"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "EID-only workflow since 2026-06-02. Paper-roster PDF variant was removed; OCR is now the prep/approval hub and fans out one signer row per approved record into this workflow via approveTo on the oath form spec.",
+    "Fan-out from OCR: each signer arrives as an operation-member row parented to the operation coordinator run (oath-signature PDF upload). No ServiceNow ticket — that fires into oath-upload for standalone OCR oath runs only.",
+    "alwaysBatchDelegatedMembers=true + alwaysBatchInputRun=true: even a single EID input run surfaces as a one-member batch (enqueue-dispatch stamps a batch parentRunId). Per-row archetype stays 'single'; the surface is always a batch.",
+    "UCPath auth is deferred (system.deferAuth=true): kernel login is a no-op; real loginToUCPath runs inside ucpath-auth step so fan-out signers only Duo after OCR approval, not at daemon launch.",
+    "betweenItems: ['reset'] keeps the browser but resets to about:blank between daemon items — prevents a stuck Person Profile from item N leaking into item N+1's navigation. Cookies are preserved (no re-Duo).",
+    "Dry-run boundary: shouldCommitOathSignature = !dryRun && !alreadyHasOath. Dry run calls beforeCommit (screenshot) and skips Save; proof is captured in data.dryRunProofCaptured.",
+    "Duplicate guard is live-page only (noOathSentinel probe). Tracker-side idempotency was removed 2026-04-23 per user direction (fail-loud, no silent skip-by-record).",
+    "Person Profile frame: #ptifrmtgtframe / TargetContent — NOT the Smart HR frame (#main_target_win0). Use oathSignature.getPersonProfileFrame(page).",
+    "The addNewOathLink has duplicate accessible names in PeopleSoft; stable PeopleSoft id selector is preferred with role fallback second."
+  ]
+}

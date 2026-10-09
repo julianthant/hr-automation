@@ -1,0 +1,126 @@
+import { z } from "zod/v4";
+import { ExtractionError } from "../../systems/crm/types.js";
+
+export const EmployeeDataSchema = z.object({
+  positionNumber: z.string().min(1, "Position number is required"),
+  firstName: z.string().min(1, "First name is required"),
+  lastName: z.string().min(1, "Last name is required"),
+  middleName: z.string().optional(),
+  ssn: z.string().regex(
+    /^\d{3}-\d{2}-\d{4}$/,
+    "SSN must be in XXX-XX-XXXX format",
+  ).optional().or(z.literal("")),
+  address: z.string().min(1, "Address is required"),
+  city: z.string().min(1, "City is required"),
+  state: z.string().length(2, "State must be a 2-letter code (e.g., CA)"),
+  postalCode: z.string().regex(
+    /^\d{5}(-\d{4})?$/,
+    "Postal code must be XXXXX or XXXXX-XXXX format",
+  ),
+  wage: z.string().regex(
+    /^\$/,
+    "Wage must start with $ (e.g., $17.75 per hour)",
+  ),
+  dob: z.string().regex(
+    /^\d{2}\/\d{2}\/\d{4}$/,
+    "Date of birth must be in MM/DD/YYYY format",
+  ).optional(),
+  phone: z.string().min(1).optional(),
+  email: z.string().email().optional(),
+  departmentNumber: z.string().regex(
+    /^\d{4,6}$/,
+    "Department number must be 4-6 digits",
+  ).optional(),
+  recruitmentNumber: z.string().min(1).optional(),
+  appointment: z.string().min(1).optional(),
+  effectiveDate: z.string().regex(
+    /^\d{2}\/\d{2}\/\d{4}$/,
+    "Effective date must be in MM/DD/YYYY format",
+  ),
+  /**
+   * "Expected Job End Date (if applicable)" from the CRM UCPath Entry Sheet.
+   * Optional — the CRM label itself says "if applicable" — but when present it
+   * is authoritative and beats the configured fiscal-year default.
+   */
+  expectedJobEndDate: z.string().regex(
+    /^\d{2}\/\d{2}\/\d{4}$/,
+    "Expected job end date must be in MM/DD/YYYY format",
+  ).optional().or(z.literal("")),
+  /** Preferred / lived first name (from onboarding roster) */
+  preferredFirstName: z.string().optional(),
+  /** Preferred / lived last name (from onboarding roster) */
+  preferredLastName: z.string().optional(),
+  /** Preferred / lived middle name (from onboarding roster) */
+  preferredMiddleName: z.string().optional(),
+});
+
+export type EmployeeData = z.infer<typeof EmployeeDataSchema>;
+
+/**
+ * Validate raw extracted data against the EmployeeData schema.
+ * Throws ExtractionError with failedFields on validation failure.
+ */
+export function validateEmployeeData(
+  raw: Record<string, string | null>,
+): EmployeeData {
+  // Convert null values to undefined so Zod sees them as missing
+  const cleaned: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    cleaned[key] = value ?? undefined;
+  }
+
+  // Normalize 5-digit zip codes with incomplete 1-3 digit suffixes (e.g. "92092-100" -> "92092")
+  if (typeof cleaned.postalCode === "string") {
+    const m = cleaned.postalCode.match(/^(\d{5})-\d{1,3}$/);
+    if (m) cleaned.postalCode = m[1];
+  }
+
+  const result = EmployeeDataSchema.safeParse(cleaned);
+
+  if (!result.success) {
+    const flat = z.flattenError(result.error);
+    const failedFields = Object.keys(flat.fieldErrors);
+    const prettyMessage = z.prettifyError(result.error);
+
+    throw new ExtractionError(
+      `Validation failed for ${failedFields.length} field(s):\n${prettyMessage}`,
+      failedFields,
+    );
+  }
+
+  return result.data;
+}
+
+
+/**
+ * Input schema for the onboarding kernel workflow. `email` is the
+ * operator-supplied field.
+ *
+ * - `dryRun` — when true, the workflow completes the read-only CRM extraction
+ *   and UCPath identity checks, then stops before the combined I-9
+ *   search/create step and before Smart HR. A rehearsal writes to no system of
+ *   record. Mirrors the strict no-write meaning of `dryRun` on the other
+ *   dashboard-launched workflows that expose it.
+ * - `mode` — hire type, see below.
+ */
+export const ONBOARDING_HIRE_MODES = ["new-hire", "rehire"] as const;
+export type OnboardingHireMode = (typeof ONBOARDING_HIRE_MODES)[number];
+
+export const OnboardingInputSchema = z.object({
+  email: z.string().email(),
+  dryRun: z.boolean().optional(),
+  /**
+   * Hire type (dashboard input-run mode picker; omitted ⇒ `new-hire`).
+   *
+   * - `new-hire` — the person does NOT exist in UCPath: I-9 profile is created
+   *   (search-first), then the UC_FULL_HIRE Smart HR transaction.
+   * - `rehire` — the person ALREADY exists in UCPath (person-search MUST match;
+   *   a no-match fails loud): the I-9 step is skipped entirely and the hire is
+   *   filed as a UC_CONC_HIRE "Staff Concurrent Hire/Inter Location Transfer"
+   *   on the matched Empl ID (reason "Concurrent Hire - Non Dual Emp").
+   */
+  mode: z.enum(ONBOARDING_HIRE_MODES).optional(),
+  /** Explicit roster path override; when omitted, resolves the newest downloaded roster. */
+  rosterPath: z.string().optional(),
+});
+export type OnboardingInput = z.infer<typeof OnboardingInputSchema>;

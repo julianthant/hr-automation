@@ -1,0 +1,102 @@
+import type { RegisteredWorkflow } from "./kernel/types.js";
+import type { DaemonFlags } from "./daemon/types.js";
+import type { ensureDaemonsAndEnqueue as ensureDaemonsAndEnqueueFn } from "./daemon/client.js";
+import { ensureDaemonsAndEnqueue } from "./daemon/client.js";
+import { buildPendingTrackerData } from "./pending-data.js";
+import { emitTrackerRow, type TrackerRowEmission } from "../tracker/jsonl.js";
+import { log } from "../utils/log.js";
+
+type EnqueueFn<TInput> = (
+  workflow: RegisteredWorkflow<TInput, readonly string[]>,
+  inputs: TInput[],
+  flags: DaemonFlags,
+  opts: Parameters<typeof ensureDaemonsAndEnqueueFn<TInput, readonly string[]>>[3],
+) => Promise<void>;
+
+export function runCliEntry(ok: boolean, errorMessage: string): boolean {
+  if (ok) return true;
+  log.error(errorMessage);
+  process.exitCode = 1;
+  return false;
+}
+
+export interface BuildCliAdapterOpts<TArgs extends readonly unknown[], TInput> {
+  workflow: RegisteredWorkflow<TInput, readonly string[]>;
+  emptyMessage: string;
+  buildInputs: (...args: TArgs) => TInput[];
+  deriveItemId?: (input: TInput) => string;
+  buildPendingData: (input: TInput, itemId: string) => Record<string, string>;
+  pendingExtras?: (
+    input: TInput,
+    itemId: string,
+    runId: string,
+    parentRunId?: string,
+  ) => Record<string, string>;
+  onPreEmitFailed?: (input: TInput, runId: string, error: unknown, itemId: string) => void;
+  getPendingId?: (input: TInput, itemId: string) => string;
+  parentRunId?: (inputs: readonly TInput[]) => string | undefined;
+  flags?: (options: { new?: boolean; parallel?: number }) => DaemonFlags;
+  /** Test override — receives a fully-stamped {@link TrackerRowEmission}. */
+  track?: (emission: TrackerRowEmission) => void;
+  enqueue?: EnqueueFn<TInput>;
+}
+
+export function buildCliAdapter<TArgs extends readonly unknown[], TInput>(
+  opts: BuildCliAdapterOpts<TArgs, TInput>,
+): (...args: [...TArgs, { new?: boolean; parallel?: number }?]) => Promise<void> {
+  return async (...argsWithMaybeOptions) => {
+    const last = argsWithMaybeOptions.at(-1);
+    const options =
+      last && typeof last === "object" && !Array.isArray(last) && ("new" in last || "parallel" in last)
+        ? (argsWithMaybeOptions.pop() as { new?: boolean; parallel?: number })
+        : {};
+    const inputs = opts.buildInputs(...(argsWithMaybeOptions as unknown as TArgs));
+    if (!runCliEntry(inputs.length > 0, opts.emptyMessage)) return;
+
+    const enqueue = opts.enqueue ?? (ensureDaemonsAndEnqueue as unknown as EnqueueFn<TInput>);
+    const track = opts.track ?? emitTrackerRow;
+    const now = new Date().toISOString();
+    const parentRunId = opts.parentRunId?.(inputs);
+    await enqueue(
+      opts.workflow,
+      inputs,
+      opts.flags?.(options) ?? { new: options.new, parallel: options.parallel },
+      {
+        ...(opts.deriveItemId ? { deriveItemId: opts.deriveItemId } : {}),
+        ...(parentRunId ? { parentRunId } : {}),
+        onPreEmitPending: (item, runId, parentRunId, itemId) => {
+          const id = opts.getPendingId?.(item, itemId) ?? itemId;
+          const extras = opts.pendingExtras?.(item, itemId, runId, parentRunId);
+          const data = buildPendingTrackerData({
+            workflow: opts.workflow,
+            input: item,
+            parentRunId,
+            extraData: {
+              ...opts.buildPendingData(item, itemId),
+              ...(extras ?? {}),
+            },
+            nameIdStamp: "omit",
+            runId,
+            at: new Date(now),
+          });
+          track({
+            workflow: opts.workflow.config.name,
+            timestamp: now,
+            id,
+            runId,
+            ...(parentRunId ? { parentRunId } : {}),
+            status: "pending",
+            data,
+          });
+        },
+        ...(opts.onPreEmitFailed
+          ? {
+              onPreEmitFailed: (item, runId, error, itemId) => {
+                opts.onPreEmitFailed?.(item, runId, error, itemId);
+              },
+            }
+          : {}),
+      },
+    );
+  };
+}

@@ -1,0 +1,2105 @@
+import { mkdirSync, writeFileSync } from "fs";
+import type { Page, Locator } from "playwright";
+import { PATHS } from "../../config.js";
+import { log } from "../../utils/log.js";
+import { debugScreenshot } from "../../utils/screenshot.js";
+import {
+  searchFrame,
+  loadingOverlay,
+  navbar,
+  search as searchSelectors,
+  goToMenu,
+  timecard,
+  people,
+  peopleFrame,
+  resolvePeopleRoot,
+  type SearchRoot,
+  type PeopleRoot,
+} from "./selectors.js";
+import { clickIfPresent, safeClick, safeFill, checkDisplayedIdentity } from "../common/index.js";
+import { gotoWithRetry } from "../../infra/browser/launch.js";
+import {
+  formatTimecardDate,
+  runTimecardCheck,
+  didPeriodLabelSwitch,
+  type TimecardDateRange,
+  type TimecardDriver,
+  type VisibleTimecardMonthDays,
+} from "../../services/timecard/index.js";
+
+export const NEW_KRONOS_URL = "https://ucsd-sso.prd.mykronos.com/wfd/home";
+
+// ─── "Select range" date-picker pacing ────────────────────────────────────
+// WFD's range picker is an Angular widget whose model updates a digest AFTER
+// the DOM click; driving it faster than it settles is what produced the
+// 2026-07-30 "did not stick" → abort. These are deliberately unhurried — the
+// picker runs at most twice per separation doc, so a slower, reliable pass is
+// strictly cheaper than a failed run. Override per-environment if needed.
+const num = (env: string | undefined, fallback: number): number => {
+  const n = Number(env);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+/** Settle after the timeframe dropdown opens. */
+const PICKER_OPEN_MS = num(process.env.KRONOS_PICKER_OPEN_MS, 3_000);
+/** Settle after "Select range" reveals the date fields + calendar. */
+const PICKER_RANGE_MS = num(process.env.KRONOS_PICKER_RANGE_MS, 2_000);
+/** Settle after clicking a field so the shared calendar binds to it. */
+const CALENDAR_BIND_MS = num(process.env.KRONOS_CALENDAR_BIND_MS, 800);
+/** Settle after a calendar day click / unparseable-header retry. */
+const CALENDAR_SETTLE_MS = num(process.env.KRONOS_CALENDAR_SETTLE_MS, 600);
+/** Poll interval while waiting for a month step to land. */
+const CALENDAR_POLL_MS = num(process.env.KRONOS_CALENDAR_POLL_MS, 250);
+/** Budget for ONE month step to move the header. */
+const CALENDAR_STEP_TIMEOUT_MS = num(process.env.KRONOS_CALENDAR_STEP_TIMEOUT_MS, 4_000);
+/** Budget for a range field to settle on the value we just set. */
+const RANGE_READBACK_TIMEOUT_MS = num(process.env.KRONOS_RANGE_READBACK_TIMEOUT_MS, 5_000);
+/** Poll interval for the range-field readback. */
+const RANGE_READBACK_POLL_MS = num(process.env.KRONOS_RANGE_READBACK_POLL_MS, 250);
+/** Settle after Apply so the grid re-renders before it is read. */
+const PICKER_APPLY_MS = num(process.env.KRONOS_PICKER_APPLY_MS, 3_500);
+
+/**
+ * The WFD Employee Search sidebar renders its input/results either INSIDE the
+ * portal-frame iframe (fresh page load) or TOP-LEVEL on the page (e.g. when
+ * reached after a timecard navigation). Probe the iframe first; fall back to
+ * the top-level page so search works in BOTH contexts. (2026-06-18: the
+ * iframe-only assumption caused `locator.fill: Timeout` on the top-level
+ * variant — EID 10090112.)
+ */
+async function resolveSearchRoot(page: Page): Promise<SearchRoot> {
+  const frame = searchFrame(page);
+  try {
+    await searchSelectors.searchInput(frame).waitFor({ state: "visible", timeout: 4_000 });
+    return frame;
+  } catch {
+    // Not in the iframe — fall back to the top-level page. Best-effort wait so
+    // the caller's safeFill gets a present element (or surfaces a clear error).
+    try {
+      await searchSelectors.searchInput(page).waitFor({ state: "visible", timeout: 4_000 });
+    } catch {
+      /* Neither context shows it yet — return the page; safeFill will report. */
+    }
+    return page;
+  }
+}
+
+/**
+ * Resolve a New Kronos employee search into found / not-found.
+ *
+ * Races a "result present" waiter (→ found) against the "no items" sentinel
+ * (→ not found). The found waiter is built by the caller as a robust signal —
+ * the result checkbox ATTACHED **or** the result slat visible — because the
+ * "Select Item" checkbox is visually hidden and waiting on its visibility never
+ * resolves (see `searchEmployee`). If NEITHER surfaces within the timeout (both
+ * waiters reject), the search is treated as **NOT FOUND** rather than thrown
+ * (ISS-B04). New Kronos is a BEST-EFFORT source for the separations Last Day
+ * Worked — the handler falls back to the Kuali LDW when New Kronos returns no
+ * punch — so a slow/empty grid must not raise a fatal-looking `✗` and burn the
+ * run; a `log.warn` keeps it visible without masquerading as a failure.
+ * (Genuinely cutting the timeout wait needs the live no-results sentinel
+ * re-mapped if it has drifted — that's why a no-record employee currently waits
+ * the full timeout before this returns false.)
+ *
+ * Exported for unit testing: it takes the two waiter promises directly, so the
+ * race + timeout-as-not-found contract is pinnable without a live page.
+ */
+/**
+ * Pure outcome for one poll tick of the employee-search sidebar. When WFD is
+ * loading results it can briefly show BOTH the "no items to display" sentinel
+ * AND the result checkbox/slat — found must win (live 2026-07-06, EID
+ * 10090185: at t+100ms noResults=true while checkbox count=1, so a naive
+ * Promise.race mis-resolved NOT FOUND in ~1s).
+ */
+export function resolveSearchPresence(
+  hasResult: boolean,
+  noResults: boolean,
+): "found" | "not-found" | "pending" {
+  if (hasResult) return "found";
+  if (noResults) return "not-found";
+  return "pending";
+}
+
+/**
+ * How long the "There are no items to display." sentinel must stay visible —
+ * CONTINUOUSLY, with no found signal — before a search resolves NOT FOUND.
+ *
+ * WFD shows that sentinel as the panel's resting/empty state BEFORE the search
+ * round-trip completes, so a single-poll "sentinel visible + no result yet" is
+ * NOT a verdict — it is the pre-search state. Live 2026-08-21 (separations doc
+ * 4546, EID 10090234 "Zafiz, Nurol", HDH): NOT FOUND was resolved ~200ms after
+ * the Search click, the timecard was never opened, and the Kuali Last Day
+ * Worked (08/08/2026) was used instead of the real last punch (08/16/2026) — a
+ * wrong-dated termination was filed. Two seconds comfortably outlasts the
+ * observed grid-load gap (results appeared within ~1s on every found doc of the
+ * same session) while keeping a genuine no-results search fast.
+ */
+export const NO_RESULTS_STABLE_MS = 2_000;
+
+/**
+ * Pure settle-tracker for the not-found verdict: returns `"not-found"` only once
+ * the no-results sentinel has been continuously visible (no found signal) for
+ * `stableMs`. Any found signal returns `"found"` immediately; a `pending` poll
+ * (neither visible) resets the sentinel clock. Unit-pinned in `navigate.test.ts`.
+ */
+export function createSearchOutcomeSettler(stableMs: number = NO_RESULTS_STABLE_MS): {
+  observe(hasResult: boolean, noResults: boolean, nowMs: number): "found" | "not-found" | "pending";
+} {
+  let noResultsSince: number | null = null;
+  return {
+    observe(hasResult, noResults, nowMs) {
+      const outcome = resolveSearchPresence(hasResult, noResults);
+      if (outcome === "found") return "found";
+      if (outcome === "pending") {
+        noResultsSince = null;
+        return "pending";
+      }
+      if (noResultsSince === null) noResultsSince = nowMs;
+      return nowMs - noResultsSince >= stableMs ? "not-found" : "pending";
+    },
+  };
+}
+
+/** True when the given search root shows at least one employee result. */
+export async function searchResultPresentInRoot(
+  root: SearchRoot,
+  employeeId: string,
+): Promise<boolean> {
+  if ((await searchSelectors.firstResultCheckbox(root).count()) > 0) return true;
+  if (await searchSelectors.firstResultSlat(root).isVisible().catch(() => false)) return true;
+  if (await searchSelectors.resultEmployeeId(root, employeeId).isVisible().catch(() => false)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Poll BOTH search contexts (portal-frame iframe + top-level page) until an
+ * employee result appears, a genuine no-results state settles, or timeout.
+ * Found signals always beat the no-results sentinel so a transient overlap
+ * during grid load cannot false-negative a present employee, and the sentinel
+ * must hold continuously for `NO_RESULTS_STABLE_MS` before NOT FOUND is
+ * returned (it is also the panel's pre-search resting text).
+ */
+async function waitForEmployeeSearchOutcome(
+  page: Page,
+  employeeId: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const contexts: SearchRoot[] = [searchFrame(page), page];
+  const deadline = Date.now() + timeoutMs;
+  // NOT FOUND only after the sentinel has held for NO_RESULTS_STABLE_MS — the
+  // sentinel is also WFD's pre-search resting state (2026-08-21, doc 4546).
+  const settler = createSearchOutcomeSettler();
+
+  while (Date.now() < deadline) {
+    let hasResult = false;
+    for (const root of contexts) {
+      if (await searchResultPresentInRoot(root, employeeId)) {
+        hasResult = true;
+        break;
+      }
+    }
+
+    let noResults = false;
+    for (const root of contexts) {
+      if (await searchSelectors.noResultsText(root).isVisible().catch(() => false)) {
+        noResults = true;
+        break;
+      }
+    }
+
+    const outcome = settler.observe(hasResult, noResults, Date.now());
+    if (outcome === "found") return true;
+    if (outcome === "not-found") return false;
+
+    await page.waitForTimeout(200);
+  }
+
+  log.warn(
+    `[New Kronos] No search results surfaced for ${employeeId} within the timeout — ` +
+    `treating as NOT FOUND (best-effort; Kuali Last Day Worked will be used).`,
+  );
+  return false;
+}
+
+export async function resolveSearchResult(
+  resultPresent: Promise<unknown>,
+  noResultsVisible: Promise<unknown>,
+  employeeId: string,
+): Promise<boolean> {
+  const foundP = resultPresent.then(() => true);
+  const notFoundP = noResultsVisible.then(() => false);
+  // Handle the losing waiter's eventual rejection so it doesn't surface as an
+  // unhandled rejection; the race below still observes the winner's settlement.
+  foundP.catch(() => {});
+  notFoundP.catch(() => {});
+  try {
+    return await Promise.race([foundP, notFoundP]);
+  } catch {
+    log.warn(
+      `[New Kronos] No search results surfaced for ${employeeId} within the timeout — ` +
+      `treating as NOT FOUND (best-effort; Kuali Last Day Worked will be used).`,
+    );
+    return false;
+  }
+}
+
+/**
+ * Search for an employee by ID in the new Kronos (WFD) system.
+ * Clicks the "Employee Search" button in the navbar, fills the search input,
+ * and checks if results are found.
+ *
+ * The search sidebar is inside an iframe named "portal-frame-*".
+ *
+ * @param page - Playwright page (already authenticated to new Kronos)
+ * @param employeeId - Employee ID to search for
+ * @returns true if employee was found, false if "There are no items to display"
+ */
+export async function searchEmployee(
+  page: Page,
+  employeeId: string,
+): Promise<boolean> {
+  log.step(`[New Kronos] Searching for employee ${employeeId}...`);
+
+  // Close any existing search sidebar first (prevents "2 elements" error between docs)
+  await closeEmployeeSearch(page);
+  await page.waitForTimeout(1_000);
+
+  // Wait for the WFD loading overlay to clear before clicking Employee Search.
+  // When the overlay is present it intercepts pointer events and the click fails
+  // with "Another element intercepted the click (modal/overlay)" (2026-06-17).
+  // The selector is best-effort and NEEDS LIVE RE-VERIFY — if none of the CSS
+  // classes match the live Dayforce build the waitFor resolves immediately via
+  // the hidden/detached check in the catch, which is safe.
+  try {
+    await loadingOverlay.overlay(page).waitFor({ state: "hidden", timeout: 5_000 });
+  } catch {
+    // Overlay absent or selector doesn't match — proceed without waiting.
+  }
+
+  // Click the Employee Search button in the navbar
+  log.step("[New Kronos] Opening Employee Search sidebar...");
+  await safeClick(navbar.employeeSearchButton(page), {
+    timeout: 10_000,
+    label: "new kronos employee search button",
+  });
+  await page.waitForTimeout(2_000);
+
+  // Resolve whether the search sidebar rendered inside the portal-frame iframe
+  // or top-level on the page, then target that context for fill/submit/results.
+  const root = await resolveSearchRoot(page);
+
+  // Fill the search input
+  log.step(`[New Kronos] Filling search: ${employeeId}`);
+  await safeFill(searchSelectors.searchInput(root), employeeId, {
+    timeout: 5_000,
+    label: "new kronos employee search input",
+  });
+  await page.waitForTimeout(500);
+
+  // Click the Search button
+  log.step("[New Kronos] Clicking Search...");
+  await safeClick(searchSelectors.searchSubmitButton(root), {
+    timeout: 5_000,
+    label: "new kronos search submit button",
+  });
+
+  // "Somebody showed up" must be detected ROBUSTLY: we go to the timecard for
+  // every employee who appears — the ONLY skips are a genuine no-results search
+  // ("nobody shows up") and the upstream identity-check ("the eid is incorrect").
+  //
+  // The found-signal used to wait for the "Select Item" checkbox to be VISIBLE,
+  // but that control is custom-styled — its backing native <input type=checkbox>
+  // is zero-size/visually hidden, so `waitFor({ state: "visible" })` NEVER
+  // resolves even when a result is present. A found employee (EID 10090147,
+  // "Total [1]" / "Aasosifo, Zazuk N") therefore raced two never-resolving
+  // waiters, timed out, and was mis-resolved as NOT FOUND — so the timecard step
+  // was skipped entirely AND the best-effort "no results surfaced" warning fired
+  // (the two symptoms are the same root cause). (2026-06-22)
+  //
+  // Poll BOTH contexts (iframe + top-level) and let found signals beat the
+  // no-results sentinel. WFD can show BOTH briefly while the grid loads (live
+  // 2026-07-06: t+100ms noResults=true AND checkbox count=1) — a Promise.race
+  // between those waiters mis-resolved a found employee as NOT FOUND in ~1s.
+  const searchResultTimeout = 15_000;
+  const found = await waitForEmployeeSearchOutcome(page, employeeId, searchResultTimeout);
+
+  if (found) {
+    log.success(`[New Kronos] Employee ${employeeId} found`);
+  } else {
+    log.step(`[New Kronos] Employee ${employeeId} NOT found`);
+  }
+
+  return found;
+}
+
+/**
+ * Click the checkbox on the first employee search result to select them.
+ */
+/**
+ * Poll for the Employee Search panel's "Go To" button to be visible AND
+ * ENABLED, returning the resolved locator (or `null` on timeout).
+ *
+ * The button is `ng-disabled="!quickFind.slatOptions.selectedslats.length"`, so
+ * ENABLED is the only reliable proof that an employee selection actually
+ * registered in Angular — a click landing on the right element is NOT proof.
+ * Go To may render in the search frame OR top-level, so both are polled.
+ */
+async function resolveEnabledGoToButton(page: Page, timeoutMs: number): Promise<Locator | null> {
+  const candidates = [
+    goToMenu.goToButtonInFrame(searchFrame(page)).first(),
+    goToMenu.goToButtonOnPage(page).first(),
+  ];
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const loc of candidates) {
+      try {
+        if ((await loc.isVisible()) && (await loc.isEnabled())) return loc;
+      } catch {
+        // Not present in this context — try the next candidate.
+      }
+    }
+    await page.waitForTimeout(500);
+  }
+  return null;
+}
+
+export async function selectEmployeeResult(page: Page): Promise<boolean> {
+  log.step("[New Kronos] Selecting employee from search results...");
+
+  // The results render in the portal-frame iframe OR top-level. After a search
+  // the search INPUT collapses to "Show Search", so `resolveSearchRoot` (which
+  // probes the input) can mis-detect the context here — try the result CHECKBOX
+  // directly in BOTH contexts. Checking the "Select Item" checkbox is what
+  // registers the slat selection that ENABLES the Go To button. (2026-06-18: the
+  // daemon resolved to the wrong context and left Selected[0] / Go To disabled.)
+  //
+  // The checkbox renders ASYNCHRONOUSLY after the search returns, so POLL for it
+  // rather than probing `count()` once — a single probe raced the render and, on
+  // a miss, fell straight through to the row-click fallback below (2026-07-31,
+  // live: EID 10090273 logged "Employee row clicked", Go To stayed disabled, and
+  // the whole timecard read was lost). Same class as the 2026-06-24 Go To
+  // dropdown race: condition-based waiting, not a one-shot check.
+  const contexts: SearchRoot[] = [searchFrame(page), page];
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    for (const root of contexts) {
+      const checkbox = searchSelectors.firstResultCheckbox(root);
+      try {
+        if ((await checkbox.count()) === 0) continue;
+        await checkbox.check({ timeout: 5_000 });
+        // VERIFY the selection registered — see `resolveEnabledGoToButton`.
+        if (await resolveEnabledGoToButton(page, 3_000)) {
+          log.step("[New Kronos] Employee checkbox checked");
+          return true;
+        }
+        log.warn("[New Kronos] Checkbox checked but no slat registered (Go To still disabled) — retrying");
+      } catch {
+        log.warn("[New Kronos] Result checkbox present but not checkable in this context — trying the next");
+      }
+    }
+    await page.waitForTimeout(250);
+  }
+
+  // Fallback: click the result row (the `menuitemradio`) directly, in either
+  // context. FAIL LOUD (root CLAUDE.md): a row click is NOT self-evidently a
+  // selection, so it must be verified exactly like the checkbox path. Returning
+  // true here unverified is what turned a recoverable selection miss into a
+  // silently-lost timecard read and a Kuali-date fallback.
+  for (const root of contexts) {
+    const resultRow = searchSelectors.firstResultRow(root);
+    if (await clickIfPresent(resultRow, { timeout: 3_000, label: "new kronos search result row" })) {
+      if (await resolveEnabledGoToButton(page, 3_000)) {
+        log.step("[New Kronos] Employee row clicked");
+        return true;
+      }
+      log.warn("[New Kronos] Result row clicked but no slat registered (Go To still disabled)");
+    }
+  }
+
+  log.error(
+    "[New Kronos] Could not select employee from results — Go To never became enabled, "
+    + "so no slat is selected and the timecard cannot be opened",
+  );
+  return false;
+}
+
+/**
+ * Probe the authoritative `.emp-nav-id` timecard-header value for the searched
+ * EID. Kept under the existing export name for direct-module compatibility.
+ */
+export function probeEidInTimecardText(
+  text: string,
+  searchedEid: string,
+): { match: boolean; otherEid: string | null } {
+  const header = text.trim();
+  const r = checkDisplayedIdentity(searchedEid, header, { mode: "exact" });
+  return {
+    match: r.ok,
+    otherEid: !r.ok && /^\d{8}$/.test(header) ? header : null,
+  };
+}
+
+export interface TimecardEmployeeCheck {
+  ok: boolean;
+  /** A DIFFERENT 8-digit id visible on the timecard when `ok` is false. */
+  shownEid: string | null;
+}
+
+/** Read only the live-verified timecard identity header; never page-wide text. */
+export async function scanTimecardEmployeeHeader(
+  page: Page,
+  eid: string,
+): Promise<TimecardEmployeeCheck> {
+  const header = await timecard.loadedEmployeeId(page).innerText({ timeout: 500 });
+  const probe = probeEidInTimecardText(header, eid);
+  return { ok: probe.match, shownEid: probe.match ? eid : probe.otherEid };
+}
+
+/**
+ * Poll the open timecard until its authoritative header shows the searched EID.
+ */
+async function waitForTimecardEmployee(
+  page: Page,
+  eid: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if ((await scanTimecardEmployeeHeader(page, eid)).ok) return true;
+    } catch {
+      // Header not rendered yet. Keep polling; timeout remains fail-closed.
+    }
+    await page.waitForTimeout(500);
+  }
+  return false;
+}
+
+/**
+ * Click Go To dropdown and select Timecard.
+ * Go To may be on the main page or inside the search iframe.
+ *
+ * After clicking the Timecards option, polls the timecard header for the
+ * searched EID — Go To can leave the PREVIOUS employee's timecard on screen
+ * (live: search 10090279 but header still showed 10090268, 2026-06-29).
+ * Returns false when the timecard does not switch within the timeout so the
+ * caller can fail loud; `verifyTimecardEmployee` remains the downstream backstop.
+ */
+export async function clickGoToTimecard(page: Page, eid: string): Promise<boolean> {
+  log.step("[New Kronos] Clicking Go To → Timecard...");
+
+  // The button is `ng-disabled` until an employee is selected, so clicking it
+  // while disabled just times out — wait for visible AND ENABLED (up to 15s for
+  // the Angular selection from selectEmployeeResult to land). `selectEmployeeResult`
+  // now verifies the same condition before returning, so reaching this timeout
+  // means the selection was LOST between the two calls, not never made.
+  const gotoButton = await resolveEnabledGoToButton(page, 15_000);
+
+  if (!gotoButton) {
+    log.error(
+      "[New Kronos] Go To button never became enabled — the employee selection " +
+      "did not register (no slat selected), so the timecard cannot be opened",
+    );
+    return false;
+  }
+
+  // Open the dropdown, then WAIT for the Timecard option to actually render
+  // before clicking — do NOT sleep a fixed 2s and check once. The old fixed
+  // `waitForTimeout(2000)` + one-shot `clickIfPresent` raced the Angular
+  // dropdown render: the FIRST found employee in a session rendered within 2s
+  // (worked), but every SUBSEQUENT employee in a batch — heavier, already-loaded
+  // WFD session — rendered the option slower, so `timecardItem.count()` was 0 at
+  // the fixed checkpoint, `clickIfPresent` returned false in ~0.1s, and the run
+  // silently fell back to the Kuali dates with the dropdown left open over the
+  // PREVIOUS employee's timecard (2026-06-24). Condition-based waiting + one
+  // dropdown re-open (the open click can be swallowed mid-render) fixes it.
+  const timecardItem = goToMenu.timecardItem(page);
+  await gotoButton.click({ timeout: 5_000 });
+
+  const totalDeadline = Date.now() + 15_000;
+  let reopened = false;
+  while (Date.now() < totalDeadline) {
+    try {
+      // Wait for the option to be present AND visible (not just attached) so we
+      // never click a stale/hidden element. First window is generous; if it
+      // elapses with no option, re-open the dropdown once and wait longer.
+      await timecardItem
+        .first()
+        .waitFor({ state: "visible", timeout: reopened ? 6_000 : 5_000 });
+    } catch {
+      if (!reopened) {
+        log.warn("[New Kronos] Timecard option not visible yet — re-opening the Go To dropdown");
+        reopened = true;
+        try {
+          await gotoButton.click({ timeout: 5_000 });
+        } catch {
+          // best-effort re-open; the next waitFor decides success/failure
+        }
+        await page.waitForTimeout(500);
+        continue;
+      }
+      break;
+    }
+
+    // Option is rendered — click it. A failure here is real (not a missing
+    // element), so fall through to the error return rather than spin.
+    try {
+      await safeClick(timecardItem.first(), {
+        timeout: 5_000,
+        label: "new kronos timecard menu item",
+      });
+    } catch {
+      break;
+    }
+
+    // Post-click EID confirmation: the Timecards menu item can be clicked while
+    // the grid still shows the PREVIOUS employee (live bug, 2026-06-29). Poll the
+    // timecard header/text for the searched EID instead of a fixed sleep.
+    // NEEDS LIVE RE-VERIFY 2026-06-29 — selector/header mapping not re-run here.
+    try {
+      await loadingOverlay.overlay(page).waitFor({ state: "hidden", timeout: 5_000 });
+    } catch {
+      // Overlay absent or selector drift — proceed without waiting.
+    }
+
+    const switched = await waitForTimecardEmployee(page, eid, 10_000);
+    if (switched) {
+      log.success(`[New Kronos] Navigated to Timecard for EID ${eid}`);
+      return true;
+    }
+
+    log.error(
+      `[New Kronos] Go To → Timecard clicked but the open timecard did not switch to EID ${eid} within the timeout`,
+    );
+    return false;
+  }
+
+  log.error(
+    "[New Kronos] Timecard option never rendered in the Go To menu — could not open the timecard",
+  );
+  return false;
+}
+
+/**
+ * Confirm the OPEN timecard belongs to the searched employee.
+ *
+ * The WFD timecard header shows the selected employee's EID (e.g. "10090228"
+ * next to the name dropdown). When Go To → Timecard doesn't actually switch
+ * employees, the PREVIOUS employee's timecard stays on screen — the live bug
+ * where a search for 10090113 (Lum-Sogimawa) left Yupe / 10090228 displayed
+ * (2026-06-24). Reading that stale grid would attribute the wrong person's
+ * punches/sick/holiday to this separation.
+ *
+ * The search slide-out is closed FIRST, then the live-verified `.emp-nav-id`
+ * header is polled. On a miss it reports a different exact 8-digit header value
+ * so the caller can fail loud with the wrong employee's EID.
+ */
+export async function verifyTimecardEmployee(
+  page: Page,
+  eid: string,
+): Promise<TimecardEmployeeCheck> {
+  await closeEmployeeSearch(page);
+  await page.waitForTimeout(500);
+  const deadline = Date.now() + 8_000;
+  let shownEid: string | null = null;
+  while (Date.now() < deadline) {
+    try {
+      const probe = await scanTimecardEmployeeHeader(page, eid);
+      if (probe.ok) return probe;
+      shownEid = probe.shownEid;
+    } catch {
+      // Header not readable yet. Keep polling; final result remains fail-closed.
+    }
+    await page.waitForTimeout(500);
+  }
+  return { ok: false, shownEid };
+}
+
+/**
+ * Switch the pay period dropdown to previous pay period.
+ */
+export async function switchToPreviousPayPeriod(page: Page): Promise<boolean> {
+  log.step("[New Kronos] Switching to previous pay period...");
+
+  // Use payPeriodTriggerButton (regex-based) so it matches regardless of whether
+  // the button shows "Current Pay Period" or a date range after setDateRange runs.
+  const periodBtn = timecard.payPeriodTriggerButton(page);
+  // Positive-assert baseline: the ACTIVE-PERIOD LABEL ("Current Pay Period" /
+  // "Previous Pay Period" / a date range) before the switch is the comparison
+  // point for the post-switch readback below. Read via `readPeriodLabel` — the
+  // trigger BUTTON's own textContent is empty (aria-labelledby), which made
+  // this baseline blank and threw the "cannot be verified" branch every time.
+  const beforeLabel = await readPeriodLabel(page);
+  if (await clickIfPresent(periodBtn, { timeout: 5_000, label: "new kronos pay period trigger button" })) {
+    await page.waitForTimeout(2_000);
+
+    const prevOption = timecard.previousPayPeriodOption(page);
+    if (await clickIfPresent(prevOption, { timeout: 5_000, label: "new kronos previous pay period option" })) {
+      // Wait for the period dropdown option to close (detach/hide) as a
+      // signal the switch was accepted, instead of a blind pause.
+      await prevOption.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
+
+      // Positive assert: the option closing only proves the click registered —
+      // it does NOT prove the timecard grid actually switched periods. Re-read
+      // the SAME trigger-button selector and fail loud if it still shows the
+      // pre-switch label (or is still literally "Current Pay Period"), instead
+      // of letting the caller read the grid believing the switch landed.
+      const afterLabel = await readPeriodLabel(page);
+      if (!didPeriodLabelSwitch(beforeLabel, afterLabel, /current pay period/i)) {
+        const detail = beforeLabel.trim()
+          ? `the pay-period trigger button did not switch (before="${beforeLabel}", after="${afterLabel}")`
+          : `the pre-switch pay-period label could not be read (before is blank, after="${afterLabel}") — ` +
+            `with no baseline the switch cannot be verified`;
+        throw new Error(
+          `[New Kronos] Previous Pay Period option closed but ${detail} — refusing to read the grid ` +
+          `as though the previous period is displayed`,
+        );
+      }
+
+      log.step(`[New Kronos] Switched to Previous Pay Period (now showing "${afterLabel}")`);
+      return true;
+    }
+  }
+
+  log.error("[New Kronos] Could not find pay period controls");
+  return false;
+}
+
+/**
+ * Check if the current timecard view has any time entries.
+ * Returns the latest date with time, or null if no time found.
+ * The year is resolved against `range` (the window the displayed pay period
+ * must fall inside; see `formatTimecardDate`).
+ */
+export async function getTimecardLastDate(
+  page: Page,
+  range: TimecardDateRange,
+): Promise<string | null> {
+  log.step("[New Kronos] Checking timecard for time entries...");
+
+  // New Kronos (WFD) uses a split grid:
+  // - ui-grid-pinned-container has date rows ("Mon 3/16")
+  // - ui-grid-viewport (last one) has data rows (In/Out/Daily values)
+  // Rows are aligned by index. Check if data row has AM/PM timestamps (In/Out punches).
+  const result = await page.evaluate(() => {
+    const viewports = document.querySelectorAll(".ui-grid-viewport");
+    if (viewports.length < 2) return null;
+
+    // First viewport is the left pinned column (dates)
+    // Last viewport is the right scrollable data column (punches)
+    const dateVp = viewports[0];
+    const dataVp = viewports[viewports.length - 1];
+
+    const dateRows: string[] = [];
+    let lastSeenDate = "";
+    dateVp.querySelectorAll("[role='row']").forEach((r) => {
+      const t = r.textContent?.trim().replace(/[^\w\s/]/g, "").trim() ?? "";
+      if (/^[A-Z][a-z]{2}\s+\d+\/\d+$/.test(t)) {
+        lastSeenDate = t;
+      }
+      dateRows.push(lastSeenDate);
+    });
+
+    const dataRows = dataVp.querySelectorAll("[role='row']");
+
+    // Find last date with In/Out punches (AM/PM timestamps)
+    let lastParsed: { month: number; day: number } | null = null;
+    for (let i = 0; i < dateRows.length && i < dataRows.length; i++) {
+      const cells = dataRows[i].querySelectorAll("[role='gridcell']");
+      const hasInOut = Array.from(cells).some((c) =>
+        /\d+:\d+\s*(AM|PM)/.test(c.textContent?.trim() ?? ""),
+      );
+      if (hasInOut) {
+        const match = dateRows[i].match(/(\d+)\/(\d+)/);
+        if (match) {
+          lastParsed = { month: parseInt(match[1], 10), day: parseInt(match[2], 10) };
+        }
+      }
+    }
+
+    return lastParsed;
+  });
+
+  if (result) {
+    const formatted = formatTimecardDate(result.month, result.day, range);
+    log.step(`[New Kronos] Latest timecard date with In/Out: ${formatted}`);
+    return formatted;
+  } else {
+    log.step("[New Kronos] No In/Out entries found in current pay period");
+  }
+
+  return null;
+}
+
+/** Read the actual first/last month-day pairs rendered in the WFD date grid. */
+export async function getVisibleTimecardMonthDays(
+  page: Page,
+): Promise<VisibleTimecardMonthDays> {
+  const dates = await page.evaluate(() => {
+    const viewport = document.querySelectorAll(".ui-grid-viewport")[0];
+    if (!viewport) return [];
+    return Array.from(viewport.querySelectorAll("[role='row']"))
+      .map((row) => {
+        const text = row.textContent;
+        return typeof text === "string" ? text.replace(/[^\w\s/]/g, "").trim() : "";
+      })
+      .map((text) => text.match(/^[A-Z][a-z]{2}\s+(\d+)\/(\d+)$/))
+      .filter((match): match is RegExpMatchArray => match !== null)
+      .map((match) => ({ month: Number(match[1]), day: Number(match[2]) }));
+  });
+  if (dates.length === 0) {
+    throw new Error("[New Kronos] could not read any visible timecard date rows");
+  }
+  return { first: dates[0], last: dates[dates.length - 1] };
+}
+
+/**
+ * Scroll the New Kronos timecard grid so the row for `targetDate`
+ * (MM/DD/YYYY) is CENTERED in the view. Used to position the browser
+ * before an audit screenshot so the human can verify:
+ *   (a) the workflow picked the correct last day (centered = easy to read), and
+ *   (b) whether any later dates exist below it (visible above and below center).
+ *
+ * `block: "center"` keeps surrounding rows in frame on both sides; when the
+ * target is near the top/bottom of the loaded rows the browser's native scroll
+ * clamps at the edge, which is fine — the operator still sees the target row
+ * plus its neighbors.
+ *
+ * Best-effort: a missing row logs + returns without throwing. Callers
+ * wrap screenshots around this; a scroll failure must not mask the
+ * real error the screenshot is being taken to capture.
+ */
+export async function scrollTimecardToDate(page: Page, targetDate: string): Promise<void> {
+  const match = targetDate.match(/^(\d{2})\/(\d{2})\/\d{4}$/);
+  if (!match) return;
+  // Kronos date cells render as "Mon 3/23" — month + day without
+  // leading zeros. Convert "03/23/2026" → "3/23" for a substring match
+  // against the row text.
+  const md = `${parseInt(match[1], 10)}/${parseInt(match[2], 10)}`;
+
+  const scrolled = await page.evaluate((wantMd: string) => {
+    const viewports = document.querySelectorAll(".ui-grid-viewport");
+    if (viewports.length === 0) return false;
+    // Column 0 is the pinned date column; both viewports scroll in
+    // lockstep because ui-grid syncs them on scroll events.
+    const dateVp = viewports[0];
+    const rows = dateVp.querySelectorAll("[role='row']");
+    for (const row of Array.from(rows)) {
+      const text = (row.textContent ?? "").replace(/\s+/g, " ").trim();
+      // Match the "/" form ("Mon 3/23" contains "3/23") to avoid
+      // false-positive matches like "3/23" inside a different cell.
+      if (text.includes(` ${wantMd}`) || text.endsWith(wantMd)) {
+        (row as HTMLElement).scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+        return true;
+      }
+    }
+    return false;
+  }, md).catch(() => false);
+
+  if (scrolled) {
+    log.step(`[New Kronos] Scrolled timecard to ${targetDate} centered in view`);
+  } else {
+    log.warn(`[New Kronos] Could not locate ${targetDate} row in timecard — screenshot scroll unchanged`);
+  }
+  // Let the grid repaint before the caller captures a screenshot.
+  await page.waitForTimeout(500);
+}
+
+/**
+ * Full timecard check: select employee, Go To → Timecard, check current then previous period.
+ * Returns the latest date with time entries, or null if nothing found.
+ */
+export async function checkTimecardDates(page: Page, eid: string): Promise<string | null> {
+  await selectEmployeeResult(page);
+
+  const driver: TimecardDriver = {
+    goToTimecard: (p) => clickGoToTimecard(p, eid),
+    afterGoTo: async (p) => {
+      await debugScreenshot(p, "new-kronos-timecard-01-current");
+    },
+    switchPeriod: (p) => switchToPreviousPayPeriod(p),
+    afterSwitch: async (p) => {
+      await debugScreenshot(p, "new-kronos-timecard-02-previous");
+    },
+    readVisibleMonthDays: (p) => getVisibleTimecardMonthDays(p),
+    readLastDate: (p, range) => getTimecardLastDate(p, range),
+  };
+  return runTimecardCheck(page, driver);
+}
+
+/**
+ * Timecard data extracted for use during separations: the last punch date,
+ * any days with a Sick pay code, and any days with a Holiday pay code.
+ */
+export interface SeparationTimecardData {
+  /** MM/DD/YYYY — latest day with an In/Out punch (the "Last Day Worked"), or null if none found. */
+  lastPunchDate: string | null;
+  /** MM/DD/YYYY[], chronological — days with a Sick pay code (e.g. "Sick - Hourly"). */
+  sickDates: string[];
+  /** MM/DD/YYYY[], chronological — days with a Holiday pay code (e.g. "Holiday - Hourly"). */
+  holidayDates: string[];
+}
+
+/** Raw month/day pairs parsed from the WFD timecard grid, year still unresolved. */
+export interface RawSeparationTimecardDates {
+  /** Latest day with an In/Out punch, or null when no punch row parsed. */
+  lastPunch: { mon: number; day: number } | null;
+  /** Days with a Sick pay code, chronological. */
+  sick: { mon: number; day: number }[];
+  /** Days with a Holiday pay code, chronological. */
+  holiday: { mon: number; day: number }[];
+}
+
+/**
+ * Resolve the grid-parsed month/day pairs to MM/DD/YYYY against the date
+ * range the timecard view was set to (`setDateRange`). Pure — exported so the
+ * Dec→Jan year matrix is unit-testable without a page. Throws (via
+ * `formatTimecardDate`) when a parsed day cannot fall inside the requested
+ * range, instead of stamping a guessed year.
+ */
+export function resolveSeparationTimecardDates(
+  raw: RawSeparationTimecardDates,
+  range: TimecardDateRange,
+): SeparationTimecardData {
+  return {
+    lastPunchDate: raw.lastPunch
+      ? formatTimecardDate(raw.lastPunch.mon, raw.lastPunch.day, range)
+      : null,
+    sickDates: raw.sick.map((d) => formatTimecardDate(d.mon, d.day, range)),
+    holidayDates: raw.holiday.map((d) => formatTimecardDate(d.mon, d.day, range)),
+  };
+}
+
+/** Require every requested calendar day; visible rows alone are insufficient. */
+export function assertTimecardDateCoverage(
+  observed: { mon: number; day: number }[],
+  range: TimecardDateRange,
+): void {
+  const dates = new Set(observed.map(date => formatTimecardDate(date.mon, date.day, range)));
+  for (const day = new Date(range.start); day <= range.end; day.setDate(day.getDate() + 1)) {
+    const expected = `${String(day.getMonth() + 1).padStart(2, "0")}/${String(day.getDate()).padStart(2, "0")}/${day.getFullYear()}`;
+    if (!dates.has(expected)) throw new Error(`[New Kronos] Full timecard scan is missing date ${expected}`);
+  }
+}
+
+/** Split into continuous anniversary windows with each month/day occurring once. */
+export function splitTimecardDateRange(start: string, end: string): { startDate: string; endDate: string }[] {
+  const first = mmddyyyyToDate(start);
+  const last = mmddyyyyToDate(end);
+  if (first > last) throw new Error("[New Kronos] Timecard range starts after it ends");
+  const format = (date: Date): string => `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
+  const ranges: { startDate: string; endDate: string }[] = [];
+  for (const cursor = new Date(first); cursor <= last;) {
+    const next = new Date(cursor.getFullYear() + 1, cursor.getMonth(), cursor.getDate());
+    const through = new Date(next); through.setDate(through.getDate() - 1);
+    const stop = through < last ? through : last;
+    ranges.push({ startDate: format(cursor), endDate: format(stop) });
+    cursor.setTime(stop.getTime()); cursor.setDate(cursor.getDate() + 1);
+  }
+  return ranges;
+}
+
+/** Read every virtualized row and require every requested calendar day. */
+export async function getSeparationTimecardData(
+  page: Page,
+  range: TimecardDateRange,
+): Promise<SeparationTimecardData> {
+  log.step("[New Kronos] Parsing timecard for separation data (last punch, sick, holiday)...");
+
+  const raw = await page.evaluate(async (bounds: { start: number[]; end: number[] }) => {
+    const start = new Date(bounds.start[0], bounds.start[1], bounds.start[2]);
+    const endDate = new Date(bounds.end[0], bounds.end[1], bounds.end[2]);
+    const weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dateKey = (date: Date): string => `${date.getMonth() + 1}/${date.getDate()}`;
+    const requested = new Map<string, { weekday: string; time: number }>();
+    for (const day = new Date(start); day <= endDate; day.setDate(day.getDate() + 1)) requested.set(dateKey(day), { weekday: weekdayNames[day.getDay()], time: day.getTime() });
+    const previous = new Date(start); previous.setDate(previous.getDate() - 1);
+    const following = new Date(endDate); following.setDate(following.getDate() + 1);
+    const padding = [previous, following].map(day => `${weekdayNames[day.getDay()]} ${dateKey(day)}`);
+    const snapshots = new Map<string, { date: { mon: number; day: number }; cells: string[] }>();
+    const viewports = (): HTMLElement[] => {
+      const vps = [...document.querySelectorAll<HTMLElement>(".ui-grid-viewport")];
+      if (vps.length !== 2) throw new Error(`[New Kronos] Expected two timecard viewports; found ${vps.length}`);
+      return vps;
+    };
+    const scroll = (top: number): void => {
+      const vps = viewports();
+      for (const vp of vps) {
+        vp.scrollTop = top;
+        vp.dispatchEvent(new Event("scroll", { bubbles: true }));
+      }
+    };
+    scroll(0);
+    let reachedEnd = false;
+    for (let pass = 0; pass < 2_000; pass++) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const [dateVp, dataVp] = viewports();
+      const dRows = [...dateVp.querySelectorAll<HTMLElement>("[role=row]")];
+      const xRows = [...dataVp.querySelectorAll<HTMLElement>("[role=row]")];
+      if (!dRows.length || dRows.length !== xRows.length || dataVp.clientHeight <= 0) {
+        throw new Error("[New Kronos] Missing or misaligned timecard rows");
+      }
+      let cur: { mon: number; day: number } | null = null;
+      let paddingRow = false;
+      for (let i = 0; i < dRows.length; i++) {
+        if (Math.abs(dRows[i].getBoundingClientRect().top - xRows[i].getBoundingClientRect().top) > 1) {
+          throw new Error("[New Kronos] Timecard date and punch rows are not aligned");
+        }
+        const match = dRows[i].textContent?.match(/([A-Za-z]{3})\s+(\d+)\/(\d+)/);
+        if (match) {
+          cur = { mon: Number(match[2]), day: Number(match[3]) };
+          const key = `${cur.mon}/${cur.day}`;
+          paddingRow = requested.get(key)?.weekday !== match[1] && padding.includes(`${match[1]} ${key}`);
+          if (!paddingRow && requested.get(key)?.weekday !== match[1]) throw new Error(`[New Kronos] Unexpected grid date ${match[0]} outside the requested calendar`);
+        }
+        if (paddingRow) continue;
+        const cells = [...xRows[i].querySelectorAll("[role=gridcell]")].map(cell => cell.textContent?.replace(/\s+/g, " ").trim() ?? "");
+        if (!cur) {
+          if (cells.some(Boolean)) throw new Error("[New Kronos] Timecard row has no associated date");
+          continue;
+        }
+        if (cells.length < 5) throw new Error("[New Kronos] Timecard row is missing punch or pay-code columns");
+        snapshots.set(JSON.stringify([cur, cells]), { date: cur, cells });
+      }
+      const end = dataVp.scrollHeight - dataVp.clientHeight;
+      if (dataVp.scrollTop >= end - 1) { reachedEnd = true; break; }
+      const next = Math.min(end, dataVp.scrollTop + Math.max(1, dataVp.clientHeight - 40));
+      scroll(next);
+    }
+    if (!reachedEnd) throw new Error("[New Kronos] Full timecard scan did not reach the end");
+    const rows = [...snapshots.values()];
+    const punches = rows.filter(row => /\d+:\d+\s*(AM|PM)/.test(`${row.cells[1]} ${row.cells[2]}`));
+    punches.sort((a, b) => requested.get(`${a.date.mon}/${a.date.day}`)!.time - requested.get(`${b.date.mon}/${b.date.day}`)!.time);
+    return {
+      lastPunch: punches.at(-1)?.date ?? null,
+      sick: rows.filter(row => /sick/i.test(row.cells[4])).map(row => row.date),
+      holiday: rows.filter(row => /holiday/i.test(row.cells[4])).map(row => row.date),
+      observed: rows.map(row => row.date),
+    };
+  }, {
+    start: [range.start.getFullYear(), range.start.getMonth(), range.start.getDate()],
+    end: [range.end.getFullYear(), range.end.getMonth(), range.end.getDate()],
+  });
+  assertTimecardDateCoverage(raw.observed, range);
+
+  const resolved = resolveSeparationTimecardDates(raw, range);
+
+  log.step(
+    `[New Kronos] Timecard parse: lastPunch=${resolved.lastPunchDate ?? "none"}, sick=${resolved.sickDates.length}, holiday=${resolved.holidayDates.length}`,
+  );
+
+  return resolved;
+}
+
+const MONTH_NAMES_FULL = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const MONTH_NAMES_ABBR = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/** Parsed `M/D/YYYY` components (month is 0-based to match `Date`/calendar math). */
+export interface ParsedDate {
+  year: number;
+  monthIndex: number;
+  day: number;
+}
+
+/**
+ * Parse an `M/D/YYYY` (or zero-padded `MM/DD/YYYY`) date into numeric parts.
+ * Throws on a malformed string so a bad upstream date fails loud here instead
+ * of silently applying a wrong timecard window. Pure + unit-pinned.
+ */
+export function parseMmddyyyy(dateStr: string): ParsedDate {
+  const m = dateStr.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) throw new Error(`[New Kronos] malformed date "${dateStr}" (expected M/D/YYYY)`);
+  const monthIndex = Number(m[1]) - 1;
+  const day = Number(m[2]);
+  const year = Number(m[3]);
+  if (monthIndex < 0 || monthIndex > 11 || day < 1 || day > 31) {
+    throw new Error(`[New Kronos] out-of-range date "${dateStr}"`);
+  }
+  const roundTrip = new Date(year, monthIndex, day);
+  if (
+    roundTrip.getFullYear() !== year ||
+    roundTrip.getMonth() !== monthIndex ||
+    roundTrip.getDate() !== day
+  ) {
+    throw new Error(`[New Kronos] invalid calendar date "${dateStr}"`);
+  }
+  return { year, monthIndex, day };
+}
+
+/** `M/D/YYYY` → ISO `YYYY-MM-DD`, the ONLY value a native `<input type=date>` accepts. */
+export function toIsoDate(dateStr: string): string {
+  const { year, monthIndex, day } = parseMmddyyyy(dateStr);
+  return `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * Normalize whatever the WFD range field reads back into ISO `YYYY-MM-DD`, so
+ * the verify compares CALENDAR DATES rather than string spellings.
+ *
+ * The field is dual-mode (`ng-attr-type="{{rangeInput.useNativeDateInput ?
+ * 'date' : 'text'}}"`), so its `.value` is ISO in native mode but locale
+ * `M/D/YYYY` in text mode — and WFD does not even pad consistently between the
+ * two fields (live 2026-07-30: start read `07/30/2026` while end read
+ * `7/30/2026` in the same open picker). Returns `null` for empty/unrecognized
+ * input so the caller FAILS LOUD instead of guessing.
+ *
+ * This is normalization, not a fallback: `5/10/2026` and `2026-05-10` are the
+ * same day, and anything that isn't a parseable date still fails. Pure +
+ * unit-pinned.
+ */
+export function normalizeRangeDateReadback(raw: string): string | null {
+  const value = raw.trim();
+  // Native mode reads back ISO `YYYY-MM-DD`; text mode reads back locale
+  // `M/D/YYYY`. Anything else is an unreadable field, not a date.
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const us = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!iso && !us) return null;
+
+  const year = Number(iso ? iso[1] : us![3]);
+  const month = Number(iso ? iso[2] : us![1]);
+  const day = Number(iso ? iso[3] : us![2]);
+
+  // Round-trip so an impossible day (2026-02-31, 2/31/2026) can never pass the
+  // verify as though the field held a real date.
+  const roundTrip = new Date(year, month - 1, day);
+  if (
+    roundTrip.getFullYear() !== year
+    || roundTrip.getMonth() !== month - 1
+    || roundTrip.getDate() !== day
+  ) {
+    return null;
+  }
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * `M/D/YYYY` → local-midnight `Date`. Throws on a malformed string (via
+ * `parseMmddyyyy`). Used to build the `TimecardDateRange` that
+ * `getSeparationTimecardData` resolves grid dates against from the same
+ * `kronosStart`/`kronosEnd` strings passed to `setDateRange`.
+ */
+export function mmddyyyyToDate(dateStr: string): Date {
+  const { year, monthIndex, day } = parseMmddyyyy(dateStr);
+  return new Date(year, monthIndex, day);
+}
+
+/**
+ * The calendar day cell's accessible name (its `aria-label`) is the full date
+ * with weekday, e.g. "Monday, June 11, 2026". We match on a weekday-agnostic
+ * fragment (`June 11, 2026`) anchored so "June 1, 2026" can't match "June 11".
+ * Pure + unit-pinned.
+ */
+export function calendarDayLabelPattern(d: ParsedDate): RegExp {
+  return new RegExp(`\\b${MONTH_NAMES_FULL[d.monthIndex]} ${d.day}, ${d.year}\\b`);
+}
+
+/** Absolute month ordinal (year*12+month) for monotonic prev/next stepping. */
+function monthOrdinal(year: number, monthIndex: number): number {
+  return year * 12 + monthIndex;
+}
+
+/**
+ * Parse the moment-picker header text ("Jun 2026") to a month ordinal so the
+ * navigator knows which way (and how far) to step. Returns null on an
+ * unparseable header (caller stops navigating and lets the verify fail loud).
+ * Pure + unit-pinned.
+ */
+export function parseCalendarHeaderOrdinal(headerText: string): number | null {
+  const m = headerText.trim().match(/^([A-Za-z]{3,})\s+(\d{4})$/);
+  if (!m) return null;
+  const idx = MONTH_NAMES_ABBR.findIndex((a) => a.toLowerCase() === m[1].slice(0, 3).toLowerCase());
+  if (idx < 0) return null;
+  return monthOrdinal(Number(m[2]), idx);
+}
+
+/**
+ * One-shot DOM inventory of the open "Select range" date picker, written to
+ * `PATHS.screenshotDir/wfd-date-picker-<ts>.json` (+ a screenshot) so the grid
+ * selectors (day cell, prev/next month, month/year header) can be authored from
+ * the REAL accessibility tree instead of a screenshot. Gated behind
+ * `DEBUG_SCREENSHOTS=1`; best-effort and never throws. Remove once the
+ * grid-pick selectors are mapped + verified.
+ */
+async function dumpDatePickerStructure(page: Page, label: string): Promise<void> {
+  if (process.env.DEBUG_SCREENSHOTS !== "1") return;
+  try {
+    const inventory = await page.evaluate(() => {
+      const interesting = Array.from(
+        document.querySelectorAll(
+          "button, [role='button'], [role='gridcell'], [role='option'], "
+            + "td, th, input, [aria-label], [class*='calendar'], [class*='datepicker'], "
+            + "[class*='date-picker'], [class*='month'], [class*='day']",
+        ),
+      ).slice(0, 600);
+      return interesting.map((el) => {
+        const e = el as HTMLElement;
+        return {
+          tag: e.tagName.toLowerCase(),
+          type: e.getAttribute("type"),
+          role: e.getAttribute("role"),
+          ariaLabel: e.getAttribute("aria-label"),
+          ariaSelected: e.getAttribute("aria-selected"),
+          ariaDisabled: e.getAttribute("aria-disabled"),
+          title: e.getAttribute("title"),
+          name: e.getAttribute("name"),
+          id: e.id || null,
+          className: typeof e.className === "string" ? e.className : null,
+          text: (e.textContent || "").trim().slice(0, 40),
+          value: (e as HTMLInputElement).value ?? null,
+          dataset: { ...e.dataset },
+        };
+      });
+    });
+    mkdirSync(PATHS.screenshotDir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const path = `${PATHS.screenshotDir}/wfd-date-picker-${label}-${ts}.json`;
+    writeFileSync(path, JSON.stringify(inventory, null, 2), "utf8");
+    log.step(`[New Kronos] date-picker DOM inventory: ${path} (${inventory.length} els)`);
+    await debugScreenshot(page, `wfd-date-picker-${label}`, { fullPage: true });
+  } catch (err) {
+    log.warn(`[New Kronos] date-picker dump failed (best-effort): ${String(err)}`);
+  }
+}
+
+/**
+ * Read the ACTIVE-period label ("Current Pay Period" / "5/10/2026 -
+ * 8/10/2026") — the baseline + proof that a period switch actually landed.
+ *
+ * Reads `timecard.payPeriodLabel`, NOT the trigger button: the trigger is an
+ * icon-only button named via `aria-labelledby`, so its own `textContent` is
+ * always "" (live 2026-07-30). Every period-switch verify that read the button
+ * therefore saw a BLANK label and threw "cannot be verified". Returns "" when
+ * genuinely unreadable so the callers' fail-loud blank-baseline branch still
+ * fires — this never invents a label.
+ */
+async function readPeriodLabel(page: Page): Promise<string> {
+  const raw = await timecard.payPeriodLabel(page).textContent({ timeout: 5_000 }).catch(() => null);
+  return (raw ?? "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Step the moment-picker calendar to `target`'s month/year by clicking the
+ * Previous/Next-month arrows, re-reading the header each step so it converges
+ * even if a click is dropped. Bounded (24 steps) so a stuck header can't spin
+ * forever. Best-effort: a failure here is caught by the day-cell click + the
+ * caller's readback verify.
+ */
+async function navigateCalendarToMonth(page: Page, target: ParsedDate): Promise<void> {
+  const want = monthOrdinal(target.year, target.monthIndex);
+  for (let i = 0; i < 24; i++) {
+    const headerText = ((await timecard.calendarMonthHeader(page).textContent()) ?? "").trim();
+    const current = parseCalendarHeaderOrdinal(headerText);
+    if (current === want) return;
+    if (current === null) {
+      if (i < 5) { await page.waitForTimeout(CALENDAR_SETTLE_MS); continue; } // header not rendered yet
+      return; // genuinely unparseable — let the readback verify fail loud
+    }
+    const arrow = want < current
+      ? timecard.calendarPrevMonth(page)
+      : timecard.calendarNextMonth(page);
+    await arrow.click({ timeout: 5_000 });
+    // Wait for the header to actually MOVE off `current` rather than sleeping a
+    // flat guess — a dropped/slow month step otherwise burns a loop iteration
+    // and can overshoot once the click lands late (the "jamming" mode).
+    await waitForCalendarHeaderChange(page, current);
+  }
+}
+
+/**
+ * Poll the moment-picker header until it no longer reads `fromOrdinal` (i.e.
+ * the month step landed), bounded by `CALENDAR_STEP_TIMEOUT_MS`. Best-effort:
+ * on timeout we return and let the loop re-read/re-step, and the caller's
+ * readback verify is the real gate.
+ */
+async function waitForCalendarHeaderChange(page: Page, fromOrdinal: number): Promise<void> {
+  const deadline = Date.now() + CALENDAR_STEP_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(CALENDAR_POLL_MS);
+    const text = ((await timecard.calendarMonthHeader(page).textContent().catch(() => "")) ?? "").trim();
+    const now = parseCalendarHeaderOrdinal(text);
+    if (now !== null && now !== fromOrdinal) return;
+  }
+}
+
+/**
+ * Fallback for `setRangeDate`: drive the visible moment-picker calendar instead
+ * of the native input. Focuses the field (binds the shared calendar to it),
+ * steps to the target month, then clicks the day cell by its full-date
+ * aria-label (weekday-agnostic, `:not(.out-of-month)` so an adjacent-month
+ * trailing day can't be hit). No readback here — the caller verifies.
+ */
+async function pickRangeDateViaCalendar(
+  page: Page,
+  input: Locator,
+  target: ParsedDate,
+): Promise<void> {
+  await input.click({ timeout: 5_000 });
+  // The shared calendar re-binds to the clicked field on focus; give the
+  // Angular digest room before reading the header (live 2026-07-30: clicking
+  // the end field does NOT re-sync the grid to that field's month, so the
+  // month navigator below must start from whatever is on screen).
+  await page.waitForTimeout(CALENDAR_BIND_MS);
+  await navigateCalendarToMonth(page, target);
+  await timecard
+    .calendarDayCell(page, calendarDayLabelPattern(target))
+    .first()
+    .click({ timeout: 5_000 });
+  await page.waitForTimeout(CALENDAR_SETTLE_MS);
+}
+
+/**
+ * Set ONE of WFD's "Select range" date fields and VERIFY the readback.
+ *
+ * The field is **DUAL-MODE** — the live DOM is
+ * `<input ng-attr-type="{{rangeInput.useNativeDateInput ? 'date' : 'text'}}"
+ *  ng-model="rangeInput.useNativeDateInput ? rangeInput.isoStartDate
+ *            : rangeInput.formattedStartDate">`
+ * so the SAME id is a native date input on some renders and an Angular-managed
+ * masked TEXT input on others. Both prior models of this field were half-right,
+ * and each broke the other mode:
+ *   - native mode: `.value` is ISO, `fill(iso)` sticks;
+ *   - text mode:   `.value` is locale `M/D/YYYY`, keystrokes go through
+ *     `ng-keydown → rangeInput.handleKeydown`, and a programmatic `fill()` of
+ *     EITHER format is wiped by the next Angular digest (live-proven
+ *     2026-07-30: filling `2026-05-10` and `05/10/2026` both reverted to
+ *     `07/30/2026`).
+ *
+ * Strategy, by mode:
+ *   1. NATIVE — `fill()` the ISO string (fast path), then verify.
+ *   2. TEXT (or unknown) — go straight to the moment-picker calendar. It drives
+ *      the widget's own model, so it is the ONE path that works in both modes.
+ *   3. Verify by CALENDAR DATE (`normalizeRangeDateReadback`), not string
+ *      equality — text mode reads back `5/10/2026`, native reads `2026-05-10`,
+ *      and WFD does not pad consistently even between its own two fields. The
+ *      2026-07-30 production abort was exactly this: the calendar had ALREADY
+ *      set the right day and the ISO string compare rejected it.
+ *   4. FAIL LOUD if the field still isn't the wanted day, rather than applying
+ *      a wrong timecard window.
+ */
+async function setRangeDate(page: Page, input: Locator, dateStr: string, label: string): Promise<void> {
+  const target = parseMmddyyyy(dateStr);
+  const wantIso = toIsoDate(dateStr);
+  const mode = await rangeInputMode(input);
+
+  if (mode === "date") {
+    try {
+      await input.fill(wantIso, { timeout: 5_000 });
+    } catch {
+      // Native fill rejected outright — fall through to the calendar.
+    }
+    if (await rangeDateSettlesTo(input, wantIso)) return;
+    log.warn(
+      `[New Kronos] ${label} date fill did not stick (native mode) — picking ${dateStr} via the calendar grid`,
+    );
+  } else {
+    // Text mode: a programmatic fill is provably wiped by the Angular digest,
+    // so don't waste a round trip (or leave a dirty half-set value) on it.
+    log.step(`[New Kronos] ${label} date: setting ${dateStr} via the calendar grid (text-mode field)`);
+  }
+
+  await pickRangeDateViaCalendar(page, input, target);
+  if (await rangeDateSettlesTo(input, wantIso)) return;
+
+  const after = await input.inputValue().catch(() => "");
+  throw new Error(
+    `[New Kronos] Could not set ${label} date to ${dateStr} — the field reads `
+    + `"${after || "<empty>"}" (normalized `
+    + `"${normalizeRangeDateReadback(after) ?? "<unparseable>"}", wanted ${wantIso}; `
+    + `input mode "${mode}"). Aborting before applying a wrong timecard window (WFP-00889).`,
+  );
+}
+
+/**
+ * Which mode the dual-mode range field is currently rendering in. Read from the
+ * resolved `type` attribute — `ng-attr-type` has already been evaluated by the
+ * time the picker is open. `"unknown"` (attribute missing/unreadable) is
+ * treated as text mode by the caller, i.e. it takes the calendar path that
+ * works in BOTH modes — never a guess about the value format.
+ */
+async function rangeInputMode(input: Locator): Promise<"date" | "text" | "unknown"> {
+  const type = await input.getAttribute("type").catch(() => null);
+  if (type === "date") return "date";
+  if (type === "text") return "text";
+  return "unknown";
+}
+
+/**
+ * Poll the field until it reads the wanted DAY (in either mode's spelling),
+ * bounded by `RANGE_READBACK_TIMEOUT_MS`. Polling rather than a single read is
+ * what stops the Angular digest from racing the verify — the old code read once
+ * a fixed 300ms after the click, which is the "jam and error out" window.
+ */
+async function rangeDateSettlesTo(input: Locator, wantIso: string): Promise<boolean> {
+  const deadline = Date.now() + RANGE_READBACK_TIMEOUT_MS;
+  for (;;) {
+    const raw = await input.inputValue().catch(() => "");
+    if (normalizeRangeDateReadback(raw) === wantIso) return true;
+    if (Date.now() >= deadline) return false;
+    await input.page().waitForTimeout(RANGE_READBACK_POLL_MS);
+  }
+}
+
+/**
+ * Set a custom date range on the New Kronos timecard view.
+ * Must be called after navigating to the Timecards page.
+ *
+ * Mapped via playwright-cli 2026-04-06; dual-mode rework 2026-07-30 (live DOM
+ * proved the fields are `ng-attr-type`-switched between `date` and `text`):
+ *   1. Click "Current Pay Period" button → opens the timeframe dropdown
+ *   2. Click "Select range" → reveals the Start/End date inputs + calendar
+ *   3. `setRangeDate` each field: mode-aware set (native ISO `fill()` fast path
+ *      / calendar grid for text mode) → polled calendar-date readback verify
+ *      (fail loud), see `setRangeDate`
+ *   4. Click "Apply"
+ *
+ * After applying, the button text changes from "Current Pay Period"
+ * to the date range string (e.g., "3/01/2026 - 4/15/2026").
+ */
+export async function setDateRange(
+  page: Page,
+  startDate: string,
+  endDate: string,
+): Promise<void> {
+  log.step(`[New Kronos] Setting date range: ${startDate} – ${endDate}`);
+
+  // Positive-assert baseline (read BEFORE any interaction): the active-period
+  // LABEL now is the comparison point for the post-Apply readback below. Read
+  // via `readPeriodLabel`, not the icon-only trigger button (empty textContent).
+  const beforeLabel = await readPeriodLabel(page);
+
+  // Step 1: Click the timeframe button to open the dropdown
+  // The button text varies: "Current Pay Period", "Previous Pay Period", or a date range string
+  await safeClick(timecard.payPeriodTriggerButton(page), {
+    timeout: 10_000,
+    label: "new kronos pay period trigger button",
+  });
+  await page.waitForTimeout(PICKER_OPEN_MS);
+
+  // Step 2: Click "Select range" to switch to custom date range mode
+  await safeClick(timecard.selectRangeButton(page), {
+    timeout: 5_000,
+    label: "new kronos select range button",
+  });
+  await page.waitForTimeout(PICKER_RANGE_MS);
+
+  // The fields render a beat after the panel does; wait for the one we touch
+  // first to be actually interactive rather than trusting the settle above.
+  await timecard
+    .startDateInput(page)
+    .waitFor({ state: "visible", timeout: 10_000 })
+    .catch(() => {
+      /* Not visible yet — setRangeDate's own click/readback reports it loudly. */
+    });
+
+  // DEBUG (DEBUG_SCREENSHOTS=1): capture the open picker's DOM (kept while the
+  // native-input + calendar-grid path is verified live; remove once stable).
+  await dumpDatePickerStructure(page, "open");
+
+  // Step 3: Set + verify each date input (mode-aware; see `setRangeDate`).
+  // Both fields are set BEFORE Apply, and each verifies its own readback, so a
+  // half-set range can never reach the grid.
+  await setRangeDate(page, timecard.startDateInput(page), startDate, "start");
+  await setRangeDate(page, timecard.endDateInput(page), endDate, "end");
+
+  // Setting the end date can nudge the start field (the widget auto-advances
+  // between the two tabs), so re-verify the start still holds the wanted day
+  // before Apply — otherwise a silently-reset start applies a wrong window.
+  if (!(await rangeDateSettlesTo(timecard.startDateInput(page), toIsoDate(startDate)))) {
+    const drifted = await timecard.startDateInput(page).inputValue().catch(() => "");
+    throw new Error(
+      `[New Kronos] Start date drifted to "${drifted || "<empty>"}" after setting the end date `
+      + `(wanted ${startDate}) — refusing to Apply a wrong timecard window (WFP-00889).`,
+    );
+  }
+
+  // Step 4: Click Apply
+  await safeClick(timecard.applyButton(page), {
+    timeout: 5_000,
+    label: "new kronos date range apply button",
+  });
+  // Wait for WFD to reload the timecard grid with the new range.
+  await page.waitForTimeout(PICKER_APPLY_MS);
+
+  // Positive assert: `setRangeDate`'s readback above only proves the DIALOG
+  // fields accepted the ISO dates — it does not prove the underlying timecard
+  // grid actually switched to that range before a caller (e.g.
+  // `getSeparationTimecardData`) reads it. Re-read the same trigger-button
+  // selector used to open the dropdown (it always displays the active
+  // period) and fail loud if it still shows the PRE-switch label, so a grid
+  // that silently stayed on the OLD period is never read as though the
+  // requested range is active.
+  const afterLabel = await readPeriodLabel(page);
+  if (!didPeriodLabelSwitch(beforeLabel, afterLabel)) {
+    const detail = beforeLabel.trim()
+      ? `did not update the displayed period (before="${beforeLabel}", after="${afterLabel}")`
+      : `cannot be verified — the pre-Apply period label could not be read ` +
+        `(before is blank, after="${afterLabel}")`;
+    throw new Error(
+      `[New Kronos] Date range Apply ${detail} for ${startDate}–${endDate} — ` +
+      `refusing to read the timecard grid as though the new range is active`,
+    );
+  }
+
+  log.step(`[New Kronos] Date range applied (now showing "${afterLabel}")`);
+}
+
+/**
+ * Close the Employee Search sidebar if it's open.
+ */
+export async function closeEmployeeSearch(page: Page): Promise<void> {
+  // The sidebar may be in the portal-frame iframe OR top-level — try both
+  // close buttons (best-effort; the sidebar may simply not be open).
+  for (const root of [searchFrame(page), page] as SearchRoot[]) {
+    try {
+      const closeBtn = searchSelectors.closeButton(root);
+      if (await clickIfPresent(closeBtn, { timeout: 2_000, label: "new kronos search sidebar close button" })) {
+        log.step("[New Kronos] Search sidebar closed");
+        return;
+      }
+    } catch {
+      // Not in this context — try the next.
+    }
+  }
+}
+
+// ─── People page navigation (Pay Rule editing) ───────────────────────────
+//
+// Used by the Kronos Pay Rule workflow to navigate an employee to the People
+// page, expand the Timekeeper section, add/modify their pay rule, and save.
+// Follows the same selector + condition-based waiting patterns as the
+// timecard navigation above.
+
+/**
+ * True when the People editor's loaded-employee header (`.empName`, title
+ * "<Name> <EID>") shows the searched EID. Whole-page text is NOT a valid signal
+ * — the searched EID lingers in the global Employee Search box/results, so a
+ * `document.body` check false-positived while the editor still displayed the
+ * PREVIOUS employee (live 2026-07-02: batch item 2 for EID 10090035 reported
+ * "already open" while `#empNav`/`.empName` still showed Kosogotaz 10090114, so
+ * the pay rule was re-added to the previous person). Word-boundary match so an
+ * 8-digit EID can't partially match a longer number. Exported for unit tests.
+ */
+export function peopleHeaderShowsEid(headerText: string, eid: string): boolean {
+  // Word-boundary match via the shared identity primitive so an 8-digit EID
+  // can't partially match a longer number.
+  return checkDisplayedIdentity(eid, headerText).ok;
+}
+
+/**
+ * One pass over the People editor's `.empName` headers: does any show `eid`?
+ * Also captures the 8-digit id actually shown when it does NOT match, so a
+ * caller can fail loud naming the wrong person. Shared by
+ * {@link waitForPeopleEmployee} and {@link verifyPeopleEmployee} so the
+ * header-reading logic lives in one place.
+ */
+async function scanPeopleHeaders(
+  root: PeopleRoot,
+  eid: string,
+): Promise<{ matched: boolean; shownEid: string | null }> {
+  const headers = people.loadedEmployeeName(root);
+  const count = await headers.count().catch(() => 0);
+  let shownEid: string | null = null;
+  for (let i = 0; i < count; i++) {
+    const cell = headers.nth(i);
+    const title = (await cell.getAttribute("title").catch(() => null)) ?? "";
+    const text = (await cell.textContent().catch(() => null)) ?? "";
+    const combined = `${title} ${text}`;
+    if (peopleHeaderShowsEid(combined, eid)) return { matched: true, shownEid: eid };
+    const m = combined.match(/\b\d{8}\b/);
+    if (m) shownEid = m[0];
+  }
+  return { matched: false, shownEid };
+}
+
+/**
+ * Poll until the People editor (managePeople route) actually DISPLAYS the
+ * searched employee — checked against the editor's OWN `.empName` header, not
+ * whole-page text (see {@link peopleHeaderShowsEid}). When a batch reuses the
+ * same browser session the previous employee's editor stays open, so
+ * `resolvePeopleRoot` truthiness alone is not enough — the header EID must match.
+ */
+async function waitForPeopleEmployee(
+  page: Page,
+  eid: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const root = resolvePeopleRoot(page);
+    if (root && (await scanPeopleHeaders(root, eid)).matched) return true;
+    await page.waitForTimeout(500);
+  }
+  return false;
+}
+
+/**
+ * Confirm the OPEN People editor is displaying the searched employee before we
+ * add a pay rule — a fail-loud identity gate (mirrors `verifyTimecardEmployee`).
+ * Reads the editor's `.empName` header (title "<Name> <EID>"), NOT whole-page
+ * text, so a searched EID lingering in the global Employee Search box can't
+ * false-pass. Returns the 8-digit id actually shown when it does NOT match, so
+ * the caller can fail loud naming the wrong person.
+ */
+export async function verifyPeopleEmployee(
+  page: Page,
+  eid: string,
+): Promise<TimecardEmployeeCheck> {
+  await closeEmployeeSearch(page);
+  const root = resolvePeopleRoot(page);
+  if (!root) return { ok: false, shownEid: null };
+  const deadline = Date.now() + 8_000;
+  let shownEid: string | null = null;
+  while (Date.now() < deadline) {
+    const scan = await scanPeopleHeaders(root, eid);
+    if (scan.matched) return { ok: true, shownEid: eid };
+    if (scan.shownEid) shownEid = scan.shownEid;
+    await page.waitForTimeout(500);
+  }
+  return { ok: false, shownEid };
+}
+
+/**
+ * Click Go To dropdown and select People.
+ * Mirrors `clickGoToTimecard` but targets the People option. After clicking,
+ * waits for the People editor to show the searched EID — not merely for the
+ * managePeople route to exist (batch reuse can leave the route open).
+ */
+export async function clickGoToPeople(page: Page, eid: string): Promise<boolean> {
+  log.step("[New Kronos] Clicking Go To → People...");
+
+  const frame = searchFrame(page);
+  // Go To may render in the search frame OR top-level — poll for whichever
+  // context's button is visible AND ENABLED.
+  const candidates = [
+    goToMenu.goToButtonInFrame(frame).first(),
+    goToMenu.goToButtonOnPage(page).first(),
+  ];
+  let gotoButton: Locator | null = null;
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline && !gotoButton) {
+    for (const loc of candidates) {
+      try {
+        if ((await loc.isVisible()) && (await loc.isEnabled())) {
+          gotoButton = loc;
+          break;
+        }
+      } catch {
+        // Not present in this context — try the next candidate.
+      }
+    }
+    if (!gotoButton) await page.waitForTimeout(500);
+  }
+
+  if (!gotoButton) {
+    log.error(
+      "[New Kronos] Go To button never became enabled — the employee selection " +
+      "did not register (no slat selected), so the People page cannot be opened",
+    );
+    return false;
+  }
+
+  if (await waitForPeopleEmployee(page, eid, 3_000)) {
+    log.success(
+      `[New Kronos] People editor already open for EID ${eid} — slat selection refreshed the page`,
+    );
+    await closeEmployeeSearch(page);
+    return true;
+  }
+
+  // Open the dropdown, then WAIT for the People option to render before clicking.
+  const peopleItem = goToMenu.peopleItem(page);
+  await gotoButton.click({ timeout: 5_000 });
+
+  const totalDeadline = Date.now() + 30_000;
+  let reopened = false;
+  while (Date.now() < totalDeadline) {
+    try {
+      await peopleItem
+        .first()
+        .waitFor({ state: "visible", timeout: reopened ? 6_000 : 5_000 });
+    } catch {
+      if (!reopened) {
+        log.warn("[New Kronos] People option not visible yet — re-opening the Go To dropdown");
+        reopened = true;
+        try {
+          await gotoButton.click({ timeout: 5_000 });
+        } catch {
+          // best-effort re-open
+        }
+        await page.waitForTimeout(500);
+        continue;
+      }
+      if (await waitForPeopleEmployee(page, eid, 5_000)) {
+        log.success(
+          `[New Kronos] People editor switched to EID ${eid} without Go To → People menu item`,
+        );
+        await closeEmployeeSearch(page);
+        return true;
+      }
+      break;
+    }
+
+    try {
+      await safeClick(peopleItem.first(), {
+        timeout: 5_000,
+        label: "new kronos people menu item",
+      });
+    } catch {
+      continue;
+    }
+
+    try {
+      await loadingOverlay.overlay(page).waitFor({ state: "hidden", timeout: 5_000 });
+    } catch {
+      // Overlay absent or selector drift — proceed.
+    }
+
+    if (await waitForPeopleEmployee(page, eid, 15_000)) {
+      log.success(`[New Kronos] Navigated to People page for EID ${eid}`);
+      await closeEmployeeSearch(page);
+      return true;
+    }
+
+    log.warn(
+      `[New Kronos] Go To → People clicked but the editor did not switch to EID ${eid} — retrying`,
+    );
+    try {
+      await gotoButton.click({ timeout: 5_000 });
+    } catch {
+      // best-effort re-open for another attempt
+    }
+    await page.waitForTimeout(500);
+  }
+
+  if (await waitForPeopleEmployee(page, eid, 3_000)) {
+    log.success(`[New Kronos] People editor confirmed for EID ${eid} after menu retries`);
+    await closeEmployeeSearch(page);
+    return true;
+  }
+
+  log.error(
+    `[New Kronos] Could not open the People editor for EID ${eid} ` +
+    `(Go To → People menu or managePeople load did not show the searched employee)`,
+  );
+  return false;
+}
+
+/**
+ * Return New Kronos to the home dashboard so the NEXT batch employee starts from
+ * a known-clean state.
+ *
+ * In a batch the previous employee's People editor stays open after Save, and
+ * once a People editor is open the global Employee Search **Go To → People**
+ * dropdown no longer offers a "People" option — so a stale editor cannot be
+ * switched in place, and the old code false-passed the switch and re-edited the
+ * PREVIOUS person (live 2026-07-02: EID 10090035 kept re-opening while the editor
+ * still showed Kosogotaz 10090114). Navigating home first makes every item run
+ * the same proven fresh-employee flow (search → select → Go To → People);
+ * live-verified 2026-07-02 (10090114 → 10090035 switched cleanly). Retries
+ * transient navigation failures via {@link gotoWithRetry}.
+ */
+export async function resetNewKronosToHome(page: Page): Promise<void> {
+  log.step("[New Kronos] Returning to home dashboard before next employee...");
+  await gotoWithRetry(page, NEW_KRONOS_URL, undefined, undefined, 30_000);
+  await page.waitForTimeout(1_000);
+}
+
+/**
+ * Expand the Timekeeper section on the People page if it's collapsed.
+ * The Timekeeper header is a clickable accordion that toggles the Pay Rule /
+ * Employment Terms tables. Click it if the Pay Rule table is not visible.
+ */
+export async function expandTimekeeperSection(page: Page): Promise<void> {
+  log.step("[New Kronos] Expanding Timekeeper section...");
+
+  const root = peopleFrame(page);
+  const timekeeperHeader = people.timekeeperSection(root);
+  try {
+    await timekeeperHeader.waitFor({ state: "visible", timeout: 45_000 });
+
+    const payRuleVisible = await people
+      .payRuleColumnHeader(root)
+      .isVisible()
+      .catch(() => false);
+
+    if (payRuleVisible) {
+      log.step("[New Kronos] Timekeeper section already expanded");
+      return;
+    }
+
+    await safeClick(timekeeperHeader, {
+      timeout: 5_000,
+      label: "new kronos timekeeper section header",
+    });
+    await people.payRuleColumnHeader(root).waitFor({ state: "visible", timeout: 15_000 });
+    log.step("[New Kronos] Timekeeper section expanded");
+  } catch (err) {
+    throw new Error(
+      `[New Kronos] Timekeeper section did not load on People page: ${String(err)}`,
+      { cause: err },
+    );
+  }
+}
+
+const PAY_RULE_MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+] as const;
+
+function parseUsEffectiveDate(effectiveDate: string): {
+  month: number;
+  day: number;
+  year: number;
+  calendarTitle: string;
+} {
+  const [mm, dd, yyyy] = effectiveDate.split("/").map((part) => Number(part));
+  if (!mm || !dd || !yyyy) {
+    throw new Error(
+      `[New Kronos] Invalid pay-rule effective date "${effectiveDate}" — expected MM/DD/YYYY`,
+    );
+  }
+  return {
+    month: mm,
+    day: dd,
+    year: yyyy,
+    calendarTitle: `${PAY_RULE_MONTH_NAMES[mm - 1]} ${yyyy}`,
+  };
+}
+
+function parseCalendarTitle(title: string): { month: number; year: number } | null {
+  const match = title.trim().match(/^([A-Za-z]+)\s+(\d{4})$/);
+  if (!match) return null;
+  const monthIndex = PAY_RULE_MONTH_NAMES.findIndex(
+    (name) => name.toLowerCase() === match[1].toLowerCase(),
+  );
+  if (monthIndex < 0) return null;
+  return { month: monthIndex + 1, year: Number(match[2]) };
+}
+
+/** True when the pay-rule grid cell text matches MM/DD/YYYY (leading zeros optional). */
+function effectiveDateCommittedInCell(cellText: string, effectiveDate: string): boolean {
+  const { month, day, year } = parseUsEffectiveDate(effectiveDate);
+  const re = new RegExp(`\\b0?${month}\\/0?${day}\\/${year}\\b`);
+  return re.test(cellText.trim());
+}
+
+/**
+ * True when the row1 Pay Rule grid cell now shows the chosen code — the real
+ * signal that the lookup modal's OK committed the selection. Case-insensitive
+ * and whitespace-tolerant because jqx renders the code inside nested spans.
+ * Exported for unit tests (no live page needed).
+ */
+export function payRuleCodeCommittedInCell(cellText: string, payRuleCode: string): boolean {
+  return cellText.trim().toLowerCase().includes(payRuleCode.trim().toLowerCase());
+}
+
+/**
+ * Click `trigger`, then wait for `target` to appear. jqx inline editors
+ * intermittently swallow the FIRST activation click (the cell/icon is hit but
+ * the editor/popup never renders), which otherwise turns a transient miss into
+ * a hard 10s `waitFor` timeout and fails the whole run. Re-click the SAME
+ * trigger up to `attempts` times (re-running the same operation — allowed under
+ * the fail-loud rule; NOT a substitute selector) before throwing a legible
+ * error. Each attempt waits `perAttemptMs` for the target.
+ */
+async function clickToReveal(
+  trigger: Locator,
+  target: Locator,
+  opts: { label: string; attempts?: number; perAttemptMs?: number },
+): Promise<void> {
+  const { label, attempts = 3, perAttemptMs = 6_000 } = opts;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    await safeClick(trigger, { timeout: 10_000, label });
+    try {
+      await target.waitFor({ state: "visible", timeout: perAttemptMs });
+      return;
+    } catch {
+      if (attempt < attempts) {
+        log.warn(
+          `[New Kronos] ${label}: target not visible after click (attempt ${attempt}/${attempts}) — retrying`,
+        );
+        continue;
+      }
+      throw new Error(
+        `[New Kronos] ${label}: element did not appear after ${attempts} click attempts`,
+      );
+    }
+  }
+}
+
+/**
+ * Confirm the pay-rule lookup selection: click the matching result row, click
+ * OK, and verify the chosen code actually committed to the row1 grid cell.
+ *
+ * The raw OK affordance is a jqx button clicked via `evaluate(el.click())`
+ * (verified 2026-07-02 — a Playwright click on it was unreliable). A single
+ * `el.click()` intermittently fails to register, leaving the modal open and the
+ * grid cell empty; the previous code then hit a hard 10s modal-hidden timeout
+ * with no retry (observed live 2026-07-02, EID 10090035). Here we retry the
+ * row-select + OK and gate success on the CODE landing in the grid — not merely
+ * on the modal closing — so we never Save an empty/wrong pay rule.
+ */
+async function confirmPayRuleSelection(
+  root: PeopleRoot,
+  payRuleCode: string,
+): Promise<void> {
+  const resultRow = people.payRuleSearchResultRow(root, payRuleCode);
+  const codeCell = people.payRuleCodeCell(root);
+  const modal = people.payRuleSearchModal(root);
+
+  const attempts = 3;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    // Re-select the row + OK while the lookup is still open (a missed OK leaves
+    // the result row visible). Once OK commits, the row disappears and the code
+    // poll below carries us out — so a stale row here just means "click again".
+    if (await resultRow.isVisible().catch(() => false)) {
+      await safeClick(resultRow, {
+        timeout: 15_000,
+        label: "new kronos pay rule search result row",
+      });
+      await people.payRuleSearchOk(root).evaluate((el) => (el as HTMLElement).click());
+    }
+
+    // Success is the CODE committed to the grid — the actual goal — polled to a
+    // short deadline so a missed click retries fast instead of stalling 10s.
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const cellText = await codeCell.innerText().catch(() => "");
+      if (payRuleCodeCommittedInCell(cellText, payRuleCode)) {
+        // Best-effort: let the modal finish closing before the next step.
+        await modal.waitFor({ state: "hidden", timeout: 5_000 }).catch(() => {});
+        log.step(`[New Kronos] Pay rule ${payRuleCode} committed to grid`);
+        return;
+      }
+      await root.waitForTimeout(250);
+    }
+
+    if (attempt < attempts) {
+      log.warn(
+        `[New Kronos] Pay rule ${payRuleCode} not committed after OK (attempt ${attempt}/${attempts}) — retrying`,
+      );
+    }
+  }
+
+  const finalCell = (await codeCell.innerText().catch(() => "")).trim();
+  throw new Error(
+    `[New Kronos] Pay rule ${payRuleCode} did not commit to the grid after ${attempts} OK attempts — ` +
+    `cell="${finalCell || "(blank)"}". Aborting before Save so no empty/wrong pay rule is persisted.`,
+  );
+}
+
+/** Pick an effective date via the inline editor's calendar icon (not typed entry). */
+async function setPayRuleEffectiveDateViaCalendar(
+  root: PeopleRoot,
+  effectiveDate: string,
+): Promise<void> {
+  const { day, calendarTitle } = parseUsEffectiveDate(effectiveDate);
+
+  // Each jqx open (cell → inline editor, calendar icon → picker) retries the
+  // click if the popup doesn't render — a single swallowed click otherwise
+  // stalls the full 10s before failing loud.
+  await clickToReveal(
+    people.effectiveDateCell(root),
+    people.effectiveDateEditor(root),
+    { label: "new kronos pay rule effective date cell" },
+  );
+  await clickToReveal(
+    people.effectiveDateCalendarButton(root),
+    people.payRuleDatePicker(root),
+    { label: "new kronos pay rule effective date calendar icon" },
+  );
+
+  const titleLoc = people.payRuleDatePickerTitle(root);
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const current = (await titleLoc.textContent())?.trim() ?? "";
+    if (current === calendarTitle) break;
+
+    const currentParts = parseCalendarTitle(current);
+    const targetParts = parseCalendarTitle(calendarTitle);
+    if (!currentParts || !targetParts) {
+      throw new Error(`[New Kronos] Could not parse pay-rule calendar title "${current}"`);
+    }
+
+    const currentIndex = currentParts.year * 12 + currentParts.month;
+    const targetIndex = targetParts.year * 12 + targetParts.month;
+    if (currentIndex === targetIndex) break;
+
+    if (currentIndex > targetIndex) {
+      await safeClick(people.payRuleDatePickerPrevMonth(root), {
+        timeout: 5_000,
+        label: "new kronos pay rule calendar prev month",
+      });
+    } else {
+      await safeClick(people.payRuleDatePickerNextMonth(root), {
+        timeout: 5_000,
+        label: "new kronos pay rule calendar next month",
+      });
+    }
+  }
+
+  const finalTitle = (await titleLoc.textContent())?.trim() ?? "";
+  if (finalTitle !== calendarTitle) {
+    throw new Error(
+      `[New Kronos] Pay-rule calendar stuck on "${finalTitle}" — expected "${calendarTitle}"`,
+    );
+  }
+
+  await safeClick(people.payRuleDatePickerDay(root, day), {
+    timeout: 10_000,
+    label: `new kronos pay rule effective date day ${day}`,
+  });
+
+  // jqx keeps the picked date in the inline input until Enter commits it to the grid cell
+  // (live 2026-07-02 — day click alone leaves the Effective Date column blank on Save).
+  await people.effectiveDateInput(root).press("Enter");
+
+  const commitDeadline = Date.now() + 5_000;
+  while (Date.now() < commitDeadline) {
+    const cellText = await people.effectiveDateCell(root).innerText();
+    if (effectiveDateCommittedInCell(cellText, effectiveDate)) {
+      log.step(`[New Kronos] Effective date committed to grid: ${cellText.trim()}`);
+      return;
+    }
+    await root.waitForTimeout(200);
+  }
+
+  const cellText = (await people.effectiveDateCell(root).innerText()).trim();
+  throw new Error(
+    `[New Kronos] Effective date calendar pick did not commit to the pay-rule grid — ` +
+    `expected ${effectiveDate}, cell="${cellText || "(blank)"}"`,
+  );
+}
+
+/**
+ * Add a new pay rule entry on the People → Timekeeper page.
+ *
+ * Flow (from the user's screenshots):
+ *   1. Click on the empty row / "+" button below existing pay rules
+ *   2. Click the search icon in the pay rule cell
+ *   3. Type the pay rule code in the search dialog
+ *   4. Click Search, then select the result
+ *   5. Set the effective date
+ *
+ * @param page - Playwright page on the People view
+ * @param payRuleCode - The full pay rule code (e.g. "SX-8Hol-8-OT-30")
+ * @param effectiveDate - MM/DD/YYYY format (e.g. "07/01/2026")
+ */
+export async function addPayRule(
+  page: Page,
+  payRuleCode: string,
+  effectiveDate: string,
+): Promise<void> {
+  log.step(`[New Kronos] Adding pay rule: ${payRuleCode} effective ${effectiveDate}`);
+
+  await closeEmployeeSearch(page);
+  const root = peopleFrame(page);
+
+  const emptyCell = people.payRuleEmptyCell(root);
+  try {
+    await safeClick(emptyCell, {
+      timeout: 10_000,
+      label: "new kronos pay rule empty cell",
+    });
+  } catch {
+    log.step("[New Kronos] Empty cell not found — clicking '+' to add new pay rule row");
+    await safeClick(people.payRuleAddButton(root), {
+      timeout: 10_000,
+      label: "new kronos pay rule add button",
+    });
+    await safeClick(people.payRuleEmptyCell(root), {
+      timeout: 10_000,
+      label: "new kronos pay rule empty cell (after add)",
+    });
+  }
+
+  await people.payRuleDropdownList(root).waitFor({ state: "attached", timeout: 15_000 });
+  // jqx dropdown Search affordance sits in a hidden popup shell — DOM click.
+  await people.payRuleSearchOption(root).evaluate((el) => (el as HTMLElement).click());
+  await people.payRuleSearchInput(root).waitFor({ state: "visible", timeout: 15_000 });
+
+  await safeFill(people.payRuleSearchInput(root), payRuleCode, {
+    timeout: 15_000,
+    label: "new kronos pay rule search input",
+  });
+
+  const resultRow = people.payRuleSearchResultRow(root, payRuleCode);
+  await resultRow.waitFor({ state: "visible", timeout: 15_000 });
+
+  // Select the row + OK, retrying the click and gating on the code committing
+  // to the grid (a single OK click intermittently no-ops — see the helper).
+  await confirmPayRuleSelection(root, payRuleCode);
+
+  await setPayRuleEffectiveDateViaCalendar(root, effectiveDate);
+
+  log.step(`[New Kronos] Pay rule ${payRuleCode} entered with effective date ${effectiveDate}`);
+}
+
+/**
+ * Click the Save button on the People page (top right) and VERIFY the save
+ * committed before reporting success.
+ *
+ * The readback contract (live-verified 2026-07-04, EID 10090026, read-only
+ * probe `scripts/verify-kronos-save-state.ts`): with no pending edits the Save
+ * button carries a native `disabled` attribute; editing enables it. A committed
+ * save returns the editor to the no-pending-edits state, so the button must
+ * read DISABLED again. If it stays enabled past the deadline (validation error
+ * dialog, rejected save, network hang), the edits are still pending — fail loud
+ * instead of stamping a payroll row "Updated" for a save that never landed.
+ */
+export async function savePersonRecord(page: Page): Promise<void> {
+  log.step("[New Kronos] Saving person record...");
+
+  const root = peopleFrame(page);
+  const saveButton = people.saveButton(root);
+  await safeClick(saveButton, {
+    timeout: 5_000,
+    label: "new kronos save button",
+  });
+
+  // Wait for save to complete — the loading overlay should appear then disappear.
+  try {
+    await loadingOverlay.overlay(page).waitFor({ state: "visible", timeout: 3_000 });
+  } catch {
+    // Overlay may not appear (fast save) — continue.
+  }
+  try {
+    await loadingOverlay.overlay(page).waitFor({ state: "hidden", timeout: 15_000 });
+  } catch {
+    // Overlay may have already cleared — continue.
+  }
+
+  // Fail-loud commit readback: poll for the Save button returning to its
+  // native-`disabled` no-pending-edits state.
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const enabled = await saveButton.isEnabled().catch(() => null);
+    if (enabled === false) {
+      log.success("[New Kronos] Person record saved (Save button returned to disabled)");
+      return;
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error(
+    "[New Kronos] Save button is still enabled 20s after clicking Save — the edits are " +
+      "still pending (validation error or rejected save), so the pay rule was NOT persisted. " +
+      "Refusing to report the person record as saved.",
+  );
+}

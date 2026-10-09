@@ -1,0 +1,379 @@
+import type { Page } from "playwright";
+import { log } from "../../utils/log.js";
+import { dismissPeopleSoftModalMask } from "../common/modal.js";
+import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
+import { emergencyContact } from "./selectors.js";
+import { normalizePersonNameForCompare } from "../../domain/identity/person-name.js";
+
+/**
+ * UCPath standalone Emergency Contact component.
+ *
+ * Using `uc_deep_link=1` opens the page WITHOUT the HR Tasks Activity Guide
+ * iframe wrapper — form refs land at the page's top level, so no
+ * `getContentFrame()` is needed.
+ */
+export const EMERGENCY_CONTACT_URL =
+  "https://ucphrprdpub.universityofcalifornia.edu/psc/ucphrprd/EMPLOYEE/HRMS/c/ADMINISTER_WORKFORCE_(GBL).EMERGENCY_CONTACT.GBL?NavColl=true&uc_deep_link=1";
+
+/**
+ * Open the Emergency Contact editor for a specific employee.
+ *
+ * Verified 2026-04-14 (EID 10090300 Kelsey Bezok):
+ *   - Direct URL with uc_deep_link=1 loads outside the HR Tasks iframe
+ *   - Empl ID textbox + Search button live at top-level `page`
+ *   - After Search, the editor renders in-place showing row 1 of N contacts
+ *
+ * Returns the Page — all subsequent field interactions use `page.getByRole(...)`.
+ */
+export async function navigateToEmergencyContact(
+  page: Page,
+  emplId: string,
+): Promise<void> {
+  log.step("Opening Emergency Contact component...");
+  await page.goto(EMERGENCY_CONTACT_URL, {
+    waitUntil: "domcontentloaded",
+    timeout: 30_000,
+  });
+  // networkidle guards the initial page load; sleep was redundant.
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+
+  await dismissPeopleSoftModalMask(page);
+
+  log.step(`Filling Empl ID ${emplId} and searching...`);
+  await safeFill(emergencyContact.emplIdInput(page), emplId, {
+    timeout: 10_000,
+    label: "ucpath emergency contact empl id",
+  });
+
+  await dismissPeopleSoftModalMask(page);
+  await safeClick(emergencyContact.searchButton(page), {
+    timeout: 10_000,
+    label: "ucpath emergency contact search button",
+  });
+
+  await page.waitForTimeout(3_000);
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+
+  // If the employee has no emergency contact AND no record at all,
+  // PeopleSoft shows "No matching values were found."
+  const noMatch = emergencyContact.noMatchMessage(page);
+  if ((await noMatch.count().catch(() => 0)) > 0) {
+    throw new NoExistingContactError(emplId);
+  }
+
+  // Multi-result grid may show a "Drill in" link per row; follow it.
+  const drillIn = emergencyContact.drillInLink(page);
+  if (await clickIfPresent(drillIn, {
+    timeout: 10_000,
+    label: "ucpath emergency contact drill in link",
+  })) {
+    log.step("Clicked Drill in...");
+    // networkidle guards the drill-in navigation; sleep was redundant.
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  }
+
+  log.success(`Emergency Contact editor loaded for Empl ID ${emplId}`);
+}
+
+/**
+ * Read every existing Contact Name textbox on the currently loaded editor.
+ * Used to skip records whose batch contact already exists in UCPath
+ * (duplicate guard).
+ */
+export async function readExistingContactNames(page: Page): Promise<string[]> {
+  try {
+    const names = await emergencyContact.contactNameInputs(page).all();
+    const out: string[] = [];
+    for (const n of names) {
+      const v = await n.inputValue({ timeout: 2_000 }).catch(() => "");
+      if (v.trim()) out.push(v.trim());
+    }
+    return out;
+  } catch (err) {
+    // Fail loud: a genuine read failure must not be indistinguishable from
+    // "this employee has no existing contacts" — that misreading skips the
+    // duplicate guard and can add a duplicate contact record.
+    throw new Error(
+      `readExistingContactNames: failed to read existing Contact Name inputs — ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+}
+
+export class NoExistingContactError extends Error {
+  constructor(public readonly emplId: string) {
+    super(`No existing emergency contact record for Empl ID ${emplId}`);
+    this.name = "NoExistingContactError";
+  }
+}
+
+/**
+ * Demote an existing emergency contact by unchecking its Primary Contact
+ * checkbox, then save. Used by the emergency-contact workflow's fuzzy-
+ * duplicate path: when an existing record's name fuzzily matches the new
+ * contact (e.g. historical typo "Tebifo Livovot" vs new "Tomoko Luvovot"),
+ * we demote the historical entry and add the new contact as primary.
+ *
+ * Idempotent: if the primary is already unchecked, just saves.
+ * Throws if `existingName` doesn't match any row's Contact Name input.
+ *
+ * Caller is expected to be on the Emergency Contact editor (post
+ * `navigateToEmergencyContact`). After the save settles, callers usually
+ * re-navigate via `navigateToEmergencyContact(page, emplId)` so the
+ * subsequent "Add a new row" plan starts from a clean editor state.
+ */
+export async function demoteExistingContact(
+  page: Page,
+  existingName: string,
+): Promise<void> {
+  log.step(`Demoting existing contact "${existingName}"...`);
+
+  await dismissPeopleSoftModalMask(page);
+
+  const nameInputs = await emergencyContact.contactNameInputs(page).all();
+  let targetIndex = -1;
+  for (let i = 0; i < nameInputs.length; i++) {
+    const v = await nameInputs[i].inputValue({ timeout: 2_000 }).catch(() => "");
+    if (v.trim() === existingName.trim()) {
+      targetIndex = i;
+      break;
+    }
+  }
+  if (targetIndex === -1) {
+    throw new Error(
+      `demoteExistingContact: no Contact Name row matched "${existingName}". ` +
+        `Existing rows: [${nameInputs.length} found]`,
+    );
+  }
+
+  const primaryCheckboxes = emergencyContact.primaryContactCheckboxes(page);
+  const cb = primaryCheckboxes.nth(targetIndex);
+  let checked: boolean;
+  try {
+    checked = await cb.isChecked({ timeout: 5_000 });
+  } catch (err) {
+    // Fail loud: a thrown isChecked() must not be silently treated as
+    // "already unchecked" — that would skip the demotion and this function
+    // still reports success, leaving the WRONG contact as Primary.
+    throw new Error(
+      `demoteExistingContact: could not read Primary Contact checkbox state for row ${targetIndex + 1} ("${existingName}") — ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+  if (checked) {
+    await cb.uncheck({ timeout: 5_000 });
+    await page.waitForTimeout(500);
+    log.step(`Unchecked Primary Contact on row ${targetIndex + 1}`);
+  } else {
+    log.step(`Row ${targetIndex + 1} already non-primary — skipping uncheck`);
+  }
+
+  await dismissPeopleSoftModalMask(page);
+  await safeClick(emergencyContact.saveButton(page), {
+    timeout: 10_000,
+    label: "ucpath emergency contact save button",
+  });
+  await page.waitForTimeout(2_000);
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+
+  log.success(`Demoted "${existingName}" — Primary Contact unchecked + saved`);
+}
+
+/** PeopleSoft error when more than one emergency contact row is marked primary. */
+export function isEmergencyContactPrimaryConflictMessage(text: string): boolean {
+  return (
+    /only one emergency contact can be indicated as the primary contact/i.test(text) ||
+    /\(1000,110\)/.test(text)
+  );
+}
+
+async function readVisibleEmergencyContactSaveError(page: Page): Promise<string | null> {
+  const dialog = emergencyContact.messageDialog(page);
+  if (await dialog.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    const text = await dialog.innerText({ timeout: 2_000 }).catch(() => "");
+    return text.trim() || null;
+  }
+  const banner = emergencyContact.saveErrorBanner(page);
+  if (await banner.isVisible({ timeout: 1_000 }).catch(() => false)) {
+    return (await banner.textContent({ timeout: 1_000 }).catch(() => null))?.trim() ?? null;
+  }
+  return null;
+}
+
+async function dismissPeopleSoftMessageDialog(page: Page): Promise<boolean> {
+  await dismissPeopleSoftModalMask(page);
+  const okButton = emergencyContact.messageDialogOkButton(page);
+  if (await okButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await okButton.click({ timeout: 5_000 });
+    await page.waitForTimeout(500);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Click Save on the emergency contact editor and wait for the roundtrip.
+ * Does not inspect success/failure — callers read errors separately.
+ */
+export async function saveEmergencyContactEditor(page: Page): Promise<void> {
+  await dismissPeopleSoftModalMask(page);
+  await safeClick(emergencyContact.saveButton(page), {
+    timeout: 10_000,
+    label: "ucpath emergency contact save button",
+  });
+  await page.waitForTimeout(2_000);
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+}
+
+async function uncheckPrimaryContactAtRow(page: Page, rowIndex: number): Promise<boolean> {
+  const cb = emergencyContact.primaryContactCheckboxes(page).nth(rowIndex);
+  let checked: boolean;
+  try {
+    checked = await cb.isChecked({ timeout: 5_000 });
+  } catch (err) {
+    throw new Error(
+      `uncheckPrimaryContactAtRow: could not read Primary Contact checkbox state for row ${rowIndex + 1} — ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+  if (!checked) return false;
+  await cb.uncheck({ timeout: 5_000 });
+  await page.waitForTimeout(500);
+  log.step(`Unchecked Primary Contact on row ${rowIndex + 1}`);
+  return true;
+}
+
+/**
+ * Uncheck Primary Contact on every row except the kept row/contact.
+ * After "Add a new row at row 1" the new contact is row index 0.
+ */
+export async function demoteOtherPrimaryContacts(
+  page: Page,
+  options: { keepRowIndex?: number; keepContactName?: string } = {},
+): Promise<number> {
+  const keepRowIndex = options.keepRowIndex ?? 0;
+  const keepName = options.keepContactName?.trim();
+  const nameInputs = await emergencyContact.contactNameInputs(page).all();
+  const primaryCheckboxes = emergencyContact.primaryContactCheckboxes(page);
+  let demoted = 0;
+
+  for (let i = 0; i < nameInputs.length; i++) {
+    if (i === keepRowIndex) continue;
+    if (keepName) {
+      const rowName = await nameInputs[i].inputValue({ timeout: 2_000 }).catch(() => "");
+      if (rowName.trim() === keepName) continue;
+    }
+    const cb = primaryCheckboxes.nth(i);
+    let checked: boolean;
+    try {
+      checked = await cb.isChecked({ timeout: 5_000 });
+    } catch (err) {
+      throw new Error(
+        `demoteOtherPrimaryContacts: could not read Primary Contact checkbox state for row ${i + 1} — ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
+    if (!checked) continue;
+    await cb.uncheck({ timeout: 5_000 });
+    await page.waitForTimeout(500);
+    demoted++;
+    log.step(`Unchecked Primary Contact on row ${i + 1}`);
+  }
+  return demoted;
+}
+
+async function uncheckPrimaryContactForName(page: Page, contactName: string): Promise<boolean> {
+  const nameInputs = await emergencyContact.contactNameInputs(page).all();
+  for (let i = 0; i < nameInputs.length; i++) {
+    const rowName = await nameInputs[i].inputValue({ timeout: 2_000 }).catch(() => "");
+    if (rowName.trim() !== contactName.trim()) continue;
+    return uncheckPrimaryContactAtRow(page, i);
+  }
+  return false;
+}
+
+/**
+ * Save the editor; on the "only one primary contact" PeopleSoft error,
+ * dismiss the dialog, uncheck conflicting primary rows, and retry once.
+ *
+ * Recovery order:
+ *   1. Demote every other row's Primary Contact (keep the new contact primary).
+ *   2. If none were demoted, uncheck Primary Contact on the new contact row.
+ */
+export async function saveEmergencyContactWithPrimaryRecovery(
+  page: Page,
+  contactName: string,
+): Promise<void> {
+  await saveEmergencyContactEditor(page);
+
+  let errorText = await readVisibleEmergencyContactSaveError(page);
+  if (!errorText) return;
+  if (!isEmergencyContactPrimaryConflictMessage(errorText)) {
+    throw new Error(`Emergency contact save reported a PeopleSoft error: ${errorText}`);
+  }
+
+  log.step("Primary contact conflict on save — recovering...");
+  await dismissPeopleSoftMessageDialog(page);
+
+  const demoted = await demoteOtherPrimaryContacts(page, {
+    keepRowIndex: 0,
+    keepContactName: contactName,
+  });
+  if (demoted === 0) {
+    log.step(
+      `No other primary contacts demoted — unchecking Primary Contact on "${contactName}"`,
+    );
+    const unchecked = await uncheckPrimaryContactForName(page, contactName);
+    if (!unchecked) {
+      await uncheckPrimaryContactAtRow(page, 0);
+    }
+  }
+
+  await saveEmergencyContactEditor(page);
+  errorText = await readVisibleEmergencyContactSaveError(page);
+  if (errorText) {
+    throw new Error(
+      `Emergency contact save failed after primary-contact recovery: ${errorText}`,
+    );
+  }
+  await assertEmergencyContactPersisted(page, contactName);
+}
+
+/**
+ * POSITIVE proof that the save landed — read the contact name back off the
+ * editor after the save round-trip.
+ *
+ * 2026-08-05: the only post-save check used to be "did an error dialog
+ * appear?", via `emergencyContact.messageDialog` — a selector whose own JSDoc
+ * still says NEEDS LIVE VERIFY. It did not match UCPath's real
+ * "Highlighted fields are required. (15,30)" dialog, so `readVisible…SaveError`
+ * returned null, absence-of-error was read as success, and a record whose save
+ * UCPath had REFUSED was reported `done`. Absence of a signal you cannot prove
+ * you can detect is not evidence. Assert the fact instead: after a genuine
+ * save the row persists and still carries the contact name; when the save was
+ * rejected the required field is blank (or the row is gone) and this throws.
+ */
+async function assertEmergencyContactPersisted(page: Page, contactName: string): Promise<void> {
+  const fields = emergencyContact.contactNameInputs(page);
+  if ((await fields.count()) === 0) {
+    throw new Error(
+      `Emergency contact save could not be confirmed for "${contactName}" — no contact rows are present after Save. ` +
+        `Treating an unconfirmable save as a FAILURE rather than reporting success.`,
+    );
+  }
+  const values = (await fields.allInnerTexts().catch(() => [] as string[])).map((v) => v.trim());
+  const inputValues = await Promise.all(
+    Array.from({ length: await fields.count() }, (_, i) =>
+      fields.nth(i).inputValue({ timeout: 3_000 }).catch(() => ""),
+    ),
+  );
+  const all = [...values, ...inputValues].map((v) => v.trim()).filter(Boolean);
+  const want = normalizePersonNameForCompare(contactName);
+  if (!all.some((v) => normalizePersonNameForCompare(v) === want)) {
+    throw new Error(
+      `Emergency contact save could not be confirmed for "${contactName}" — after Save the editor shows ` +
+        `[${all.join(", ") || "no contact names"}]. UCPath most likely rejected the save. ` +
+        `Failing loud so this is not recorded as a successful write.`,
+    );
+  }
+}

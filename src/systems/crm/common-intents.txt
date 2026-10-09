@@ -1,0 +1,8 @@
+search employee by email
+extract employee record fields
+download iDocs PDF
+navigate to onboarding section
+read department from record
+read pay rate from record
+extract appointment dates
+read hiring supervisor name

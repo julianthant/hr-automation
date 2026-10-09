@@ -1,0 +1,575 @@
+@import "tailwindcss";
+@import "@heroui/styles";
+/* React Flow base styles MUST come after the tailwindcss import (Tailwind v4
+   ordering rule) and never be imported from a .tsx — see the Workflow Graph
+   Editor. We remap its --xy-* variables to our design tokens at the end of this
+   file so the built-in chrome (Background / Controls / MiniMap / handles /
+   default edges) tracks the theme instead of React Flow's stock palette. */
+@import "@xyflow/react/dist/style.css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: hsl(30 28.5714% 97.2549%);
+  --foreground: hsl(12 21.7391% 9.0196%);
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(12 21.7391% 9.0196%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(12 21.7391% 9.0196%);
+  --primary: hsl(22.7273 82.5000% 31.3725%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(21.4286 77.7778% 96.4706%);
+  --secondary-foreground: hsl(21.3158 55.0725% 27.0588%);
+  --muted: hsl(33.3333 25.7143% 93.1373%);
+  --muted-foreground: hsl(22.5000 7.0175% 44.7059%);
+  --accent: hsl(26.6667 69.2308% 87.2549%);
+  --accent-foreground: hsl(21.3158 55.0725% 27.0588%);
+  --destructive: hsl(0 68.3761% 45.8824%);
+  --destructive-foreground: hsl(0 0% 100%);
+  /* Semantic state tokens (audit 2026-06-04) — light. danger == --destructive. */
+  --info: hsl(211 80% 43%);
+  --info-foreground: hsl(0 0% 100%);
+  --success: hsl(142 60% 33%);
+  --success-foreground: hsl(0 0% 100%);
+  --warning: hsl(38 92% 40%);
+  --warning-foreground: hsl(0 0% 100%);
+  /* Categorical log/event accents — distinct hues, theme-managed (light). */
+  --log-cyan: hsl(190 80% 36%);
+  --log-teal: hsl(172 66% 33%);
+  --log-violet: hsl(258 60% 54%);
+  --log-slate: hsl(215 16% 42%);
+  --border: hsl(28.0000 21.1268% 86.0784%);
+  --input: hsl(28.0000 21.1268% 86.0784%);
+  --ring: hsl(22.7273 82.5000% 31.3725%);
+  --chart-1: hsl(22.7273 82.5000% 31.3725%);
+  --chart-2: hsl(25.9649 90.4762% 37.0588%);
+  --chart-3: hsl(17.4725 88.3495% 40.3922%);
+  --chart-4: hsl(35.4545 91.6667% 32.9412%);
+  --chart-5: hsl(31.7647 80.9524% 28.8235%);
+  --sidebar: hsl(33.3333 23.0769% 92.3529%);
+  --sidebar-foreground: hsl(12 21.7391% 9.0196%);
+  --sidebar-primary: hsl(22.7273 82.5000% 31.3725%);
+  --sidebar-primary-foreground: hsl(0 0% 100%);
+  --sidebar-accent: hsl(31.3043 33.3333% 86.4706%);
+  --sidebar-accent-foreground: hsl(21.3158 55.0725% 27.0588%);
+  --sidebar-border: hsl(28.0000 21.1268% 86.0784%);
+  --sidebar-ring: hsl(22.7273 82.5000% 31.3725%);
+  --font-sans: "IBM Plex Sans", "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: "IBM Plex Serif", "Georgia", ui-serif, serif;
+  --font-mono: "IBM Plex Mono", "Fira Code", ui-monospace, monospace;
+  --radius: 0.5rem;
+  --shadow-x: 0;
+  --shadow-y: 1px;
+  --shadow-blur: 3px;
+  --shadow-spread: 0px;
+  --shadow-opacity: 0.06;
+  --shadow-color: #241005;
+  --shadow-2xs: 0 1px 3px 0px hsl(21.2903 75.6098% 8.0392% / 0.03);
+  --shadow-xs: 0 1px 3px 0px hsl(21.2903 75.6098% 8.0392% / 0.03);
+  --shadow-sm: 0 1px 3px 0px hsl(21.2903 75.6098% 8.0392% / 0.06), 0 1px 2px -1px hsl(21.2903 75.6098% 8.0392% / 0.06);
+  --shadow: 0 1px 3px 0px hsl(21.2903 75.6098% 8.0392% / 0.06), 0 1px 2px -1px hsl(21.2903 75.6098% 8.0392% / 0.06);
+  --shadow-md: 0 1px 3px 0px hsl(21.2903 75.6098% 8.0392% / 0.06), 0 2px 4px -1px hsl(21.2903 75.6098% 8.0392% / 0.06);
+  --shadow-lg: 0 1px 3px 0px hsl(21.2903 75.6098% 8.0392% / 0.06), 0 4px 6px -1px hsl(21.2903 75.6098% 8.0392% / 0.06);
+  --shadow-xl: 0 1px 3px 0px hsl(21.2903 75.6098% 8.0392% / 0.06), 0 8px 10px -1px hsl(21.2903 75.6098% 8.0392% / 0.06);
+  --shadow-2xl: 0 1px 3px 0px hsl(21.2903 75.6098% 8.0392% / 0.15);
+  --tracking-normal: 0em;
+  --spacing: 0.25rem;
+}
+
+.dark {
+  /* Neutral near-black retheme (2026-06-04). Unified onto the --capture-*
+     "Editorial Calm" ladder: hue 240, ~4% sat, near-black surfaces, near-
+     white neutral primary, muted-but-legible status hues. The whole
+     dashboard now reads like the capture/run-modal reference. */
+  --background: hsl(240 4% 4%);
+  --foreground: hsl(240 5% 96%);
+  --card: hsl(240 4% 7%);
+  --card-foreground: hsl(240 5% 96%);
+  --popover: hsl(240 4% 8%);
+  --popover-foreground: hsl(240 5% 96%);
+  --primary: hsl(240 5% 90%);
+  --primary-foreground: hsl(240 6% 10%);
+  --secondary: hsl(240 4% 10%);
+  --secondary-foreground: hsl(240 4% 80%);
+  --muted: hsl(240 4% 9%);
+  --muted-foreground: hsl(240 4% 56%);
+  --accent: hsl(240 4% 13%);
+  --accent-foreground: hsl(240 5% 92%);
+  --destructive: hsl(0 58% 62%);
+  --destructive-foreground: hsl(0 0% 98%);
+
+  /* HeroUI component overrides (Calendar, etc.) */
+  --surface: hsl(240 4% 7%);
+  --surface-foreground: hsl(240 5% 96%);
+  --overlay: hsl(240 4% 5%);
+  --overlay-foreground: hsl(240 5% 96%);
+  --default: hsl(240 4% 16%);
+  --default-foreground: hsl(240 5% 92%);
+  --danger: hsl(0 58% 62%);
+  --danger-foreground: hsl(0 0% 98%);
+  --success: hsl(142 48% 55%);
+  --success-foreground: hsl(142 40% 8%);
+  --warning: hsl(38 55% 58%);
+  --warning-foreground: hsl(38 60% 8%);
+  /* Semantic + categorical accents — muted to sit on near-black
+     (audit 2026-06-04, retoned neutral 2026-06-04). Solid text-<token>
+     stays legible (~AA+) on the #0a0a0b background.
+     --success/--warning already defined above; danger == --destructive. */
+  --info: hsl(211 62% 64%);
+  --info-foreground: hsl(211 60% 10%);
+  --log-cyan: hsl(189 58% 58%);
+  --log-teal: hsl(172 44% 54%);
+  --log-violet: hsl(258 55% 72%);
+  --log-slate: hsl(215 16% 60%);
+  --focus: hsl(240 4% 50%);
+  --separator: hsl(240 3% 13%);
+  --scrollbar: hsl(240 4% 30%);
+  --border: hsl(240 3% 14%);
+  --input: hsl(240 4% 16%);
+  --ring: hsl(240 4% 50%);
+  /* Categorical chart ramp: neutral light → muted info/success/warning/violet,
+     derived from the retoned status accents so charts read on-theme. */
+  --chart-1: hsl(240 5% 78%);
+  --chart-2: hsl(211 62% 64%);
+  --chart-3: hsl(142 48% 55%);
+  --chart-4: hsl(38 55% 58%);
+  --chart-5: hsl(258 55% 72%);
+  --sidebar: hsl(240 4% 3%);
+  --sidebar-foreground: hsl(240 4% 80%);
+  --sidebar-primary: hsl(240 5% 90%);
+  --sidebar-primary-foreground: hsl(240 6% 10%);
+  --sidebar-accent: hsl(240 4% 13%);
+  --sidebar-accent-foreground: hsl(240 5% 92%);
+  --sidebar-border: hsl(240 3% 12%);
+  --sidebar-ring: hsl(240 4% 50%);
+  --font-sans: "IBM Plex Sans", "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: "IBM Plex Serif", "Georgia", ui-serif, serif;
+  --font-mono: "IBM Plex Mono", "Fira Code", ui-monospace, monospace;
+  --radius: 0.5rem;
+  --shadow-x: 0;
+  --shadow-y: 1px;
+  --shadow-blur: 4px;
+  --shadow-spread: 0px;
+  --shadow-opacity: 0.4;
+  --shadow-color: #000000;
+  --shadow-2xs: 0 1px 4px 0px hsl(0 100.0000% 0.1961% / 0.20);
+  --shadow-xs: 0 1px 4px 0px hsl(0 100.0000% 0.1961% / 0.20);
+  --shadow-sm: 0 1px 4px 0px hsl(0 100.0000% 0.1961% / 0.40), 0 1px 2px -1px hsl(0 100.0000% 0.1961% / 0.40);
+  --shadow: 0 1px 4px 0px hsl(0 100.0000% 0.1961% / 0.40), 0 1px 2px -1px hsl(0 100.0000% 0.1961% / 0.40);
+  --shadow-md: 0 1px 4px 0px hsl(0 100.0000% 0.1961% / 0.40), 0 2px 4px -1px hsl(0 100.0000% 0.1961% / 0.40);
+  --shadow-lg: 0 1px 4px 0px hsl(0 100.0000% 0.1961% / 0.40), 0 4px 6px -1px hsl(0 100.0000% 0.1961% / 0.40);
+  --shadow-xl: 0 1px 4px 0px hsl(0 100.0000% 0.1961% / 0.40), 0 8px 10px -1px hsl(0 100.0000% 0.1961% / 0.40);
+  --shadow-2xl: 0 1px 4px 0px hsl(0 100.0000% 0.1961% / 1.00);
+}
+
+/* Original dashboard @theme inline block (unchanged) */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-log-cyan: var(--log-cyan);
+  --color-log-teal: var(--log-teal);
+  --color-log-violet: var(--log-violet);
+  --color-log-slate: var(--log-slate);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-serif: var(--font-serif);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow: var(--shadow);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Themed native scrollbars — the consistency net for scroll regions still on
+     native overflow (the virtualized log stream, queue list, etc.). Regions
+     migrated to the Radix `ScrollArea` render their own overlay scrollbar and
+     hide the native one, so these rules don't double up. Token-driven. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--muted-foreground);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@layer components {
+  /* Search history dropdown — fixed width avoids Tailwind arbitrary `w-*` not
+     winning over other layout in some builds; breakpoints mirror QueuePanel. */
+  .dashboard-search-results-panel {
+    box-sizing: border-box;
+    width: 300px;
+  }
+  @media (min-width: 1440px) {
+    .dashboard-search-results-panel {
+      width: 380px;
+    }
+  }
+  @media (min-width: 1536px) {
+    .dashboard-search-results-panel {
+      width: 460px;
+    }
+  }
+
+  /* Shared input style for the prep review pane forms (EcReviewForm,
+     OathReviewForm). Tighter than the search input — these grids are
+     dense and the operator scans many fields per record. */
+  .form-input {
+    @apply h-8 w-full rounded-md border border-border bg-secondary px-2.5 text-sm text-foreground;
+    @apply outline-none focus:border-primary;
+  }
+}
+
+/* HeroUI Calendar dark mode fixes
+   HeroUI uses --accent for interactive (today, selected) and --muted for subdued text.
+   Our shadcn theme uses these differently, so we scope overrides to the calendar. */
+.dark .calendar {
+  --accent: hsl(240 5% 90%);
+  --accent-foreground: hsl(240 6% 10%);
+  --muted: hsl(240 4% 56%);
+  --default: hsl(240 4% 16%);
+  --default-foreground: hsl(240 5% 92%);
+}
+.dark .calendar__nav-button {
+  color: hsl(240 5% 92%);
+}
+.dark .calendar__nav-button:hover {
+  background: hsl(240 4% 16%);
+}
+.dark .calendar__header-cell {
+  color: hsl(240 4% 56%);
+}
+
+/* ========================================================================
+   Capture surface tokens
+   ========================================================================
+   Realigned 2026-04-29 to derive from the dashboard's warm-dark theme
+   tokens instead of the previous self-contained cool slate (#020617 etc.).
+   The capture modal now inherits the same surface tones as the rest of
+   the dashboard — operators see one cohesive aesthetic rather than the
+   modal feeling like a transplant from another product. Semantic colors
+   (success/warn/error) keep their canonical meanings but are tuned to
+   sit comfortably alongside the warm-dark palette: warmer reds, slightly
+   desaturated greens, and an amber that matches the dashboard's primary.
+
+   The HSL component values mirror the dashboard's `.dark` block above —
+   small tweaks (a deeper raised-hi, a slightly stronger border-strong)
+   keep elevation legible inside the modal. */
+:root {
+  /* Capture surfaces — Editorial Calm system (2026-04-30).
+     Neutral dark grayscale. No chromatic accents for "good" states.
+     Outlined CTAs only. Token names retained from the previous warm-
+     brown palette so existing component code keeps compiling; values
+     reset to the neutral system per docs/superpowers/specs/
+     2026-04-30-capture-and-run-modal-redesign-design.md §6. */
+  --capture-bg-page: hsl(240 4% 4%);            /* #050507 */
+  --capture-bg-modal: hsl(240 4% 7%);           /* #0e0e10 */
+  --capture-bg-raised: hsl(240 4% 9%);          /* #131316 */
+  --capture-bg-raised-hi: hsl(240 4% 12%);      /* #1c1c1f */
+  --capture-border-subtle: hsl(240 3% 14%);     /* #232325 */
+  --capture-border-strong: hsl(240 4% 18%);     /* #2c2c2e */
+  --capture-border-cta: hsl(240 4% 28%);        /* #4a4a4c — primary outline */
+  --capture-border-cta-strong: hsl(240 4% 42%); /* #6a6a6c — primary outline (brighter) */
+
+  --capture-fg-primary: hsl(240 5% 96%);        /* #f5f5f7 */
+  --capture-fg-secondary: hsl(240 4% 80%);      /* #c8c8cb */
+  --capture-fg-body: hsl(240 4% 82%);           /* #d0d0d3 */
+  --capture-fg-muted: hsl(240 4% 54%);          /* #8a8a8c */
+  --capture-fg-faint: hsl(240 4% 44%);          /* #6e6e72 */
+
+  /* Warm + error reduced to single-color hairline use only.
+     No -bg / -fg variants — backgrounds are no longer tinted. */
+  --capture-warn: hsl(38 50% 56%);              /* #d4a64a */
+  --capture-error: hsl(0 50% 56%);              /* #d4544a */
+
+  --capture-focus-ring: hsl(240 4% 42%);        /* matches border-cta-strong */
+
+  /* Easings — motion language unchanged. */
+  --cap-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --cap-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --cap-ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --cap-ease-smooth: cubic-bezier(0.45, 0, 0.55, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-drawer { transition: none !important; }
+}
+
+/* Workflow Modifier blueprint canvas — faint engineering grid-paper behind the
+   plates. Dot color is the theme border token, so it tracks light/dark. */
+.blueprint-grid {
+  background-image: radial-gradient(var(--border) 1px, transparent 0);
+  background-size: 22px 22px;
+  background-position: -1px -1px;
+}
+
+/* Workflow Graph Editor — remap React Flow's stock --xy-* palette to our design
+   tokens so the canvas chrome (background, default handles/edges, Controls &
+   MiniMap panels) reads as part of the dark monochrome theme. Custom node/edge
+   visuals are owned by their components' Tailwind token classes; these defaults
+   cover the built-in elements we don't fully replace. Token refs only — no raw
+   color, no keyframes (architecture-guarded). */
+.react-flow {
+  --xy-background-color: var(--background);
+  --xy-node-background-color-default: var(--card);
+  --xy-node-color-default: var(--foreground);
+  --xy-node-border-default: 1px solid var(--border);
+  --xy-node-border-radius-default: 0.75rem;
+  --xy-node-boxshadow-default: none;
+  --xy-handle-background-color-default: var(--muted);
+  --xy-handle-border-color-default: var(--muted-foreground);
+  --xy-edge-stroke-default: var(--muted-foreground);
+  --xy-edge-stroke-selected-default: var(--foreground);
+  --xy-edge-label-color-default: var(--foreground);
+  --xy-edge-label-background-color-default: var(--card);
+  --xy-connectionline-stroke-default: var(--muted-foreground);
+  --xy-attribution-background-color-default: transparent;
+  --xy-theme-panel-bg: var(--popover);
+  --xy-theme-panel-text: var(--popover-foreground);
+  --xy-controls-button-background-color-default: var(--secondary);
+  --xy-controls-button-background-color-hover-default: var(--accent);
+  --xy-controls-button-color-default: var(--foreground);
+  --xy-controls-button-color-hover-default: var(--foreground);
+  --xy-controls-button-border-color-default: var(--border);
+  --xy-minimap-background-color-default: var(--popover);
+  --xy-minimap-mask-background-color-default: color-mix(in srgb, var(--background) 70%, transparent);
+}
+
+/* ========================================================================
+   Sonner toast theming — token-driven, per-type left accent bar.
+   ========================================================================
+   The <Toaster> in App.tsx owns layout/behaviour (position, offset, icons,
+   closeButton, durations via lib/notify.ts). This block owns the *look*:
+   card surface, 3px left accent, title/description hierarchy, and an inline
+   dismiss control on the right (not a floating corner chip — those rendered
+   as blank circles when Sonner's absolute positioning fought our overrides). */
+[data-sonner-toaster] {
+  --width: 360px;
+  --normal-bg: var(--card);
+  --normal-text: var(--foreground);
+  --normal-border: var(--border);
+  --border-radius: calc(var(--radius) + 2px);
+  --gray1: var(--foreground);
+  --gray2: var(--muted);
+  --gray4: var(--border);
+  --gray5: var(--border);
+  --gray12: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+[data-sonner-toast][data-styled="true"] {
+  padding: 11px 12px 11px 13px;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  box-shadow: var(--shadow-md);
+}
+
+[data-sonner-toast] [data-title] {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--foreground);
+  padding-right: 4px;
+}
+
+[data-sonner-toast] [data-description] {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+  margin-top: 2px;
+}
+
+[data-sonner-toast] [data-icon] {
+  margin-top: 1px;
+  align-self: flex-start;
+  height: 18px;
+  width: 18px;
+}
+
+[data-sonner-toast] [data-icon] svg {
+  width: 18px;
+  height: 18px;
+}
+
+[data-sonner-toast] [data-content] {
+  flex: 1;
+  min-width: 0;
+  padding-right: 2px;
+}
+
+/* Per-type accent: left bar + icon + subtle surface tint. */
+[data-sonner-toast][data-type="success"] {
+  border-left-color: var(--success);
+  background: color-mix(in srgb, var(--success) 7%, var(--card));
+}
+[data-sonner-toast][data-type="success"] [data-icon] {
+  color: var(--success);
+}
+[data-sonner-toast][data-type="info"] {
+  border-left-color: var(--info);
+  background: color-mix(in srgb, var(--info) 7%, var(--card));
+}
+[data-sonner-toast][data-type="info"] [data-icon] {
+  color: var(--info);
+}
+[data-sonner-toast][data-type="warning"] {
+  border-left-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 8%, var(--card));
+}
+[data-sonner-toast][data-type="warning"] [data-icon] {
+  color: var(--warning);
+}
+[data-sonner-toast][data-type="error"] {
+  border-left-color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 8%, var(--card));
+}
+[data-sonner-toast][data-type="error"] [data-icon] {
+  color: var(--destructive);
+}
+[data-sonner-toast][data-type="loading"] {
+  border-left-color: var(--muted-foreground);
+}
+[data-sonner-toast][data-type="loading"] [data-icon] {
+  color: var(--muted-foreground);
+}
+
+/* Dismiss — inline on the right, always visible; explicit SVG stroke so the
+   X never disappears when currentColor inheritance breaks. */
+[data-sonner-toast][data-styled="true"] [data-close-button] {
+  position: relative;
+  left: unset !important;
+  right: unset !important;
+  top: unset !important;
+  transform: none !important;
+  order: 99;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-left: auto;
+  margin-top: -1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--foreground);
+  opacity: 0.7;
+  cursor: pointer;
+  transition:
+    opacity 120ms ease,
+    color 120ms ease,
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+[data-sonner-toast][data-styled="true"] [data-close-button]:hover {
+  opacity: 1;
+  color: var(--foreground);
+  background: var(--accent);
+  border-color: var(--border);
+}
+
+[data-sonner-toast][data-styled="true"] [data-close-button]:focus-visible {
+  opacity: 1;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+[data-sonner-toast][data-styled="true"] [data-close-button] svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 2;
+  opacity: 1;
+}
+
+/* Inline action / cancel buttons (e.g. Retry / Undo) inherit the theme. */
+[data-sonner-toast] [data-button] {
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  height: 26px;
+}
+[data-sonner-toast] [data-action] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+[data-sonner-toast] [data-cancel] {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}

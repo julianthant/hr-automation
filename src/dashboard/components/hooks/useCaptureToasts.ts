@@ -1,0 +1,184 @@
+import { useEffect, useRef } from "react";
+import { toast } from "@/lib/notify";
+import { notify, NOTIFY_KINDS } from "@/lib/notifications";
+import { Camera, AlertTriangle } from "lucide-react";
+import { createElement } from "react";
+import type { CaptureSessionEvent } from "@/components/capture/capture-types";
+import { sseHub } from "@/lib/sse-hub";
+
+/**
+ * Toast hook for capture lifecycle events. Mounted once at the App root
+ * so capture activity surfaces toasts even when the modal isn't open.
+ *
+ * Two suppression rules so toasts don't double up with the modal's own
+ * inline UI:
+ *
+ *   1. Modal-ownership: when the capture modal mounts, it calls
+ *      `setSessionOwnedByModal(sessionId, true)` so this hook ignores
+ *      photo_added / expired events for THAT session (the modal already
+ *      surfaces them inline). Terminal handoff events (finalized /
+ *      finalize_failed) still fire — those are post-close notifications.
+ *
+ *   2. Per-event timestamp dedupe (`lastSeenTsRef`): the backend's
+ *      session-event SSE stream doesn't currently replay individual
+ *      events on reconnect (only the `session-list` snapshot is
+ *      re-broadcast), but the watermark is cheap insurance against
+ *      future backend changes. Any event with `ts <= lastSeen` is
+ *      treated as a replay and skipped silently.
+ *
+ * Note: the previous `firstEventRef` defence was unconditional — it
+ * dropped the very first session-event of every connection regardless
+ * of provenance. That silently swallowed legitimate live events when
+ * the dashboard was opened mid-capture. The dedupe-by-timestamp scheme
+ * supersedes it: replays are filtered by their (already-seen) ts, while
+ * live events pass through unconditionally.
+ */
+
+const ownedSessionIds = new Set<string>();
+
+/** Modal entry point — call with `true` on session start, `false` on close. */
+export function setSessionOwnedByModal(sessionId: string, owned: boolean): void {
+  if (owned) ownedSessionIds.add(sessionId);
+  else ownedSessionIds.delete(sessionId);
+}
+
+interface CaptureToastsOptions {
+  /** Resolve a workflow name to a human label, e.g. "oath-signature" → "Oath signature". */
+  workflowLabel?: (workflow: string) => string;
+}
+
+export function useCaptureToasts(opts: CaptureToastsOptions = {}): void {
+  // `labelFn` lives in a ref so we can read the latest version inside the
+  // SSE handlers without listing it as a useEffect dep. Without this, the
+  // default `(w) => w` (or any inline `workflowLabel` from the caller) is
+  // a fresh function reference every render, which would tear down and
+  // re-create the EventSource on each parent re-render. Under SSE-driven
+  // App-level re-renders that loop runs ~1×/sec and leaks active EventSource
+  // connections (close() drains async; some leak); after a few minutes the
+  // browser's HTTP/1.1 connection pool is saturated and screenshot/image
+  // fetches stall indefinitely. Verified 2026-05-02 with 510 leaked SSE
+  // connections blocking the SharePoint screenshots panel.
+  const labelFnRef = useRef(opts.workflowLabel ?? ((w: string) => w));
+  labelFnRef.current = opts.workflowLabel ?? ((w: string) => w);
+
+  // Stash workflow → label for events whose own payload doesn't carry the
+  // workflow name. session_created carries it; photo events carry only the
+  // sessionId. We learn the mapping when session_created arrives.
+  const workflowBySessionRef = useRef<Map<string, string>>(new Map());
+  // High-water mark of event timestamps (epoch ms) seen by THIS hook
+  // lifetime. Filters duplicates from any reconnect snapshot replay
+  // (defensive — the current backend doesn't replay individual events,
+  // but the cost of one numeric compare per event is trivial).
+  const lastSeenTsRef = useRef<number>(0);
+
+  useEffect(() => {
+    const remember = (sessionId: string, workflow: string) => {
+      if (sessionId && workflow) workflowBySessionRef.current.set(sessionId, workflow);
+    };
+
+    const unsubscribe = sseHub.subscribe<unknown>(
+      "captureSessions",
+      {},
+      (data, event) => {
+        if (event === "session-list") {
+          try {
+            const snapshot = data as { sessions?: Array<{ sessionId: string; workflow: string }> };
+            (snapshot.sessions ?? []).forEach((s) => remember(s.sessionId, s.workflow));
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+
+        if (event === "heartbeat") {
+          /* keep-alive only */
+          return;
+        }
+
+        if (event === "session-event") {
+          let ev: CaptureSessionEvent;
+          try {
+            ev = data as CaptureSessionEvent;
+          } catch {
+            return;
+          }
+
+          // session_created teaches us the workflow for later events.
+          if (ev.type === "session_created") {
+            const wf = (ev.payload as { workflow?: string }).workflow;
+            if (wf) remember(ev.sessionId, wf);
+          }
+
+          // Replay-safe dedupe — skip any event we've already considered.
+          if (ev.ts && ev.ts <= lastSeenTsRef.current) return;
+          if (ev.ts) lastSeenTsRef.current = ev.ts;
+
+          const isOwned = ownedSessionIds.has(ev.sessionId);
+          const workflow = workflowBySessionRef.current.get(ev.sessionId) ?? "capture";
+          const label = labelFnRef.current(workflow);
+
+          switch (ev.type) {
+            case "photo_added": {
+              if (isOwned) return;
+              const blurFlagged = (ev.payload as { blurFlagged?: boolean }).blurFlagged;
+              const photoIndex = (ev.payload as { photoIndex?: number }).photoIndex ?? 0;
+              if (blurFlagged) {
+                toast.warning("Blurry photo detected", {
+                  description: `Photo ${photoIndex + 1} in ${label} may need a retake`,
+                  icon: createElement(AlertTriangle, { "aria-hidden": true, className: "h-4 w-4" }),
+                });
+              } else {
+                toast.info("Photo added", {
+                  description: `${label} · photo ${photoIndex + 1}`,
+                  icon: createElement(Camera, { "aria-hidden": true, className: "h-4 w-4" }),
+                });
+              }
+              return;
+            }
+            case "finalized": {
+              notify({
+                kind: NOTIFY_KINDS.captureCompleted,
+                title: "Capture complete",
+                description: `${label} · bundle saved`,
+                source: workflow,
+              });
+              return;
+            }
+            case "finalize_failed": {
+              const stage = (ev.payload as { stage?: string }).stage ?? "handler";
+              notify({
+                kind: NOTIFY_KINDS.captureFailed,
+                title: "Capture handoff failed",
+                description: `${label}: ${stage} failed — retry from the capture modal`,
+                source: workflow,
+              });
+              return;
+            }
+            case "expired": {
+              if (isOwned) return; // modal will surface it inline
+              notify({
+                kind: NOTIFY_KINDS.captureExpired,
+                title: "Capture session expired",
+                description: `${label} session timed out after 15 min of inactivity`,
+                source: workflow,
+              });
+              return;
+            }
+            // discarded: no toast — that's a direct user action, no surprise.
+            default:
+              return;
+          }
+        }
+      },
+      () => {
+        // EventSource browser default reconnects automatically.
+      },
+    );
+
+    return () => {
+      unsubscribe();
+    };
+    // Empty deps: the subscription is created once on mount and torn down
+    // on unmount. `labelFn` is read live via `labelFnRef`.
+  }, []);
+}

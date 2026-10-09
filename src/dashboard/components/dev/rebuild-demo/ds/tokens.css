@@ -1,0 +1,1251 @@
+/* ==========================================================================
+   REBUILD DEMO — DESIGN TOKENS  (dev-only)
+   ==========================================================================
+   The single source of every color, size, radius, shadow, focus ring and
+   motion value used by the rebuild demo's primitive library (`demo-ui.tsx`).
+   Builder agents compose primitives; primitives read these tokens; nothing
+   else hardcodes a value. That is the whole contract.
+
+   TWO THEMES, ONE PRODUCT. The demo ships a togglable pair — `Graphite Warm`
+   (dark) and `Paper Ink` (light) — selected by a `data-demo-theme` attribute.
+   Each theme block below redeclares BOTH the product's own semantic tokens
+   (`--background`, `--warning`, …, which the demo's surfaces read directly
+   through Tailwind utilities) AND the `--ds-*` layer derived from them, so a
+   theme is one contiguous, auditable block rather than a diff against another.
+
+   WHY AN ATTRIBUTE AND NOT A CLASS. The shipped dashboard hardcodes
+   `class="dark"` on BOTH `<html>` and `<body>` (`index.html`), and `.dark`
+   re-scopes every semantic token. A demo-scoped light theme therefore has to
+   win against a `.dark` ANCESTOR: the selector lists below carry
+   `:root[data-demo-theme=…]` (0,2,0) and `body[data-demo-theme=…]` (0,1,1),
+   both of which outrank `.dark` (0,1,0) on the element that carries it, plus a
+   bare `[data-demo-theme=…]` for the demo's own root container. `ds/theme.ts`
+   stamps all three. Overlays portal to `<body>`, which is exactly why the body
+   selector is not optional.
+
+   The `:root` block keeps a FALLBACK that aliases the app's own theme, so a
+   primitive rendered outside a themed subtree still resolves every token.
+
+   PALETTE BUDGET: one accent + four semantic hues (info / success / warning /
+   danger), and nothing else. `Running` is neutral on purpose — it is the most
+   common status on screen and a hue spent there is a hue spent everywhere. The
+   categorical `--log-*` accents are retired to a neutral ramp (see each theme).
+
+   Naming: --ds-<group>-<role>[-<state>]
+     surface | border | fg | control | status | radius | text | lh | space
+     h (control heights) | elev | focus | dur | ease
+
+   Guard notes (tests/unit/architecture/frontend-tailwind-compliance.test.ts):
+   hand-rolled CSS animation is banned anywhere under src/dashboard — no
+   key-frame blocks, no shorthand animation property. Motion here is
+   transition-only, driven by the --ds-dur-* / --ds-ease-* tokens, which
+   collapse to 0ms under prefers-reduced-motion (bottom of this file).
+   ========================================================================== */
+
+:root {
+  /* ---------------------------------------------------------------------
+     SURFACE — the elevation ladder, darkest (page) to lightest (raised).
+     Depth in this product comes from surface + hairline border, never from
+     a big shadow. Shadows are reserved for things that FLOAT (overlays).
+     --------------------------------------------------------------------- */
+  --ds-surface-page: var(--background); /* app background, behind everything */
+  --ds-surface-1: var(--card); /* panels, cards, bars — the default plane */
+  --ds-surface-2: var(--muted); /* inset wells, table headers, code blocks */
+  --ds-surface-3: var(--accent); /* hover / pressed / selected fill */
+  --ds-surface-overlay: var(--popover); /* dialogs, drawers, menus, tooltips */
+  --ds-surface-scrim: color-mix(in srgb, hsl(0 0% 0%) 66%, transparent);
+  /* SELECTION — one shade off the card it sits on, and no more.
+     It was `color-mix(primary 10%, transparent)`, and on Graphite Warm the
+     accent is near-WHITE, so a selected row rendered as a light grey plate —
+     brighter than the amber `Waiting on you` fill two rows below it. Selection
+     is the lowest-stakes state on this screen: it says "the system is pointing
+     here", which needs to be findable and needs to be nothing else. Mixing
+     toward the FOREGROUND instead of toward the accent keeps it hueless and
+     keeps it one step, on either theme.
+
+     Selection lifts the card BODY only (not the recessed footer) and lightens
+     the card's own perimeter border. No inset rail — that light-gray left edge
+     was a second border the operator asked to remove. The fill stays a small
+     step so the body reads selected without becoming a pale plate. */
+  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 4%, var(--ds-surface-1));
+  --ds-surface-disabled: color-mix(in srgb, var(--muted) 60%, transparent);
+
+  /* THE RECESSED PLANE — the ONE treatment for "this sits back from the card".
+     Three of them existed: the row footer was a solid darker band with no
+     border, a chip was an outlined pill with its OWN fill, and the delegation
+     chip was outlined AND lighter. Three answers to one question is how a
+     dense surface stops reading as one system.
+
+     The footer's is the one that survives, on the operator's own preference
+     and on the merits: a fill and no line means a row carrying six facts is a
+     band of tones rather than a grid of little boxes.
+
+     TWO SHAPES ON ONE PLANE, and the operator drew the line: *"all these types
+     of things should have a border and be matte."*
+
+       A BAND   — a footer, a bar, a strip that divides a panel — is a FILL and
+                  no line. It is a region, and a region with an outline reads as
+                  an object sitting in the panel rather than as part of it.
+       A CHIP   — a fact, a marker, a tile, a badge, anything that is an OBJECT
+                  you can point at — is a MATTE FILL *and* a hairline. A row
+                  carrying six borderless facts loses the edges between them:
+                  they read as one run of tinted text, not six things.
+
+     `--ds-recess-border` is that hairline, and every chip reads it rather than
+     picking its own. A band does not read it at all — its `border-t` comes from
+     `--ds-border-subtle`, which is the divider, not the object edge.
+
+     TWO INKS ON ONE PLANE, and the split is the thing that was drifting: three
+     chips were painting `--ds-fg-muted` by hand while the plane's own token
+     said `--ds-fg-secondary`, so "recessed" meant two different weights
+     depending on which call site you read. It is not one intent rendered
+     inconsistently — it is two:
+
+       `--ds-recess-fg`       a recessed surface carrying a VALUE you READ
+                              (`EID 10090008`, a filename, a count)
+       `--ds-recess-fg-quiet` a recessed surface carrying a MARKER you SCAN
+                              PAST (`test`, `dry run`, `v3.1`, a panel name)
+
+     Both are now named, so neither is a hand-picked colour at a call site.
+
+     WHAT IS DELIBERATELY *NOT* ON THIS PLANE: a form control. `controlShell`,
+     Checkbox, Radio, the off Switch and SearchInput all draw `--ds-surface-2`
+     with `--ds-control-border`, which reads like a recessed chip and is not
+     one. A control's OUTLINE at 3:1 is what identifies it as a control — it is
+     the whole basis of the `ValueField` / `LockedValue` pair, where "you may
+     change this" and "you may not" are told apart by SHAPE. Folding the
+     controls onto a border-less plane would delete that cue to win a
+     consistency that was never true. They stay as they are, on purpose. */
+  --ds-recess-bg: var(--ds-surface-2);
+  --ds-recess-fg: var(--ds-fg-secondary);
+  --ds-recess-fg-quiet: var(--ds-fg-muted);
+  --ds-recess-border: var(--ds-border);
+
+  /* THE PAPER PLANE — the ONE place in this product that is not a UI surface.
+     A scanned page rendered inside the capture viewer is a DOCUMENT: ink on
+     stock, ruled lines, a signature block. It is deliberately the same in both
+     themes, because paper does not have a dark mode and a form printed in
+     graphite would read as a UI panel wearing a form's layout.
+
+     It is used by exactly one component (`PageFacsimile`) and it is fenced:
+     what it renders is SYNTHETIC, drawn from the synthetic extraction record
+     beside it and marked as such on its own face. The rule it does not break is
+     the one the placeholder frame protects — nothing here draws an
+     approximation of a REAL system page, and no live scan is committed to this
+     bundle. Its contrast is checked as text on a light surface (ink 15% on
+     stock 97% clears 4.5:1 with room; the quiet ink is a label at 3:1+). */
+  --ds-paper-bg: oklch(0.97 0.006 85);
+  --ds-paper-fg: oklch(0.22 0.008 85);
+  --ds-paper-fg-quiet: oklch(0.46 0.008 85);
+  --ds-paper-rule: oklch(0.82 0.008 85);
+
+  /* ---------------------------------------------------------------------
+     BORDER — one hairline weight for structure; strength carries meaning.
+     --------------------------------------------------------------------- */
+  --ds-border-subtle: color-mix(in srgb, var(--border) 55%, transparent);
+  --ds-border: var(--border); /* the default 1px separator */
+  --ds-border-strong: var(--input); /* input outlines, resting controls */
+  --ds-border-loud: color-mix(in srgb, var(--foreground) 22%, transparent);
+  /* The outline that IDENTIFIES a control (input, select, checkbox, switch).
+     WCAG 1.4.11 wants 3:1 for that; a decorative separator does not need it,
+     which is why this is a different token from --ds-border-strong. */
+  --ds-control-border: color-mix(in srgb, var(--foreground) 38%, transparent);
+  --ds-border-w: 1px; /* structure */
+  --ds-border-w-emphasis: 2px; /* selection, active tab underline */
+  --ds-border-w-rail: 3px; /* the left rail marker on nav/attention rows */
+
+  /* ---------------------------------------------------------------------
+     FOREGROUND — four steps of text emphasis. If you need a fifth, you are
+     saying too much in one place.
+     --------------------------------------------------------------------- */
+  --ds-fg: var(--foreground); /* primary text, values, names */
+  --ds-fg-secondary: var(--secondary-foreground); /* supporting text */
+  --ds-fg-muted: var(--muted-foreground); /* labels, meta, units */
+  --ds-fg-faint: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+  --ds-fg-inverse: var(--primary-foreground); /* on a solid accent fill */
+  --ds-fg-link: var(--info);
+
+  /* ---------------------------------------------------------------------
+     CONTROL — buttons, inputs, toggles. `accent` is the product's near-white
+     primary; `danger` is the only chromatic action color.
+     --------------------------------------------------------------------- */
+  --ds-control-bg: var(--secondary);
+  --ds-control-bg-hover: var(--accent);
+  --ds-control-bg-active: color-mix(in srgb, var(--accent) 70%, var(--background));
+  --ds-control-fg: var(--foreground);
+
+  --ds-accent: var(--primary); /* the product's "primary" */
+  --ds-accent-mark: var(--primary); /* the raw swatch — bars, dots, fills */
+  --ds-accent-fg: var(--primary-foreground);
+  --ds-accent-hover: color-mix(in srgb, var(--primary) 88%, hsl(0 0% 100%));
+  --ds-accent-quiet: color-mix(in srgb, var(--primary) 12%, transparent);
+
+  --ds-danger: var(--destructive); /* danger as TEXT */
+  --ds-danger-solid: var(--destructive); /* danger as a solid FILL */
+  --ds-danger-fg: hsl(0 65% 8%); /* dark ink on the dark theme's bright red */
+  --ds-danger-quiet: color-mix(in srgb, var(--destructive) 12%, transparent);
+  --ds-danger-border: color-mix(in srgb, var(--destructive) 45%, transparent);
+
+  /* ---------------------------------------------------------------------
+     STATUS — the eight load-bearing queue statuses.
+
+     Color is never the only signal. Each status also owns a distinct ICON,
+     a distinct EMPHASIS TIER (solid / tinted / outline / ghost) and, for two
+     of them, a distinct SHAPE cue (dashed border, solid gray Cancelled pill).
+     See ds/primitives-status.tsx for the icon + tier bindings, and DESIGN.md
+     for the full mapping table.
+
+     Loudness ladder, deliberately:
+       1 Waiting on you  solid amber   — the operator is the blocker
+       2 Failed          solid red     — the run is broken
+       3 Write parked    dashed amber  — a write may or may not have landed
+       4 Done w/ warnings tinted amber — finished, needs eyes, not urgent
+       5 Running         tinted NEUTRAL— in motion (the only animated status)
+       6 Queued          outline neutral—accepted, inert
+       7 Cancelled       ghost neutral — a deliberate act is not an alert
+       8 Verified done   ghost green   — the quietest thing on screen
+
+     The three amber tiers are the point, not an accident: amber means "a human
+     is involved", and the FILL WEIGHT (solid / dashed / faint tint) is the
+     priority signal. Colour never carries a status alone — the icon, the tier
+     and the label all differ too.
+
+     Every status carries BOTH a `-fg` (the value it is rendered as TEXT, held
+     to 4.5:1 on every surface in the ladder) and a `-mark` (the raw swatch, for
+     the dot, the rail, the bar and any solid fill). On a dark theme they are
+     usually the same value; on a light one they are not, because the swatch
+     that reads as a dot at 6px fails as 11px body text.
+     --------------------------------------------------------------------- */
+
+  /* 1 — Waiting on you (LOUD: solid fill, dark ink) */
+  --ds-status-waiting-fg: var(--warning);
+  --ds-status-waiting-mark: var(--warning);
+  --ds-status-waiting-bg: color-mix(in srgb, var(--warning) 14%, transparent);
+  --ds-status-waiting-border: color-mix(in srgb, var(--warning) 55%, transparent);
+  --ds-status-waiting-solid-bg: var(--warning);
+  --ds-status-waiting-solid-fg: hsl(38 62% 8%);
+
+  /* 2 — Failed (LOUD: solid fill, dark ink) */
+  --ds-status-failed-fg: var(--destructive);
+  --ds-status-failed-mark: var(--destructive);
+  --ds-status-failed-bg: color-mix(in srgb, var(--destructive) 14%, transparent);
+  --ds-status-failed-border: color-mix(in srgb, var(--destructive) 55%, transparent);
+  --ds-status-failed-solid-bg: var(--destructive);
+  --ds-status-failed-solid-fg: var(--ds-danger-fg);
+
+  /* 3 — Write parked (tint + a DASHED border no other status uses) */
+  --ds-status-parked-fg: var(--warning);
+  --ds-status-parked-mark: var(--warning);
+  --ds-status-parked-bg: color-mix(in srgb, var(--warning) 13%, transparent);
+  --ds-status-parked-border: color-mix(in srgb, var(--warning) 60%, transparent);
+
+  /* 4 — Done with warnings (amber icon, muted label — FYI, not a demand) */
+  --ds-status-done-warnings-fg: var(--warning);
+  --ds-status-done-warnings-mark: var(--warning);
+  --ds-status-done-warnings-bg: color-mix(in srgb, var(--warning) 9%, transparent);
+  --ds-status-done-warnings-border: color-mix(in srgb, var(--warning) 30%, transparent);
+
+  /* 5 — Running (NEUTRAL: the only status whose icon moves, and the only
+         differentiator it needs. It is the most common status on screen, so a
+         hue spent here is a hue spent everywhere.) */
+  --ds-status-running-fg: var(--ds-fg-muted);
+  --ds-status-running-mark: var(--ds-fg-muted);
+  --ds-status-running-bg: color-mix(in srgb, var(--foreground) 6%, transparent);
+  --ds-status-running-border: color-mix(in srgb, var(--foreground) 18%, transparent);
+
+  /* 6 — Queued (outline only: no fill = nothing has happened yet) */
+  --ds-status-queued-fg: var(--ds-fg-muted);
+  --ds-status-queued-mark: var(--ds-fg-muted);
+  --ds-status-queued-bg: transparent;
+  --ds-status-queued-border: color-mix(in srgb, var(--muted-foreground) 45%, transparent);
+
+  /* 7 — Cancelled (solid gray pill like Done; NOT amber, NOT red —
+         a deliberate stop is neither a warning nor a failure) */
+  --ds-status-cancelled-fg: var(--ds-fg-muted);
+  --ds-status-cancelled-mark: var(--ds-fg-muted);
+  --ds-status-cancelled-bg: color-mix(in srgb, var(--muted-foreground) 14%, transparent);
+  --ds-status-cancelled-border: color-mix(in srgb, var(--muted-foreground) 40%, transparent);
+  --ds-status-cancelled-solid-bg: #737373;
+  --ds-status-cancelled-solid-fg: #fafafa;
+
+  /* 8 — Verified done (ghost: green icon, muted label, no chrome at all) */
+  /* 8 — Done (solid green fill, dark ink — same shape as Waiting on you /
+         Failed, quieter hue. Operator 2026-07-29: a bare green word + shield
+         read as unfinished chrome; the word belongs in a filled pill.) */
+  --ds-status-verified-done-fg: var(--success);
+  --ds-status-verified-done-mark: var(--success);
+  --ds-status-verified-done-bg: color-mix(in srgb, var(--success) 14%, transparent);
+  --ds-status-verified-done-border: color-mix(in srgb, var(--success) 40%, transparent);
+  --ds-status-verified-done-solid-bg: var(--success);
+  --ds-status-verified-done-solid-fg: hsl(152 55% 8%);
+
+  /* Neutral/informational accents reused by Banner, Chip and the log surfaces */
+  --ds-info-fg: var(--info);
+  --ds-info-mark: var(--info);
+  --ds-info-bg: color-mix(in srgb, var(--info) 12%, transparent);
+  --ds-info-border: color-mix(in srgb, var(--info) 40%, transparent);
+  /* Solid info fill — the product-level launch CTA (queue `Start a run`). Info
+     blue is the interactive hue on Graphite Warm; amber `--ds-accent-mark` stays
+     off verbs because it shares warning's family. */
+  --ds-info-solid-bg: var(--info);
+  --ds-info-solid-fg: var(--info-foreground);
+  --ds-info-solid-hover: color-mix(in srgb, var(--info) 88%, hsl(0 0% 100%));
+  --ds-success-fg: var(--success);
+  --ds-success-mark: var(--success);
+  --ds-success-bg: color-mix(in srgb, var(--success) 12%, transparent);
+  --ds-success-border: color-mix(in srgb, var(--success) 38%, transparent);
+
+  /* ---------------------------------------------------------------------
+     DIRECTION — which way a value moved. ONE axis, TWO tones.
+
+     This is a deliberate, narrow exception to the "one accent + four semantic
+     hues" budget, and the case for it is that direction is INFORMATION, not
+     decoration: the log stream and the Data ledger both interleave values the
+     run READ with values it WROTE, and a write is the one that changed the
+     world. Telling them apart is the first thing an operator does on either
+     surface, and the arrow alone was carrying it at 12px.
+
+     It is NOT the old categorical `--log-*` set coming back. That was four
+     hues for four categories (nav / search / read / write) painted on top of
+     four status hues. This is two tones of one axis, and it is used for the
+     direction of a value and nothing else — never a heading, a chip, a status
+     or a section label.
+
+     Why these two hues:
+       · READ is BLUE because that is the colour the operator asks for it by,
+         and because receiving is the passive half of the pair.
+       · WRITE is PURPLE. Teal was rejected: held to 4.5:1 on paper it collapses
+         toward the success green, and a write must never borrow the colour of
+         "verified". Amber was rejected: it is reserved for "a human is
+         involved", and every write would then shout at gate volume.
+
+     Same `-fg` / `-mark` contract as every other hue, and here the split is
+     load-bearing rather than incidental: on Paper Ink the swatch that reads as
+     a 2px rail fails as 11px text, so ICONS AND TEXT read `-fg` (they carry
+     meaning and are held to 4.5:1) and rails / fills read `-mark`.
+     --------------------------------------------------------------------- */
+  --ds-read-fg: #38bdf8;
+  --ds-read-mark: #38bdf8;
+  --ds-read-bg: color-mix(in srgb, #38bdf8 12%, transparent);
+  --ds-read-border: color-mix(in srgb, #38bdf8 36%, transparent);
+  --ds-write-fg: #c4b5fd;
+  --ds-write-mark: #a78bfa;
+  --ds-write-bg: color-mix(in srgb, #a78bfa 14%, transparent);
+  --ds-write-border: color-mix(in srgb, #a78bfa 40%, transparent);
+
+  /* ---------------------------------------------------------------------
+     TYPE — a seven-step scale. The demo previously used eleven ad-hoc sizes
+     (9.5 / 10 / 10.5 / 11 / 11.5 / 12 / 12.5 / 13 …); half-pixel drift is
+     what makes twenty surfaces built by twenty agents look like twenty
+     products. These are the only sizes.
+     --------------------------------------------------------------------- */
+  --ds-font-sans: var(--font-sans);
+  --ds-font-mono: var(--font-mono);
+
+  --ds-text-micro: 10px; /* count badges, kbd, uppercase group labels */
+  --ds-lh-micro: 13px;
+  --ds-text-meta: 11px; /* timestamps, trace ids, footers, chips */
+  --ds-lh-meta: 15px;
+  --ds-text-body: 12px; /* the dense default — table cells, log lines */
+  --ds-lh-body: 16px;
+  --ds-text-ui: 13px; /* control labels, row titles, nav — the UI default */
+  --ds-lh-ui: 18px;
+  --ds-text-title: 14px; /* panel + card titles */
+  --ds-lh-title: 20px;
+  --ds-text-section: 16px; /* dialog titles, page section heads */
+  --ds-lh-section: 22px;
+  --ds-text-display: 20px; /* the one big number on a summary surface */
+  --ds-lh-display: 26px;
+
+  --ds-tracking-caps: 0.14em; /* uppercase micro labels only */
+  --ds-tracking-tight: -0.006em; /* section/display sizes only */
+
+  /* ---------------------------------------------------------------------
+     SPACE — an 8px rhythm with 2/4/6 available for dense interiors.
+     Gaps inside a control: hair/tight. Between controls: snug/base.
+     Between groups: cozy/loose. Between sections: section/page.
+     --------------------------------------------------------------------- */
+  --ds-space-hair: 2px;
+  --ds-space-tight: 4px;
+  --ds-space-snug: 6px;
+  --ds-space-base: 8px;
+  --ds-space-cozy: 12px;
+  --ds-space-loose: 16px;
+  --ds-space-section: 24px;
+  --ds-space-page: 32px;
+  /* THE SHELL'S LEFT AND RIGHT EDGE — Top Bar, Queue Toolbar, and the panel
+     region all hang off this one inset. It used to be three different numbers
+     (`cozy` / `base` / bare `p-3`), so the three bands' content started on
+     three different verticals (operator: "these 3 panels does not have the
+     same left and right alignment"). One token, one edge. */
+  --ds-shell-inset: var(--ds-space-cozy);
+
+  /* ---------------------------------------------------------------------
+     SIZE — control + chrome heights. A dense operations tool lives or dies
+     on consistent row rhythm; these are the only heights.
+     --------------------------------------------------------------------- */
+  --ds-h-xs: 20px; /* inline chips, count badges */
+  --ds-h-sm: 24px; /* toolbar icon buttons, table row controls */
+  --ds-h-md: 28px; /* the default control height */
+  --ds-h-lg: 32px; /* primary dialog actions, search fields */
+  --ds-h-row: 32px; /* one queue/table row */
+  --ds-h-bar: 36px; /* status bar, panel toolbar */
+  /* EVERY control in the queue's action bar is this tall — the launcher, the
+     run starter, the eight status pills, the two composites' container, the
+     sort select and the select toggle. Operator: "all of these should have the
+     same height." It is named rather than repeated as `--ds-h-sm` at eight call
+     sites so a control added later cannot quietly drift by 6px, which is
+     exactly how the composites' bordered box came to be 30 in a row of 24.
+
+     It is the DEFAULT control height (28), not the dense one (24). At 24 the
+     bar's ten pills each had 6px of ink above and below an 11px label inside a
+     36px band, and the operator read the result as controls of different sizes
+     even where the token had already made them identical — the padding, not the
+     height, was doing the differing. 28 in a 36 band leaves 4px of air top and
+     bottom and lets every control take the SAME `--ds-space-base` inset, which
+     is what "the same height no matter what" actually asks for. */
+  --ds-h-toolbar: var(--ds-h-md);
+  --ds-h-topbar: 44px; /* the app top bar */
+  /* The Session Card's micro step pipeline. It is a RESERVED band, not a
+     measured one: every card gives the bar the same slot whether or not it
+     holds an item, so the bars land on one baseline down the row and a worker
+     with nothing in flight is not handed a bar it has not earned. */
+  --ds-h-micro-pipeline: 8px;
+  /* The run timeline's track. 10px, not 8: a not-yet-reached segment is drawn
+     as an OUTLINE with a transparent fill, and at 8px a 1px outline top and
+     bottom leaves 6px of hole — the segment reads as a hairline rather than as
+     a shape. The whole point of the outlined state is that a queued run shows
+     you how many steps it has and how it is laid out before it starts. */
+  --ds-h-timeline-bar: 10px;
+  /* The evidence lightbox's capture STAGE. Tall enough that a letter page,
+     fitted contain-style into the column, reads as the subject — not a stamp
+     floating in a dark well. Shared as the height budget for the metadata
+     column so the two end on one line. */
+  --ds-h-capture-box: 58vh;
+  /* the thumbnail strip along the capture column's bottom — tall enough that
+     a page facsimile reads as a preview, not a labelled chip with a camera */
+  --ds-h-capture-thumb: 72px;
+  /* The source-page stage when Review stacks below its extracted fields. At
+     the side-by-side rung the grid gives it the full remaining panel height;
+     at the narrow rung it still needs enough paper to inspect rather than a
+     thumbnail stretched across a decision surface. */
+  --ds-h-review-page-min: 420px;
+  /* ONE MEMBER LINE, and the two wells built out of it.
+     ------------------------------------------------------------------
+     The well used to be a hand-picked 136px on 24px lines, and the half-cut
+     row that fell out of it was defended as a depth cue. The operator read it
+     as what it looks like — *"the list is hard-clipped mid-row"* — and they are
+     right: a partially painted row is indistinguishable from a rendering bug,
+     and a scrollbar already says "there is more" without lying about a person.
+
+     So the well is now a WHOLE NUMBER OF LINES, always. `line` is the rhythm
+     (26px — two more than the dense control height, because these rows are read
+     in columns rather than clicked in a bar); the two wells are N lines plus
+     the N-1 hairlines `divide-y` puts between them, which is exactly where the
+     container's edge lands.
+
+       collapsed  5 lines — the resting shape, the same at 5 members and at 50
+       open      20 lines — the operator's own number, scrolling to everyone
+
+     Scale is still presentational: the RESTING height does not vary with the
+     count. What changed is that expanding is now in the row instead of only
+     through `Open all N`. */
+  --ds-h-member-line: 28px;
+  --ds-h-member-well: calc(5 * var(--ds-h-member-line) + 4 * var(--ds-border-w));
+  --ds-h-member-well-open: calc(20 * var(--ds-h-member-line) + 19 * var(--ds-border-w));
+  /* NO TOKEN FOR THE DECISION NOTICE'S BAND. There was one — the toast
+     viewport's floor was built partly out of it — and deleting it is the point:
+     the notice hangs off its panel's bottom-LEFT and the toast stack off the
+     viewport's bottom-right, so the two can never converge and neither needs to
+     know the other's height. See `ds/primitives-overlay.tsx`. */
+  /* The two FIXED columns of a member line, in the well and in the drill-in.
+     They are fixed so the names down the left and the EIDs down the right land
+     on the same edge in every group — a member list whose third column sizes
+     itself to its content puts every EID in a different place and makes a
+     50-person roster unreadable. 104px is the widest OUTCOME word the demo's
+     vocabularies hold ("Not searchable" at 11px) with room to spare, and no
+     wider — every pixel here comes off the NAME column, which at a 400px queue
+     is the one thing on the line that cannot be recovered from elsewhere. A
+     workflow that declares no vocabulary puts its free-text detail in the same
+     column and truncates there, which it did before at any width. */
+  --ds-w-member-detail: 104px;
+  --ds-w-member-eid: 64px;
+  /* The ARCHIVE's fixed columns. They are tokens rather than literals in a
+     `<colgroup>` because the bump SECTION HEADER lays its own facts on the same
+     `when` and `count` tracks — so a sweep's date sits over the dates of the
+     runs it swept, and the section heads line up down the page instead of each
+     one ending wherever its sentence stopped. */
+  --ds-w-archive-status: 132px;
+  --ds-w-archive-trace: 148px;
+  /* Wide enough for `Jul 20, 9:02 AM` plus cell padding — 124 used to cut the
+     meridian to `A…` and made 24h-looking bulk clocks look like a second format. */
+  --ds-w-archive-when: 152px;
+  /* `RAN FOR` (caps) + sort glyph + count badge — 76 forced the header onto two
+     lines. */
+  --ds-w-archive-duration: 104px;
+  /* The bump header used to own two tracks of its own here — a version pair and
+     a kind. They are GONE, and that is the fix rather than a tidy-up: a second
+     set of tracks inside the archive table is what put a sweep's date 42px left
+     of the `When` column it names. The header is six real `<td>`s on the
+     `<colgroup>` above, so it has no widths to keep in sync. */
+  /* A queue row's HANGING INDENT — the leading column its status tick sits in,
+     and the left edge every line under the title aligns to. It is a real grid
+     track, so the row's rhythm comes from ONE gap instead of a hand-picked
+     `ml-5` on each of the six things that can appear under a title. 14px icon +
+     the 4px that binds the tick to the name it belongs to. */
+  --ds-w-row-indent: 18px;
+  /* Retired width cap for queue redirect chips. Kept so old references do not
+     go missing mid-refactor — chips now fill/wrap in the band instead of
+     truncating at half the title column. */
+  --ds-w-row-link-max: calc(50% - var(--ds-w-row-indent) / 2 - var(--ds-space-cozy));
+  --ds-w-rail: 200px; /* the workflow rail */
+  /* The queue and the run's CONTEXT RAIL are equal resting side panels. 376px
+     is slightly wider than the former 348px context rail while leaving the
+     centre log panel as the largest column at every three-panel breakpoint.
+     One shared token keeps the two edges from drifting apart again. */
+  --ds-w-side-panel: 376px;
+  --ds-w-context-rail: var(--ds-w-side-panel);
+  /* The rail while the Data surface is being EDITED in it. 376px reads a
+     ledger fine but is tight to type a date into once the row carries a label,
+     a value, its badges and its system; 520 puts the clock back on the line and
+     still leaves the centre column enough to keep the stream readable at 1280.
+     It is a task width, not a preference — the rail returns to 348 the moment
+     the operator narrows it. */
+  --ds-w-context-rail-wide: 520px;
+  --ds-w-context-spine: 34px;
+  /* Popover widths. A popover explains ONE thing; if it needs to be wider than
+     `lg` it is a Dialog or a panel section, not a popover. */
+  --ds-w-popover-sm: 240px;
+  --ds-w-popover-md: 300px;
+  --ds-w-popover-lg: 380px;
+  /* A context menu's FLOOR. It holds verbs, so it is narrow — but it must not
+     be narrower than its own longest verb or the menu re-flows around whichever
+     row it was opened on, and a menu that changes width per object reads as a
+     different menu each time. */
+  --ds-w-menu: 216px;
+  --ds-w-session-card: 268px; /* one worker card in the Session Panel drawer */
+  /* One cell of a wrapping CHIP ROW. Chips carry facts of wildly different
+     lengths, so a plain `flex-wrap` leaves every line ending somewhere else and
+     an orphan on line two — the ragged edge the operator called out. Laying them
+     on a track of this width gives every line the SAME ending edge, so a wrapped
+     row reads as one block instead of as debris. 148px seats the demo's longest
+     fact (`txn TXN-0891245`) without hyphenating it. */
+  --ds-w-chip-cell: 148px;
+  /* The same idea at the density a Session Card runs at: `ucpath 1/1` is a
+     third the width of a queue fact, and a 148px track would leave one chip a
+     line and half the card empty. */
+  --ds-w-capacity-cell: 76px;
+  /* THE SHAPE OF A PAGE. US Letter is 612 × 792 pt — measured from the real
+     packet the OCR fixtures are built on (`data/documents/single-oath.pdf`),
+     and the same ratio the corpus's own 1275 × 1650 document capture carries.
+     Every placeholder that stands in for a document page used to be sized by a
+     hand-picked min-height (≈400 × 840, aspect 0.48), which is not the shape of
+     anything the operator has ever scanned: it made a portrait page read as a
+     letterbox and gave the review pane a picture of a document nobody would
+     recognise. As a RATIO it is correct at every size, so one value serves the
+     review pane, the evidence tiles and the lightbox. An evidence capture that
+     SERVES its own dimensions uses those instead — a 1600 × 1000 browser
+     viewport is not a page and must not be drawn as one. */
+  --ds-aspect-page: 612 / 792;
+  /* The evidence list thumbnail SLOT. Fixed width + fixed height so every
+     row's label starts on the same x — a portrait page and a landscape
+     viewport keep their own shape INSIDE the slot (letterboxed), never by
+     pushing the text around. */
+  --ds-h-evidence-thumb: 44px;
+  --ds-w-evidence-thumb: 72px;
+  /* ONE EVIDENCE ROW, and the well built out of it — the same construction as
+     the member well, and for the same reason: a list that CLIPS must clip on a
+     whole row boundary, or the cut edge reads as a rendering fault rather than
+     as "there is more below". The rail's evidence list was a two-column grid of
+     tall tiles, so one capture occupied a third of the width and left the rest
+     empty; it is a full-width list now, and the well is what keeps a run with
+     nine captures from pushing Data off the rail. */
+  --ds-h-evidence-row: calc(var(--ds-h-evidence-thumb) + 2 * var(--ds-space-snug));
+  --ds-h-evidence-well: calc(4 * var(--ds-h-evidence-row) + 3 * var(--ds-border-w));
+
+  /* ---------------------------------------------------------------------
+     RADIUS — derived from the product's --radius (8px) so the demo can
+     never drift from the shipped corner language.
+     --------------------------------------------------------------------- */
+  --ds-radius-xs: 3px;
+  --ds-radius-sm: calc(var(--radius) - 4px); /* 4px — chips, badges */
+  --ds-radius-md: calc(var(--radius) - 2px); /* 6px — buttons, inputs, rows */
+  --ds-radius-lg: var(--radius); /* 8px — cards, panels */
+  --ds-radius-xl: calc(var(--radius) + 4px); /* 12px — dialogs, drawers */
+  --ds-radius-pill: 9999px;
+
+  /* ---------------------------------------------------------------------
+     ELEVATION — three steps, and only floating things get them.
+     0 = flat (border only). Most of this UI is elevation 0.
+     --------------------------------------------------------------------- */
+  --ds-elev-1: 0 1px 2px hsl(0 0% 0% / 0.35);
+  --ds-elev-2:
+    0 4px 12px -2px hsl(0 0% 0% / 0.45), 0 1px 3px hsl(0 0% 0% / 0.32);
+  --ds-elev-3:
+    0 16px 40px -8px hsl(0 0% 0% / 0.62), 0 2px 8px -2px hsl(0 0% 0% / 0.45);
+
+  /* ---------------------------------------------------------------------
+     FOCUS — one ring, everywhere, always visible. A 2px outline (not a
+     box-shadow ring) so it survives forced-colors and follows the radius.
+     --------------------------------------------------------------------- */
+  /* THE RING — one ink for "the system is pointing at this".
+     Focus and selection are the same statement at two volumes, so they read
+     the SAME ink rather than inventing one each.
+
+     It is deliberately no longer near-white. At 85% foreground the ring was
+     the brightest thing on the panel — louder than the amber `Waiting on you`
+     fill beside it — which inverts the attention ladder rule 1 mandates:
+     selection is the LOWEST-stakes state on screen (which row am I looking
+     at), and it must sit BELOW the two states allowed to shout. This value is
+     the quietest that still clears WCAG 2.2's 3:1 focus-appearance floor
+     against every surface in the ladder (≈4.6:1 on the card plane, ≈3.9:1 on
+     the raised one), so nothing is lost but the shouting. */
+  --ds-ring: color-mix(in srgb, var(--foreground) 46%, transparent);
+  --ds-focus-ring: var(--ds-ring);
+  --ds-focus-ring-w: 2px;
+  --ds-focus-ring-offset: 1px;
+
+  /* ---------------------------------------------------------------------
+     MOTION — one language, expressed as tokens so no surface invents its own.
+
+     Motion here is functional only: it answers *where did this come from*,
+     *did my press register*, or *what just arrived*. Nothing moves for
+     delight, and nothing that merely UPDATES moves at all.
+     --------------------------------------------------------------------- */
+
+  /* The raw ladder. Kept because a handful of colour/opacity transitions want
+     a duration that is not one of the two semantic ones. */
+  --ds-dur-1: 90ms; /* press feedback, hover tint */
+  --ds-dur-2: 140ms; /* the default — color/opacity changes */
+  --ds-dur-3: 200ms; /* a slower settle */
+  --ds-dur-4: 260ms; /* the scrim behind a drawer */
+
+  /* THE HOUSE PAIR — the two durations every arrival and every dismissal in
+     the product reads, and the reason the whole thing feels like one system.
+     ENTER is slower than EXIT on purpose: arriving has to be READ, leaving has
+     only to be acknowledged, and a slow exit is the commonest way an interface
+     comes to feel laggy. Asymmetry is the rule, not a per-surface choice. */
+  --ds-dur-enter: 150ms;
+  --ds-dur-exit: 90ms;
+
+  /* A SPATIAL change — a panel taking a different shape, the context rail
+     collapsing, the queue narrowing on a drill-in. Longer than an overlay
+     because the distance the eye follows is real rather than nominal. */
+  --ds-dur-move: 220ms;
+
+  /* HOW FAR anything travels, ever. In a dense console motion is a nudge that
+     names a direction, not a journey: past ~8px the eye starts chasing the
+     element instead of reading it, which is the opposite of the point. */
+  --ds-travel-sm: 4px; /* a popover leaving its trigger */
+  --ds-travel-md: 8px; /* a dialog, a toast, a record arriving */
+
+  /* The ONE scale value. A surface arrives from 97%, never from 90% — a large
+     zoom on a 1100px dialog reads as a bounce, and nothing here bounces. */
+  --ds-scale-enter: 0.97;
+
+  --ds-ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* things arriving */
+  --ds-ease-in: cubic-bezier(0.4, 0, 1, 1); /* things leaving */
+  --ds-ease-standard: cubic-bezier(0.45, 0, 0.55, 1); /* things moving in place */
+}
+
+/* ==========================================================================
+   THEME SWAP — a cut, not a transition
+   ==========================================================================
+   A palette change is not motion: colour is neither transform nor opacity, and
+   animating it across a whole page is a paint on every node. Worse, doing
+   NOTHING is not neutral either — every element carrying `ds-motion` /
+   `ds-motion-fast` already transitions `color` and `background-color`, so the
+   swap would crossfade those elements over 90–140ms while everything else
+   snapped, and the page would read as a ragged wipe rather than one change.
+
+   `ds/theme.ts` sets this attribute for the single frame the swap lands in.
+   Zeroing the four duration tokens is the same switch `prefers-reduced-motion`
+   throws at the bottom of this file: every transition in the system reads them,
+   so one declaration removes all of them without an `!important` anywhere.
+   ========================================================================== */
+:root[data-demo-theme-switching] {
+  --ds-dur-1: 0ms;
+  --ds-dur-2: 0ms;
+  --ds-dur-3: 0ms;
+  --ds-dur-4: 0ms;
+  --ds-dur-enter: 0ms;
+  --ds-dur-exit: 0ms;
+  --ds-dur-move: 0ms;
+}
+
+/* ==========================================================================
+   THEME · DARK — "Graphite Warm"
+   ==========================================================================
+   Warm near-black. Depth comes from the surface ladder plus a white-alpha
+   hairline; shadows are reserved for things that float. One accent (amber)
+   and four semantic hues, and that is the whole live palette.
+   ========================================================================== */
+[data-demo-theme="dark"],
+:root[data-demo-theme="dark"],
+body[data-demo-theme="dark"] {
+  color-scheme: dark;
+
+  /* --- the product's own semantic tokens ------------------------------- */
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #18181b;
+  --card-foreground: #fafafa;
+  /* a hair above the card so an overlay reads as floating even before its
+     shadow lands — the scrim alone cannot separate a drawer from a panel */
+  --popover: #1c1c1f;
+  --popover-foreground: #fafafa;
+  /* THE ACCENT IS NOT THE ACTION. Graphite Warm's accent is amber (#f5a623),
+     which is the SAME hue family as `warning` — so filling every primary button
+     with it would make the primary action shout at exactly the volume reserved
+     for `Waiting on you`, and a screen with one waiting run would read as five.
+     The primary action is therefore the highest-contrast neutral fill (the
+     Vercel/Height convention this theme is drawn from) and the amber survives as
+     `--ds-accent-mark`: the product's warm identity note, spent on marks, never
+     on a verb. Paper Ink has no such collision, so ITS accent is its action. */
+  --primary: #fafafa;
+  --primary-foreground: #09090b;
+  --secondary: #202024;
+  --secondary-foreground: #d4d4d8;
+  --muted: #121215;
+  --muted-foreground: #a1a1aa;
+  --accent: #27272a;
+  --accent-foreground: #fafafa;
+  /* #f04438 is the swatch; as TEXT it drops to 3.96:1 on the raised surface,
+     so the token every `text-destructive` reads is the lifted red and the
+     swatch survives on the solid chip, the dot and the rail (`-mark`). */
+  --destructive: #f97066;
+  --destructive-foreground: #2a0806;
+  --info: #4ea1f3;
+  --info-foreground: #06182b;
+  --success: #12b76a;
+  --success-foreground: #04140c;
+  --warning: #f79009;
+  --warning-foreground: #1a1204;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.16);
+  --ring: #a1a1aa;
+
+  /* The categorical log accents are RETIRED to a neutral ramp. The log stream
+     used to paint four hues on top of four status hues at once — the noisiest
+     surface in the product. Reads and writes are now told apart by direction
+     icon and type weight; only the genuinely semantic one (an unconfirmed /
+     parked write) keeps a hue, and it is the warning amber it always meant. */
+  --log-teal: #fafafa; /* a WRITE — the load-bearing direction */
+  --log-cyan: #d4d4d8; /* a READ */
+  --log-slate: #a1a1aa; /* navigation, search, inert chrome */
+  --log-violet: #f79009; /* unconfirmed / parked — warning, not a category */
+  --chart-1: #fafafa;
+  --chart-2: #a1a1aa;
+  --chart-3: #4ea1f3;
+  --chart-4: #12b76a;
+  --chart-5: #f79009;
+
+  /* --- surface ---------------------------------------------------------- */
+  --ds-surface-page: var(--background);
+  --ds-surface-1: var(--card);
+  --ds-surface-2: var(--muted);
+  --ds-surface-3: var(--accent);
+  --ds-surface-overlay: var(--popover);
+  --ds-surface-scrim: rgba(0, 0, 0, 0.66);
+  /* Body-only lift — see :root. Footer stays on --ds-recess-bg. */
+  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 4%, var(--ds-surface-1));
+  --ds-surface-disabled: color-mix(in srgb, var(--muted) 60%, transparent);
+
+  /* --- border ----------------------------------------------------------- */
+  --ds-border-subtle: rgba(255, 255, 255, 0.05);
+  --ds-border: rgba(255, 255, 255, 0.08);
+  --ds-border-strong: rgba(255, 255, 255, 0.16);
+  --ds-border-loud: rgba(255, 255, 255, 0.28);
+  --ds-control-border: rgba(255, 255, 255, 0.38); /* 3.6:1 on the card plane */
+
+  /* --- foreground ------------------------------------------------------- */
+  --ds-fg: var(--foreground);
+  --ds-fg-secondary: var(--secondary-foreground);
+  --ds-fg-muted: var(--muted-foreground);
+  --ds-fg-faint: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+  --ds-fg-inverse: var(--primary-foreground);
+  --ds-fg-link: var(--info);
+
+  /* --- control + accent ------------------------------------------------- */
+  --ds-control-bg: var(--secondary);
+  --ds-control-bg-hover: var(--accent);
+  --ds-control-bg-active: color-mix(in srgb, var(--accent) 70%, var(--background));
+  --ds-control-fg: var(--foreground);
+
+  --ds-accent: #fafafa; /* the primary action's fill */
+  --ds-accent-mark: #f5a623; /* the identity note — a mark, never a verb */
+  --ds-accent-fg: #09090b;
+  --ds-accent-hover: #ffffff;
+  --ds-accent-quiet: color-mix(in srgb, #fafafa 12%, transparent);
+
+  --ds-danger: #f97066;
+  --ds-danger-solid: #f04438;
+  --ds-danger-fg: #2a0806;
+  --ds-danger-quiet: color-mix(in srgb, #f04438 12%, transparent);
+  --ds-danger-border: color-mix(in srgb, #f04438 45%, transparent);
+
+  /* --- status ----------------------------------------------------------- */
+  --ds-status-waiting-fg: #f79009;
+  --ds-status-waiting-mark: #f79009;
+  --ds-status-waiting-bg: color-mix(in srgb, #f79009 14%, transparent);
+  --ds-status-waiting-border: color-mix(in srgb, #f79009 55%, transparent);
+  --ds-status-waiting-solid-bg: #f79009;
+  --ds-status-waiting-solid-fg: #1a1204;
+
+  --ds-status-failed-fg: #f97066;
+  --ds-status-failed-mark: #f04438;
+  --ds-status-failed-bg: color-mix(in srgb, #f04438 14%, transparent);
+  --ds-status-failed-border: color-mix(in srgb, #f04438 55%, transparent);
+  --ds-status-failed-solid-bg: #f04438;
+  --ds-status-failed-solid-fg: #2a0806;
+
+  --ds-status-parked-fg: #f79009;
+  --ds-status-parked-mark: #f79009;
+  --ds-status-parked-bg: color-mix(in srgb, #f79009 13%, transparent);
+  --ds-status-parked-border: color-mix(in srgb, #f79009 60%, transparent);
+
+  --ds-status-done-warnings-fg: #f79009;
+  --ds-status-done-warnings-mark: #f79009;
+  --ds-status-done-warnings-bg: color-mix(in srgb, #f79009 9%, transparent);
+  --ds-status-done-warnings-border: color-mix(in srgb, #f79009 30%, transparent);
+
+  --ds-status-running-fg: var(--ds-fg-muted);
+  --ds-status-running-mark: var(--ds-fg-muted);
+  --ds-status-running-bg: rgba(255, 255, 255, 0.06);
+  --ds-status-running-border: rgba(255, 255, 255, 0.18);
+
+  --ds-status-queued-fg: var(--ds-fg-muted);
+  --ds-status-queued-mark: var(--ds-fg-muted);
+  --ds-status-queued-bg: transparent;
+  --ds-status-queued-border: rgba(255, 255, 255, 0.22);
+
+  --ds-status-cancelled-fg: var(--ds-fg-muted);
+  --ds-status-cancelled-mark: var(--ds-fg-muted);
+  --ds-status-cancelled-bg: color-mix(in srgb, #a3a3a3 14%, transparent);
+  --ds-status-cancelled-border: color-mix(in srgb, #a3a3a3 40%, transparent);
+  --ds-status-cancelled-solid-bg: #737373;
+  --ds-status-cancelled-solid-fg: #fafafa;
+
+  --ds-status-verified-done-fg: #12b76a;
+  --ds-status-verified-done-mark: #12b76a;
+  --ds-status-verified-done-bg: color-mix(in srgb, #12b76a 14%, transparent);
+  --ds-status-verified-done-border: color-mix(in srgb, #12b76a 40%, transparent);
+  --ds-status-verified-done-solid-bg: #12b76a;
+  --ds-status-verified-done-solid-fg: #052e1c;
+
+  --ds-info-fg: #4ea1f3;
+  --ds-info-mark: #4ea1f3;
+  --ds-info-bg: color-mix(in srgb, #4ea1f3 12%, transparent);
+  --ds-info-border: color-mix(in srgb, #4ea1f3 40%, transparent);
+  --ds-info-solid-bg: #4ea1f3;
+  --ds-info-solid-fg: #06182b;
+  --ds-info-solid-hover: #6eb4f5;
+  --ds-success-fg: #12b76a;
+  --ds-success-mark: #12b76a;
+  --ds-success-bg: color-mix(in srgb, #12b76a 12%, transparent);
+  --ds-success-border: color-mix(in srgb, #12b76a 38%, transparent);
+
+  /* --- direction (read / write) ------------------------------------------
+     Measured on the card plane (#18181b): read text 8.1:1, write text 10.0:1,
+     read mark 8.1:1, write mark 6.4:1. Both clear the 4.5:1 text floor, so on
+     this theme `-fg` and `-mark` differ only in weight, not in legibility. */
+  --ds-read-fg: #38bdf8;
+  --ds-read-mark: #38bdf8;
+  --ds-read-bg: color-mix(in srgb, #38bdf8 12%, transparent);
+  --ds-read-border: color-mix(in srgb, #38bdf8 36%, transparent);
+  --ds-write-fg: #c4b5fd;
+  --ds-write-mark: #a78bfa;
+  --ds-write-bg: color-mix(in srgb, #a78bfa 14%, transparent);
+  --ds-write-border: color-mix(in srgb, #a78bfa 40%, transparent);
+
+  /* --- focus + elevation ------------------------------------------------ */
+  /* 4.6:1 on the card plane (#18181b), 3.9:1 on the raised one (#27272a) —
+     both clear WCAG 2.2's 3:1 focus-appearance floor with headroom, at a
+     fraction of the volume the old 85% white was shouting at. */
+  --ds-ring: rgba(255, 255, 255, 0.46);
+  --ds-focus-ring: var(--ds-ring);
+  --ds-elev-1: 0 1px 2px hsl(0 0% 0% / 0.35);
+  --ds-elev-2:
+    0 4px 12px -2px hsl(0 0% 0% / 0.45), 0 1px 3px hsl(0 0% 0% / 0.32);
+  --ds-elev-3:
+    0 16px 40px -8px hsl(0 0% 0% / 0.62), 0 2px 8px -2px hsl(0 0% 0% / 0.45);
+}
+
+/* ==========================================================================
+   THEME · LIGHT — "Paper Ink"
+   ==========================================================================
+   A tinted page with white cards, so a panel reads as a sheet lying on a desk
+   rather than a region of the same paint. Elevation here is a SHADOW, because
+   a hairline alone cannot separate white from white — this is the one place
+   the two themes reach for different mechanics to say the same thing.
+
+   NOT AN INVERSION. Four of the five hues are re-picked, not lightened: the
+   dark theme's swatches all fail 4.5:1 as body text on white, so each hue
+   carries a darker `-fg` for text and keeps its swatch on the dot / bar /
+   border (`-mark`). Every pair below was measured, including status text
+   against the RENDERED tint rather than against the page.
+   ========================================================================== */
+[data-demo-theme="light"],
+:root[data-demo-theme="light"],
+body[data-demo-theme="light"] {
+  color-scheme: light;
+
+  /* --- the product's own semantic tokens ------------------------------- */
+  --background: #f6f8fa;
+  --foreground: #0b0f19;
+  --card: #ffffff;
+  --card-foreground: #0b0f19;
+  --popover: #ffffff;
+  --popover-foreground: #0b0f19;
+  /* the swatch is #4f46e5; text uses the step down so it clears 4.5:1 on the
+     accent tint as well as on paper (`--ds-accent-mark` keeps the swatch) */
+  --primary: #4338ca;
+  --primary-foreground: #ffffff;
+  --secondary: #eff2f6;
+  --secondary-foreground: #334155;
+  --muted: #f1f4f8;
+  --muted-foreground: #475569;
+  --accent: #e8ecf2;
+  --accent-foreground: #0b0f19;
+  --destructive: #b42318;
+  --destructive-foreground: #ffffff;
+  --info: #0369a1; /* swatch #0ba5ec — 2.8:1 as text, so text steps down */
+  --info-foreground: #ffffff;
+  --success: #065f46; /* swatch #059669 — 3.8:1 as text, so text steps down */
+  --success-foreground: #ffffff;
+  --warning: #b54708;
+  --warning-foreground: #ffffff;
+  --border: #e4e7ec;
+  --input: #d0d5dd;
+  --ring: #667085;
+
+  --log-teal: #0b0f19; /* a WRITE */
+  --log-cyan: #334155; /* a READ */
+  --log-slate: #475569; /* navigation, search, inert chrome */
+  --log-violet: #b54708; /* unconfirmed / parked */
+  --chart-1: #0b0f19;
+  --chart-2: #475569;
+  --chart-3: #0369a1;
+  --chart-4: #065f46;
+  --chart-5: #b54708;
+
+  /* --- surface ---------------------------------------------------------- */
+  --ds-surface-page: var(--background);
+  --ds-surface-1: var(--card);
+  --ds-surface-2: var(--muted);
+  --ds-surface-3: var(--accent);
+  --ds-surface-overlay: var(--popover);
+  --ds-surface-scrim: rgba(16, 24, 40, 0.45);
+  /* Paper needs a hair more mix than Graphite Warm's 4% for the same read. */
+  --ds-surface-selected: color-mix(in srgb, var(--ds-fg) 5%, var(--ds-surface-1));
+  --ds-surface-disabled: color-mix(in srgb, var(--muted) 70%, transparent);
+
+  /* --- border ----------------------------------------------------------- */
+  --ds-border-subtle: #edeff2;
+  --ds-border: #e4e7ec;
+  --ds-border-strong: #d0d5dd;
+  --ds-border-loud: #b4bcc8;
+  --ds-control-border: #7e8899; /* 3.6:1 on white, 3.4:1 on the page */
+
+  /* --- foreground ------------------------------------------------------- */
+  --ds-fg: var(--foreground);
+  --ds-fg-secondary: var(--secondary-foreground);
+  --ds-fg-muted: var(--muted-foreground);
+  --ds-fg-faint: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+  --ds-fg-inverse: var(--primary-foreground);
+  --ds-fg-link: var(--info);
+
+  /* --- control + accent ------------------------------------------------- */
+  --ds-control-bg: var(--secondary);
+  --ds-control-bg-hover: var(--accent);
+  --ds-control-bg-active: color-mix(in srgb, var(--accent) 70%, #d5dbe4);
+  --ds-control-fg: var(--foreground);
+
+  --ds-accent: #4338ca;
+  --ds-accent-mark: #4f46e5;
+  --ds-accent-fg: #ffffff;
+  --ds-accent-hover: #3730a3; /* light hovers DARKEN; dark hovers lighten */
+  --ds-accent-quiet: color-mix(in srgb, #4f46e5 12%, transparent);
+
+  --ds-danger: #b42318;
+  --ds-danger-solid: #b42318;
+  --ds-danger-fg: #ffffff;
+  --ds-danger-quiet: color-mix(in srgb, #b42318 10%, transparent);
+  --ds-danger-border: color-mix(in srgb, #b42318 40%, transparent);
+
+  /* --- status ----------------------------------------------------------- */
+  /* The amber family sits on an OPAQUE warm tint rather than an alpha wash:
+     on paper a 14% amber over white reads as dirty grey, and the measured
+     5.2:1 of #b54708 on #fffaeb is the pair this theme was picked for. */
+  --ds-status-waiting-fg: #b54708;
+  --ds-status-waiting-mark: #f79009;
+  --ds-status-waiting-bg: #fffaeb;
+  --ds-status-waiting-border: color-mix(in srgb, #b54708 40%, transparent);
+  --ds-status-waiting-solid-bg: #b54708;
+  --ds-status-waiting-solid-fg: #ffffff;
+
+  --ds-status-failed-fg: #b42318;
+  --ds-status-failed-mark: #b42318;
+  --ds-status-failed-bg: color-mix(in srgb, #b42318 10%, transparent);
+  --ds-status-failed-border: color-mix(in srgb, #b42318 40%, transparent);
+  --ds-status-failed-solid-bg: #b42318;
+  --ds-status-failed-solid-fg: #ffffff;
+
+  --ds-status-parked-fg: #b54708;
+  --ds-status-parked-mark: #f79009;
+  --ds-status-parked-bg: #fffaeb;
+  --ds-status-parked-border: color-mix(in srgb, #b54708 50%, transparent);
+
+  --ds-status-done-warnings-fg: #b54708;
+  --ds-status-done-warnings-mark: #f79009;
+  --ds-status-done-warnings-bg: #fffaeb;
+  --ds-status-done-warnings-border: color-mix(in srgb, #b54708 24%, transparent);
+
+  --ds-status-running-fg: var(--ds-fg-muted);
+  --ds-status-running-mark: var(--ds-fg-muted);
+  --ds-status-running-bg: color-mix(in srgb, #0b0f19 5%, transparent);
+  --ds-status-running-border: color-mix(in srgb, #0b0f19 14%, transparent);
+
+  --ds-status-queued-fg: var(--ds-fg-muted);
+  --ds-status-queued-mark: var(--ds-fg-muted);
+  --ds-status-queued-bg: transparent;
+  --ds-status-queued-border: color-mix(in srgb, #475569 35%, transparent);
+
+  --ds-status-cancelled-fg: var(--ds-fg-muted);
+  --ds-status-cancelled-mark: var(--ds-fg-muted);
+  --ds-status-cancelled-bg: color-mix(in srgb, #737373 12%, transparent);
+  --ds-status-cancelled-border: color-mix(in srgb, #737373 28%, transparent);
+  --ds-status-cancelled-solid-bg: #a3a3a3;
+  --ds-status-cancelled-solid-fg: #171717;
+
+  --ds-status-verified-done-fg: #065f46;
+  --ds-status-verified-done-mark: #059669;
+  --ds-status-verified-done-bg: color-mix(in srgb, #059669 12%, transparent);
+  --ds-status-verified-done-border: color-mix(in srgb, #065f46 28%, transparent);
+  --ds-status-verified-done-solid-bg: #059669;
+  --ds-status-verified-done-solid-fg: #ffffff;
+
+  --ds-info-fg: #0369a1;
+  --ds-info-mark: #0ba5ec;
+  --ds-info-bg: color-mix(in srgb, #0ba5ec 12%, transparent);
+  --ds-info-border: color-mix(in srgb, #0369a1 40%, transparent);
+  --ds-info-solid-bg: #0ba5ec;
+  --ds-info-solid-fg: #ffffff;
+  --ds-info-solid-hover: #0284c7;
+  --ds-success-fg: #065f46;
+  --ds-success-mark: #059669;
+  --ds-success-bg: color-mix(in srgb, #059669 12%, transparent);
+  --ds-success-border: color-mix(in srgb, #065f46 38%, transparent);
+
+  /* --- direction (read / write) ------------------------------------------
+     This is the theme the `-fg` / `-mark` split exists for. Sky-600 (#0284c7)
+     reads as a rail at 4.1:1 on white but only 2.8:1 as text, so the text step
+     drops to #075985 (7.6:1 on white, 6.5:1 on its own rendered tint). Write
+     is purple rather than indigo on purpose: Paper Ink's accent IS indigo, and
+     a write must not read as "the primary action". Purple text #6b21a8 is
+     8.8:1 on white and 7.6:1 on its own tint; the #9333ea mark is 5.4:1. */
+  --ds-read-fg: #075985;
+  --ds-read-mark: #0284c7;
+  --ds-read-bg: color-mix(in srgb, #0284c7 10%, transparent);
+  --ds-read-border: color-mix(in srgb, #075985 34%, transparent);
+  --ds-write-fg: #6b21a8;
+  --ds-write-mark: #9333ea;
+  --ds-write-bg: color-mix(in srgb, #9333ea 10%, transparent);
+  --ds-write-border: color-mix(in srgb, #6b21a8 34%, transparent);
+
+  /* --- focus + elevation ------------------------------------------------ */
+  /* 4.2:1 on white, 3.9:1 on the tinted page — the same statement as the dark
+     theme's ring at the same volume, re-picked rather than inverted. */
+  --ds-ring: #737d8f;
+  --ds-focus-ring: var(--ds-ring);
+  /* White on white cannot be separated by a hairline alone, so this is the one
+     theme where a resting card is allowed a shadow. */
+  --ds-elev-1: 0 1px 3px rgba(16, 24, 40, 0.1);
+  --ds-elev-2:
+    0 4px 12px -2px rgba(16, 24, 40, 0.12), 0 1px 3px rgba(16, 24, 40, 0.08);
+  --ds-elev-3:
+    0 16px 40px -8px rgba(16, 24, 40, 0.18), 0 2px 8px -2px rgba(16, 24, 40, 0.1);
+}
+
+/* ==========================================================================
+   HELPER CLASSES
+   ==========================================================================
+   Only for the handful of things Tailwind expresses awkwardly or ambiguously
+   (font-size + line-height pairs, box-shadow tokens, the focus ring). Colors,
+   spacing and layout stay in Tailwind utilities reading var(--ds-*).
+
+   These are unlayered, so they win over Tailwind utilities. That is on
+   purpose: `ds-text-body` must not be silently overridden by a stray
+   `text-[11.5px]`. To change a size, change the token.
+   ========================================================================== */
+
+.ds-text-micro {
+  font-size: var(--ds-text-micro);
+  line-height: var(--ds-lh-micro);
+}
+.ds-text-meta {
+  font-size: var(--ds-text-meta);
+  line-height: var(--ds-lh-meta);
+}
+.ds-text-body {
+  font-size: var(--ds-text-body);
+  line-height: var(--ds-lh-body);
+}
+.ds-text-ui {
+  font-size: var(--ds-text-ui);
+  line-height: var(--ds-lh-ui);
+}
+.ds-text-title {
+  font-size: var(--ds-text-title);
+  line-height: var(--ds-lh-title);
+  letter-spacing: var(--ds-tracking-tight);
+}
+.ds-text-section {
+  font-size: var(--ds-text-section);
+  line-height: var(--ds-lh-section);
+  letter-spacing: var(--ds-tracking-tight);
+}
+.ds-text-display {
+  font-size: var(--ds-text-display);
+  line-height: var(--ds-lh-display);
+  letter-spacing: var(--ds-tracking-tight);
+  font-variant-numeric: tabular-nums;
+}
+/* Uppercase micro label — group headers, table column heads, tile captions. */
+.ds-text-caps {
+  font-size: var(--ds-text-micro);
+  line-height: var(--ds-lh-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--ds-tracking-caps);
+  font-weight: 600;
+}
+/* Collapse the line box to the em. Compose AFTER a `ds-text-*` size class on a
+   single-line label that shares a flex/grid row with an icon or a taller
+   control (ⓘ, chip): the flex mid then is the glyph mid, not a padded line
+   box. Multi-line copy keeps the size class's own line-height. Unlayered so
+   it can beat the size class (same origin, later in this file). */
+.ds-leading-flush {
+  line-height: 1;
+}
+
+/* Elevation */
+.ds-elev-1 {
+  box-shadow: var(--ds-elev-1);
+}
+.ds-elev-2 {
+  box-shadow: var(--ds-elev-2);
+}
+.ds-elev-3 {
+  box-shadow: var(--ds-elev-3);
+}
+
+/* The focus ring. Every interactive primitive carries `ds-focus`. */
+.ds-focus:focus-visible {
+  outline: var(--ds-focus-ring-w) solid var(--ds-focus-ring);
+  outline-offset: var(--ds-focus-ring-offset);
+}
+/* Containers that own focus for a child (Field, Tabs list, table row). */
+.ds-focus-within:focus-within {
+  outline: var(--ds-focus-ring-w) solid var(--ds-focus-ring);
+  outline-offset: var(--ds-focus-ring-offset);
+}
+
+/* ==========================================================================
+   MOTION — the five classes that are the whole language
+   ==========================================================================
+   Every one of them is a TRANSITION, never a key-frame animation, and that is
+   what makes the language interruptible by construction: a transition
+   re-targets from wherever it currently is the instant its end value changes,
+   so grabbing something mid-flight responds immediately instead of finishing
+   the move it was making. A key-frame animation cannot do that, which is the
+   reason none of them exist here (and the reason the architecture guard bans
+   writing one).
+
+   Only `opacity` and `transform` are ever animated. Nothing in this system
+   transitions width, height, top or left — a spatial change is expressed as a
+   translate over a laid-out grid, so the browser never re-lays-out a frame.
+
+   Durations are tokens, which is what lets `prefers-reduced-motion` remove
+   every transition in the product with one declaration at the foot of this
+   file rather than a reduced-motion branch per component.
+   ========================================================================== */
+
+/* Colour, fill and edge, in place. The workhorse — hover tints, status
+   changes, a chip going selected. */
+.ds-motion {
+  transition-property: color, background-color, border-color, outline-color,
+    box-shadow, opacity;
+  transition-duration: var(--ds-dur-2);
+  transition-timing-function: var(--ds-ease-out);
+}
+
+/* Press feedback and hover on a COMMAND. Fast because a press has to feel
+   like a press: anything over ~100ms reads as the button thinking. */
+.ds-motion-fast {
+  transition-property: color, background-color, border-color, box-shadow,
+    opacity, transform;
+  transition-duration: var(--ds-dur-1);
+  transition-timing-function: var(--ds-ease-out);
+}
+
+/* SOMETHING ARRIVING — an overlay, a toast, a record the run just read. */
+.ds-motion-enter {
+  transition-property: opacity, transform;
+  transition-duration: var(--ds-dur-enter);
+  transition-timing-function: var(--ds-ease-out);
+}
+
+/* SOMETHING LEAVING. Faster, and on the `in` curve so it goes rather than
+   drifts. Applied by swapping the class, so the exit re-targets from wherever
+   the entrance had got to. */
+.ds-motion-exit {
+  transition-property: opacity, transform;
+  transition-duration: var(--ds-dur-exit);
+  transition-timing-function: var(--ds-ease-in);
+}
+
+/* A SPATIAL change — a panel changing shape, a rail collapsing, a column
+   narrowing. Longer, and on the standard curve: the thing is not arriving
+   from anywhere, it is moving in place. */
+.ds-motion-move {
+  transition-property: transform, opacity;
+  transition-duration: var(--ds-dur-move);
+  transition-timing-function: var(--ds-ease-standard);
+}
+
+/* A dashed hairline — the shape cue that belongs to "Write parked" alone. */
+.ds-dashed {
+  border-style: dashed;
+}
+
+/* Numeric columns must not jitter as values tick. */
+.ds-nums {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--ds-font-mono);
+}
+
+/* ==========================================================================
+   REDUCED MOTION
+   ==========================================================================
+   One switch. Because every transition in the system reads a --ds-dur-*
+   token, zeroing the tokens removes all motion without touching a component.
+   (Tailwind's animate-* utilities are separately paired with
+   `motion-reduce:animate-none` at their call sites — the architecture guard
+   enforces that.) */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ds-dur-1: 0ms;
+    --ds-dur-2: 0ms;
+    --ds-dur-3: 0ms;
+    --ds-dur-4: 0ms;
+    --ds-dur-enter: 0ms;
+    --ds-dur-exit: 0ms;
+    --ds-dur-move: 0ms;
+    /* Distance is motion too. Zeroing only the clock would still slide a
+       drawer 8px in one frame — a jump, which is what a reduced-motion
+       preference is asking not to see. */
+    --ds-travel-sm: 0px;
+    --ds-travel-md: 0px;
+    --ds-scale-enter: 1;
+  }
+}

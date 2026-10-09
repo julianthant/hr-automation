@@ -1,0 +1,209 @@
+import { describe, it, beforeEach } from "vitest";
+import assert from "node:assert/strict";
+
+import {
+  resolveQueueRowStatus,
+  getWorkflowStatusExtensions,
+  registerWorkflowStatusExtensions,
+  isDryRunEntry,
+  __resetWorkflowStatusExtensionsForTests,
+  type StatusExtensionEntry,
+} from "../../../src/domain/queue-row-status.js";
+import { personLookupStatusExtensions } from "../../../src/domain/person-lookup-status.js";
+import { ocrStatusExtensions } from "../../../src/tracker/dashboard/ocr-status.js";
+
+function reRegister(): void {
+  __resetWorkflowStatusExtensionsForTests();
+  registerWorkflowStatusExtensions("person-lookup", personLookupStatusExtensions);
+  registerWorkflowStatusExtensions("ocr", ocrStatusExtensions);
+}
+
+beforeEach(reRegister);
+
+function entry(partial: Partial<StatusExtensionEntry>): StatusExtensionEntry {
+  return {
+    workflow: "person-lookup",
+    status: "done",
+    ...partial,
+  };
+}
+
+describe("resolveQueueRowStatus — derivedStatus", () => {
+  it("person-lookup done + activeStatus=not-found → notFound", () => {
+    const r = resolveQueueRowStatus(
+      entry({ workflow: "person-lookup", status: "done", data: { activeStatus: "not-found" } }),
+      { isDone: true },
+    );
+    assert.equal(r.derivedStatus, "notFound");
+  });
+
+  it("person-lookup not-found but status=running → no derived status", () => {
+    const r = resolveQueueRowStatus(
+      entry({ workflow: "person-lookup", status: "running", data: { activeStatus: "not-found" } }),
+      { isDone: false },
+    );
+    assert.equal(r.derivedStatus, null);
+  });
+
+  it("person-lookup done with a normal active status → no derived status", () => {
+    const r = resolveQueueRowStatus(
+      entry({ workflow: "person-lookup", status: "done", data: { activeStatus: "active" } }),
+      { isDone: true },
+    );
+    assert.equal(r.derivedStatus, null);
+  });
+
+  it("delegated OCR running + awaiting-approval → needsReview", () => {
+    const r = resolveQueueRowStatus(
+      {
+        workflow: "ocr",
+        status: "running",
+        step: "awaiting-approval",
+        parentRunId: "parent-run-1",
+        data: {},
+      },
+      { isDone: false },
+    );
+    assert.equal(r.derivedStatus, "needsReview");
+  });
+
+  it("standalone OCR awaiting-approval (no parentRunId) → no derived status", () => {
+    const r = resolveQueueRowStatus(
+      { workflow: "ocr", status: "running", step: "awaiting-approval", data: {} },
+      { isDone: false },
+    );
+    assert.equal(r.derivedStatus, null);
+  });
+
+  it("OCR done (approved) → no derived status", () => {
+    const r = resolveQueueRowStatus(
+      { workflow: "ocr", status: "done", step: "done", parentRunId: "p", data: {} },
+      { isDone: true },
+    );
+    assert.equal(r.derivedStatus, null);
+  });
+
+  it("workflow with no extensions → all null (default base behavior)", () => {
+    const r = resolveQueueRowStatus(
+      { workflow: "onboarding", status: "done", data: {} },
+      { isDone: true },
+    );
+    assert.equal(r.derivedStatus, null);
+    assert.equal(r.secondaryTag, null);
+  });
+});
+
+describe("resolveQueueRowStatus — secondaryTag (person-lookup A/IA)", () => {
+  it("activeStatus=inactive → IA / Inactive / warning classes", () => {
+    const r = resolveQueueRowStatus(
+      entry({ workflow: "person-lookup", status: "done", data: { activeStatus: "inactive" } }),
+      { isDone: true },
+    );
+    assert.deepEqual(r.secondaryTag, {
+      text: "IA",
+      title: "Inactive",
+      className: "bg-warning/12 text-warning border border-warning/30",
+    });
+  });
+
+  it("activeStatus=active → A / Active / success classes", () => {
+    const r = resolveQueueRowStatus(
+      entry({ workflow: "person-lookup", status: "done", data: { activeStatus: "active" } }),
+      { isDone: true },
+    );
+    assert.deepEqual(r.secondaryTag, {
+      text: "A",
+      title: "Active",
+      className: "bg-success/12 text-success border border-success/30",
+    });
+  });
+
+  it("activeStatus=non-hdh → A / Active (non-HDH dept) / success classes", () => {
+    const r = resolveQueueRowStatus(
+      entry({ workflow: "person-lookup", status: "done", data: { activeStatus: "non-hdh" } }),
+      { isDone: true },
+    );
+    assert.deepEqual(r.secondaryTag, {
+      text: "A",
+      title: "Active (non-HDH dept)",
+      className: "bg-success/12 text-success border border-success/30",
+    });
+  });
+
+  it("legacy isActive=true + isDone (no activeStatus) → A / Active", () => {
+    const r = resolveQueueRowStatus(
+      entry({ workflow: "person-lookup", status: "done", data: { isActive: "true" } }),
+      { isDone: true },
+    );
+    assert.deepEqual(r.secondaryTag, {
+      text: "A",
+      title: "Active",
+      className: "bg-success/12 text-success border border-success/30",
+    });
+  });
+
+  it("legacy isActive=true but NOT done → no tag", () => {
+    const r = resolveQueueRowStatus(
+      entry({ workflow: "person-lookup", status: "running", data: { isActive: "true" } }),
+      { isDone: false },
+    );
+    assert.equal(r.secondaryTag, null);
+  });
+
+  it("no activeStatus and no legacy active → no tag", () => {
+    const r = resolveQueueRowStatus(
+      entry({ workflow: "person-lookup", status: "done", data: {} }),
+      { isDone: true },
+    );
+    assert.equal(r.secondaryTag, null);
+  });
+
+  it("not-found activeStatus → no secondary tag (only derived status)", () => {
+    const r = resolveQueueRowStatus(
+      entry({ workflow: "person-lookup", status: "done", data: { activeStatus: "not-found" } }),
+      { isDone: true },
+    );
+    assert.equal(r.secondaryTag, null);
+    assert.equal(r.derivedStatus, "notFound");
+  });
+
+  it("ocr verify rows tag an under-verified done run; other ocr rows get no tag (E2E-011)", () => {
+    const tagFor = getWorkflowStatusExtensions("ocr")?.secondaryTag;
+    assert.ok(tagFor, "ocr declares a secondaryTag rule");
+    const verifyEntry = entry({
+      workflow: "ocr",
+      status: "done",
+      data: { formType: "verify", verifiedCount: "0", recordCount: "1" },
+    });
+    const tag = tagFor!(verifyEntry, { isDone: true });
+    assert.equal(tag?.text, "0/1 verified");
+    // Fully verified, non-verify, and non-done rows stay untagged.
+    assert.equal(tagFor!(entry({ workflow: "ocr", status: "done", data: { formType: "verify", verifiedCount: "2", recordCount: "2" } }), { isDone: true }), null);
+    assert.equal(tagFor!(entry({ workflow: "ocr", status: "done", data: { formType: "oath", verifiedCount: "0", recordCount: "1" } }), { isDone: true }), null);
+    assert.equal(tagFor!(verifyEntry, { isDone: false }), null);
+  });
+});
+
+describe("isDryRunEntry — cross-workflow dry-run predicate", () => {
+  it("data.dryRun string \"true\" → true (daemon re-emit / stringified task store)", () => {
+    assert.equal(isDryRunEntry({ data: { dryRun: "true" } }), true);
+  });
+
+  it("data.dryRun boolean true → true (in-process initialData / updateData)", () => {
+    // The kernel can carry the raw boolean before stringification.
+    assert.equal(isDryRunEntry({ data: { dryRun: true } as unknown as Record<string, string> }), true);
+  });
+
+  it("dryRun absent → false (live run)", () => {
+    assert.equal(isDryRunEntry({ data: { email: "fixture002@example.edu" } }), false);
+  });
+
+  it("no data at all → false", () => {
+    assert.equal(isDryRunEntry({}), false);
+  });
+
+  it("dryRun=\"false\" or boolean false → false (not a dry run)", () => {
+    assert.equal(isDryRunEntry({ data: { dryRun: "false" } }), false);
+    assert.equal(isDryRunEntry({ data: { dryRun: false } as unknown as Record<string, string> }), false);
+  });
+});

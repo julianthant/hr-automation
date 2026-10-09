@@ -1,0 +1,9 @@
+login I9 with username password
+create new I9 employee profile
+search existing I9 by SSN
+search existing I9 by profile ID
+fill section 1 start date
+select worksite by department number
+handle duplicate employee dialog
+dismiss training notification
+extract profile ID from URL

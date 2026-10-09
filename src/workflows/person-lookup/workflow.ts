@@ -1,0 +1,880 @@
+/**
+ * Person Lookup workflow with two UCPath modes and an optional CRM check.
+ *
+ * Search resolves a name/EID through Person Org Summary and derives active /
+ * HDH status. Match asks the HR-Tasks Search/Match surface whether UCPath
+ * already knows the legal-name + SSN/DOB identity.
+ *
+ * Kernel-based (shared-context-pool mode). Each input-run batch launches one
+ * UCPath browser (+ CRM browser), authenticates once per system, then fans out
+ * N people across N tabs in each shared BrowserContext. One-person requests
+ * are single rows; multi-person requests are grouped as batch-member rows by
+ * the dashboard enqueue boundary.
+ */
+
+import { defineWorkflow, runWorkflow } from "../../core/index.js";
+import { buildCliAdapter } from "../../core/cli-adapter.js";
+import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
+import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
+import type { Ctx } from "../../core/kernel/types.js";
+import { log } from "../../utils/log.js";
+import { errorMessage } from "../../utils/errors.js";
+import { loginToUCPath, loginToACTCrm } from "../../infra/auth/login.js";
+import { requireLogin } from "../../infra/auth/require-login.js";
+import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
+import { rootQueueTitleData } from "../../domain/queue-title.js";
+import { personLookupStatusExtensions } from "../../domain/person-lookup-status.js";
+import {
+  deriveActiveCheckOutcome,
+  deriveCrmOnlyCheckOutcome,
+  resolvePersonLookupForEidLookup,
+  systemPresence,
+  type ActiveCheckOutcome,
+} from "./outcome.js";
+import { lookupPersonInUcpath } from "./lookup.js";
+import {
+  parsePersonOrgNameInput as parseNameInput,
+  type EidResult,
+} from "../../systems/ucpath/person-org-summary.js";
+import {
+  searchCrmByName,
+  searchCrmByEidOrName,
+  pickCrmStartDate,
+  pickCrmRecord,
+  datesWithinDays,
+  type CrmRecord,
+} from "./crm-search.js";
+import {
+  normalizeName,
+  parseLastFirstName,
+  toLastFirstName,
+  displayPersonName,
+} from "../../domain/identity/person-name.js";
+import { prepareNames } from "../../domain/identity/person-name-batch.js";
+import { searchPerson } from "../../systems/ucpath/navigate.js";
+import { handlePersonMatch } from "./match.js";
+import {
+  PersonLookupItemSchema,
+  derivePersonLookupItemId,
+  displayPersonLookupInput,
+  isEidInput,
+  isMatchInput,
+  resolvePersonLookupCrmCheck,
+  resolvePersonLookupMode,
+  type PersonLookupItem,
+  type PersonLookupSearchInput,
+} from "./schema.js";
+
+export interface LookupResult {
+  name: string;
+  found: boolean;
+  sdcmpResults: EidResult[];
+  error?: string;
+}
+
+const steps = ["searching", "cross-verification", "active-status", "crm-dates"] as const;
+
+/**
+ * Read tracker `ctx.data` fields as strings. Values ride the tracker as
+ * strings; a non-string here is a stamping bug and reads as absent rather
+ * than stringifying to "[object Object]".
+ */
+function dataString(...values: unknown[]): string {
+  for (const v of values) {
+    if (v === null || v === undefined) continue;
+    return typeof v === "string" ? v : "";
+  }
+  return "";
+}
+
+/** Direct input runs use normal utility defaults; OCR fan-out children title by person/EID. */
+export const PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
+  ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
+  memberRow: {
+    titleSource: "person",
+  },
+  // Delegated lookups (OCR EID-resolution fan-out) always render as a batch,
+  // even when one record resolves — a lone delegated lookup stays a one-member
+  // batch, not a standalone single. Direct one-person input runs are unaffected
+  // (root rows, not delegated members), so they stay `single`.
+  delegation: {
+    ...DEFAULT_WORKFLOW_RUNTIME_POLICY.delegation,
+    alwaysOperationDelegatedMembers: true,
+  },
+};
+
+/**
+ * Perform the UCPath search for one item and stamp the result fields
+ * onto the tracker entry's data. Branches on the input shape:
+ *
+ *  - `{ name }`   — multi-strategy SDCMP/HDH search, returns up to N
+ *                   candidate rows (callers may cross-verify against CRM)
+ *  - `{ emplId }` — direct Empl ID search, single result
+ *
+ * After either branch resolves to a detail page, captures a screenshot
+ * and stamps the resulting filename onto the tracker row's
+ * `personOrgScreenshot` data field.
+ *
+ * Returns the raw results so the optional CRM step can cross-reference them.
+ */
+async function searchingStep<TSteps extends readonly string[]>(
+  ctx: Ctx<TSteps, PersonLookupItem>,
+  input: PersonLookupSearchInput,
+): Promise<EidResult[]> {
+  const page = await ctx.page("ucpath");
+
+  if (isEidInput(input)) {
+    let lookup: Awaited<ReturnType<typeof lookupPersonInUcpath>>;
+    try {
+      lookup = await lookupPersonInUcpath(page, { kind: "by-eid", emplId: input.emplId });
+    } catch (err) {
+      log.error(`searchByEid failed for "${input.emplId}": ${errorMessage(err)}`);
+      ctx.updateData({ emplId: input.emplId, hrStatus: "Error" });
+      // Capture the UCPath page state before rethrowing so the operator has
+      // evidence of what the search saw. Best-effort: never masks the original error.
+      await ctx.captureAndStampScreenshot(
+        "UCPath EID search failed",
+        "personOrgSearchScreenshot",
+        { systems: ["ucpath"] },
+      );
+      throw err;
+    }
+    const result = lookup.selection.selected;
+    if (!result) {
+      log.step(`No detail page for EID ${input.emplId}`);
+      ctx.updateData({
+        emplId: input.emplId,
+        hrStatus: "Not found",
+        ucpathFound: systemPresence(false),
+      });
+      // Capture the UCPath search-results grid so the operator has evidence of
+      // what the lookup saw (empty / ambiguous results).
+      await ctx.captureAndStampScreenshot(
+        "no UCPath detail",
+        "personOrgSearchScreenshot",
+        { systems: ["ucpath"] },
+      );
+      return [];
+    }
+    log.success(
+      `EID ${result.emplId} resolved → ${result.name} | ${result.department ?? "?"} | ${result.hrStatus}`,
+    );
+    ctx.updateData({
+      resolvedName: toLastFirstName(result.name, result.lastName),
+      emplId: result.emplId,
+      department: result.department ?? "",
+      hrStatus: result.hrStatus,
+      jobTitle: result.jobCodeDescription ?? "",
+      ucpathFound: systemPresence(true),
+    });
+    await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot", {
+      systems: ["ucpath"],
+    });
+    return lookup.results as EidResult[];
+  }
+
+  // Name-search path. The searching-state grid is only worth a screenshot when
+  // nothing resolves (a not-found audit) — on success we capture the resolved
+  // detail page instead, so the operator never sees the mid-search form.
+  let lookup: Awaited<ReturnType<typeof lookupPersonInUcpath>>;
+  try {
+    lookup = await lookupPersonInUcpath(page, { kind: "by-name", name: input.name }, {
+      keepNonHdh: input.keepNonHdh,
+    });
+  } catch (err) {
+    log.error(`Search failed for "${input.name}": ${errorMessage(err)}`);
+    // Prose belongs in the HR-status DETAIL field, never in `emplId` — a prose
+    // value in the EID identity field leaks into the queue-row subtitle and gets
+    // carried forward as a "resolved" EID. The thrown error already lands the row
+    // as `failed` (the structured failure signal).
+    ctx.updateData({ hrStatus: "Error" });
+    // Capture the UCPath page state before rethrowing so the operator has
+    // evidence of what the search saw. Best-effort: never masks the original error.
+    await ctx.captureAndStampScreenshot(
+      "UCPath search failed",
+      "personOrgSearchScreenshot",
+      { systems: ["ucpath"] },
+    );
+    throw err;
+  }
+  if (lookup.results.length === 0) {
+    log.step(`No SDCMP results for "${input.name}"`);
+    // No EID resolved — leave `emplId` unset so the subtitle falls through to the
+    // trace id. Terminal "Not found" only applies when CRM also misses (see
+    // active-status); `ucpathFound` records this system's outcome alone.
+    ctx.updateData({ hrStatus: "Not found", ucpathFound: systemPresence(false) });
+    await ctx.captureAndStampScreenshot(
+      "person-org-summary-search-results",
+      "personOrgSearchScreenshot",
+      { systems: ["ucpath"] },
+    );
+    return [];
+  }
+  const first = lookup.selection.selected ?? lookup.results[0];
+  log.success(
+    `Found ${lookup.results.length} result(s) for "${input.name}": EID ${first.emplId} | ${first.department ?? "?"} | ${first.jobCodeDescription}`,
+  );
+  ctx.updateData({
+    resolvedName: toLastFirstName(first.name, first.lastName),
+    emplId: first.emplId,
+    department: first.department ?? "",
+    hrStatus: first.hrStatus,
+    jobTitle: first.jobCodeDescription ?? "",
+    ucpathFound: systemPresence(true),
+  });
+  await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot", {
+    systems: ["ucpath"],
+  });
+  return lookup.results as EidResult[];
+}
+
+/** Split a UCPath-resolved "First [Middle] Last" name into CRM search parts. */
+export function splitResolvedName(fullName: string): { lastName: string; firstName: string } {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { lastName: "", firstName: "" };
+  if (parts.length === 1) return { lastName: parts[0], firstName: "" };
+  return { lastName: parts[parts.length - 1], firstName: parts[0] };
+}
+
+/**
+ * Resolve CRM search name parts from a resolved name that may be in comma
+ * format ("Last, First [Middle]" — how searchingStep stamps `resolvedName`
+ * via toLastFirstName) or natural "First [Middle] Last" order. Comma form is
+ * parsed first; otherwise falls back to the whitespace split.
+ */
+export function resolveCrmSearchNameParts(
+  resolved: string,
+): { lastName: string; firstName: string } {
+  const parsed = parseLastFirstName(resolved);
+  if (parsed) return { lastName: parsed.lastName, firstName: parsed.firstName };
+  return splitResolvedName(resolved);
+}
+
+/**
+ * Resolve the CRM cross-verification match for a name search against the
+ * UCPath SDCMP candidates. Pure — drives `crmMatch` / `crmMatchedEmplId`:
+ *  - "direct" — a CRM record's UCPath EID equals an SDCMP candidate's EID
+ *               (unique — see ambiguity note below)
+ *  - "date"   — a CRM firstDayOfService is within ±7d of an SDCMP date
+ *  - "none"   — CRM returned records but nothing matched
+ *
+ * If MULTIPLE CRM records directly match DIFFERENT SDCMP candidate EIDs,
+ * picking the first would be an arbitrary, potentially wrong-person match —
+ * this returns "none" instead of trusting either (root CLAUDE.md "Fail loud").
+ *
+ * Why ±7 days is a justified tolerance, not a loose match (2026-07-08 audit):
+ * CRM's "First Day of Service" and UCPath's Last Hire / effective date are
+ * entered by different systems/people days apart for the same real start date
+ * (onboarding paperwork vs. payroll processing lag), so an exact-date compare
+ * would reject genuine matches. The tolerance is bounded, pinned by a test
+ * (`matchCrmEid` "falls back to a ±7 day date match…" in
+ * `tests/unit/workflows/person-lookup/crm-start-date.test.ts`), documented in
+ * `src/workflows/person-lookup/CLAUDE.md`, and only ever a FALLBACK tie-
+ * breaker below the exact-EID check above — it never runs when a direct EID
+ * match exists, and an ambiguous CRM-only case above already fails loud
+ * instead of guessing. It also does not gate an HR write directly: it only
+ * feeds `crmMatch`/`crmMatchedEmplId`, which choose which CRM record's dates
+ * to surface — a wrong match here would misattribute Start Date display data,
+ * not submit a wrong transaction.
+ */
+export function matchCrmEid(
+  sdcmp: EidResult[],
+  crmRecords: CrmRecord[],
+): { crmMatch: "direct" | "date" | "none"; crmMatchedEmplId?: string } {
+  const directMatchedEids = new Set(
+    crmRecords
+      .map((crec) => crec.ucpathEmployeeId)
+      .filter((eid): eid is string => Boolean(eid))
+      .filter((eid) => sdcmp.some((r) => r.emplId === eid)),
+  );
+  if (directMatchedEids.size === 1) {
+    return { crmMatch: "direct", crmMatchedEmplId: [...directMatchedEids][0] };
+  }
+  if (directMatchedEids.size > 1) {
+    log.step(
+      `CRM cross-verify: ${directMatchedEids.size} distinct direct EID matches — ambiguous, not resolving`,
+    );
+    return { crmMatch: "none" };
+  }
+  for (const crec of crmRecords) {
+    const crmDate = crec.firstDayOfService;
+    if (!crmDate) continue;
+    for (const ucRec of sdcmp) {
+      const ucDate = ucRec.startDate || ucRec.effectiveDate;
+      if (!ucDate) continue;
+      if (datesWithinDays(crmDate, ucDate, 7)) {
+        return { crmMatch: "date", crmMatchedEmplId: ucRec.emplId };
+      }
+    }
+  }
+  return { crmMatch: "none" };
+}
+
+/**
+ * Stamp the operator-facing Start Date from CRM (First Day of Service) and, if
+ * any CRM record was found, capture the CRM record page (not the search grid).
+ * Start Date is CRM-only: it stays blank when CRM has no record or no date.
+ *
+ * Also stamps `crmFound` and, when UCPath left identity blank, fills Name/Dept
+ * (and EID when present) from a confidently chosen CRM record so a CRM-only
+ * hit still populates the detail grid.
+ */
+async function stampCrmStartDateAndScreenshot<TSteps extends readonly string[]>(
+  ctx: Ctx<TSteps, PersonLookupItem>,
+  crmRecords: CrmRecord[],
+  resolvedEid?: string,
+): Promise<void> {
+  const startDate = pickCrmStartDate(crmRecords, resolvedEid);
+  const identityRecord =
+    pickCrmRecord(crmRecords, resolvedEid) ??
+    (crmRecords.length === 1 ? crmRecords[0] : undefined);
+  const patch: Record<string, string> = {
+    startDate,
+    crmFound: systemPresence(crmRecords.length > 0),
+  };
+  if (identityRecord && !dataString(ctx.data.resolvedName).trim()) {
+    patch.resolvedName = displayPersonName(identityRecord.name);
+    if (identityRecord.department?.trim()) {
+      patch.department = identityRecord.department.trim();
+    }
+    if (identityRecord.ucpathEmployeeId?.trim() && !dataString(ctx.data.emplId).trim()) {
+      patch.emplId = identityRecord.ucpathEmployeeId.trim();
+    }
+  }
+  ctx.updateData(patch);
+  if (crmRecords.length === 0) {
+    log.step("CRM start date: no CRM record — Start Date left blank");
+    // Capture the empty CRM search result so the operator has evidence of what the lookup saw.
+    await ctx.captureAndStampScreenshot("no CRM record", "crmSearchScreenshot", {
+      systems: ["crm"],
+    });
+    return;
+  }
+  log.step(`CRM start date: "${startDate || "(none)"}" (EID ${resolvedEid || "?"})`);
+  await ctx.captureAndStampScreenshot("crm-record", "crmRecordScreenshot", {
+    systems: ["crm"],
+  });
+}
+
+/**
+ * Cross-verify against CRM and source the operator-facing Start Date (CRM First
+ * Day of Service). Emits `crmMatch` for name inputs as one of:
+ *  - "direct"    — UCPath EID matched a CRM record's UCPath EID
+ *  - "date"      — UCPath effective date matched a CRM firstDayOfService (±7d)
+ *  - "crm-only"  — CRM had an EID but UCPath returned no SDCMP results
+ *  - "ambiguous" — CRM-only path found MULTIPLE distinct EIDs with no UCPath
+ *                  cross-check possible — no identity is stamped
+ *  - "none"      — CRM returned records but none matched
+ *  - ""          — CRM returned no records for this name
+ *
+ * EID inputs skip name disambiguation (the EID already identifies the person)
+ * and only fetch the CRM record — searching CRM by EID first, then by the
+ * UCPath-resolved name — to stamp the Start Date.
+ */
+async function crossVerificationStep<TSteps extends readonly string[]>(
+  ctx: Ctx<TSteps, PersonLookupItem>,
+  input: PersonLookupItem,
+  sdcmp: EidResult[],
+): Promise<void> {
+  const crmPage = await ctx.page("crm");
+
+  // Match inputs use the HR-Tasks result EID when available, then fall back
+  // to the legal name. CRM is an optional independent check here; it never
+  // changes the UCPath `found` answer stamped by the searching step.
+  if (isMatchInput(input)) {
+    const matchedEmplId = dataString(ctx.data.matchedEmplId).trim();
+    let crmRecords: CrmRecord[];
+    try {
+      crmRecords = await searchCrmByEidOrName(crmPage, {
+        ...(matchedEmplId ? { emplId: matchedEmplId } : {}),
+        lastName: input.lastName,
+        firstName: input.firstName,
+      });
+    } catch (err) {
+      log.error(
+        `CRM match check failed for "${input.lastName}, ${input.firstName}" — ${errorMessage(err)}`,
+      );
+      await ctx.captureAndStampScreenshot("CRM search failed", "crmSearchScreenshot", {
+        systems: ["crm"],
+      });
+      throw err;
+    }
+    await stampCrmStartDateAndScreenshot(ctx, crmRecords, matchedEmplId || undefined);
+    return;
+  }
+
+  // EID inputs: search CRM by EID or name purely to source the Start Date.
+  if (isEidInput(input)) {
+    const { lastName, firstName } = resolveCrmSearchNameParts(
+      dataString(ctx.data.resolvedName, ctx.data.searchName),
+    );
+    let crmRecords: CrmRecord[] = [];
+    try {
+      crmRecords = await searchCrmByEidOrName(crmPage, {
+        emplId: input.emplId,
+        lastName,
+        firstName,
+      });
+    } catch (err) {
+      log.error(`CRM start date: search failed for EID ${input.emplId} — ${errorMessage(err)}`);
+      ctx.updateData({ crmFound: systemPresence(false) });
+      // Capture whatever the CRM page shows after the failure so the operator has evidence.
+      await ctx.captureAndStampScreenshot("CRM search failed", "crmSearchScreenshot", {
+        systems: ["crm"],
+      });
+    }
+    await stampCrmStartDateAndScreenshot(ctx, crmRecords, input.emplId);
+    return;
+  }
+
+  const searchName = dataString(ctx.data.searchName, input.name).trim();
+  let parsed: ReturnType<typeof parseNameInput>;
+  try {
+    parsed = parseNameInput(searchName);
+  } catch (err) {
+    log.error(`CRM cross-verify: invalid name "${searchName}" — ${errorMessage(err)}`);
+    ctx.updateData({ crmMatch: "", startDate: "", crmFound: systemPresence(false) });
+    return;
+  }
+
+  let crmRecords: CrmRecord[];
+  try {
+    crmRecords = await searchCrmByName(crmPage, parsed.lastName, parsed.first);
+  } catch (err) {
+    log.error(`CRM cross-verify: search failed for "${searchName}" — ${errorMessage(err)}`);
+    ctx.updateData({ crmMatch: "", startDate: "", crmFound: systemPresence(false) });
+    // Capture whatever the CRM page shows after the failure so the operator has evidence.
+    await ctx.captureAndStampScreenshot("CRM search failed", "crmSearchScreenshot", {
+      systems: ["crm"],
+    });
+    return;
+  }
+
+  if (crmRecords.length === 0) {
+    log.step(`CRM: no records for "${searchName}"`);
+    ctx.updateData({ crmMatch: "", startDate: "", crmFound: systemPresence(false) });
+    // Capture the empty CRM search result so the operator has evidence of what the lookup saw.
+    await ctx.captureAndStampScreenshot("no CRM record", "crmSearchScreenshot", {
+      systems: ["crm"],
+    });
+    return;
+  }
+
+  // CRM-only path: UCPath returned no SDCMP results but CRM has an EID.
+  // This surfaces the CRM-sourced EID so the dashboard shows it instead of "Not found".
+  if (sdcmp.length === 0) {
+    const withEid = crmRecords.filter((r) => r.ucpathEmployeeId);
+    const distinctEids = new Set(withEid.map((r) => r.ucpathEmployeeId));
+    if (distinctEids.size > 1) {
+      // Multiple CRM records carry DIFFERENT EIDs and UCPath returned nothing
+      // to cross-check against — stamping the first (a loose token-substring
+      // name match, zero UCPath verification) risks the wrong person's
+      // identity. Fail loud: flag ambiguous instead (root CLAUDE.md "Fail loud").
+      log.step(
+        `CRM-only: ${distinctEids.size} distinct EIDs found, no UCPath cross-check — ambiguous, not resolving`,
+      );
+      ctx.updateData({ crmMatch: "ambiguous", crmFound: systemPresence(true) });
+      await stampCrmStartDateAndScreenshot(ctx, crmRecords);
+      return;
+    }
+    if (withEid.length > 0) {
+      const record = withEid[0];
+      log.success(`CRM-only EID: ${record.ucpathEmployeeId} (UCPath had no SDCMP match)`);
+      ctx.updateData({
+        emplId: record.ucpathEmployeeId,
+        department: record.department ?? "",
+        resolvedName: displayPersonName(record.name),
+        crmMatch: "crm-only",
+        crmFound: systemPresence(true),
+      });
+      await stampCrmStartDateAndScreenshot(ctx, crmRecords, record.ucpathEmployeeId);
+      return;
+    }
+    // CRM returned records but none had an EID — can't verify anything
+    ctx.updateData({ crmMatch: "none" });
+    await stampCrmStartDateAndScreenshot(ctx, crmRecords);
+    return;
+  }
+
+  const { crmMatch, crmMatchedEmplId } = matchCrmEid(sdcmp, crmRecords);
+  if (crmMatch === "direct") {
+    log.success(`Direct EID match: ${crmMatchedEmplId}`);
+  } else if (crmMatch === "date") {
+    log.success(`Date match → EID ${crmMatchedEmplId}`);
+  }
+  ctx.updateData({ crmMatch, ...(crmMatchedEmplId ? { crmMatchedEmplId } : {}) });
+  await stampCrmStartDateAndScreenshot(
+    ctx,
+    crmRecords,
+    crmMatchedEmplId ?? dataString(ctx.data.emplId),
+  );
+}
+
+function stampActiveCheckFields<TSteps extends readonly string[]>(
+  ctx: Ctx<TSteps, PersonLookupItem>,
+  outcome: ActiveCheckOutcome,
+): void {
+  // Ambiguous means the name search found multiple DISTINCT candidate EIDs
+  // with no way to pick the right one. `outcome.emplId`/`outcome.name` are
+  // already "" here, but the conditional-spread-when-truthy pattern below
+  // would otherwise SKIP the keys entirely, leaving an earlier arbitrary
+  // `results[0]` pick (stamped by `searchingStep`) riding the row under an
+  // "Ambiguous" status — a well-formed but unverified EID is worse than none
+  // (root CLAUDE.md "Fail loud"). Force-clear identity fields instead.
+  const isAmbiguous = outcome.activeStatus === "ambiguous";
+  const isCrmOnly = outcome.activeStatus === "n/a";
+  ctx.updateData({
+    activeStatus: outcome.activeStatus,
+    hrStatus: outcome.hrStatus,
+    department: outcome.department,
+    ...(isAmbiguous
+      ? { emplId: "", resolvedName: "", jobTitle: "" }
+      : {
+          ...(outcome.emplId ? { emplId: outcome.emplId } : {}),
+          ...(outcome.name ? { resolvedName: outcome.name } : {}),
+        }),
+    // Start Date is sourced from CRM (First Day of Service) in
+    // cross-verification — do NOT write it here, or active-status (which runs
+    // after cross-verification) would clobber the CRM value with UCPath's Last
+    // Hire. Keep the UCPath date as backend-only context for audit.
+    ucpathStartDate: outcome.startDate,
+    effdt: outcome.effdt,
+    terminationDate: outcome.terminationDate,
+    terminationReason: outcome.terminationReason,
+    expectedJobEndDate: outcome.expectedJobEndDate,
+    isActive: String(outcome.isActive),
+    isHdhAccepted: String(outcome.isHdhAccepted),
+    candidateEids: outcome.candidateEids.join(", "),
+    // CRM-only: UCPath stayed Not found; both-miss keeps ucpathFound from searching.
+    ...(isCrmOnly ? { ucpathFound: systemPresence(false), crmFound: systemPresence(true) } : {}),
+  });
+  if (outcome.activeStatus === "active") {
+    log.success(`Person Lookup active status: ${outcome.emplId} is active (HDH)`);
+  } else {
+    log.step(`Person Lookup active status: ${outcome.searchName} → ${outcome.activeStatus}`);
+  }
+}
+
+export function resolveActiveStatusResultsForPersonLookup(args: {
+  input: PersonLookupSearchInput;
+  sdcmpFromSearch: EidResult[];
+  crmMatchedEmplId?: string;
+}): {
+  deriveInput: { kind: "by-eid"; emplId: string } | { kind: "by-name"; name: string };
+  results: EidResult[];
+} {
+  return resolvePersonLookupForEidLookup({
+    input: isEidInput(args.input)
+      ? { kind: "by-eid", emplId: args.input.emplId }
+      : { kind: "by-name", name: args.input.name },
+    sdcmpFromSearch: args.sdcmpFromSearch,
+    crmMatchedEmplId: args.crmMatchedEmplId,
+  }) as {
+    deriveInput: { kind: "by-eid"; emplId: string } | { kind: "by-name"; name: string };
+    results: EidResult[];
+  };
+}
+
+/**
+ * UCPath Person Org active / HDH disposition. Uses search results from
+ * `searching`, except CRM-only matches where UCPath had no row — then loads
+ * detail by CRM EID via the lookup primitive. When that still misses, the
+ * run stays found with `activeStatus: "n/a"` and CRM-filled identity.
+ */
+async function activeStatusStep<TSteps extends readonly string[]>(
+  ctx: Ctx<TSteps, PersonLookupItem>,
+  input: PersonLookupSearchInput,
+  sdcmpFromSearch: EidResult[],
+): Promise<void> {
+  const crmMatch = ctx.data.crmMatch as string | undefined;
+  const crmFound = dataString(ctx.data.crmFound) === "Found";
+
+  if (!isEidInput(input) && crmMatch === "crm-only") {
+    const page = await ctx.page("ucpath");
+    const eid = dataString(ctx.data.emplId).trim();
+    if (!/^10\d{6}$/.test(eid)) {
+      stampActiveCheckFields(
+        ctx,
+        crmFound
+          ? deriveCrmOnlyCheckOutcome(
+              { kind: "by-eid", emplId: eid },
+              {
+                name: dataString(ctx.data.resolvedName),
+                department: dataString(ctx.data.department),
+                emplId: eid,
+              },
+            )
+          : deriveActiveCheckOutcome({ kind: "by-eid", emplId: eid }, []),
+      );
+      return;
+    }
+    const lookup = await lookupPersonInUcpath(page, { kind: "by-eid", emplId: eid });
+    const results = lookup.results;
+    await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot", {
+      systems: ["ucpath"],
+    });
+    if (results.length > 0) {
+      ctx.updateData({ ucpathFound: systemPresence(true) });
+      stampActiveCheckFields(ctx, deriveActiveCheckOutcome({ kind: "by-eid", emplId: eid }, results));
+      return;
+    }
+    stampActiveCheckFields(
+      ctx,
+      deriveCrmOnlyCheckOutcome(
+        { kind: "by-eid", emplId: eid },
+        {
+          name: dataString(ctx.data.resolvedName),
+          department: dataString(ctx.data.department),
+          emplId: eid,
+        },
+      ),
+    );
+    return;
+  }
+
+  const { deriveInput, results } = resolveActiveStatusResultsForPersonLookup({
+    input: !isEidInput(input) && typeof ctx.data.searchName === "string"
+      ? { ...input, name: ctx.data.searchName }
+      : input,
+    sdcmpFromSearch,
+    crmMatchedEmplId:
+      typeof ctx.data.crmMatchedEmplId === "string" ? ctx.data.crmMatchedEmplId : undefined,
+  });
+  const outcome = deriveActiveCheckOutcome(deriveInput, results);
+  if (outcome.activeStatus === "not-found" && crmFound) {
+    stampActiveCheckFields(
+      ctx,
+      deriveCrmOnlyCheckOutcome(deriveInput, {
+        name: dataString(ctx.data.resolvedName),
+        department: dataString(ctx.data.department),
+        emplId: dataString(ctx.data.emplId) || (deriveInput.kind === "by-eid" ? deriveInput.emplId : ""),
+      }),
+    );
+    return;
+  }
+  stampActiveCheckFields(ctx, outcome);
+}
+
+/**
+ * Opt-in CRM date enrichment step. Stamps `employmentDate` (CRM First Day of
+ * Service) and `oathDate` (CRM Date Signed) onto the tracker row's data.
+ *
+ * Runs only when `input.includeCrmDates === true`; best-effort — never throws
+ * and never fails the overall lookup.
+ */
+async function crmDatesStep<TSteps extends readonly string[]>(
+  ctx: Ctx<TSteps, PersonLookupItem>,
+): Promise<void> {
+  const name = dataString(ctx.data.resolvedName, ctx.data.searchName).trim();
+  if (!name) {
+    log.step("CRM dates: no resolved name available — skipping");
+    return;
+  }
+
+  let parsed: ReturnType<typeof parseNameInput>;
+  try {
+    parsed = parseNameInput(name);
+  } catch (err) {
+    log.step(`CRM dates: could not parse name "${name}" — ${errorMessage(err)} — skipping`);
+    return;
+  }
+
+  const crmPage = await ctx.page("crm");
+
+  let crmRecords: Awaited<ReturnType<typeof searchCrmByName>>;
+  try {
+    crmRecords = await searchCrmByName(crmPage, parsed.lastName, parsed.first);
+  } catch (err) {
+    log.error(`CRM dates: search failed for "${name}" — ${errorMessage(err)}`);
+    return;
+  }
+
+  if (crmRecords.length === 0) {
+    log.step(`CRM dates: no record found for "${name}"`);
+    return;
+  }
+
+  const resolvedEid = dataString(ctx.data.emplId).trim();
+  const primary = resolvedEid
+    ? crmRecords.find((r) => r.ucpathEmployeeId === resolvedEid)
+    : (crmRecords.length === 1 ? crmRecords[0] : undefined);
+
+  if (!primary) {
+    // A resolved EID that matches no CRM record here (or no resolved EID with
+    // multiple same-name CRM candidates) leaves no confident single record to
+    // read dates from — stamping `crmRecords[0]` would silently pull a
+    // DIFFERENT person's dates (root CLAUDE.md "Fail loud"). This step is
+    // best-effort (see module CLAUDE.md), so log and skip instead of guessing.
+    log.step(
+      `CRM dates: no confident CRM record match for "${name}"${resolvedEid ? ` (EID ${resolvedEid})` : ""} — skipping`,
+    );
+    return;
+  }
+
+  ctx.updateData({
+    employmentDate: primary.firstDayOfService ?? "",
+    oathDate: primary.dateSigned ?? "",
+  });
+  log.success(
+    `CRM dates: employment="${primary.firstDayOfService ?? ""}" oath="${primary.dateSigned ?? ""}"`,
+  );
+}
+
+/**
+ * Person Lookup kernel definition. Two systems (UCPath + CRM), four stable
+ * handler steps: searching → cross-verification → active-status → crm-dates.
+ * CRM auth remains in the batch's eager one-time auth chain; `crmCheck` gates
+ * the CRM work, not browser launch/auth. Match mode skips active-status and
+ * crm-dates; Search runs crm-dates only when `includeCrmDates` is true.
+ */
+export const personLookupWorkflow = defineWorkflow<PersonLookupItem, typeof steps>({
+  name: "person-lookup",
+  label: "Person Lookup",
+  archetype: "single",
+  inputSubject: (input) => (isEidInput(input) ? "eid" : "name"),
+  statusExtensions: personLookupStatusExtensions,
+  code: "pl",
+  category: "Search",
+  iconName: "Search",
+  systems: [
+    {
+      id: "ucpath",
+      login: requireLogin(loginToUCPath, "UCPath authentication failed"),
+    },
+    {
+      id: "crm",
+      login: requireLogin(loginToACTCrm, "CRM authentication failed"),
+    },
+  ],
+  authSteps: true,
+  steps,
+  schema: PersonLookupItemSchema,
+  runtimePolicy: PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY,
+  queueTitle: { kind: "single" },
+  batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },
+  detailFields: [
+    { key: "searchName", label: "Search" },
+    { key: "resolvedName", label: "Name" },
+    { key: "emplId", label: "EID" },
+    { key: "department", label: "Dept" },
+    { key: "hrStatus", label: "HR Status" },
+    { key: "ucpathFound", label: "UCPath" },
+    { key: "crmFound", label: "CRM" },
+    { key: "startDate", label: "Start Date" },
+    { key: "terminationDate", label: "End Date", conditional: true },
+    { key: "terminationReason", label: "Term Reason", conditional: true },
+    { key: "found", label: "Found in UCPath", conditional: true },
+    { key: "matchedEmplId", label: "Matched Empl ID", conditional: true },
+    { key: "matchedName", label: "Matched Name", conditional: true },
+  ],
+  getName: (d) => d.searchName ?? "",
+  getId: (d) => d.searchName ?? "",
+  operatorSubject: (input) =>
+    isMatchInput(input)
+      ? buildOperatorSubject({
+          kind: "person",
+          value: `${input.lastName}, ${input.firstName}`,
+        })
+      : isEidInput(input)
+      ? buildOperatorSubject({ kind: "eid", value: input.emplId })
+      : buildOperatorSubject({ kind: "person", value: input.name }),
+  initialData: (input) =>
+    isMatchInput(input)
+      ? { searchName: displayPersonLookupInput(input) }
+      : isEidInput(input)
+      ? { searchName: displayPersonLookupInput(input), emplId: input.emplId }
+      : { searchName: normalizeName(input.name) },
+  deriveItemId: derivePersonLookupItemId,
+  handler: handlePersonLookup,
+});
+
+/** Shared Search/Match handler, exported so mode-specific step routing is testable. */
+export async function handlePersonLookup(
+  ctx: Ctx<typeof steps, PersonLookupItem>,
+  input: PersonLookupItem,
+  matchSearchImpl: typeof searchPerson = searchPerson,
+): Promise<void> {
+  const mode = resolvePersonLookupMode(input);
+  const crmCheck = resolvePersonLookupCrmCheck(input);
+
+  if (mode === "match") {
+    if (!isMatchInput(input)) {
+      throw new Error(
+        `Person Lookup mode "match" requires lastName, firstName, and an SSN or DOB`,
+      );
+    }
+    ctx.updateData({ searchName: displayPersonLookupInput(input) });
+    await ctx.step("searching", async () => handlePersonMatch(ctx, input, matchSearchImpl));
+    if (crmCheck) {
+      await ctx.step("cross-verification", async () => {
+        await crossVerificationStep(ctx, input, []);
+      });
+    } else {
+      ctx.skipStep("cross-verification");
+    }
+    ctx.skipStep("active-status");
+    ctx.skipStep("crm-dates");
+    return;
+  }
+
+  if (isMatchInput(input)) {
+    throw new Error(
+      `Person Lookup Search mode requires a name or Empl ID; match-shaped input must set mode="match"`,
+    );
+  }
+
+  ctx.updateData({
+    searchName: isEidInput(input)
+      ? displayPersonLookupInput(input)
+      : normalizeName(input.name),
+  });
+  const sdcmp = await ctx.step("searching", async () => searchingStep(ctx, input));
+  if (crmCheck) {
+    await ctx.step("cross-verification", async () => {
+      await crossVerificationStep(ctx, input, sdcmp);
+    });
+  } else {
+    // Absence means CRM was not consulted. Never stamp crmFound="Not found"
+    // for this branch — that would turn a skipped check into a false result.
+    ctx.skipStep("cross-verification");
+  }
+  await ctx.step("active-status", async () => activeStatusStep(ctx, input, sdcmp));
+  if (!crmCheck || input.includeCrmDates !== true) {
+    ctx.skipStep("crm-dates");
+  } else {
+    await ctx.step("crm-dates", async () => crmDatesStep(ctx));
+  }
+}
+
+export async function runPersonLookup(input: PersonLookupItem): Promise<void> {
+  await runWorkflow(personLookupWorkflow, input);
+}
+
+export { dedupeNames, prepareNames } from "../../domain/identity/person-name-batch.js";
+
+/**
+ * Internal daemon-mode adapter.
+ *
+ * Enqueues one `{name}` or `{emplId}` item per unique, normalized input to any
+ * alive `person-lookup` daemon (or spawns one via `ensureDaemonsAndEnqueue`).
+ * Keeps the UCPath + CRM browser session warm across batches so subsequent
+ * items don't re-Duo.
+ */
+export const runPersonLookupCli = buildCliAdapter<[string[]], PersonLookupItem>({
+  workflow: personLookupWorkflow,
+  emptyMessage: "runPersonLookupCli: no names or EIDs provided",
+  buildInputs: (names) => prepareNames(names).map((name) => ({ name })),
+  deriveItemId: derivePersonLookupItemId,
+  buildPendingData: (item, itemId) => {
+    const n = "name" in item && item.name ? normalizeName(item.name) : ("emplId" in item ? item.emplId : "");
+    const subject = personLookupWorkflow.config.operatorSubject?.(item);
+    const parentSubject = "parentSubject" in item ? item.parentSubject : undefined;
+    return {
+      searchName: n,
+      __name: n ?? "",
+      __id: n ?? itemId,
+      ...(parentSubject ? rootQueueTitleData(parentSubject) : {}),
+      ...operatorSubjectData(subject),
+    };
+  },
+});

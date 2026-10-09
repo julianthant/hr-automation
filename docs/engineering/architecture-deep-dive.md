@@ -1,0 +1,999 @@
+# HR Automation — Architecture Deep Dive
+
+A from-scratch walkthrough of how the codebase is wired. Assumes zero prior context. Every term is defined on first use; every diagram reflects real files in `src/`.
+
+**Table of contents**
+
+1. [The 10,000-foot view](#1-the-10000-foot-view)
+2. [The three-layer split](#2-the-three-layer-split)
+3. [What is `Ctx`?](#3-what-is-ctx)
+4. [The kernel internals](#4-the-kernel-internals)
+5. [Run modes: single, sequential batch, pool, daemon](#5-run-modes-single-sequential-batch-pool-daemon)
+6. [Auth chains (sequential vs interleaved)](#6-auth-chains-sequential-vs-interleaved)
+7. [Tracker + Dashboard (observability)](#7-tracker--dashboard-observability)
+8. [Workflow runtime (projections + actions)](#8-workflow-runtime-projections--actions)
+9. [Systems + Selector Intelligence](#9-systems--selector-intelligence)
+10. [End-to-end: one onboarding, step by step](#10-end-to-end-one-onboarding-step-by-step)
+11. [Glossary](#11-glossary)
+
+---
+
+## 1. The 10,000-foot view
+
+The repo is a **Playwright robot** that logs into UCSD's HR systems (UCPath, ACT CRM, I9 Complete, Kuali, Kronos) and does routine HR work: onboarding, separations, person lookups, report downloads, etc.
+
+The trick: each automation is **declarative**. You don't write "launch a browser, log in, run this, tear down." You write:
+
+```ts
+defineWorkflow({
+  name: "onboarding",
+  systems: [crm, ucpath, i9],
+  steps: ["crm-auth", "extraction", "pdf-download", ...],
+  handler: async (ctx, data) => { /* your Playwright code */ },
+})
+```
+
+The **kernel** (`src/core/`) takes that declaration and handles every piece of infrastructure around it: browser launch, window tiling, authentication retries, Duo MFA sequencing, step tracking, screenshot-on-failure, SIGINT cleanup, live dashboard streaming, batch parallelism.
+
+```mermaid
+flowchart LR
+    A[Dashboard<br/>input run / upload run] --> B[Dashboard HTTP route<br/>enqueue / prepare / start]
+    B --> C[Kernel<br/>runWorkflow / Batch / Pool]
+    C --> D[Handler<br/>your Playwright code]
+    D -->|writes JSONL| E[.tracker/*.jsonl]
+    E -->|SSE stream| F[Dashboard<br/>:5173]
+```
+
+---
+
+## 2. The three-layer split
+
+Top-level directory tree and what each thing is responsible for:
+
+```
+src/
+├── core/          ← THE KERNEL: defineWorkflow, runWorkflow, Session, Stepper, Ctx
+├── systems/       ← PER-SYSTEM DRIVERS: one folder per external system
+│   ├── ucpath/    ←   Playwright selectors + navigate helpers for PeopleSoft
+│   ├── crm/       ←   ACT CRM (Salesforce) extract
+│   ├── i9/        ←   I9 Complete profile + Section 1
+│   ├── kuali/     ←   Kuali Build separation form
+│   ├── new-kronos/    ←   WFD/Dayforce timecard
+│   ├── old-kronos/    ←   UKG Kronos Time Detail PDFs
+│   └── common/    ←   safeClick, safeFill, dismissPeopleSoftModalMask
+├── workflows/     ← COMPOSED WORKFLOWS: each is defineWorkflow(...) + CLI adapter
+│   ├── onboarding/          ← CRM + UCPath + I9
+│   ├── separations/         ← Kuali + Old/New Kronos + UCPath
+│   ├── person-lookup/       ← UCPath + CRM name/EID resolution
+│   ├── old-kronos-reports/  ← UKG Time Detail PDFs
+│   ├── work-study/          ← UCPath PayPath
+│   ├── emergency-contact/   ← UCPath
+│   ├── oath-signature/      ← UCPath
+│   ├── oath-upload/         ← ServiceNow + OCR + delegation
+│   ├── i9-lookup/           ← I9 signer lookup (delegated-only)
+│   ├── crm-doc-download/    ← CRM iDocs PDFs
+│   ├── sharepoint-download/ ← SharePoint roster files
+│   ├── onbase/              ← OnBase document import
+│   └── ocr/                 ← OCR engine (dashboard HTTP only)
+├── infra/         ← Runtime infrastructure
+│   ├── auth/     ← Per-system login flows + Duo polling + SSO fields
+│   └── browser/  ← launchBrowser, CDP-based tiling math (kernel-internal)
+├── services/      ← Reusable IO/stateful primitives (capture, matching, ocr)
+├── domain/        ← Business concepts: identity, operator-subject, log-events, hdh
+├── tracker/       ← JSONL append + SSE dashboard server + Excel export
+├── dashboard/     ← React SPA (Vite + shadcn/ui) — reads SSE, renders queue + logs
+├── utils/         ← env, errors, log (AsyncLocalStorage), pii, screenshot, worker-pool
+├── scripts/       ← selector catalog generator, fuzzy search, clean-tracker, setup
+├── cli.ts         ← Commander entry point
+└── config.ts      ← URLs, PATHS, TIMEOUTS, SCREEN dims, ANNUAL_DATES
+```
+
+**Read-it-once mental model:**
+
+| Layer        | Answers the question                         |
+| ------------ | -------------------------------------------- |
+| `core/`      | "How do I _run_ any workflow?"               |
+| `systems/`   | "How do I _talk to_ UCPath / CRM / I9?"      |
+| `workflows/` | "What is _this particular_ workflow's flow?" |
+
+```mermaid
+flowchart TB
+    subgraph "Layer 3: workflows/"
+        W1[onboarding/workflow.ts]
+        W2[separations/workflow.ts]
+        W3[person-lookup/workflow.ts]
+    end
+    subgraph "Layer 2: systems/"
+        S1[ucpath/selectors.ts + navigate.ts]
+        S2[crm/selectors.ts + extract.ts]
+        S3[i9/selectors.ts + create.ts]
+    end
+    subgraph "Layer 1: core/"
+        K1[defineWorkflow]
+        K2[runWorkflow / Batch / Pool]
+        K3[Session + Stepper + Ctx]
+    end
+    W1 --> K1
+    W1 --> S1
+    W1 --> S2
+    W1 --> S3
+    W2 --> K1
+    W3 --> K1
+    K1 --> K2
+    K2 --> K3
+```
+
+---
+
+## 3. What is `Ctx`?
+
+`Ctx` is the **only** object your handler receives at runtime. It's the "remote control" the kernel hands you so you can drive browsers, announce step transitions, update dashboard data, and retry flaky work — without ever touching the kernel internals directly.
+
+### The shape (from `src/core/kernel/types.ts`)
+
+```ts
+export interface Ctx<TSteps extends readonly string[], TData> {
+  page(id: string): Promise<Page>          // get a Playwright Page (auth-ready-aware)
+  step<R>(name, fn: () => Promise<R>): Promise<R>  // wrap work in a named step
+  markStep(name): void                      // announce-only step transition
+  skipStep(name): void                      // mark step skipped (distinct from markStep — shows "skipped" treatment in dashboard pipeline)
+  parallel(tasks): PromiseSettledResult<…>  // allSettled fan-out
+  parallelAll(tasks): Awaited<…>            // Promise.all fan-out
+  retry<R>(fn, opts?): Promise<R>           // linear-backoff retry
+  updateData(patch): void                   // push fields into the dashboard row
+  data: Partial<TData>                      // current merged data (prefilled + updateData patches)
+  screenshot(label: string): Promise<void>  // take a debug screenshot, saved to .tracker/screenshots/
+  captureAndStampScreenshot(page, label): Promise<string | null>  // screenshot + stamp with label overlay
+  session: SessionHandle                    // escape hatch to raw Session
+  log: typeof log                           // colored console + JSONL
+  isBatch: boolean                          // are we inside a batch run?
+  runId: string                             // unique per run
+  parentRunId?: string                      // parent run's id when spawned via delegateTo; undefined for root runs
+  shouldSkipStep(name: TSteps[number]): boolean  // returns true when the step was elected for skipping in RunOpts
+  signal: AbortSignal                       // per-run AbortSignal; flips on operator cancel; auto-injected into Playwright calls
+}
+```
+
+### Why it exists
+
+Before the kernel, every workflow file looked like this:
+
+```ts
+// PRE-KERNEL (obsolete):
+const { browser, context, page } = await launchBrowser({...})
+await withTrackedWorkflow(name, id, {}, async (setStep, updateData) => {
+  setStep("auth")
+  await loginToUCPath(page)
+  setStep("extraction")
+  try { await extract(page) } catch (err) {
+    await debugScreenshot(page, "extraction-failed")
+    throw err
+  }
+  // ... 200 more lines of plumbing ...
+})
+```
+
+Every workflow re-implemented: browser launch, tiling, auth retry, screenshot-on-failure, tracker emit, SIGINT handler, log context. **`Ctx` centralizes all of it.**
+
+### What each method does
+
+#### `ctx.page(id)` — get a Playwright Page, waiting for auth
+
+```ts
+const ucpath = await ctx.page("ucpath");
+await ucpath.goto("/hr/...");
+```
+
+Under the hood: `ctx.page(id) === ctx.session.page(id)`. The `Session` holds a `Map<systemId, { page, browser, context }>` plus a `Map<systemId, Promise<void>>` of "auth-ready" promises. Calling `ctx.page("ucpath")` `await`s the ucpath ready promise before returning — so if you're on an `interleaved` auth chain and ucpath's Duo hasn't been approved yet, this call blocks until it is.
+
+```mermaid
+sequenceDiagram
+    participant H as Handler
+    participant S as Session
+    participant P as Playwright Page
+    H->>S: ctx.page("ucpath")
+    S->>S: await readyPromises.get("ucpath")
+    Note over S: blocks until<br/>Duo approved
+    S-->>H: Page
+    H->>P: page.goto(...)
+```
+
+#### `ctx.step(name, fn)` — wrap work in a tracked step
+
+```ts
+await ctx.step("extraction", async () => {
+  const data = await extractEmployee(page);
+  ctx.updateData({ name: data.fullName });
+});
+```
+
+What happens on the way in: `emitStep(name)` — writes a `running` entry to `.tracker/rows/{workflow}-{date}.jsonl` so the dashboard row updates to show this step.
+
+What happens on success: nothing extra, your value is returned.
+
+What happens on **failure**:
+
+1. `screenshotFn(name)` fires — screenshots **every open page** to `.tracker/screenshots/{workflow}-{itemId}-{step}-{systemId}-{ts}.png`
+2. `emitFailed(name, classifiedError)` fires — writes a `failed` entry
+3. The error is **re-thrown** so your handler's control flow continues to work as expected
+
+```mermaid
+flowchart TB
+    A[ctx.step name, fn] --> B[currentStep = name<br/>emitStep name]
+    B --> C[await fn]
+    C -->|success| D[return value]
+    C -->|throws| E[screenshotAll all pages]
+    E --> F[classifyError]
+    F --> G[emitFailed name, err]
+    G --> H[rethrow]
+```
+
+#### `ctx.markStep(name)` vs `ctx.step(name, fn)`
+
+|                        | `step` | `markStep` |
+| ---------------------- | ------ | ---------- |
+| Wraps a body           | ✅     | ❌         |
+| Emits `running`        | ✅     | ✅         |
+| Catches errors         | ✅     | ❌         |
+| Screenshots on failure | ✅     | ❌         |
+
+`markStep` is for phase transitions whose work is already managed elsewhere. Example: onboarding's `"crm-auth"` step is actually handled by `Session.launch` before the handler runs — but the dashboard still wants the row to say "currently in crm-auth." You call `ctx.markStep("crm-auth")` to announce it.
+
+#### `ctx.parallel` vs `ctx.parallelAll`
+
+```ts
+// parallel — allSettled shape (each task may fail independently)
+const r = await ctx.parallel({
+  kronos: () => downloadKronos(),
+  kuali: () => extractKuali(),
+});
+if (r.kronos.status === "fulfilled") {
+  use(r.kronos.value);
+}
+
+// parallelAll — Promise.all shape (first failure tears the rest down)
+const { kronos, kuali } = await ctx.parallelAll({
+  kronos: () => downloadKronos(),
+  kuali: () => extractKuali(),
+});
+```
+
+Used by separations for its 4-way Phase-1 fan-out (Old Kronos + New Kronos + UCPath Job Summary + Kuali timekeeper fill, all in parallel).
+
+#### `ctx.retry(fn, opts)` — linear backoff
+
+```ts
+const data = await ctx.retry(() => extractEmployee(page), {
+  attempts: 3,
+  backoffMs: 1000,
+  onAttempt: (n, err) => log.warn(`attempt ${n}: ${err}`),
+});
+```
+
+Attempt N waits `backoffMs * (N-1)` ms before retrying (default 0, 1s, 2s). On exhaustion, the **last error** is re-thrown verbatim.
+
+#### `ctx.updateData(patch)` — push fields into the dashboard row
+
+```ts
+ctx.updateData({ emplId: "1234567", name: "Person 905", wage: "$25.00" });
+```
+
+This is what makes the dashboard's per-row detail grid populate. Every key you list in `detailFields` (on `defineWorkflow`) should be populated by at least one `ctx.updateData({ key: ... })` call — a runtime `log.warn` fires at workflow end if any declared field was never populated.
+
+Data flow:
+
+```mermaid
+flowchart LR
+    A[ctx.updateData patch] --> B[Stepper.updateData]
+    B --> C[merge into this.data]
+    C --> D[emitData - full accumulated data]
+    D --> E[trackEvent - running with full data]
+    E --> F[.tracker/*.jsonl]
+    F --> G[SSE stream]
+    G --> H[Dashboard row updates]
+```
+
+#### `ctx.session`, `ctx.log`, `ctx.isBatch`, `ctx.runId` — escape hatches
+
+- `ctx.session.page(id)` — same as `ctx.page(id)`. `ctx.session` exposes only `page(id)` (`SessionHandle` has no other methods).
+- `ctx.log.step/success/warn/error/waiting` — colored console + JSONL (via `AsyncLocalStorage`).
+- `ctx.isBatch` — are we inside `runWorkflowBatch` / `runWorkflowPool`? Most handlers ignore it.
+- `ctx.runId` — the unique UUID for this run. Useful when writing external state keyed by run.
+
+### How `Ctx` is built
+
+`Ctx` is not a class — it's a plain object. One factory builds it: `makeCtx` in `src/core/kernel/ctx.ts`. All three run modes (`runWorkflow`, `runWorkflowBatch`, `runWorkflowPool`) call `makeCtx` so the handler receives an identical surface in every mode.
+
+```mermaid
+flowchart LR
+    A[runWorkflow] -->|1| B[Session.launch]
+    A -->|2| C[new Stepper]
+    B --> D[makeCtx]
+    C --> D
+    D --> E[Ctx]
+    E --> F[wf.config.handler<br/>ctx, data]
+```
+
+The body of `makeCtx` is just method delegation:
+
+```ts
+return {
+  page: (id) => session.page(id),
+  step: (name, fn) => stepper.step(name, fn),
+  markStep: (name) => stepper.markStep(name),
+  parallel: (tasks) => stepper.parallel(tasks),
+  parallelAll: (tasks) => stepper.parallelAll(tasks),
+  retry,                              // local linear-backoff impl
+  updateData: (patch) => stepper.updateData(patch),
+  session: { page: (id) => session.page(id) },   // SessionHandle — page(id) only
+  log, isBatch, runId,
+}
+```
+
+So **`Ctx` is a façade over two internal objects: `Session` (browsers + auth) and `Stepper` (state + emits).** Everything else is just `log` and run metadata.
+
+---
+
+## 4. The kernel internals
+
+Three collaborating classes + one factory. Together they own the entire runtime of a workflow.
+
+```mermaid
+flowchart TB
+    subgraph "Kernel"
+        SES[Session<br/>browsers + auth-ready promises]
+        STP[Stepper<br/>currentStep + data + emits]
+        CTX[makeCtx - builds Ctx façade]
+        REG[registry<br/>WorkflowMetadata map]
+    end
+    SES --> CTX
+    STP --> CTX
+    CTX --> HANDLER[Handler code]
+    DEF[defineWorkflow] --> REG
+    REG --> DASH[Dashboard<br/>/api/workflow-definitions]
+```
+
+### `Session` — the browser + auth manager (`src/core/kernel/session.ts`)
+
+**State:**
+
+```ts
+interface SessionState {
+  systems: SystemConfig[];
+  browsers: Map<string, { page; browser; context }>;
+  readyPromises: Map<string, Promise<void>>; // one per system, resolves when auth completes
+}
+```
+
+**`Session.launch(systems, opts)` lifecycle:**
+
+1. Launch all browsers in parallel (`Promise.all`).
+2. Tile windows using real screen dims (first browser's `window.screen.availWidth`, via CDP `Browser.setWindowBounds`).
+3. Run the auth chain (sequential or interleaved — see §6).
+4. Return a `Session` with `browsers` map + `readyPromises` map populated.
+
+**Key methods used by handlers (via `Ctx`):**
+
+| Method                  | Purpose                                                           |
+| ----------------------- | ----------------------------------------------------------------- |
+| `page(id)`              | `await readyPromises.get(id)` then return `browsers.get(id).page` |
+| `reset(id)`             | `page.goto(system.resetUrl)` — clear state between batch items    |
+| `healthCheck(id)`       | check if page is closed; placeholder for deeper probes            |
+| `screenshotAll(prefix)` | screenshot every open page (best-effort, never throws)            |
+| `killChrome()`          | SIGINT force-kill path                                            |
+| `close()`               | graceful close: each context + browser closed in turn             |
+
+### `Stepper` — the state/emits manager (`src/core/kernel/stepper.ts`)
+
+**State:**
+
+```ts
+class Stepper {
+  private data: Record<string, unknown> = {};
+  private currentStep: string | null = null;
+  // constructor receives: emitStep, emitData, emitFailed, screenshotFn
+}
+```
+
+**The `step(name, fn)` method in full:**
+
+```ts
+async step<R>(name: string, fn: () => Promise<R>): Promise<R> {
+  this.currentStep = name
+  this.opts.emitStep(name)                // dashboard row: "running → extraction"
+  try {
+    return await fn()
+  } catch (err) {
+    if (this.opts.screenshotFn) {
+      try { await this.opts.screenshotFn(name) } catch {}  // best-effort
+    }
+    const classified = classifyError(err)    // "Target closed" → "Browser closed unexpectedly"
+    this.opts.emitFailed(name, classified)   // dashboard row: "failed: extraction: Browser closed unexpectedly"
+    throw err                                // rethrow — control flow preserved
+  }
+}
+```
+
+**`updateData` pattern:**
+
+```ts
+updateData(patch) {
+  this.data = { ...this.data, ...patch }     // accumulate
+  this.opts.emitData({ ...this.data })       // emit FULL merged data, not just patch
+}
+```
+
+The emitted data is the _accumulated_ dictionary, so every tracker entry carries the latest full snapshot of whatever `updateData` has been called with so far.
+
+### `registry` — workflow metadata (`src/core/kernel/registry.ts`)
+
+An in-memory `Map<name, WorkflowMetadata>` populated at module-load time when `defineWorkflow` runs. The dashboard reads it via `/api/workflow-definitions`.
+
+```ts
+// Simplified — see src/core/kernel/types.ts for the full interface
+interface WorkflowMetadata {
+  name: string;        // "onboarding"
+  label: string;       // "Onboarding"
+  archetype: WorkflowArchetype;  // row shape: "single" | "preview" | "operation" (legacy "batch" normalizes to "operation" on read)
+  code: string;        // 2-char provenance prefix for trace ids (e.g. "ob")
+  category?: string;   // rail grouping label; absent → "Other"
+  iconName?: string;   // lucide-react icon name
+  steps: readonly string[];
+  systems: string[];   // ["crm", "ucpath", "i9"]
+  detailFields: Array<{ key; label }>;
+  presentation: WorkflowPresentationConfig;  // effective config, always present after registry normalization
+}
+```
+
+**Why it matters:** the frontend has **zero workflow-specific code**. To add a new workflow's detail panel to the dashboard, you just add `detailFields` to your `defineWorkflow` call. The React app fetches `/api/workflow-definitions` and renders whatever's there.
+
+### `defineWorkflow` — the declaration
+
+```ts
+export function defineWorkflow<TData, TSteps extends readonly string[]>(
+  config: WorkflowConfig<TData, TSteps>,
+): RegisteredWorkflow<TData, TSteps> {
+  const metadata = {
+    name: config.name,
+    label: config.label ?? autoLabel(config.name),
+    steps: config.steps,
+    systems: config.systems.map((s) => s.id),
+    detailFields: (config.detailFields ?? []).map(normalizeDetailField),
+  };
+  register(metadata);
+  return { config, metadata };
+}
+```
+
+That's it. It derives a `WorkflowMetadata`, shoves it in the registry, and returns a `RegisteredWorkflow`. No side effects beyond the registry write.
+
+The **type parameters** are important: `TSteps extends readonly string[]` is a tuple type. When a workflow declares `steps: ["crm-auth", "extraction", ...] as const`, TypeScript narrows `ctx.step(name, ...)` / `ctx.markStep(name)` to accept only those exact strings — so typos become compile-time errors.
+
+---
+
+## 5. Run modes: single, sequential batch, pool, daemon
+
+Three entry points. Same handler shape. Different orchestration.
+
+```mermaid
+flowchart TB
+    ENTRY{runWorkflow? <br/>runWorkflowBatch?}
+    ENTRY -->|single| SGL[runWorkflow]
+    ENTRY -->|many items| BATCH[runWorkflowBatch]
+    BATCH -->|batch.mode == pool| POOL[runWorkflowPool]
+    BATCH -->|batch.mode == shared-context-pool| SCP[runWorkflowSharedContextPool]
+    BATCH -->|default: sequential| SEQ[sequential loop]
+
+    SGL --> S1[1 Session<br/>1 Duo per system]
+    SEQ --> S2[1 Session<br/>reused across all items]
+    POOL --> S3[N Sessions<br/>N Duos per system]
+    SCP --> S4[1 Session<br/>1 Duo per system<br/>N lazy tabs per context]
+```
+
+### Mode 1: `runWorkflow(wf, data)` — single item
+
+```
+1. schema.parse(data) — throws if validation fails
+2. derive itemId from data (emplId → docId → email → sessionId → UUID fallback)
+3. withLogContext(name, itemId, async () => {
+4.   withTrackedWorkflow(...) {
+5.     Session.launch(systems)  — 1 Duo per system
+6.     stepper = new Stepper({ emitStep, emitData, emitFailed, screenshotFn })
+7.     ctx = makeCtx({ session, stepper, isBatch: false, runId })
+8.     await handler(ctx, data)     ← your code runs here
+9.     session.close()
+10.   }
+11. })
+```
+
+SIGINT handling is **owned by `withTrackedWorkflow`** in this mode — it writes a `failed` tracker entry + log entry synchronously via `appendFileSync` before `process.exit`.
+
+### Mode 2: `runWorkflowBatch(wf, items)` sequential — one browser set, many items
+
+```
+1. Validate every item upfront (fail fast before launch)
+2. Pre-generate { itemId, runId } per item
+3. Optionally pre-emit `pending` rows for every item (if preEmitPending)
+4. Session.launch(systems) ONCE — shared across all items
+5. For each item i:
+   a. If i > 0 and betweenItems hooks set: reset / health-check
+   b. withLogContext → withTrackedWorkflow → new Stepper → makeCtx → handler(ctx, item)
+   c. Catch per-item errors so the batch continues
+6. session.close() when done
+7. Return BatchResult { total, succeeded, failed, errors[] }
+```
+
+Used by: `separations` (4 systems, 1 Duo per system up front, then sequential doc processing).
+
+### Mode 3: `runWorkflowPool(wf, items)` — N workers each with own Session
+
+```
+1. Validate every item upfront
+2. Pre-generate { itemId, runId } per item, optionally pre-emit pending
+3. Create queue = [...items]
+4. Spawn min(poolSize, items.length) worker coroutines in parallel:
+   Each worker:
+     a. Session.launch(systems)  — this worker's own N Duos
+     b. While queue.length > 0:
+        - shift one item
+        - withLogContext → withTrackedWorkflow → new Stepper → makeCtx → handler
+        - catch per-item errors
+     c. session.close()
+5. await Promise.all(workers)
+```
+
+Used by: `onboarding` (parallel mode), `old-kronos-reports`.
+
+**Important property:** pool-mode gives you N sessions = N×M Duo prompts (M systems per workflow). Onboarding with `poolSize: 4` = 4 workers × 3 Duos (CRM + UCPath + I9 — I9 became a UCSD SSO + Duo flow via the UCOP portal on 2026-07-01) = 12 Duo approvals at startup.
+
+### Mode 4: Daemon mode — persistent long-lived worker processes
+
+Production default for dashboard-exposed workflows since 2026-04-22.
+
+```
+Operator submits an input run from the dashboard
+  → No alive daemon? Spawn one detached (tsx src/cli-daemon.ts onboarding)
+  → Daemon authenticates once (CRM Duo + UCPath Duo)
+  → Item enqueued to SQLite tasks table (.tracker/state.db)
+  → Daemon claims item via UPDATE … RETURNING (atomic claim)
+  → Daemon processes item using runOneItem (same kernel primitive as runWorkflow)
+  → Daemon stays alive, polling for next item
+
+Operator submits another input run while the daemon is alive
+  → Item enqueued to SQLite tasks table
+  → POST /wake to all alive daemons
+  → Daemon claims and processes — no re-Duo
+```
+
+**Key properties:**
+- Auth-once per session: Duo is paid at daemon start, then amortized across all subsequent items.
+- Load balancing: multiple alive daemons race to claim the next SQLite task row — no coordinator needed.
+- Keepalive: every 15 min idle, each daemon runs `session.healthCheck(system)` per system to prevent SAML expiry.
+- Graceful drain: `:stop` scripts set a stop signal; daemons finish in-flight work and exit.
+
+Workflows registered for daemon mode: `separations`, `work-study`, `person-lookup`, `onboarding`, `oath-signature`, `emergency-contact`, `oath-upload`, `crm-doc-download`, `onbase`, and delegated-only `i9-lookup`.
+
+Implementation: `src/core/daemon/` (daemon loop, queue, registry, HTTP keepalive) + `src/core/task-store/` (SQLite control plane).
+
+### Deriving `itemId`
+
+`deriveItemId(data, fallback)` checks for a stable id on the input data, in priority order:
+
+1. `data.emplId` (e.g. "1234567")
+2. `data.docId` (e.g. Kuali doc number)
+3. `data.email` (onboarding)
+4. `data.sessionId` (OCR / file-backed workflows)
+5. `fallback` (UUID)
+
+Callers can override with `RunOpts.deriveItemId` — e.g. emergency-contact uses `p{NN}-{emplId}` because rosters can have duplicates per run.
+
+### `preAssignedRunId` and `onPreEmitPending` — the "show the queue upfront" contract
+
+In batch/pool modes, operators want the dashboard to show **all pending items** before any processing starts. That's what `preEmitPending` + `onPreEmitPending` do:
+
+```mermaid
+sequenceDiagram
+    participant DASH as Dashboard
+    participant K as Kernel
+    participant T as Tracker JSONL
+    participant D as Dashboard
+
+    DASH->>K: prepare/enqueue batch [a,b,c]
+    K->>K: generate runIds for a, b, c
+    K->>T: pending a (runId=α)
+    K->>T: pending b (runId=β)
+    K->>T: pending c (runId=γ)
+    T->>D: SSE: 3 pending rows
+    K->>K: Session.launch (1 Duo)
+    loop for each item
+        K->>T: running a
+        T-->>D: SSE: a → running
+        Note over K: handler executes
+        K->>T: done a
+        T-->>D: SSE: a → done
+    end
+```
+
+The `withTrackedWorkflow` wrapper checks `preAssignedRunId` — if set, it _skips_ the duplicate `pending` emit it would normally write, because the caller already wrote one with the same runId.
+
+---
+
+## 6. Auth chains (sequential vs interleaved)
+
+`Session.launch` supports two strategies for the "many Duos in a row" problem.
+
+**Duo MFA is manual**: the operator approves each push on their phone. Two simultaneous Duo prompts would error, so the kernel serializes them.
+
+### Sequential (`authChain: "sequential"`)
+
+```mermaid
+sequenceDiagram
+    participant K as Kernel
+    participant B1 as CRM browser
+    participant B2 as UCPath browser
+    participant B3 as I9 browser
+    participant U as User phone
+    K->>B1: bringToFront
+    K->>B1: login
+    B1->>U: Duo push
+    U-->>B1: approve
+    K->>B2: bringToFront
+    K->>B2: login
+    B2->>U: Duo push
+    U-->>B2: approve
+    K->>B3: bringToFront
+    K->>B3: login
+    B3->>U: Duo push
+    U-->>B3: approve
+    Note over B3: I9 = UCOP portal → UCSD SSO + Duo
+    K->>K: all readyPromises resolve
+```
+
+**Used when:** order matters (onboarding — CRM work comes before UCPath, and if it's a rehire we never need UCPath's Duo).
+
+### Interleaved (`authChain: "interleaved"`)
+
+```mermaid
+sequenceDiagram
+    participant K as Kernel
+    participant B1 as System 1
+    participant B2 as System 2
+    participant B3 as System 3
+    participant U as User phone
+    participant H as Handler
+    K->>B1: login (blocks)
+    B1->>U: Duo
+    U-->>B1: approve
+    K-->>H: return — handler starts
+    Note right of K: B2, B3 auth in background
+    par background chain
+        K->>B2: login
+        B2->>U: Duo
+        U-->>B2: approve
+    and
+        H->>K: ctx.page("ucpath")
+        Note over K: awaits system 2 ready
+    end
+```
+
+Only system[0] blocks `Session.launch` from returning. Systems 1..N are chained in the background via `.catch(() => {}).then(...)`. The `.catch(() => {})` is deliberate: one bad auth must not block the next system's auth — each chain link swallows its predecessor's failure.
+
+**The implicit gate:** when your handler calls `ctx.page("system-b")`, it `await`s `readyPromises.get("system-b")` first. So if system-b isn't authed yet, `ctx.page("system-b")` blocks. This gives you "start work on system-a while system-b finishes authing" automatically.
+
+**Used when:** multiple systems are independent and the handler can begin work on system-a while system-b is still authing (separations).
+
+### Auth retry
+
+Each `login` is wrapped in `loginWithRetry` — up to 3 attempts, with `page.goto('about:blank')` + 1s wait between tries. A flaky Duo timeout no longer crashes the workflow.
+
+---
+
+## 7. Tracker + Dashboard (observability)
+
+Every kernel workflow emits two append-only JSONL streams:
+
+```
+.tracker/
+├── rows/
+│   ├── onboarding-2026-04-18.jsonl      ← entries: pending/running/done/failed
+│   └── separations-2026-04-18.jsonl
+├── logs/
+│   └── onboarding-2026-04-18.jsonl      ← logs: step/success/warn/error/waiting
+├── sessions/
+│   └── 2026-04-18.jsonl                 ← session-level events (browser launch, duo queue)
+├── state.db                             ← SQLite control plane (tasks, worker heartbeats, worker_commands, browser_processes). Queue authority since 2026-05-04.
+└── daemons/
+    └── <workflow>.queue.jsonl            ← append-only audit trail for daemon queue items (not authoritative — read state.db)
+```
+
+### Write path
+
+```mermaid
+flowchart LR
+    H[Handler] -->|ctx.step| STP[Stepper]
+    H -->|ctx.updateData| STP
+    H -->|ctx.log.step| LOG[log emit]
+    STP -->|emitStep/emitData/emitFailed| WTW[withTrackedWorkflow callbacks]
+    WTW -->|trackEvent| JSONL[rows/workflow-DATE.jsonl]
+    LOG -->|AsyncLocalStorage ctx| LOGJSONL[logs/workflow-DATE.jsonl]
+```
+
+- `appendFileSync` is the write primitive. POSIX `write(2)` with `O_APPEND` is atomic per-line at the OS level — no mutex needed.
+- Free-form log messages are PII-scrubbed at write time (`redactPii` replaces SSN/DOB patterns).
+
+### Read path (dashboard)
+
+```mermaid
+flowchart LR
+    JSONL[.tracker/*.jsonl] -->|readFileSync cached| SSE[dashboard.ts SSE]
+    SSE -->|EventSource| REACT[React SPA :5173]
+    REACT --> UI[QueuePanel / LogPanel /<br/>StepPipeline / SessionPanel]
+```
+
+- **SSE server** (`src/tracker/dashboard/server.ts`) runs on port 3838. (`src/tracker/dashboard.ts` is a barrel re-export.)
+- **Vite dev server** (`npm run dashboard`) runs on port 5173 and proxies `/api` + `/events` to 3838.
+- Parsed JSONL is cached keyed by (path, mtime, size) — invalidated on any append.
+
+### SSE enrichment
+
+The multiplexed `/events/hub` endpoint enriches tracker entries with:
+
+- `firstLogTs`, `lastLogTs` — per (itemId, runId) earliest/latest log timestamps
+- `lastLogMessage` — most recent log line
+- `stepDurations` — per-step wall-clock ms (computed from step transitions)
+
+So the frontend never has to fetch the full log stream to show "started 3m ago, current step took 45s."
+
+### Dashboard panels (all observation-only as of 2026-04-18)
+
+| Panel                                 | Data source                                      | Purpose                                                                                                        |
+| ------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `QueuePanel`                          | tracker entries                                  | live list of pending/running/done/failed                                                                       |
+| `EntryItem` + `StepPipeline`          | `stepDurations`                                  | per-item row with step timing chips                                                                            |
+| `LogPanel`                            | logs JSONL                                       | log stream for a selected entry                                                                                |
+| `RunSelector`                         | `/api/runs`                                      | switch between retries of the same itemId                                                                      |
+| `ScreenshotsPanel` / `ScreenshotCard` | `/api/screenshots`                               | dedicated tab: grid of captured screenshots per entry (superseded the inline `FailureDrillDown` on 2026-04-21) |
+| `SessionPanel`                        | `sessions.jsonl`                                 | live browser/auth/Duo-queue state                                                                              |
+| `SelectorWarningsPanel`               | logs (filtered by "selector fallback triggered") | surface stale selectors                                                                                        |
+| `SearchBar`                           | `/api/search`                                    | cross-workflow search across historical JSONL                                                                  |
+
+### Dashboard run surfaces
+
+Workflow starts are dashboard-owned. Operators launch workflows through one of two surfaces:
+
+- **Input runs**: typed item starts through `InputRunPanel`, `INPUT_RUN_REGISTRY`, and `/api/enqueue`.
+- **Upload runs**: file-backed starts through `RunModal`, `RUN_MODAL_REGISTRY`, and workflow-specific prepare/start routes.
+
+Direct package-script workflow starts and YAML/batch-file launch paths are not valid operator surfaces.
+
+---
+
+## 8. Workflow runtime (projections + actions)
+
+After the 2026-05 workflow runtime migration, dashboard queue behavior is **declarative per workflow**, not hardcoded in React.
+
+```mermaid
+flowchart LR
+  JSONL[Tracker entries] --> SURF[queue-surfaces.ts]
+  SURF --> PROJ[workflow-runtime/projection.ts]
+  POL[workflow.ts runtimePolicy] --> PROJ
+  PROJ --> UI[QueuePanel / EntryItem / LogPanel chip]
+  UI -->|POST /api/*| ACT[performWorkflowAction]
+  ACT --> OPS[ops/cancel retry delete queue]
+```
+
+| Piece | Location | Role |
+| ----- | -------- | ---- |
+| `WorkflowRuntimePolicy` | `src/domain/workflow-runtime/types.ts` | Declares row/group/batch-view action descriptors + delegation/preview/member/prep rules |
+| Policy registry | `src/domain/workflow-runtime/registry.ts` | Populated at workflow load via `defineWorkflow({ runtimePolicy })` |
+| Projections | `src/domain/workflow-runtime/projection.ts` | Turns tracker rows + queue surfaces into `WorkflowRunProjection` (title, subtitle, `rowTypeLabel`, `actions`, `batchMembers`) |
+| Action engine | `src/control/actions/perform-workflow-action.ts` | Single dispatcher for cancel / retry / delete / bump; HTTP routes are thin wrappers |
+| React consumers | `QueuePanel`, `EntryItem`, `BatchFooterActions`, shared row action buttons | Read projection `actions` for enablement + scope; POST to legacy-compatible `/api/*` paths |
+
+**Scope discipline:** `row` / `group` / `visible-view` use caller-provided targets verbatim — queue-panel buttons cannot reach batch-view-only rows. Only explicit `tree` scope walks descendant runs. Batch footer retry/delete uses projection `targetRunIds` so bulk actions stay inside the opened batch.
+
+**Adding a workflow:** spread `DEFAULT_WORKFLOW_RUNTIME_POLICY` in `workflow.ts`, override delegation/preview rules when needed, and ensure `tests/unit/architecture/runtime-policy-coverage.test.ts` passes. See `docs/workflow/README.md` → "How To Add A New Workflow".
+
+---
+
+## 9. Systems + Selector Intelligence
+
+Each folder under `src/systems/` is a Playwright driver for one external system. They all share a conventional layout.
+
+```
+src/systems/ucpath/
+├── selectors.ts           ← every page.locator(...) lives here
+├── navigate.ts            ← helpers: getContentFrame, waitForPeopleSoftProcessing, etc.
+├── ss-smart-hr.ts         ← Smart HR transaction driver
+├── job-summary.ts         ← Job Summary extract
+├── person-org-summary.ts  ← Person Org Summary extract
+├── personal-data.ts       ← Personal Data page helpers
+├── action-plan.ts         ← Action Plan page helpers
+├── transaction.ts         ← UCPath transaction driver
+├── SELECTORS.md           ← auto-generated catalog (committed, drift-gated)
+├── LESSONS.md             ← append-only failure notes (format-gated)
+├── common-intents.txt     ← hand-curated intents for fuzzy search
+└── CLAUDE.md              ← per-system doc with the "map a new selector" loop
+```
+
+(Login flow lives in `src/infra/auth/login.ts`.)
+
+### The selector registry contract
+
+Every Playwright selector lives in `selectors.ts` as a **function** returning `Locator`/`FrameLocator`:
+
+```ts
+// src/systems/ucpath/selectors.ts
+export const smartHR = {
+  /**
+   * Save & Submit button on Smart HR transaction page.
+   * Often arrives disabled — force-click to bypass.
+   * @tags smart-hr, save, submit, button
+   */
+  // verified 2026-04-16
+  saveSubmitButton: (frame: FrameLocator) =>
+    frame
+      .getByRole("button", { name: "Save and Submit" })
+      .or(frame.locator("input[value='Save']")) // fallback
+      .or(frame.locator("#SAVE_PB")), // 2nd fallback
+  // ...
+};
+```
+
+**Three conventions enforced by unit tests:**
+
+1. **No inline selectors outside `selectors.ts`** — `tests/unit/systems/inline-selectors.test.ts` rejects `page.locator(...)` calls in any other `src/systems/**/*.ts` file. `row.locator("td").nth(1)` rooted in a registry selector is allowed via `// allow-inline-selector` EOL comment.
+2. **Drift gate** — `tests/unit/scripts/selectors-catalog.test.ts` regenerates `SELECTORS.md` and fails if it doesn't match the committed version.
+3. **Lesson format gate** — every `LESSONS.md` entry has `**Tried:**`, `**Failed because:**`, `**Fix:**`, `**Tags:**`.
+
+### `safeClick` / `safeFill` — telemetry on fallback matches
+
+```ts
+await safeClick(smartHR.saveSubmitButton(frame), "save-submit-button");
+```
+
+If the primary selector misses but a `.or(...)` fallback matches, `safeClick` emits `log.warn("selector fallback triggered: save-submit-button")`. The dashboard's `SelectorWarningsPanel` aggregates those warns across N days — so when a fallback starts matching regularly, you know the primary selector is stale before it fully breaks.
+
+### The "before you map a new selector" loop
+
+Enforced in every per-system CLAUDE.md:
+
+```
+1. npm run selector:search "<your intent>"
+   → does a matching selector exist in any system? If yes, USE IT.
+2. Check LESSONS.md for related failure modes
+3. Map a new selector via playwright-cli (opens a headed browser, dumps accessibility tree with refs)
+4. Add JSDoc + @tags + // verified <today> in selectors.ts
+5. npm run selectors:catalog to regen SELECTORS.md
+6. If you hit a non-obvious failure — append a lesson to LESSONS.md
+```
+
+```mermaid
+flowchart TB
+    A[New selector need] --> B[npm run selector:search]
+    B --> C{match?}
+    C -->|yes| USE[use existing]
+    C -->|no| D[read LESSONS.md]
+    D --> E[playwright-cli snapshot]
+    E --> F[add to selectors.ts<br/>+ JSDoc + @tags + verified date]
+    F --> G[npm run selectors:catalog]
+    G --> H{hit a non-obvious<br/>failure?}
+    H -->|yes| I[append LESSONS.md entry]
+    H -->|no| J[done]
+    I --> J
+```
+
+The fuzzy search is a pure in-repo scorer (no Fuse.js, no embeddings, no new deps).
+
+---
+
+## 10. End-to-end: one input run, step by step
+
+Let's trace a dashboard input run for `fixture021@example.edu` from `/api/enqueue` to completed transaction.
+
+```mermaid
+sequenceDiagram
+    participant DASH as Dashboard
+    participant API as /api/enqueue
+    participant Q as Task store
+    participant K as Kernel runWorkflow
+    participant SES as Session
+    participant STP as Stepper
+    participant H as Handler
+    participant T as Tracker JSONL
+    participant D as Dashboard
+
+    DASH->>API: workflow + parsed input
+    API->>Q: insert task row
+    Q->>K: daemon claims item
+    K->>K: runWorkflow(onboardingWorkflow, { email })
+    K->>K: schema.parse({ email }) ✓
+    K->>K: itemId = "fixture021@example.edu"
+    K->>T: withLogContext + withTrackedWorkflow<br/>pending
+    T-->>D: row appears: "fixture021@example.edu — pending"
+    K->>SES: Session.launch([crm, ucpath, i9])
+    SES->>SES: 3 browsers launch in parallel
+    SES->>SES: CDP tile windows
+    SES->>SES: sequential auth<br/>CRM Duo → UCPath Duo → I9 SSO
+    SES-->>K: Session ready
+    K->>STP: new Stepper(emitStep/Data/Failed)
+    K->>K: ctx = makeCtx({session, stepper, isBatch:false, runId})
+    K->>H: handler(ctx, { email })
+
+    Note over H: Phase 1: crm-auth + extraction
+    H->>H: ctx.markStep("crm-auth")
+    STP-->>T: running "crm-auth"
+    H->>H: ctx.step("extraction", ...)
+    STP-->>T: running "extraction"
+    H->>SES: ctx.page("crm")
+    H->>H: extractRawFields(crmPage)
+    H->>H: ctx.updateData({name, emplId, wage})
+    STP-->>T: running + data
+    T-->>D: row updates with name/emplId
+
+    Note over H: Phase 2: pdf-download (non-fatal)
+    H->>H: ctx.step("pdf-download", ...)
+    H->>H: direct iDocs fetch
+
+    Note over H: Phase 3: ucpath-auth + person-search
+    H->>H: ctx.markStep("ucpath-auth")
+    H->>H: ctx.step("person-search", ...)
+    H->>SES: ctx.page("ucpath")
+    H->>H: searchPerson by SSN
+    alt rehire
+        H->>H: updateData({status:"Rehire"}) + return
+    end
+
+    Note over H: Phase 4: i9-creation
+    H->>H: ctx.step("i9-creation", ...)
+    H->>SES: ctx.page("i9")
+    H->>H: search I9 by SSN — not found → create
+
+    Note over H: Phase 5: transaction
+    H->>H: ctx.step("transaction", ...)
+    H->>H: plan.execute() — fill 4 tabs + Save
+    H->>H: updateData({status:"Done"})
+
+    H-->>K: return
+    K->>SES: session.close()
+    K->>T: done
+    T-->>D: row → done
+```
+
+**Total Duos:** 2 (CRM + UCPath). I9 uses UCSD SSO without 2FA.
+
+---
+
+## 11. Glossary
+
+| Term                          | Meaning                                                                                                 |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Kernel**                    | Code under `src/core/`. Owns browser lifecycle, auth, tracker wrapping, ctx construction.               |
+| **Handler**                   | The `async (ctx, data) => {...}` function on `WorkflowConfig.handler`. Your business logic.             |
+| **`Ctx`**                     | The façade object the handler receives. Exposes `page/step/markStep/parallel/retry/updateData/…`.       |
+| **`Session`**                 | Manages browsers + auth-ready promises, one per system. Created by `Session.launch`.                    |
+| **`Stepper`**                 | Holds current step + accumulated data; wraps step bodies with screenshot-on-failure emit.               |
+| **`defineWorkflow`**          | Declaration helper. Registers metadata + returns `RegisteredWorkflow` the run fns consume.              |
+| **`RegisteredWorkflow`**      | `{ config, metadata }` — the handle run fns receive.                                                    |
+| **Run mode**                  | `runWorkflow` (single) / `runWorkflowBatch` (sequential many) / `runWorkflowPool` (parallel many).      |
+| **Auth chain**                | `sequential` = Duo one-at-a-time blocking; `interleaved` = first blocks, rest chain in background.      |
+| **Duo**                       | UCSD's MFA push notification. Manual — operator approves on phone. Two concurrent pushes would error.   |
+| **Tracker**                   | Append-only JSONL under `.tracker/` written by the tracker wrapper. Dashboard's source of truth.        |
+| **SSE**                       | Server-Sent Events. How the dashboard streams live tracker updates to React.                            |
+| **`runId`**                   | Unique UUID per workflow run. Appears on every tracker entry + log line.                                |
+| **`itemId`**                  | Stable per-subject id (emplId/docId/email/UUID). Groups retries of the same subject across runs.        |
+| **`withTrackedWorkflow`**     | Tracker lifecycle wrapper. Kernel-internal — handlers never call it directly.                           |
+| **Selector intelligence**     | `SELECTORS.md` + `LESSONS.md` + `common-intents.txt` + `selector:search` per system.                    |
+| **`safeClick`/`safeFill`**    | Wrappers that log `selector fallback triggered` when `.or(...)` fallbacks match.                        |
+| **`playwright-cli`**          | Standalone tool for mapping selectors. `open --headed` + `snapshot` dumps accessibility tree with refs. |
+
+---
+
+## Further reading (in this repo)
+
+- [`CLAUDE.md`](../../CLAUDE.md) — root. Architecture overview + kernel primer + writing-a-new-workflow + gotchas.
+- [`src/core/CLAUDE.md`](../../src/core/CLAUDE.md) — kernel internals.
+- [`src/tracker/CLAUDE.md`](../../src/tracker/CLAUDE.md) — tracker + dashboard backend.
+- [`src/dashboard/CLAUDE.md`](../../src/dashboard/CLAUDE.md) — frontend conventions.
+- [`src/workflows/*/CLAUDE.md`](../../src/workflows/) — per-workflow shape + lessons.
+- [`src/systems/*/{LESSONS,SELECTORS}.md`](../../src/systems/) — per-system failure notes + catalog.

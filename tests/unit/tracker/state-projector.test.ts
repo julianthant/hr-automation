@@ -1,0 +1,305 @@
+import { test } from "vitest";
+import assert from "node:assert/strict";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+import { openStateDb, closeStateDbForTests } from "../../../src/tracker/state/db.js";
+import {
+  rebuildProjectionForAllDates,
+  rebuildProjectionForDate,
+} from "../../../src/tracker/state/rebuild.js";
+import { applyTrackerEntry } from "../../../src/tracker/state/apply.js";
+import { dateLocal } from "../../../src/tracker/jsonl.js";
+import { rowFilePath, logFilePath, sessionFilePath, rowsDir, logsDir, sessionsDir } from "../../../src/tracker/paths.js";
+
+function tmpTracker(): string {
+  return mkdtempSync(join(tmpdir(), "state-rebuild-"));
+}
+
+test("rebuildProjectionForDate replays tracker and log JSONL into SQLite", () => {
+  const dir = tmpTracker();
+  const date = "2026-05-04";
+  try {
+    mkdirSync(rowsDir(dir), { recursive: true });
+    mkdirSync(logsDir(dir), { recursive: true });
+    appendFileSync(rowFilePath("onboarding", date, dir), JSON.stringify({
+      workflow: "onboarding",
+      timestamp: "2026-05-04T20:00:00.000Z",
+      id: "jane",
+      runId: "run-1",
+      status: "running",
+      step: "extraction",
+      data: { name: "Jane" },
+    }) + "\n");
+    appendFileSync(logFilePath("onboarding", date, dir), JSON.stringify({
+      workflow: "onboarding",
+      itemId: "jane",
+      runId: "run-1",
+      level: "step",
+      message: "Extracting",
+      ts: "2026-05-04T20:00:10.000Z",
+    }) + "\n");
+
+    const db = openStateDb(dir);
+    rebuildProjectionForDate(db, { dir, date });
+    const run = db.prepare("SELECT latest_status, latest_step, last_log_message FROM runs").get() as {
+      latest_status: string;
+      latest_step: string;
+      last_log_message: string;
+    };
+    assert.deepEqual({ ...run }, {
+      latest_status: "running",
+      latest_step: "extraction",
+      last_log_message: "Extracting",
+    });
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("rebuildProjectionForAllDates restores historical partitions after projection invalidation", () => {
+  const dir = tmpTracker();
+  try {
+    mkdirSync(rowsDir(dir), { recursive: true });
+    for (const [date, id] of [["2026-07-14", "historical"], ["2026-07-16", "current"]] as const) {
+      appendFileSync(rowFilePath("onboarding", date, dir), `${JSON.stringify({
+        workflow: "onboarding",
+        timestamp: `${date}T20:00:00.000Z`,
+        id,
+        runId: `run-${id}`,
+        status: "done",
+        data: { archetype: "single" },
+      })}\n`);
+    }
+    const db = openStateDb(dir);
+    db.exec("DELETE FROM run_events; DELETE FROM runs; DELETE FROM items; DELETE FROM projection_sources;");
+
+    assert.deepEqual(
+      rebuildProjectionForAllDates(db, { dir, includeDates: ["2026-07-16"] }),
+      ["2026-07-14", "2026-07-16"],
+    );
+    const ids = db.prepare("SELECT item_id FROM runs ORDER BY item_id").all() as Array<{ item_id: string }>;
+    assert.deepEqual(ids.map((row) => row.item_id), ["current", "historical"]);
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("applyTrackerEntry derives fallback tracker_date in local time", () => {
+  const dir = tmpTracker();
+  const timestamp = "2026-05-14T05:08:05.215Z";
+  try {
+    const db = openStateDb(dir);
+    applyTrackerEntry(
+      db,
+      {
+        workflow: "eid-lookup",
+        timestamp,
+        id: "queued-name",
+        runId: "run-1",
+        status: "pending",
+      },
+      {
+        sourceKind: "tracker",
+        path: join(dir, "synthetic.jsonl"),
+        offset: 0,
+      },
+    );
+
+    const row = db.prepare("SELECT tracker_date FROM items WHERE item_id = ?").get("queued-name") as {
+      tracker_date: string;
+    };
+    assert.equal(row.tracker_date, dateLocal(new Date(timestamp)));
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("rebuildProjectionForDate is idempotent and skips malformed lines", () => {
+  const dir = tmpTracker();
+  const date = "2026-05-04";
+  try {
+    mkdirSync(rowsDir(dir), { recursive: true });
+    appendFileSync(rowFilePath("work-study", date, dir), "{bad json}\n");
+    appendFileSync(rowFilePath("work-study", date, dir), JSON.stringify({
+      workflow: "work-study",
+      timestamp: "2026-05-04T20:00:00.000Z",
+      id: "10000910",
+      runId: "run-1",
+      status: "done",
+    }) + "\n");
+
+    const db = openStateDb(dir);
+    rebuildProjectionForDate(db, { dir, date });
+    rebuildProjectionForDate(db, { dir, date });
+    const count = db.prepare("SELECT COUNT(*) AS n FROM run_events").get() as { n: number };
+    assert.equal(count.n, 1);
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("rebuildProjectionForDate skips sessions-${date}.jsonl in the tracker loop", () => {
+  // Regression: sessions-${date}.jsonl used to match the `-${date}.jsonl` suffix
+  // when sitting in the tracker root, but now session files live in the sessions/
+  // subdir — separate from rows/. This test confirms the session file still flows
+  // through the session loop and does NOT appear as a tracker row.
+  const dir = tmpTracker();
+  const date = "2026-05-04";
+  try {
+    mkdirSync(sessionsDir(dir), { recursive: true });
+    appendFileSync(sessionFilePath(date, dir), JSON.stringify({
+      type: "workflow_start",
+      timestamp: "2026-05-04T20:00:00.000Z",
+      pid: 1,
+      workflowInstance: "Today 1",
+      runId: "run-1",
+    }) + "\n");
+
+    const db = openStateDb(dir);
+    rebuildProjectionForDate(db, { dir, date });
+    const trackerCount = db.prepare("SELECT COUNT(*) AS n FROM run_events").get() as { n: number };
+    const sessionCount = db.prepare("SELECT COUNT(*) AS n FROM session_events").get() as { n: number };
+    assert.equal(trackerCount.n, 0, "session file must not produce tracker rows");
+    assert.equal(sessionCount.n, 1, "session file must still flow through the session loop");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("rebuildProjectionForDate applies only new bytes on second call (incremental)", () => {
+  const dir = tmpTracker();
+  const date = "2026-05-04";
+  try {
+    mkdirSync(rowsDir(dir), { recursive: true });
+    const trackerPath = rowFilePath("onboarding", date, dir);
+
+    // First write: one entry
+    appendFileSync(trackerPath, JSON.stringify({
+      workflow: "onboarding",
+      timestamp: "2026-05-04T20:00:00.000Z",
+      id: "alice",
+      runId: "run-1",
+      status: "done",
+      data: { name: "Alice" },
+    }) + "\n");
+
+    const db = openStateDb(dir);
+    rebuildProjectionForDate(db, { dir, date });
+    const countAfterFirst = (db.prepare("SELECT COUNT(*) AS n FROM run_events").get() as { n: number }).n;
+    assert.equal(countAfterFirst, 1, "first rebuild should produce 1 run_event");
+
+    // Second write: a new entry appended after the first rebuild
+    appendFileSync(trackerPath, JSON.stringify({
+      workflow: "onboarding",
+      timestamp: "2026-05-04T21:00:00.000Z",
+      id: "bob",
+      runId: "run-2",
+      status: "done",
+      data: { name: "Bob" },
+    }) + "\n");
+
+    rebuildProjectionForDate(db, { dir, date });
+    const countAfterSecond = (db.prepare("SELECT COUNT(*) AS n FROM run_events").get() as { n: number }).n;
+    assert.equal(countAfterSecond, 2, "second rebuild should add only the new entry");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("rebuildProjectionForDate only clears session events for the rebuilt date", () => {
+  const dir = tmpTracker();
+  try {
+    mkdirSync(sessionsDir(dir), { recursive: true });
+    appendFileSync(sessionFilePath("2026-05-03", dir), JSON.stringify({
+      type: "workflow_start",
+      timestamp: "2026-05-03T20:00:00.000Z",
+      pid: 1,
+      workflowInstance: "Yesterday 1",
+      runId: "run-yesterday",
+    }) + "\n");
+    appendFileSync(sessionFilePath("2026-05-04", dir), JSON.stringify({
+      type: "workflow_start",
+      timestamp: "2026-05-04T20:00:00.000Z",
+      pid: 1,
+      workflowInstance: "Today 1",
+      runId: "run-today",
+    }) + "\n");
+
+    const db = openStateDb(dir);
+    rebuildProjectionForDate(db, { dir, date: "2026-05-03" });
+    rebuildProjectionForDate(db, { dir, date: "2026-05-04" });
+
+    const rows = db.prepare(`
+      SELECT tracker_date, workflow_instance
+      FROM session_events
+      ORDER BY tracker_date ASC
+    `).all() as Array<{ tracker_date: string; workflow_instance: string }>;
+    assert.deepEqual(rows.map((r) => ({ ...r })), [
+      { tracker_date: "2026-05-03", workflow_instance: "Yesterday 1" },
+      { tracker_date: "2026-05-04", workflow_instance: "Today 1" },
+    ]);
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("rebuild handles JSONL truncation by re-reading from offset 0", () => {
+  // Regression: without truncation detection, stat.size <= cached byte_offset
+  // causes parseJsonlFrom to return [] forever, so any bytes appended after the
+  // truncation point are never parsed. The fix resets effectiveStart to 0 when
+  // stat.size < startAt; INSERT OR IGNORE on UNIQUE(source_path, source_offset)
+  // absorbs lines whose byte offsets collide with pre-truncation DB rows as a
+  // no-op, but lines at novel offsets still land.
+  //
+  // To produce novel offsets after truncation we use long original entries
+  // (so their line lengths differ from the short replacement entries), making
+  // the second short line sit at a byte offset that the original file never had.
+  const dir = tmpTracker();
+  const date = "2026-05-08";
+  try {
+    mkdirSync(rowsDir(dir), { recursive: true });
+    const path = rowFilePath("separations", date, dir);
+
+    // Write 2 long entries — large enough that a 2-entry replacement file
+    // (with shorter lines) will be smaller than this file's total size.
+    const longSuffix = { data: { name: "Alice Smith Jonivog III — long field to widen the line" } };
+    appendFileSync(path, JSON.stringify({ workflow: "separations", id: "long-1", runId: "long-1#1", status: "pending", timestamp: "2026-05-08T10:00:00Z", ...longSuffix }) + "\n");
+    appendFileSync(path, JSON.stringify({ workflow: "separations", id: "long-2", runId: "long-2#1", status: "pending", timestamp: "2026-05-08T10:01:00Z", ...longSuffix }) + "\n");
+    const db = openStateDb(dir);
+    rebuildProjectionForDate(db, { dir, date });
+    const before = db.prepare(`SELECT COUNT(*) AS n FROM run_events WHERE workflow = 'separations' AND tracker_date = ?`).get(date) as { n: number };
+    assert.equal(before.n, 2, "first rebuild should produce 2 run_events");
+
+    // Truncate the file by rewriting it with 2 short entries.  The short lines
+    // are narrower than the originals, so the second short entry sits at a byte
+    // offset that no existing run_event row has — it will pass INSERT OR IGNORE.
+    // The new file is also smaller than the cached byte_offset, triggering the
+    // truncation-detection branch (effectiveStart = 0) introduced in this fix.
+    // Without the fix, stat.size <= startAt → [] forever.
+    writeFileSync(path,
+      JSON.stringify({ workflow: "separations", id: "short-1", runId: "short-1#1", status: "pending", timestamp: "2026-05-08T11:00:00Z" }) + "\n" +
+      JSON.stringify({ workflow: "separations", id: "short-2", runId: "short-2#1", status: "pending", timestamp: "2026-05-08T11:01:00Z" }) + "\n",
+    );
+    rebuildProjectionForDate(db, { dir, date });
+
+    // short-2 sits at an offset that was not present in the original file
+    // (the long lines are wider than the short lines), so INSERT OR IGNORE
+    // lets it through. long-1 and long-2 remain (no DELETE on truncation).
+    const after = db.prepare(`SELECT COUNT(*) AS n FROM run_events WHERE workflow = 'separations' AND tracker_date = ?`).get(date) as { n: number };
+    assert.ok(after.n >= 3, `expected at least 3 rows (2 original + short-2 at novel offset), got ${after.n}`);
+    const short2Row = db.prepare(`SELECT 1 FROM run_events WHERE workflow = 'separations' AND item_id = 'short-2'`).get();
+    assert.ok(short2Row, "short-2 (post-truncation entry at novel offset) should be present");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

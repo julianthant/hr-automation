@@ -1,0 +1,527 @@
+import { useState, useEffect, useMemo } from "react";
+import type { ReactNode } from "react";
+import { TerminalSquare, TriangleAlert } from "lucide-react";
+import { StepPipeline, computeOcrPipelineView } from "./StepPipeline";
+import { LogStream } from "./LogStream";
+import { RunSelector } from "./RunSelector";
+import { ExportMenu } from "./ExportMenu";
+import { RetryButton } from "@/components/shared/RetryButton";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { ScreenshotsPanel } from "./ScreenshotsPanel";
+import { OperationScreenshotsPanel } from "./OperationScreenshotsPanel";
+import { EditDataTab } from "./EditDataTab";
+import { EidApprovalBanner } from "./EidApprovalBanner";
+import { ViewDataPanel } from "./ViewDataPanel";
+import { isDataPointLog } from "../../../domain/data-point.js";
+import { formatTraceIdRunLabel } from "../../../domain/queue-trace-id.js";
+import { useLogs, type CollapsedLogEntry } from "@/components/hooks/useLogs";
+import { useCoordinatorAggregatedLogs } from "@/components/hooks/useCoordinatorAggregatedLogs";
+import {
+  COORDINATOR_LOG_SOURCE_LABEL,
+  computeOperationPipelineView,
+  isOperationCoordinatorRow,
+  operationCoordinatorEffectiveStatus,
+  type CoordinatorLogLine,
+} from "./coordinator-logs";
+import { resolveEntryName } from "@/components/shared/entry-display";
+import { useRunEvents } from "@/components/hooks/useRunEvents";
+import { useRunsForMergedEntry } from "@/components/hooks/useRunsForMergedEntry";
+import { cn } from "@/lib/utils";
+import type { TrackerEntry } from "@/components/shared/types";
+import { formatTrackerValue, isMonospaceKey } from "@/components/shared/types";
+import { deriveTrackerFallbackLog } from "./log-fallback";
+import { useWorkflow } from "@/lib/workflows-context";
+import { hasDelegationRole } from "../../../domain/row-archetype.js";
+
+type LazySlot = ReactNode | (() => ReactNode);
+
+interface LogPanelProps {
+  entry: TrackerEntry | null;
+  workflow: string;
+  date: string;
+  /** Cross-workflow entries for child-run detection. Optional — if absent, child section is hidden. */
+  allEntries?: TrackerEntry[];
+  /** Per-entry base-name labels from `buildDisplayNameMap`. */
+  displayNames?: Map<string, string>;
+  /**
+   * Other entries merged into this entry (same person, different input
+   * shapes — e.g. EID + name checks). Their runs are pooled with `entry`'s
+   * runs and presented as one combined history. Each pooled run keeps its
+   * true `itemId` so log fetching addresses the right JSONL key.
+   */
+  siblings?: TrackerEntry[];
+  /** Default-active LogStream tab (e.g. "preview" when opening from an OCR review row click). */
+  defaultTab?: string;
+  /** Optional preview content for the LogStream's Preview tab (e.g. OCR two-column body). */
+  previewSlot?: LazySlot;
+  /** Optional chrome row under the Preview tab strip (e.g. OCR filename + actions). */
+  previewHeaderSlot?: LazySlot;
+  /** Whether the Preview tab is shown. */
+  previewAvailable?: boolean;
+  /** Reports whether the Preview tab is currently selected. */
+  onPreviewVisibleChange?: (visible: boolean) => void;
+  /** Called when the operator triggers a hard-delete from the RunSelector toolbar. */
+  onDeleteEntry?: () => void;
+}
+
+/**
+ * Resolves which entry the detail grid should render for.
+ *
+ * For the LIVE run, always render the (live) `entry`. For a HISTORICAL run
+ * selected via the RunSelector, prefer that run's OWN `data` snapshot
+ * (`RunInfo.data`) so switching the run pill repaints the grid with that
+ * run's actual values instead of the deduped entry's latest data.
+ *
+ * FAIL LOUD: when the historical run recorded no `data` (e.g. a
+ * very-early-cancelled run), this returns `null` rather than silently
+ * falling back to `entry` — `entry` is the LIVE run's data, which can belong
+ * to a different person under a merged sibling group. Showing it here would
+ * render the wrong person's fields under the operator's selected historical
+ * run. Callers must render a distinguishable "data unavailable" state for
+ * `null`, never substitute `entry`.
+ */
+export function resolveDetailEntry(
+  entry: TrackerEntry,
+  isViewingLiveRun: boolean,
+  activeRunData: Record<string, unknown> | undefined,
+): TrackerEntry | null {
+  if (isViewingLiveRun) return entry;
+  if (!activeRunData) return null;
+  return { ...entry, data: activeRunData as TrackerEntry["data"], typedData: undefined };
+}
+
+/**
+ * The log-panel footer chip shows the run's trace id (`data.__traceId`) — the
+ * greppable run identifier (e.g. `ec-150044-a3f1`), NOT the person EID. Pure +
+ * exported for unit testing.
+ */
+export function deriveLogPanelFooterRunLabel(entry: TrackerEntry): string {
+  const traceId = typeof entry.data?.__traceId === "string" ? entry.data.__traceId.trim() : "";
+  return formatTraceIdRunLabel(traceId, entry.runOrdinal);
+}
+
+export function LogPanel({ entry, workflow, date, allEntries, displayNames, siblings, defaultTab, previewSlot, previewHeaderSlot, previewAvailable, onPreviewVisibleChange, onDeleteEntry }: LogPanelProps) {
+  const effectiveWorkflow = entry?.workflow ?? workflow;
+  const registered = useWorkflow(effectiveWorkflow);
+  const [maximized, setMaximized] = useState(false);
+  // Reset maximized whenever we switch to a different entry — operator's
+  // intent for "fullscreen the tab" is per-row, not session-wide.
+  useEffect(() => { setMaximized(false); }, [entry?.id, entry?.runId]);
+
+  // Compute child entries (other entries where parentRunId === this run's runId).
+  const childEntries: TrackerEntry[] = useMemo(
+    () =>
+      entry?.runId && allEntries
+        ? allEntries.filter((e) => e.parentRunId === entry.runId && e.id !== entry.id)
+        : [],
+    [allEntries, entry?.id, entry?.runId],
+  );
+  // Any operation-archetype row is a coordinator that owns the consolidated
+  // event-tracker detail panel — the OCR-backed set AND input-run operation
+  // shells (e.g. separations multi-person). Both fan out to member rows, so
+  // both show aggregated member screenshots, hide the (meaningless) person
+  // detail grid, and report member-rollup status. See `isOperationCoordinatorRow`.
+  const isOperationCoordinator = Boolean(entry && isOperationCoordinatorRow(entry));
+  const registeredSteps = useMemo(() => registered?.steps ?? [], [registered]);
+  const detailFields = useMemo(() => registered?.detailFields ?? [], [registered]);
+
+  // Runs for this entry + siblings, pooled with backend-stable run ordinals.
+  // Keyed on (id, runId) tuples — NOT on status/step — so status updates
+  // at 1 Hz do not trigger /api/runs refetches (new runs start by runId
+  // changing, not status changing).
+  const { runs, setRuns, activeRunId, setActiveRunId, runsError } = useRunsForMergedEntry({
+    entry,
+    siblings,
+    workflow,
+    date,
+  });
+
+  // Use the entry's own workflow when present (cross-workflow rows: OCR
+  // prep rows surface in oath-signature/emergency-contact queues, but
+  // their logs live in ocr-logs.jsonl). Falls back to the topbar workflow
+  // when no entry is selected (skeleton state).
+  const logSourceWorkflow = effectiveWorkflow;
+  // When the active run came from a merged sibling, fetch logs against
+  // the run's TRUE itemId rather than the primary's id — JSONL keys logs
+  // per (workflow, itemId, runId) and the sibling's logs live under its
+  // own itemId.
+  const activeRunForLog = runs.find((r) => r.runId === activeRunId);
+  const activeItemId = activeRunForLog?.itemId || entry?.id || null;
+  const handleRunDeleted = () => {
+    const remainingRuns = runs.filter((run) => run.runId !== activeRunId);
+    if (remainingRuns.length === 0) {
+      onDeleteEntry?.();
+      return;
+    }
+    setRuns(remainingRuns);
+    setActiveRunId(remainingRuns[remainingRuns.length - 1]?.runId ?? null);
+  };
+  const { logs, loading: logsLoading } = useLogs(logSourceWorkflow, activeItemId, activeRunId, date);
+  const { events } = useRunEvents(logSourceWorkflow, activeItemId, activeRunId, date);
+  // Operation coordinator rows merge sparse lifecycle logs with OCR KEY events
+  // and member summaries. Daemon session-lifecycle events render once on their
+  // own (via the LogStream events merge below), so they are NOT folded in here.
+  const { active: coordinatorAggregateActive, logs: coordinatorLogs } =
+    useCoordinatorAggregatedLogs({ entry, coordinatorLogs: logs, childEntries, date });
+  const screenshotEventCount = useMemo(
+    () => events.reduce((n, e) => (e.type === "screenshot" ? n + 1 : n), 0),
+    [events],
+  );
+  const trackerFallbackLog = useMemo(
+    () => deriveTrackerFallbackLog(entry, activeRunId),
+    [entry, activeRunId],
+  );
+  const displayedLogs = useMemo(() => {
+    // Coordinator rows show the merged (coordinator + OCR + member) timeline
+    // when it has any real content; otherwise fall through to the normal
+    // fallback (e.g. a just-created operation with no logs yet).
+    if (coordinatorAggregateActive && coordinatorLogs.length > 0) {
+      return coordinatorLogs;
+    }
+    if (!logsLoading && logs.length === 0 && trackerFallbackLog) {
+      return [trackerFallbackLog];
+    }
+    return logs;
+  }, [coordinatorAggregateActive, coordinatorLogs, logs, logsLoading, trackerFallbackLog]);
+
+  // Gate the "View Data" tab: only show it when this run actually recorded
+  // data-provenance points via `ctx.recordData` (mirrors the Edit Data /
+  // Preview gating). Any workflow opts in simply by emitting points.
+  const viewDataAvailable = useMemo(
+    () => displayedLogs.some((l) => isDataPointLog(l)),
+    [displayedLogs],
+  );
+
+  // Source-label resolver for the merged coordinator timeline — maps each line's
+  // `source` to its human badge. undefined for non-coordinator rows (no badge).
+  const sourceLabelOf = useMemo(() => {
+    if (!coordinatorAggregateActive) return undefined;
+    return (entry: CollapsedLogEntry): string | undefined => {
+      // The merged coordinator lines are `CoordinatorLogLine`s (carry `source`);
+      // the LogStream prop is typed on the base `CollapsedLogEntry`, so read it
+      // through the wider shape. Non-coordinator lines (none here) yield no badge.
+      const source = (entry as CoordinatorLogLine).source;
+      return source ? COORDINATOR_LOG_SOURCE_LABEL[source] : undefined;
+    };
+  }, [coordinatorAggregateActive]);
+
+  // Derive step/status from active run when viewing a HISTORICAL run via the
+  // RunSelector. For the LIVE run (activeRun matches the SSE-delivered entry's
+  // runId) prefer the SSE entry — `/api/runs` is polled every 2s only while
+  // entry.status is running/pending, so the moment SSE flips status to done
+  // the polling stops and `activeRun.step` freezes at whatever step the LAST
+  // poll captured. For fast workflows (e.g. OCR with 0 records) that's the
+  // first step, leaving the timeline stuck even though the entry is terminal.
+  const activeRun = runs.find((r) => r.runId === activeRunId);
+  const isViewingLiveRun = !activeRunId || activeRunId === entry?.runId;
+  const liveEntryStatus = entry
+    ? operationCoordinatorEffectiveStatus(entry, childEntries)
+    : undefined;
+  const runStatus = isViewingLiveRun
+    ? (liveEntryStatus || entry?.status || activeRun?.status || "pending") // || entry?.status only reached when entry is null (liveEntryStatus is undefined)
+    : (activeRun?.status || entry?.status || "pending");
+  const runStep = isViewingLiveRun
+    ? (entry?.step || activeRun?.step || null)
+    : (activeRun?.step || null);
+  // Step durations follow the SAME live-vs-historical preference as
+  // status/step above. For the LIVE run, prefer the SSE `entry` — `activeRun`
+  // is a one-shot `/api/runs` snapshot taken when the row was opened
+  // (`useRunsForMergedEntry` only refetches when runId/id/date change, not as
+  // the run progresses), so its `stepDurations` freezes at open time. The SSE
+  // entry refreshes whenever a step closes or the run goes terminal (both
+  // change `step`/`status`, which are in the entry hash), which is exactly when
+  // durations change — so the timeline now updates live instead of only after a
+  // remount (tab switch). Historical runs keep using the run's own snapshot.
+  const runStepDurations = isViewingLiveRun
+    ? (entry?.stepDurations ?? activeRun?.stepDurations)
+    : (activeRun?.stepDurations ?? entry?.stepDurations);
+  // OCR rows drop the `verification` (always) and "Review"/`awaiting-approval`
+  // (standalone only) chips cosmetically — see `computeOcrPipelineView`. The
+  // helper also remaps currentStep/status so a run parked on a hidden step
+  // still renders the visible chips as complete. Non-OCR rows pass through.
+  const pipeline = useMemo(() => {
+    // Operation coordinators show their OWN lifecycle (Prepare → Review →
+    // Fan-out) instead of the target workflow's member steps — see
+    // `computeOperationPipelineView`.
+    if (isOperationCoordinator && entry) {
+      return computeOperationPipelineView(entry, childEntries);
+    }
+    if (entry?.workflow === "ocr") {
+      return computeOcrPipelineView(
+        registeredSteps,
+        runStep,
+        runStatus,
+        Boolean(entry?.parentRunId),
+      );
+    }
+    return { steps: registeredSteps, currentStep: runStep, status: runStatus };
+  }, [entry, isOperationCoordinator, childEntries, registeredSteps, runStep, runStatus]);
+
+  const allDetailFields = useMemo(
+    () => detailFields.filter((f) => f.displayInGrid !== false),
+    [detailFields],
+  );
+
+  // Footer chip = the active run's trace id. When viewing a historical run,
+  // prefer that run's stamped data over the deduped live entry.
+  const footerRunLabel = useMemo(() => {
+    if (!entry) return "";
+    const historicalData = !isViewingLiveRun ? activeRun?.data : undefined;
+    const runOrdinal = !isViewingLiveRun ? activeRun?.runOrdinal : entry.runOrdinal;
+    const labelEntry: TrackerEntry = historicalData
+      ? {
+          ...entry,
+          runOrdinal,
+          data: { ...entry.data, ...historicalData } as TrackerEntry["data"],
+        }
+      : { ...entry, runOrdinal };
+    return deriveLogPanelFooterRunLabel(labelEntry);
+  }, [entry, isViewingLiveRun, activeRun?.data, activeRun?.runOrdinal]);
+
+  if (!entry) {
+    return (
+      <div className="flex-1 flex flex-col bg-card">
+        <EmptyState
+          icon={TerminalSquare}
+          title="Select an entry"
+          description="Click an entry in the queue to view its logs"
+        />
+      </div>
+    );
+  }
+
+  // The detail grid renders fields off `formatTrackerValue(entry, key)`,
+  // which reads `entry.data[key]`. `allDetailFields` is memoized above.
+  // When the operator is viewing a HISTORICAL run via the RunSelector, the deduped entry's data is the LATEST run's
+  // data (often null/empty for cancelled rows) — not the data captured by
+  // the run they actually selected. Use the per-run `data` carried on
+  // `RunInfo` (server-side `runs.latest_data_json` via `/api/runs`) so
+  // switching the run pill repaints the grid with that run's own values.
+  // When swapping in a historical run's data, ALSO clear typedData — it's
+  // the typed-shape mirror of the deduped entry's `data` and `formatTrackerValue`
+  // checks it first. Leaving the primary's typedData in place would mask the
+  // per-run `data` we just substituted (e.g. showing "Not found" from
+  // 10090309's last run while the operator is viewing Livovot's earlier
+  // successful run).
+  // FAIL LOUD: `resolveDetailEntry` returns `null` when the historical run
+  // recorded no data — never fall back to the live entry here, that would
+  // silently render a DIFFERENT run's (possibly a different person's) fields
+  // under the operator's selected historical run.
+  const detailEntry = resolveDetailEntry(entry, isViewingLiveRun, activeRun?.data);
+
+  const renderDetailValue = (key: string): string =>
+    detailEntry ? formatTrackerValue(detailEntry, key) : "";
+
+  /**
+   * A detail value carrying no information. `formatTrackerValue` substitutes
+   * the em-dash placeholder for a missing/null field, so a `conditional` field
+   * must treat that placeholder as blank — otherwise it renders forever.
+   */
+  const isBlankDetailValue = (value: string): boolean => {
+    const trimmed = value.trim();
+    return trimmed === "" || trimmed === "—";
+  };
+
+  const Skeleton = ({ className }: { className?: string }) => (
+    <div className={cn("rounded bg-muted motion-safe:animate-pulse", className)} />
+  );
+
+  // Show skeleton while logs are loading and we have no data yet
+  const showSkeleton = logsLoading && displayedLogs.length === 0;
+  const hideDetailGrid =
+    Boolean(previewAvailable) ||
+    hasDelegationRole(entry, "dispatch") ||
+    isOperationCoordinator;
+  // FAIL LOUD: `detailEntry` is null exactly when the operator is viewing a
+  // HISTORICAL run that recorded no `data` — render a distinguishable
+  // "unavailable" message in place of the grid rather than any fields.
+  const historicalDataUnavailable = !isViewingLiveRun && !detailEntry;
+  // Run-level failure banner — elevates `entry.error` above the log wall with a
+  // Retry. A cancelled run (failed + step="cancelled") is operator-stopped, not
+  // a failure, so it gets no banner.
+  const isCancelledRun = runStatus === "failed" && runStep === "cancelled";
+  const failureBanner =
+    runStatus === "failed" && !isCancelledRun && entry.error ? (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5">
+        <TriangleAlert aria-hidden className="h-4 w-4 shrink-0 text-destructive" />
+        <p className="min-w-0 flex-1 text-[12.5px] leading-snug">
+          <span className="font-semibold text-destructive">Run failed.</span>{" "}
+          <span className="text-foreground/80">{entry.error}</span>
+        </p>
+        <RetryButton
+          workflow={logSourceWorkflow}
+          id={activeItemId ?? entry.id}
+          runId={activeRunId ?? entry.runId ?? undefined}
+          date={date}
+          size="md"
+        />
+      </div>
+    ) : undefined;
+
+  // Identity-approval review banner — any identity-resolving run that PAUSED for
+  // operator approval (data.eidApproval === "pending"). Workflow-agnostic
+  // (separations, onboarding, …) — gated only on the pause marker, not the
+  // workflow name. The run is `done` (not failed), so it never collides with the
+  // failure banner; reuse the same top slot.
+  const eidApprovalBanner =
+    entry.data?.eidApproval === "pending" ? (
+      <EidApprovalBanner entry={entry} workflow={logSourceWorkflow} date={date} />
+    ) : undefined;
+
+  return (
+    <div className="flex-1 flex flex-col bg-card min-w-0 min-h-0 overflow-hidden">
+      {/* Detail grid + step pipeline are hidden when the operator maximizes
+          a tab so the tab content takes the full LogPanel height. The
+          previous title/action header was removed to move content up. */}
+      {!maximized && (<>
+      {/* Detail grid — rendered from registry metadata via formatTrackerValue;
+          auto-adapts to any workflow's detailFields declaration. Wraps to
+          rows of 4. */}
+      {!hideDetailGrid && (
+        historicalDataUnavailable ? (
+          <div className="flex items-center gap-2 px-6 py-3 border-b border-border shrink-0 text-sm text-muted-foreground">
+            <TriangleAlert aria-hidden className="h-4 w-4 shrink-0 text-warning" />
+            <span>Data unavailable for this run — no fields were recorded.</span>
+          </div>
+        ) : (
+        <div className="grid grid-cols-4 shrink-0">
+          {allDetailFields.map((f) => {
+            const value = renderDetailValue(f.key);
+            // Conditional fields hide when empty so ordinary separation rows
+            // don't grow blank I-9 Action History cells.
+            //
+            // `formatTrackerValue` renders a MISSING value as an em-dash
+            // placeholder, never "" — so the original `!value.trim()` check was
+            // always false and `conditional` silently hid nothing. Test for the
+            // placeholder, not just whitespace.
+            if (f.conditional && isBlankDetailValue(value)) return null;
+            const mono = isMonospaceKey(f.key);
+            return (
+              <div
+                key={f.key}
+                style={{ height: "69.5px" }}
+                className="px-6 flex flex-col justify-center gap-1 overflow-hidden border-b border-r border-border"
+              >
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium leading-none">
+                  {f.label}
+                </div>
+                {showSkeleton ? (
+                  <Skeleton className="h-4 w-20" />
+                ) : (
+                  <div className={cn(
+                    "text-sm truncate leading-tight",
+                    mono ? "font-mono" : "font-medium",
+                  )} title={value}>
+                    {value}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        )
+      )}
+
+      {/* Step pipeline — every row, including the operation coordinator, shows
+          its own lifecycle timeline (Prepare → Review → Fan-out for
+          coordinators, whose steps are derived in `computeOperationPipelineView`). */}
+      {showSkeleton ? (
+        <div className="flex items-center gap-3 px-6 py-4 border-b border-border">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex items-center">
+              {i > 0 && <Skeleton className="w-8 h-0.5 mx-1.5" />}
+              <Skeleton className="w-6 h-6 rounded-full" />
+              <Skeleton className="h-3 w-16 ml-1.5" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <StepPipeline
+          steps={pipeline.steps}
+          currentStep={pipeline.currentStep}
+          status={pipeline.status}
+          stepDurations={isOperationCoordinator ? undefined : runStepDurations}
+          entry={entry ?? undefined}
+          stepDisplay={registered?.presentation?.steps}
+        />
+      )}
+
+      </>)}
+
+      <LogStream
+        logs={displayedLogs}
+        events={events}
+        loading={logsLoading}
+        footerRunLabel={footerRunLabel}
+        failureBanner={failureBanner ?? eidApprovalBanner}
+        sourceLabelOf={sourceLabelOf}
+        screenshotsSlot={
+          isOperationCoordinator ? (
+            <OperationScreenshotsPanel
+              members={childEntries}
+              displayNames={displayNames}
+              title={resolveEntryName(entry, displayNames) || entry.id}
+            />
+          ) : (
+            <ScreenshotsPanel
+              workflow={logSourceWorkflow}
+              itemId={activeItemId}
+              screenshotEventCount={screenshotEventCount}
+              runId={activeRunId}
+            />
+          )
+        }
+        editDataAvailable={!isOperationCoordinator && detailFields.some((f) => f.editable)}
+        editDataSlot={
+          <EditDataTab
+            workflow={logSourceWorkflow}
+            entry={entry ?? null}
+            runId={activeRunId}
+            date={date}
+          />
+        }
+        viewDataAvailable={viewDataAvailable}
+        viewDataSlot={<ViewDataPanel logs={displayedLogs} loading={logsLoading} />}
+        previewSlot={previewSlot}
+        previewHeaderSlot={previewHeaderSlot}
+        previewAvailable={previewAvailable}
+        onPreviewVisibleChange={onPreviewVisibleChange}
+        runControlsSlot={
+          <>
+          <ExportMenu
+            entry={entry}
+            logs={displayedLogs}
+            events={events}
+            workflow={logSourceWorkflow}
+            runId={activeRunId}
+            date={date}
+          />
+          <RunSelector
+            runs={runs}
+            activeRunId={activeRunId}
+            onSelect={setActiveRunId}
+            workflow={logSourceWorkflow}
+            stale={runsError}
+            retryTarget={{
+              workflow: logSourceWorkflow,
+              id: activeItemId ?? entry.id,
+              runId: activeRunId ?? undefined,
+              date,
+            }}
+            deleteTarget={onDeleteEntry && activeRunId ? {
+              workflow: entry.workflow,
+              id: activeItemId ?? entry.id,
+              date,
+              runId: activeRunId,
+              onDeleted: handleRunDeleted,
+            } : undefined}
+          />
+          </>
+        }
+        initialTab={defaultTab}
+        maximized={maximized}
+        onToggleMaximize={() => setMaximized((v) => !v)}
+      />
+    </div>
+  );
+}

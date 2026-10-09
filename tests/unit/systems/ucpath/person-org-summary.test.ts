@@ -1,0 +1,223 @@
+import { describe, it } from "vitest";
+import assert from "node:assert/strict";
+import { isAcceptedHdhDepartment } from "../../../../src/domain/hdh/departments.js";
+import {
+  PERSON_ORG_NAME_LABELS,
+  resolveSeparationHireDate,
+  deriveAssignmentDetailsFromCells,
+  parsePersonOrgNameInput,
+  selectPreferredAssignmentDetails,
+  selectPersonName,
+} from "../../../../src/systems/ucpath/person-org-summary.js";
+
+describe("HDH department policy", () => {
+  it("accepts housing, dining, and hospitality departments", () => {
+    assert.equal(isAcceptedHdhDepartment("HOUSING/DINING/HOSPITALITY"), true);
+    assert.equal(isAcceptedHdhDepartment("On Campus Housing"), true);
+    assert.equal(isAcceptedHdhDepartment("Dining Services"), true);
+    assert.equal(isAcceptedHdhDepartment("Hospitality Services"), true);
+  });
+
+  it("rejects unrelated SDCMP departments", () => {
+    assert.equal(isAcceptedHdhDepartment("QUALCOMM INSTITUTE"), false);
+    assert.equal(isAcceptedHdhDepartment("RADY SCHOOL OF MANAGEMENT"), false);
+    assert.equal(isAcceptedHdhDepartment(undefined), false);
+  });
+});
+
+describe("parsePersonOrgNameInput", () => {
+  it("parses normalized Last, First Middle names", () => {
+    assert.deepEqual(parsePersonOrgNameInput("zun, haki tuwom"), {
+      lastName: "Zun",
+      first: "Haki",
+      middle: "Tuwom",
+    });
+  });
+
+  it("throws a helpful error for invalid input", () => {
+    assert.throws(
+      () => parsePersonOrgNameInput("plain string"),
+      /Expected "Last, First Middle" or "Last, First"/,
+    );
+  });
+});
+
+describe("deriveAssignmentDetailsFromCells", () => {
+  it("extracts expected job end date separately from termination date", () => {
+    const assignment = deriveAssignmentDetailsFromCells([
+      "0",
+      "04/01/2026",
+      "Active",
+      "SDCMP",
+      "40090002",
+      "900003",
+      "Dining Services",
+      "004722",
+      "Student 2",
+      "06/30/2026",
+      "0.500000",
+      "Per Diem",
+    ]);
+
+    assert.deepEqual(assignment, {
+      emplRecord: "0",
+      effectiveDate: "04/01/2026",
+      hrStatus: "Active",
+      businessUnit: "SDCMP",
+      positionNumber: "40090002",
+      deptId: "900003",
+      department: "Dining Services",
+      jobCode: "004722",
+      jobCodeDescription: "Student 2",
+      expectedJobEndDate: "06/30/2026",
+      fte: "0.500000",
+      emplClass: "Per Diem",
+    });
+  });
+
+  it("returns null for header or malformed rows", () => {
+    assert.equal(
+      deriveAssignmentDetailsFromCells([
+        "Empl Record",
+        "EFFDT",
+        "HR Status",
+        "Business Unit",
+        "Position Number",
+        "Dept ID",
+        "Department Description",
+      ]),
+      null,
+    );
+  });
+});
+
+describe("selectPreferredAssignmentDetails", () => {
+  it("chooses active employment over an older inactive employment for the same Person Org detail page", () => {
+    const inactive = deriveAssignmentDetailsFromCells([
+      "0",
+      "04/13/2026",
+      "Inactive",
+      "SDCMP",
+      "40090020",
+      "000167",
+      "TEMPORARY EMPLOYMENT SERVICES",
+      "005116",
+      "CUSTODIAN SR",
+      "07/31/2026",
+      "1.000000",
+      "Staff: Floater",
+    ]);
+    const active = deriveAssignmentDetailsFromCells([
+      "1",
+      "04/13/2026",
+      "Active",
+      "SDCMP",
+      "40090017",
+      "900001",
+      "HOUSING/DINING/HOSPITALITY",
+      "005116",
+      "CUSTODIAN SR",
+      "",
+      "1.000000",
+      "Staff: Career",
+    ]);
+
+    assert.ok(inactive);
+    assert.ok(active);
+    assert.equal(selectPreferredAssignmentDetails([inactive, active])?.emplRecord, "1");
+  });
+});
+
+describe("selectPersonName", () => {
+  it("picks a real two-word name", () => {
+    assert.equal(selectPersonName(["Laq Livovot"]), "Laq Livovot");
+  });
+
+  it("picks the name and skips two-word UI labels in front of it", () => {
+    assert.equal(
+      selectPersonName(["Person ID", "HR Status", "Laq Livovot"]),
+      "Laq Livovot",
+    );
+  });
+
+  it("rejects 'Person ID' rendered with a non-breaking space", () => {
+    // Regression: PeopleSoft renders 'Person ID' as a leaf span. Pre-fix,
+    // text.includes('Person ID') returned false (regular space mismatch) and
+    // 'Person ID' leaked through as the picked name.
+    assert.equal(
+      selectPersonName(["Person ID", "Laq Livovot"]),
+      "Laq Livovot",
+    );
+  });
+
+  it("matches labels case-insensitively", () => {
+    assert.equal(
+      selectPersonName(["person id", "PERSON ID", "Laq Livovot"]),
+      "Laq Livovot",
+    );
+  });
+
+  it("returns the normalized form (collapses internal NBSP/whitespace)", () => {
+    assert.equal(
+      selectPersonName(["Laq Livovot"]),
+      "Laq Livovot",
+    );
+  });
+
+  it("rejects candidates containing digits", () => {
+    assert.equal(
+      selectPersonName(["12345 Foo", "Laq Livovot"]),
+      "Laq Livovot",
+    );
+  });
+
+  it("rejects candidates of length ≥ 60", () => {
+    const long = "A" + " B".repeat(40); // exceeds 60 chars
+    assert.equal(selectPersonName([long, "Laq Livovot"]), "Laq Livovot");
+  });
+
+  it("returns null when no candidate qualifies", () => {
+    assert.equal(selectPersonName(["Person ID", "HR Status", "Active"]), null);
+  });
+
+  it("rejects single-word candidates", () => {
+    assert.equal(selectPersonName(["Active", "Laq Livovot"]), "Laq Livovot");
+  });
+
+  it("rejects 'Loading Complete' UI status text leaking from UCPath", () => {
+    // Regression observed 2026-05-08 on a fresh-daemon Person Org Summary
+    // single-result page: "Loading Complete" passed the two-word + no-digit
+    // shape filter and was picked as the name when the page hadn't fully
+    // settled. Skip-list now rejects it.
+    assert.equal(
+      selectPersonName(["Loading Complete", "Laq Livovot"]),
+      "Laq Livovot",
+    );
+  });
+
+  it("PERSON_ORG_NAME_LABELS is the default label list", () => {
+    assert.ok(PERSON_ORG_NAME_LABELS.includes("Person ID"));
+    assert.ok(PERSON_ORG_NAME_LABELS.includes("HR Status"));
+    assert.equal(PERSON_ORG_NAME_LABELS.includes("Jupeco Zun"), false);
+  });
+});
+
+
+describe("resolveSeparationHireDate", () => {
+  const job = { emplRecord: "0", positionNumber: "40090016" };
+  const cells = ["0", "09/13/2026", "Active", "SDCMP", "40090016", "900001", "HOUSING/DINING/HOSPITALITY", "004921", "STDT 2", "06/30/2027", "0.44", "Student"];
+  const instance = { hireDate: "10/24/2025", assignments: [cells], complete: true };
+  it("uses Last Hire rather than later assignment EFFDT", () => {
+    assert.equal(resolveSeparationHireDate("10090254", "10090254", job, [instance]), "10/24/2025");
+  });
+  it("selects the matched employment instance", () => {
+    assert.equal(resolveSeparationHireDate("10090254", "10090254", job, [{ ...instance, hireDate: "01/01/2026", assignments: [["1", ...cells.slice(1)]] }, instance]), "10/24/2025");
+  });
+  it("rejects a stale employee", () => assert.throws(() => resolveSeparationHireDate("10090298", "10090254", job, [instance]), /identity mismatch/));
+  it("rejects incomplete pagination", () => assert.throws(() => resolveSeparationHireDate("10090254", "10090254", job, [{ ...instance, complete: false }]), /incomplete/));
+  it("rejects absent or ambiguous jobs", () => {
+    assert.throws(() => resolveSeparationHireDate("10090254", "10090254", { ...job, positionNumber: "other" }, [instance]), /found 0/);
+    assert.throws(() => resolveSeparationHireDate("10090254", "10090254", job, [instance, instance]), /found 2/);
+  });
+  it("rejects blank Last Hire without EFFDT substitution", () => assert.throws(() => resolveSeparationHireDate("10090254", "10090254", job, [{ ...instance, hireDate: "" }]), /Last Hire is blank/));
+});

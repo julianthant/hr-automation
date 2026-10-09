@@ -1,0 +1,300 @@
+import { log } from "../../utils/log.js";
+import { defineWorkflow } from "../../core/index.js";
+import { loginToUCPath } from "../../infra/auth/login.js";
+import { buildOperatorSubject } from "../../domain/operator-subject.js";
+import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
+import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
+import { TransactionError } from "../../systems/ucpath/types.js";
+import {
+  navigateToEmergencyContact,
+  demoteExistingContact,
+  saveEmergencyContactWithPrimaryRecovery,
+} from "../../systems/ucpath/personal-data.js";
+import { assertDisplayedIdentity } from "../../systems/common/index.js";
+import {
+  assertContactNameStillPresent,
+  buildEmergencyContactPlan,
+  extractEmployeeName,
+  findExistingContactDuplicate,
+  readEmergencyContactPersonIdRow,
+  type ContactMatch,
+} from "./enter.js";
+import type { EmergencyContactContext } from "./enter.js";
+import {
+  applyPrefilledToEmergencyContactRecord,
+  buildContactAddressSummary,
+  buildContactPhoneSummary,
+  hasEmergencyContactPrefilledOverrides,
+} from "./prefilled-record.js";
+import { RecordSchema } from "./schema.js";
+import type { EmergencyContactRecord } from "./schema.js";
+
+const WORKFLOW = "emergency-contact";
+
+const emergencyContactSteps = ["navigation", "fill-form", "save"] as const;
+
+/**
+ * Emergency Contact runtime policy.
+ *
+ * Emergency Contact PDF uploads mirror OCR prep behavior before approval:
+ * file rows title by PDF filename, and approved contact/person rows fan
+ * out as child-only delegation members titled by employee/contact data.
+ */
+export const EMERGENCY_CONTACT_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
+  ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
+  memberRow: {
+    titleSource: "person",
+  },
+  prepRow: {
+    titleSource: "pdf-original-name",
+  },
+};
+
+export function shouldDemoteExistingContactForRun(
+  match: ContactMatch | null,
+  dryRun: boolean | undefined,
+): boolean {
+  return Boolean(match && !match.isExact && !dryRun);
+}
+
+/** Flat tracker seed for emergency-contact rows (HTTP enqueue + batch pre-emit). */
+export function buildEmergencyContactTrackerSeed(
+  record: EmergencyContactRecord,
+  batchName?: string,
+): Record<string, string> {
+  return {
+    ...(batchName ? { batchName } : {}),
+    sourcePage: String(record.sourcePage),
+    emplId: record.employee.employeeId,
+    employeeName: record.employee.name,
+    contactName: record.emergencyContact.name,
+    relationship: record.emergencyContact.relationship,
+    ...(record.dryRun ? { dryRun: "true" } : {}),
+  };
+}
+
+export function buildEmergencyContactPendingData(
+  record: EmergencyContactRecord,
+  batchName: string,
+): Record<string, string> {
+  return buildEmergencyContactTrackerSeed(record, batchName);
+}
+
+/**
+ * Kernel definition for the emergency-contact batch workflow.
+ *
+ * Batch mode (`sequential`, `preEmitPending: true`): OCR approval prepares the
+ * pending rows with rich display fields before records are claimed by daemons;
+ * `withTrackedWorkflow` then reuses that runId and skips its duplicate pending
+ * emit.
+ *
+ * `betweenItems: ["reset"]` resets UCPath to `about:blank` between
+ * records so a stuck page from record N doesn't leak into record N+1's
+ * `navigateToEmergencyContact`.
+ */
+export const emergencyContactWorkflow = defineWorkflow({
+  name: WORKFLOW,
+  label: "Emergency Contact",
+  archetype: "operation",
+  inputSubject: "name",
+  code: "ec",
+  category: "Onboarding",
+  iconName: "Phone",
+  systems: [
+    {
+      id: "ucpath",
+      // deferAuth: UCPath auth is deferred to the `navigation` step so a
+      // fan-out contact child only Duos AFTER OCR approval, when it actually
+      // reaches UCPath. Mirrors oath-signature's deferral: all three OCR fan-out
+      // targets (oath-signature / oath-upload / emergency-contact) defer auth
+      // so the operator is not prompted for Duo before reviewing the OCR results.
+      deferAuth: true,
+    },
+  ],
+  authSteps: false,
+  steps: emergencyContactSteps,
+  schema: RecordSchema,
+  runtimePolicy: EMERGENCY_CONTACT_WORKFLOW_RUNTIME_POLICY,
+  queueTitle: { kind: "single" },
+  batch: {
+    mode: "sequential",
+    preEmitPending: true,
+    betweenItems: ["reset"],
+  },
+  matchKey: "emplId",
+  initialData: (input) => buildEmergencyContactTrackerSeed(input),
+  detailFields: [
+    { key: "employeeName", label: "Name", editable: true, group: "Employee" },
+    { key: "emplId", label: "Empl ID", editable: true, group: "Employee", inputKind: "id" },
+    { key: "contactName", label: "Name", editable: true, group: "Contact" },
+    { key: "relationship", label: "Relationship", editable: true, group: "Contact" },
+    { key: "contactPhone", label: "Contact Phone", conditional: true, editable: true, group: "Contact" },
+    {
+      key: "contactAddress",
+      label: "Contact Address",
+      conditional: true,
+      editable: true,
+      multiline: true,
+      group: "Contact",
+    },
+  ],
+  getName: (d) => d.employeeName ?? "",
+  getId: (d) => d.emplId ?? "",
+  operatorSubject: (input) =>
+    buildOperatorSubject({
+      kind: "person",
+      value: input.employee.name || input.employee.employeeId,
+    }),
+  handler: async (ctx, record) => {
+    const page = await ctx.page("ucpath");
+    const usingEditData = hasEmergencyContactPrefilledOverrides(record, ctx.data);
+    const effectiveRecord = applyPrefilledToEmergencyContactRecord(record, ctx.data);
+    if (usingEditData) {
+      log.step(
+        `[emergency-contact] Using manual input from edit-data ` +
+        `(emplId='${effectiveRecord.employee.employeeId}' employee='${effectiveRecord.employee.name}' ` +
+        `contact='${effectiveRecord.emergencyContact.name}')`,
+      );
+    }
+
+    // Populate dashboard fields synchronously from the input so the kernel's
+    // post-handler check stops warning about declared-but-unpopulated fields.
+    // onPreEmitPending writes these to the *pending* row; this writes them
+    // to subsequent running rows' data via the ctx merge.
+    {
+      const c = effectiveRecord.emergencyContact;
+      // Shared with prefilled-record.ts: the same builders let an edit-data
+      // rerun recognize (and skip) values that merely round-trip these summaries.
+      const phoneSummary = buildContactPhoneSummary(c);
+      const contactAddress = buildContactAddressSummary(c);
+      ctx.updateData({
+        emplId: effectiveRecord.employee.employeeId,
+        employeeName: effectiveRecord.employee.name,
+        contactName: c.name,
+        relationship: c.relationship,
+        contactPhone: phoneSummary,
+        contactAddress,
+        ...(effectiveRecord.dryRun ? { dryRun: true } : {}),
+      });
+    }
+
+    const skipped = await ctx.step("navigation", async () => {
+      // Auth is deferred from session-launch to here so Duo fires AFTER OCR
+      // approval, not before. `loginToUCPath` is idempotent: on a daemon only
+      // the first item shows Duo; subsequent items reuse the warm session.
+      const authOk = await loginToUCPath(page, ctx.workflowInstance, ctx.signal);
+      if (!authOk) throw new Error("UCPath authentication failed");
+
+      await navigateToEmergencyContact(page, effectiveRecord.employee.employeeId);
+
+      // Pre-fill identity gate: confirm the loaded UCPath editor is showing the
+      // INTENDED employee (its "Person ID <emplId>" header) BEFORE we demote an
+      // existing primary contact or add a new one. A stale/wrong page here would
+      // otherwise write this contact onto the wrong person's record. Fail loud on
+      // a mismatch, naming the id actually displayed.
+      // `pollMs` is load-bearing, not politeness: PeopleSoft paints this header
+      // AFTER the editor's own "loaded" signal, so a single sample races the
+      // render and reports a hard identity MISMATCH for the right person. That
+      // is what failed all 13 records of the 2026-08-05 batch. Bound-wait for
+      // the fact instead of sampling it once.
+      await assertDisplayedIdentity({
+        expected: effectiveRecord.employee.employeeId,
+        context: `Emergency Contact (${effectiveRecord.employee.name || "employee"})`,
+        extract: () => readEmergencyContactPersonIdRow(page),
+        pollMs: 15_000,
+      });
+
+      const discoveredCtx: EmergencyContactContext = { employeeName: effectiveRecord.employee.name };
+      await extractEmployeeName(page, discoveredCtx);
+      if (discoveredCtx.employeeName && !usingEditData) {
+        ctx.updateData({ employeeName: discoveredCtx.employeeName });
+      }
+
+      // Duplicate guard (pre-plan). Returns ContactMatch | null:
+      //   - null: no match within distance 2 → add normally.
+      //   - isExact: existing record is already current → skip the plan.
+      //   - fuzzy (distance 1-2): likely historical typo of the same person →
+      //     demote the existing primary, then add new as primary.
+      const existing = await findExistingContactDuplicate(page, effectiveRecord.emergencyContact.name);
+      if (existing && existing.isExact) {
+        ctx.updateData({
+          skipped: "true",
+          skipReason: `Contact "${existing.name}" already exists (exact match)`,
+        });
+        log.success(`Skipping — "${existing.name}" already present on this employee's record`);
+        return true;
+      }
+      if (existing && !existing.isExact) {
+        // Fuzzy match — demote the existing row and continue with normal add.
+        if (shouldDemoteExistingContactForRun(existing, effectiveRecord.dryRun)) {
+          log.step(
+            `Fuzzy duplicate "${existing.name}" (distance ${existing.distance}) — demoting and adding new as primary.`,
+          );
+          await demoteExistingContact(page, existing.name);
+          // After save+return, navigate back into the editor for this employee
+          // so the subsequent fill-form step starts from the right place.
+          await navigateToEmergencyContact(page, effectiveRecord.employee.employeeId);
+        } else {
+          log.step(
+            `Dry run: would demote fuzzy duplicate "${existing.name}" (distance ${existing.distance}) before adding new primary contact.`,
+          );
+        }
+        ctx.updateData({
+          fuzzyDemote: effectiveRecord.dryRun ? "would-run" : "true",
+          fuzzyDemoteName: existing.name,
+        });
+      }
+      return false;
+    });
+
+    if (skipped) {
+      ctx.skipStep("fill-form");
+      ctx.skipStep("save");
+      return;
+    }
+
+    await ctx.step("fill-form", async () => {
+      const planCtx: EmergencyContactContext = { employeeName: effectiveRecord.employee.name };
+      const plan = buildEmergencyContactPlan(effectiveRecord, page, planCtx);
+      try {
+        await plan.execute();
+        if (effectiveRecord.dryRun) {
+          await ctx.screenshot({ kind: "form", label: "emergency-contact-dry-run-pre-save" });
+        }
+      } catch (err) {
+        if (err instanceof TransactionError) {
+          throw new Error(
+            `Transaction failed at step: ${err.step ?? "unknown"} — ${err.message}`,
+            { cause: err },
+          );
+        }
+        throw err;
+      }
+    });
+
+    await ctx.step("save", async () => {
+      if (effectiveRecord.dryRun) {
+        ctx.updateData({ status: "Dry Run Complete" });
+        log.success(`Dry run complete for ${effectiveRecord.employee.name} — UCPath Save was skipped.`);
+        return;
+      }
+      // A postback between the name fill and Save (above all the Edit Address
+      // modal) can silently clear the required Contact Name — that is exactly
+      // how the 2026-08-05 batch reached Save with a blank field and got
+      // "Highlighted fields are required. (15,30)". Re-assert immediately
+      // before the click so the failure is loud and attributable.
+      await assertContactNameStillPresent(page, effectiveRecord.emergencyContact.name);
+      try {
+        await saveEmergencyContactWithPrimaryRecovery(page, effectiveRecord.emergencyContact.name);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `Emergency contact save for ${effectiveRecord.employee.name} (EID ${effectiveRecord.employee.employeeId}) failed — ${detail}`,
+          { cause: err },
+        );
+      }
+      await ctx.screenshot({ kind: "form", label: "emergency-contact-saved" });
+      log.success(`Saved emergency contact for ${effectiveRecord.employee.name}`);
+    });
+  },
+});

@@ -1,0 +1,218 @@
+import { describe, it } from "vitest";
+import assert from "node:assert/strict";
+
+import {
+  pickCrmStartDate,
+  pickCrmPayrollTitle,
+  payrollTitleFromTitleCode,
+  type CrmRecord,
+} from "../../../../src/workflows/person-lookup/crm-search.js";
+import {
+  matchCrmEid,
+  resolveCrmSearchNameParts,
+  splitResolvedName,
+} from "../../../../src/workflows/person-lookup/workflow.js";
+import type { EidResult } from "../../../../src/systems/ucpath/person-org-summary.js";
+
+function crmRecord(patch: Partial<CrmRecord> = {}): CrmRecord {
+  return {
+    name: "Simaruz, Ranopa",
+    ppsId: "",
+    ucpathEmployeeId: "10090058",
+    firstDayOfService: "10/12/2021",
+    appointmentEndDate: "",
+    dateSigned: "",
+    department: "HOUSING/DINING/HOSPITALITY",
+    titleCode: "",
+    ucsdEmail: "",
+    personalEmail: "",
+    hireType: "",
+    recordUrl: "https://act-crm.my.site.com/hr/ONB_ViewOnboarding?id=1",
+    ...patch,
+  };
+}
+
+function eidResult(patch: Partial<EidResult> = {}): EidResult {
+  return {
+    emplId: "10090058",
+    emplRecord: "0",
+    hrStatus: "Active",
+    businessUnit: "SDCMP",
+    jobCode: "",
+    jobCodeDescription: "",
+    lastName: "Simaruz",
+    name: "Ranopa Simaruz",
+    department: "HOUSING/DINING/HOSPITALITY",
+    startDate: "10/22/2022",
+    effectiveDate: "10/22/2022",
+    terminationDate: "",
+    expectedJobEndDate: "",
+    ...patch,
+  };
+}
+
+describe("pickCrmStartDate", () => {
+  it("returns the First Day of Service of the EID-matched record", () => {
+    const records = [
+      crmRecord({ ucpathEmployeeId: "10999999", firstDayOfService: "01/01/2020" }),
+      crmRecord({ ucpathEmployeeId: "10090058", firstDayOfService: "10/12/2021" }),
+    ];
+    assert.equal(pickCrmStartDate(records, "10090058"), "10/12/2021");
+  });
+
+  it("returns blank instead of a different person's record when the EID doesn't match (fail loud)", () => {
+    const records = [
+      crmRecord({ ucpathEmployeeId: "10999999", firstDayOfService: "01/01/2020" }),
+    ];
+    assert.equal(pickCrmStartDate(records, "10090058"), "");
+  });
+
+  it("uses the first record when no EID is supplied", () => {
+    const records = [crmRecord({ firstDayOfService: "03/03/2023" })];
+    assert.equal(pickCrmStartDate(records), "03/03/2023");
+  });
+
+  it("returns blank when no EID is supplied and multiple records are ambiguous (fail loud)", () => {
+    const records = [
+      crmRecord({ ucpathEmployeeId: "10999999", firstDayOfService: "01/01/2020" }),
+      crmRecord({ ucpathEmployeeId: "10090015", firstDayOfService: "02/02/2022" }),
+    ];
+    assert.equal(pickCrmStartDate(records), "");
+  });
+
+  it("returns blank when there are no records (CRM-only, no fallback)", () => {
+    assert.equal(pickCrmStartDate([], "10090058"), "");
+  });
+
+  it("returns blank when the chosen record has no First Day of Service", () => {
+    const records = [crmRecord({ ucpathEmployeeId: "10090058", firstDayOfService: "" })];
+    assert.equal(pickCrmStartDate(records, "10090058"), "");
+  });
+});
+
+describe("payrollTitleFromTitleCode", () => {
+  it("strips the leading PeopleSoft job code", () => {
+    assert.equal(payrollTitleFromTitleCode("4921 - STDT 2"), "STDT 2");
+  });
+
+  it("tolerates irregular spacing around the dash", () => {
+    assert.equal(payrollTitleFromTitleCode("4921-STDT 2"), "STDT 2");
+    assert.equal(payrollTitleFromTitleCode("  4921  -  STDT 2  "), "STDT 2");
+  });
+
+  it("leaves a value without a numeric code prefix unchanged", () => {
+    assert.equal(payrollTitleFromTitleCode("STDT 2"), "STDT 2");
+  });
+
+  it("does not strip a trailing number that is part of the title", () => {
+    assert.equal(payrollTitleFromTitleCode("4921 - STDT 2"), "STDT 2");
+    assert.equal(payrollTitleFromTitleCode("BLANK AST 3"), "BLANK AST 3");
+  });
+
+  it("returns blank for an empty title code", () => {
+    assert.equal(payrollTitleFromTitleCode(""), "");
+  });
+});
+
+describe("pickCrmPayrollTitle", () => {
+  it("returns the stripped payroll title of the EID-matched record", () => {
+    const records = [
+      crmRecord({ ucpathEmployeeId: "10999999", titleCode: "0001 - WRONG" }),
+      crmRecord({ ucpathEmployeeId: "10090058", titleCode: "4921 - STDT 2" }),
+    ];
+    assert.equal(pickCrmPayrollTitle(records, "10090058"), "STDT 2");
+  });
+
+  it("returns blank instead of a different person's record when the EID doesn't match (fail loud)", () => {
+    const records = [crmRecord({ ucpathEmployeeId: "10999999", titleCode: "4921 - STDT 2" })];
+    assert.equal(pickCrmPayrollTitle(records, "10090058"), "");
+  });
+
+  it("returns blank when there are no records", () => {
+    assert.equal(pickCrmPayrollTitle([], "10090058"), "");
+  });
+
+  it("returns blank when the chosen record has no title code", () => {
+    const records = [crmRecord({ ucpathEmployeeId: "10090058", titleCode: "" })];
+    assert.equal(pickCrmPayrollTitle(records, "10090058"), "");
+  });
+});
+
+describe("matchCrmEid", () => {
+  it("prefers a direct UCPath EID match over a date match", () => {
+    const result = matchCrmEid(
+      [eidResult({ emplId: "10090058" })],
+      [crmRecord({ ucpathEmployeeId: "10090058" })],
+    );
+    assert.deepEqual(result, { crmMatch: "direct", crmMatchedEmplId: "10090058" });
+  });
+
+  it("falls back to a ±7 day date match when no EID lines up", () => {
+    const result = matchCrmEid(
+      [eidResult({ emplId: "10090058", startDate: "10/15/2021", effectiveDate: "" })],
+      [crmRecord({ ucpathEmployeeId: "", firstDayOfService: "10/12/2021" })],
+    );
+    assert.deepEqual(result, { crmMatch: "date", crmMatchedEmplId: "10090058" });
+  });
+
+  it("returns none when CRM records match neither EID nor date", () => {
+    const result = matchCrmEid(
+      [eidResult({ emplId: "10090058", startDate: "01/01/2020", effectiveDate: "" })],
+      [crmRecord({ ucpathEmployeeId: "10000000", firstDayOfService: "12/31/2024" })],
+    );
+    assert.deepEqual(result, { crmMatch: "none" });
+  });
+});
+
+describe("splitResolvedName", () => {
+  it("splits a First Last name into CRM search parts", () => {
+    assert.deepEqual(splitResolvedName("Ranopa Simaruz"), {
+      lastName: "Simaruz",
+      firstName: "Ranopa",
+    });
+  });
+
+  it("treats the final token as the last name for First Middle Last", () => {
+    assert.deepEqual(splitResolvedName("Ranopa Vatudake Simaruz"), {
+      lastName: "Simaruz",
+      firstName: "Ranopa",
+    });
+  });
+
+  it("handles a single token and empty input", () => {
+    assert.deepEqual(splitResolvedName("Cuga"), { lastName: "Cuga", firstName: "" });
+    assert.deepEqual(splitResolvedName("   "), { lastName: "", firstName: "" });
+  });
+});
+
+describe("resolveCrmSearchNameParts", () => {
+  it("parses a comma-format resolvedName (as stamped by toLastFirstName) without swapping parts", () => {
+    assert.deepEqual(resolveCrmSearchNameParts("Livovot, Laq"), {
+      lastName: "Livovot",
+      firstName: "Laq",
+    });
+  });
+
+  it("drops the middle name from a comma-format name", () => {
+    assert.deepEqual(resolveCrmSearchNameParts("Simaruz, Ranopa Vatudake"), {
+      lastName: "Simaruz",
+      firstName: "Ranopa",
+    });
+  });
+
+  it("falls back to the whitespace split for First [Middle] Last input", () => {
+    assert.deepEqual(resolveCrmSearchNameParts("Ranopa Vatudake Simaruz"), {
+      lastName: "Simaruz",
+      firstName: "Ranopa",
+    });
+    assert.deepEqual(resolveCrmSearchNameParts("Laq Livovot"), {
+      lastName: "Livovot",
+      firstName: "Laq",
+    });
+  });
+
+  it("handles single-token and empty input via the fallback split", () => {
+    assert.deepEqual(resolveCrmSearchNameParts("Cuga"), { lastName: "Cuga", firstName: "" });
+    assert.deepEqual(resolveCrmSearchNameParts(""), { lastName: "", firstName: "" });
+  });
+});

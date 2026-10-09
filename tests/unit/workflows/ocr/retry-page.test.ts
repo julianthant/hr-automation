@@ -1,0 +1,550 @@
+import { test } from "vitest";
+import assert from "node:assert/strict";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { runOcrRetryPage } from "../../../../src/workflows/ocr/retry-page.js";
+import { rowFilePath, rowsDir } from "../../../../src/tracker/jsonl.js";
+
+const PDF_FILE_ID = "11111111-1111-4111-8111-111111111111";
+
+function ensurePdfCachePagePng(dir: string, pdfFileId: string, pageNum: number): void {
+  const cacheDir = join(dir, "pdf-cache", pdfFileId);
+  mkdirSync(cacheDir, { recursive: true });
+  const pngPath = join(cacheDir, `page-${String(pageNum).padStart(3, "0")}.png`);
+  writeFileSync(pngPath, "");
+}
+
+function setup(): { dir: string } {
+  const dir = join(tmpdir(), `ocr-retry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  return { dir };
+}
+
+test("runOcrRetryPage replaces records for the retried page and clears it from failedPages", async () => {
+  const { dir } = setup();
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
+  writeFileSync(ocrFile, JSON.stringify({
+    workflow: "ocr",
+    id: "session-r1",
+    runId: "run-r1",
+    status: "done",
+    step: "awaiting-approval",
+    timestamp: "2026-05-01T00:00:00Z",
+    data: {
+      formType: "oath",
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      pdfFileId: PDF_FILE_ID,
+      sessionId: "session-r1",
+      recordCount: 2,
+      verifiedCount: 1,
+      records: JSON.stringify([
+        { sourcePage: 1, rowIndex: 0, printedName: "Alice",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+          employeeId: "10000910", matchState: "resolved", selected: true, warnings: [],
+          verification: { state: "verified", hrStatus: "Active", department: "HDH", screenshotFilename: "a.png", checkedAt: "2026-05-01T00:00:00Z" },
+        },
+      ]),
+      failedPages: JSON.stringify([
+        { page: 2, error: "rate limit", attemptedKeys: ["gemini-1"], pageImagePath: join(dir, "page-images", "session-r1", "page-02.png"), attempts: 1 },
+      ]),
+      pageStatusSummary: JSON.stringify({ total: 2, succeeded: 1, failed: 1 }),
+    },
+  }) + "\n", "utf-8");
+
+  ensurePdfCachePagePng(dir, PDF_FILE_ID, 2);
+
+  const writtenEntries: object[] = [];
+  await runOcrRetryPage(
+    { sessionId: "session-r1", runId: "run-r1", pageNum: 2 },
+    {
+      trackerDir: dir,
+      date: "2026-05-01",
+      _emitOverride: (e) => writtenEntries.push(e),
+      _ocrPageOverride: async ({ pageNum }) => {
+        assert.equal(pageNum, 2);
+        return {
+          records: [{
+            sourcePage: 2, rowIndex: 0,
+            printedName: "Bob",
+            employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+            notes: [], documentType: "expected", originallyMissing: [],
+          }],
+          stillFailed: false,
+        };
+      },
+      _loadRosterOverride: async () => [{ eid: "10000002", name: "Bob" }],
+      _enqueueEidLookupOverride: async () => { /* none — Bob matches roster directly */ },
+      _watchChildRunsOverride: async () => [],
+    },
+  );
+
+  const approval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
+    (e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval",
+  );
+  assert.ok(approval, "fresh awaiting-approval entry written");
+  const records = JSON.parse(approval!.data!.records!) as Array<{ sourcePage: number; printedName: string }>;
+  const sortedRecords = [...records].sort((a, b) => a.sourcePage - b.sourcePage);
+  assert.equal(sortedRecords.length, 2, "alice (page 1) + bob (page 2)");
+  assert.equal(sortedRecords[0].printedName, "Alice");
+  assert.equal(sortedRecords[1].printedName, "Bob");
+  const failedPages = JSON.parse(approval!.data!.failedPages ?? "[]") as Array<{ page: number }>;
+  assert.equal(failedPages.length, 0, "page 2 cleared from failedPages");
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("runOcrRetryPage keeps page in failedPages with bumped attempts when retry still fails", async () => {
+  const { dir } = setup();
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
+  writeFileSync(ocrFile, JSON.stringify({
+    workflow: "ocr",
+    id: "session-r2",
+    runId: "run-r2",
+    status: "done",
+    step: "awaiting-approval",
+    timestamp: "2026-05-01T00:00:00Z",
+    data: {
+      formType: "oath",
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      pdfFileId: PDF_FILE_ID,
+      sessionId: "session-r2",
+      recordCount: 0,
+      verifiedCount: 0,
+      records: JSON.stringify([]),
+      failedPages: JSON.stringify([
+        { page: 1, error: "rate limit", attemptedKeys: ["gemini-1"], pageImagePath: join(dir, "page-images", "session-r2", "page-01.png"), attempts: 1 },
+      ]),
+      pageStatusSummary: JSON.stringify({ total: 1, succeeded: 0, failed: 1 }),
+    },
+  }) + "\n", "utf-8");
+
+  ensurePdfCachePagePng(dir, PDF_FILE_ID, 1);
+
+  const writtenEntries: object[] = [];
+  await runOcrRetryPage(
+    { sessionId: "session-r2", runId: "run-r2", pageNum: 1 },
+    {
+      trackerDir: dir,
+      date: "2026-05-01",
+      _emitOverride: (e) => writtenEntries.push(e),
+      _ocrPageOverride: async () => ({
+        records: [],
+        stillFailed: true,
+        error: "still throttled",
+        attemptedKeys: ["gemini-2", "mistral-1"],
+      }),
+      _loadRosterOverride: async () => [],
+      _enqueueEidLookupOverride: async () => {},
+      _watchChildRunsOverride: async () => [],
+    },
+  );
+
+  const approval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
+    (e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval",
+  );
+  const failedPages = JSON.parse(approval!.data!.failedPages!) as Array<{ page: number; attempts: number; error: string }>;
+  assert.equal(failedPages.length, 1);
+  assert.equal(failedPages[0].page, 1);
+  assert.equal(failedPages[0].attempts, 2, "attempts bumped from 1 to 2");
+  assert.equal(failedPages[0].error, "still throttled");
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("runOcrRetryPage preserves rosterPath in the emitted row", async () => {
+  const { dir } = setup();
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
+  writeFileSync(ocrFile, JSON.stringify({
+    workflow: "ocr",
+    id: "session-rp",
+    runId: "run-rp",
+    status: "done",
+    step: "awaiting-approval",
+    timestamp: "2026-05-01T00:00:00Z",
+    data: {
+      formType: "oath",
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      pdfFileId: PDF_FILE_ID,
+      sessionId: "session-rp",
+      rosterPath: "/tmp/roster.xlsx",
+      records: JSON.stringify([]),
+      failedPages: JSON.stringify([
+        { page: 1, error: "rate limit", attemptedKeys: ["gemini-1"], pageImagePath: join(dir, "page-images", "session-rp", "page-01.png"), attempts: 1 },
+      ]),
+      pageStatusSummary: JSON.stringify({ total: 1, succeeded: 0, failed: 1 }),
+    },
+  }) + "\n", "utf-8");
+
+  ensurePdfCachePagePng(dir, PDF_FILE_ID, 1);
+
+  const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
+  await runOcrRetryPage(
+    { sessionId: "session-rp", runId: "run-rp", pageNum: 1 },
+    {
+      trackerDir: dir,
+      date: "2026-05-01",
+      _emitOverride: (e) => writtenEntries.push(e as never),
+      _ocrPageOverride: async () => ({
+        records: [{
+          sourcePage: 1, rowIndex: 0,
+          printedName: "Duka", employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        stillFailed: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000004", name: "Duka" }],
+      _enqueueEidLookupOverride: async () => {},
+      _watchChildRunsOverride: async () => [],
+    },
+  );
+
+  const approval = writtenEntries.find((e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval");
+  assert.ok(approval);
+  assert.equal(approval!.data!.rosterPath, "/tmp/roster.xlsx", "rosterPath must round-trip on emitted row");
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("runOcrRetryPage keeps row selected when eid-lookup verification is non-hdh (matches main orchestrator)", async () => {
+  const { dir } = setup();
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
+  writeFileSync(ocrFile, JSON.stringify({
+    workflow: "ocr",
+    id: "session-nh",
+    runId: "run-nh",
+    status: "done",
+    step: "awaiting-approval",
+    timestamp: "2026-05-01T00:00:00Z",
+    data: {
+      formType: "oath",
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      pdfFileId: PDF_FILE_ID,
+      sessionId: "session-nh",
+      recordCount: 0,
+      verifiedCount: 0,
+      records: JSON.stringify([]),
+      failedPages: JSON.stringify([
+        { page: 1, error: "rate limit", attemptedKeys: ["gemini-1"], pageImagePath: join(dir, "page-images", "session-nh", "page-01.png"), attempts: 1 },
+      ]),
+      pageStatusSummary: JSON.stringify({ total: 1, succeeded: 0, failed: 1 }),
+    },
+  }) + "\n", "utf-8");
+
+  ensurePdfCachePagePng(dir, "pf-nh", 1);
+
+  const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
+  await runOcrRetryPage(
+    { sessionId: "session-nh", runId: "run-nh", pageNum: 1 },
+    {
+      trackerDir: dir,
+      date: "2026-05-01",
+      _emitOverride: (e) => writtenEntries.push(e as never),
+      _ocrPageOverride: async () => ({
+        records: [{
+          sourcePage: 1, rowIndex: 0,
+          printedName: "Pat",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        stillFailed: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000009", name: "Pat" }],
+      _enqueueEidLookupOverride: async () => {},
+      _watchChildRunsOverride: async (opts) => {
+        const itemId = opts.expectedItemIds[0];
+        assert.ok(itemId);
+        return [{
+          workflow: "eid-lookup",
+          itemId,
+          runId: "lr",
+          status: "done",
+          data: {
+            emplId: "10000009",
+            activeStatus: "non-hdh",
+            hrStatus: "Active",
+            department: "NOT-HDH",
+          },
+        }];
+      },
+    },
+  );
+
+  const approval = writtenEntries.find((e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval");
+  assert.ok(approval);
+  const records = JSON.parse(approval!.data!.records!) as Array<{ printedName?: string; selected?: boolean; verification?: { state?: string } }>;
+  const pat = records.find((r) => r.printedName === "Pat");
+  assert.ok(pat);
+  assert.equal(pat!.verification?.state, "non-hdh");
+  assert.equal(pat!.selected, true);
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("runOcrRetryPage clamps succeeded to 0 when summary.total is 0 (old rows)", async () => {
+  const { dir } = setup();
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
+  writeFileSync(ocrFile, JSON.stringify({
+    workflow: "ocr",
+    id: "session-clamp",
+    runId: "run-clamp",
+    status: "done",
+    step: "awaiting-approval",
+    timestamp: "2026-05-01T00:00:00Z",
+    data: {
+      formType: "oath",
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      pdfFileId: PDF_FILE_ID,
+      sessionId: "session-clamp",
+      records: JSON.stringify([]),
+      failedPages: JSON.stringify([
+        { page: 1, error: "x", attemptedKeys: [], pageImagePath: join(dir, "page-images", "session-clamp", "page-01.png"), attempts: 1 },
+        { page: 2, error: "y", attemptedKeys: [], pageImagePath: join(dir, "page-images", "session-clamp", "page-02.png"), attempts: 1 },
+      ]),
+      // No pageStatusSummary in the row — simulates an old row pre-dating the feature.
+    },
+  }) + "\n", "utf-8");
+
+  ensurePdfCachePagePng(dir, "pf-clamp", 1);
+
+  const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
+  await runOcrRetryPage(
+    { sessionId: "session-clamp", runId: "run-clamp", pageNum: 1 },
+    {
+      trackerDir: dir,
+      date: "2026-05-01",
+      _emitOverride: (e) => writtenEntries.push(e as never),
+      _ocrPageOverride: async () => ({ records: [], stillFailed: false }),
+      _loadRosterOverride: async () => [],
+      _enqueueEidLookupOverride: async () => {},
+      _watchChildRunsOverride: async () => [],
+    },
+  );
+
+  const approval = writtenEntries.find((e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval");
+  const summary = JSON.parse(approval!.data!.pageStatusSummary!) as { total: number; succeeded: number; failed: number };
+  assert.equal(summary.succeeded >= 0, true, "succeeded must not be negative");
+  assert.equal(summary.failed, 1, "page 1 cleared, page 2 still failed");
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("runOcrRetryPage preserves __traceId + queueRowKind on the re-emitted row (item-4b regression)", async () => {
+  const { dir } = setup();
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
+  writeFileSync(ocrFile, JSON.stringify({
+    workflow: "ocr",
+    id: "session-tr",
+    runId: "run-tr",
+    status: "done",
+    step: "awaiting-approval",
+    timestamp: "2026-05-01T00:00:00Z",
+    data: {
+      formType: "oath",
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      pdfFileId: PDF_FILE_ID,
+      sessionId: "session-tr",
+      // The frozen trace id + queue-row kind ride EVERY OCR row; retry-page rebuilds
+      // `base` explicitly, so it must re-stamp them or the re-run is untraceable.
+      __traceId: "os-120000-abcd",
+      queueRowKind: "file",
+      records: JSON.stringify([]),
+      failedPages: JSON.stringify([
+        { page: 1, error: "rate limit", attemptedKeys: ["gemini-1"], pageImagePath: join(dir, "page-images", "session-tr", "page-01.png"), attempts: 1 },
+      ]),
+      pageStatusSummary: JSON.stringify({ total: 1, succeeded: 0, failed: 1 }),
+    },
+  }) + "\n", "utf-8");
+
+  ensurePdfCachePagePng(dir, "pf-tr", 1);
+
+  const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
+  await runOcrRetryPage(
+    { sessionId: "session-tr", runId: "run-tr", pageNum: 1 },
+    {
+      trackerDir: dir,
+      date: "2026-05-01",
+      _emitOverride: (e) => writtenEntries.push(e as never),
+      _ocrPageOverride: async () => ({
+        records: [{
+          sourcePage: 1, rowIndex: 0, printedName: "Zoe",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        stillFailed: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000005", name: "Zoe" }],
+      _enqueueEidLookupOverride: async () => {},
+      _watchChildRunsOverride: async () => [],
+    },
+  );
+
+  const approval = writtenEntries.find((e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval");
+  assert.ok(approval, "fresh awaiting-approval entry written");
+  assert.equal(approval!.data!.__traceId, "os-120000-abcd", "__traceId must ride the re-emitted row (traceable to parent)");
+  assert.equal(approval!.data!.queueRowKind, "file", "queueRowKind must ride the re-emitted row");
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("runOcrRetryPage: two re-OCR'd records sharing the SAME name do not collide — both get the correct outcome (itemId collision fix)", async () => {
+  const { dir } = setup();
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
+  writeFileSync(ocrFile, JSON.stringify({
+    workflow: "ocr",
+    id: "session-collide",
+    runId: "run-collide",
+    status: "done",
+    step: "awaiting-approval",
+    timestamp: "2026-05-01T00:00:00Z",
+    data: {
+      formType: "oath",
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      pdfFileId: PDF_FILE_ID,
+      sessionId: "session-collide",
+      recordCount: 0,
+      verifiedCount: 0,
+      records: JSON.stringify([]),
+      failedPages: JSON.stringify([
+        { page: 1, error: "rate limit", attemptedKeys: ["gemini-1"], pageImagePath: join(dir, "page-images", "session-collide", "page-01.png"), attempts: 1 },
+      ]),
+      pageStatusSummary: JSON.stringify({ total: 1, succeeded: 0, failed: 1 }),
+    },
+  }) + "\n", "utf-8");
+
+  ensurePdfCachePagePng(dir, "pf-collide", 1);
+
+  let expectedItemIdsSeen: string[] = [];
+  const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
+  await runOcrRetryPage(
+    { sessionId: "session-collide", runId: "run-collide", pageNum: 1 },
+    {
+      trackerDir: dir,
+      date: "2026-05-01",
+      _emitOverride: (e) => writtenEntries.push(e as never),
+      _ocrPageOverride: async () => ({
+        // Two DIFFERENT people who share a printed name on the retried page —
+        // both fall through to name-based lookup (empty roster below), so
+        // both dispatch the IDENTICAL fanOutAndWatch input.
+        records: [
+          { sourcePage: 1, rowIndex: 0, printedName: "Smith, John", employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026", notes: [], documentType: "expected", originallyMissing: [] },
+          { sourcePage: 1, rowIndex: 1, printedName: "Smith, John", employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026", notes: [], documentType: "expected", originallyMissing: [] },
+        ],
+        stillFailed: false,
+      }),
+      _loadRosterOverride: async () => [],
+      // Without this override, a fan-out with no `dispatch` override falls
+      // through to the REAL delegateToAllImpl → daemon spawn — this test only
+      // wants to pin the collision-safe grouping, not exercise real daemon
+      // dispatch (which every other test in this file also stubs out).
+      _enqueueEidLookupOverride: async () => { /* no-op — watch override below supplies the outcome */ },
+      _watchChildRunsOverride: async (opts) => {
+        expectedItemIdsSeen = [...opts.expectedItemIds];
+        return [{
+          workflow: "eid-lookup",
+          itemId: opts.expectedItemIds[0]!,
+          runId: "lr-collide",
+          status: "done",
+          data: { emplId: "10999999", activeStatus: "active", hrStatus: "Active", department: "HDH" },
+        }];
+      },
+    },
+  );
+
+  // Collision-proof by construction: only ONE child dispatched for the
+  // shared name, not two (deduped, not a collided pair).
+  assert.equal(expectedItemIdsSeen.length, 1, "only one fan-out child dispatched for the shared name");
+
+  const approval = writtenEntries.find((e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval");
+  assert.ok(approval);
+  const records = JSON.parse(approval!.data!.records!) as Array<{ printedName?: string; employeeId?: string; matchState?: string }>;
+  const smiths = records.filter((r) => r.printedName === "Smith, John");
+  assert.equal(smiths.length, 2, "both Smith, John records survive");
+  for (const rec of smiths) {
+    assert.equal(rec.employeeId, "10999999", "BOTH records get the shared lookup outcome — not just the dispatched one");
+    assert.equal(rec.matchState, "resolved");
+  }
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("runOcrRetryPage fails loud when data.records is PRESENT but not valid JSON (does not silently truncate the batch)", async () => {
+  const { dir } = setup();
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
+  writeFileSync(ocrFile, JSON.stringify({
+    workflow: "ocr",
+    id: "session-badjson",
+    runId: "run-badjson",
+    status: "done",
+    step: "awaiting-approval",
+    timestamp: "2026-05-01T00:00:00Z",
+    data: {
+      formType: "oath",
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      pdfFileId: PDF_FILE_ID,
+      sessionId: "session-badjson",
+      records: "{not valid json",
+    },
+  }) + "\n", "utf-8");
+
+  await assert.rejects(
+    () => runOcrRetryPage(
+      { sessionId: "session-badjson", runId: "run-badjson", pageNum: 1 },
+      { trackerDir: dir, date: "2026-05-01" },
+    ),
+    /not valid JSON/,
+    "a present-but-corrupt data.records must throw, not silently return []",
+  );
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("runOcrRetryPage fails loud when data.records parses to a non-array (does not silently truncate the batch)", async () => {
+  const { dir } = setup();
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
+  writeFileSync(ocrFile, JSON.stringify({
+    workflow: "ocr",
+    id: "session-notarray",
+    runId: "run-notarray",
+    status: "done",
+    step: "awaiting-approval",
+    timestamp: "2026-05-01T00:00:00Z",
+    data: {
+      formType: "oath",
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      pdfFileId: PDF_FILE_ID,
+      sessionId: "session-notarray",
+      records: JSON.stringify({ oops: "this is an object, not an array" }),
+    },
+  }) + "\n", "utf-8");
+
+  await assert.rejects(
+    () => runOcrRetryPage(
+      { sessionId: "session-notarray", runId: "run-notarray", pageNum: 1 },
+      { trackerDir: dir, date: "2026-05-01" },
+    ),
+    /non-array/,
+    "a present-but-wrongly-shaped data.records must throw, not silently return []",
+  );
+
+  rmSync(dir, { recursive: true, force: true });
+});

@@ -1,0 +1,174 @@
+import { describe, it } from "vitest";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  REPO_ROOT,
+  auditCountAllowlist,
+  repoRelative,
+  walkFiles,
+  type CountAllowlist,
+} from "./helpers/guard-files.js";
+
+/**
+ * Guard: every `waitForTimeout(` in src/workflows/ and src/systems/ must be
+ * accounted for in the allowlist below (per-file count + a one-line reason).
+ *
+ * A fixed `waitForTimeout` is exactly the kind of "unverified" wait the root
+ * CLAUDE.md fail-loud rule warns about when it stands in for a real
+ * readiness check: it either fires too early (racing a slow render — see
+ * `src/systems/new-kronos/CLAUDE.md` 2026-06-24, `src/systems/ucpath/
+ * CLAUDE.md` 2026-06-22) or wastes time firing long after the page is ready.
+ * Two recent sleep-elimination passes replaced most fixed sleeps with
+ * condition-based polling; what's left here is either a documented
+ * genuinely-fixed delay (e.g. old-kronos's 80ms JQX typing debounce) or a
+ * TODO(live-verify)-marked keep where no reliable DOM signal has been found
+ * yet (e.g. emergency-contact/enter.ts).
+ *
+ * This is a RATCHET: it fails on ANY new `waitForTimeout(` in these two
+ * trees that isn't already counted here (new file, or a file's count going
+ * up), so a sleep can't quietly slip back in after a hardening pass. It also
+ * fails if an allowlisted count drops (the entry is now stale) so the
+ * allowlist can't silently over-count forever — update the count and, if the
+ * remaining sleeps changed shape, the reason.
+ */
+
+const ROOT = REPO_ROOT;
+const SCAN_ROOTS = [join(ROOT, "src", "workflows"), join(ROOT, "src", "systems")];
+
+/** file (relative to repo root) -> { count, reason } */
+const ALLOWLIST: CountAllowlist = {
+  "src/workflows/emergency-contact/enter.ts": {
+    count: 1,
+    reason: "Phone-field settle only — no detectable post-fill DOM condition. (Was 2: the Contact Name settle was removed 2026-08-05 when the name fill gained a read-back verify instead of a sleep.)",
+  },
+  "src/workflows/old-kronos-reports/workflow.ts": {
+    count: 1,
+    reason: "Legacy old-kronos Reports page settle; no stable readiness selector identified yet.",
+  },
+  "src/workflows/onboarding/enter.ts": {
+    count: 1,
+    reason: "I-9 document-interstitial settle wait; no reliable readiness signal on that page.",
+  },
+  "src/workflows/onboarding/workflow.ts": {
+    count: 2,
+    reason: "i9/UCPath cross-system settle waits inside the parallel-staggered auth path.",
+  },
+  "src/workflows/separations/steps/kronos-search.ts": {
+    count: 1,
+    reason: "Old Kronos search-results grid settle; grid render has no consistent completion signal.",
+  },
+  "src/workflows/sharepoint-download/download.ts": {
+    count: 5,
+    reason: "SharePoint's dynamic file-grid UI has no reliable network-idle/render-complete signal across its several steps.",
+  },
+  "src/workflows/work-study/enter.ts": {
+    count: 4,
+    reason: "UCPath work-study grid/sidebar settle waits; PeopleSoft grids do not reliably raise a processing/spinner state for these.",
+  },
+  "src/systems/crm/idocs-download.ts": {
+    count: 1,
+    reason: "CRM iDocs download page settle; no stable readiness selector identified yet.",
+  },
+  "src/systems/i9/create.ts": {
+    count: 3,
+    reason: "i9 dialog/banner settle waits around record-creation confirmation UI.",
+  },
+  "src/systems/i9/navigate.ts": {
+    count: 1,
+    reason: "i9 navigation settle wait.",
+  },
+  "src/systems/i9/search.ts": {
+    count: 1,
+    reason: "i9 search-results settle wait.",
+  },
+  "src/systems/kuali/navigate.ts": {
+    count: 4,
+    reason: "Kuali form-render settle waits; no consistent processing indicator for these steps.",
+  },
+  "src/systems/new-kronos/navigate.ts": {
+    count: 29,
+    reason: "New Kronos (WFD) is an Angular app with no consistent readiness signal across its many dropdown/grid renders — extensively documented in src/systems/new-kronos/LESSONS.md and CLAUDE.md (2026-06-24 lesson: a removed fixed 2s sleep here already caused a real production miss). Net -1 on 2026-07-31 (30→29): `selectEmployeeResult` now POLLS for the result checkbox and verifies the selection registered (Go To enabled) instead of probing count() once and falling through to an unverified row click — that deleted two flat 1s post-click settle sleeps and added one 250ms poll interval, and `clickGoToTimecard`'s hand-rolled enabled-button loop was folded into the shared `resolveEnabledGoToButton` helper (one 500ms poll interval instead of two). Every remaining sleep here is either a bounded condition-wait's poll cadence or a documented settle with no DOM signal.",
+  },
+  "src/systems/old-kronos/navigate.ts": {
+    count: 29,
+    reason: "Legacy JQX-grid UI including the documented 80ms JQX typing debounce (see root task context); the rest are settle waits for a UI with no reliable processing signal.",
+  },
+  "src/systems/old-kronos/reports.ts": {
+    count: 11,
+    reason: "Same legacy old-kronos JQX-grid UI, Reports flow — no reliable readiness signal.",
+  },
+  "src/systems/onbase/navigate.ts": {
+    count: 6,
+    reason: "OnBase Unity Client form settle waits; no consistent processing indicator.",
+  },
+  "src/systems/ucpath/job-summary.ts": {
+    count: 2,
+    reason: "PeopleSoft Job Summary tab/grid settle; see the 2026-06-22 CLAUDE.md lesson on this grid not reliably raising the processing spinner. Net -1 on 2026-08-20 (3→2): the Job Information / Work Location grid-scan polls now sleep via node:timers/promises (the frozen-grid rewrite), so only the tab-click settle waits remain.",
+  },
+  "src/systems/ucpath/navigate.ts": {
+    count: 6,
+    reason: "PeopleSoft navigation / modal-mask teardown settle waits.",
+  },
+  "src/systems/ucpath/person-org-summary.ts": {
+    count: 8,
+    reason: "PeopleSoft Person Org Summary iframe settle waits across several sub-views.",
+  },
+  "src/systems/ucpath/personal-data.ts": {
+    count: 7,
+    reason: "PeopleSoft Personal Data page settle waits across its dialogs/rows.",
+  },
+  "src/systems/ucpath/ss-smart-hr.ts": {
+    count: 4,
+    reason: "Hire/termination search and TER drill still settle on the optional PeopleSoft spinner plus a short wait; Process EID and the SS Smart HR search-form entry now wait for the Name box, result row, detail id, or verified no-match banner.",
+  },
+  "src/systems/ucpath/transaction.ts": {
+    count: 19,
+    reason: "PeopleSoft transaction save/submit is the heaviest, most PeopleSoft-processing-dependent UI in the codebase; no consistent completion signal across its many save/readback steps. The 2026-08-18 additions are POLL cadences, not stand-ins for a readiness check: fillVerified re-reads the field it just wrote (its own condition), and the post-submit loop polls until the transaction id resolves — both terminate on the real signal and only sleep between attempts.",
+  },
+};
+
+function countWaitForTimeout(content: string): number {
+  let n = 0;
+  for (const line of content.split("\n")) {
+    const t = line.trim();
+    if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) continue;
+    if (/waitForTimeout\(/.test(line)) n++;
+  }
+  return n;
+}
+
+const FIX_GUIDANCE =
+  "Root CLAUDE.md 'Fail loud — no unverified silent fallbacks' + the fixed-" +
+  "sleep incidents in src/systems/new-kronos/CLAUDE.md (2026-06-24) and " +
+  "src/systems/ucpath/CLAUDE.md (2026-06-22): a fixed waitForTimeout that " +
+  "stands in for a real readiness check races the render it's waiting on. " +
+  "Fix: replace with a condition-based wait (poll for the element/state you " +
+  "actually need, e.g. via a helper like pollForJobInfoScan). If a fixed " +
+  "delay is genuinely the only option (a documented typing debounce, or a " +
+  "live-verify TODO with no known DOM signal yet), add/adjust its { count, " +
+  "reason } entry in the ALLOWLIST here.";
+
+describe("fail-loud guard: waitForTimeout allowlist in workflows/systems", () => {
+  it("every waitForTimeout( in src/workflows/ and src/systems/ is accounted for", () => {
+    const found = new Map<string, number>();
+    for (const scanRoot of SCAN_ROOTS) {
+      for (const file of walkFiles(scanRoot)) {
+        const content = readFileSync(file, "utf8");
+        const n = countWaitForTimeout(content);
+        if (n > 0) found.set(repoRelative(file), n);
+      }
+    }
+
+    const violations = auditCountAllowlist(found, ALLOWLIST, {
+      unallowlisted: (file, count) =>
+        `${file}: ${count} unallowlisted waitForTimeout( call(s)) — new sleep introduced outside the allowlist.`,
+      changed: (file, expected, actual) =>
+        `${file}: allowlisted for ${expected} waitForTimeout( call(s)) but found ${actual} — update the ALLOWLIST count (and reason, if the shape changed).`,
+      stale: (file, expected) =>
+        `${file}: allowlisted for ${expected} waitForTimeout( call(s)) but none found anymore — remove the stale entry.`,
+    });
+
+    assert.deepEqual(violations, [], `\n${FIX_GUIDANCE}\n\n${violations.join("\n")}`);
+  });
+});

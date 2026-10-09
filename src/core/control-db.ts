@@ -1,0 +1,51 @@
+import { openDatabase, transaction, type Database } from '../infra/sqlite/index.js'
+
+import { openStateDb, runMigrations, stateDbPath } from '../tracker/state/db.js'
+import { DEFAULT_DIR } from '../tracker/jsonl.js'
+
+export interface OpenControlDbOpts {
+  path?: string
+  trackerDir?: string
+}
+
+export interface ControlDb {
+  db: Database
+  migrate(): void
+  transaction<T>(body: () => T): T
+  close(): void
+}
+
+export function controlDbPath(trackerDir: string = DEFAULT_DIR): string {
+  return stateDbPath(trackerDir)
+}
+
+export function openControlDb(opts: OpenControlDbOpts = {}): ControlDb {
+  const db = opts.path ? openStandaloneDb(opts.path) : openStateDb(opts.trackerDir)
+  // When using the shared state DB (no custom path), close() must be a no-op.
+  // openStateDb caches one connection per tracker directory; calling close()
+  // would tear down the underlying DatabaseSync under every other caller in
+  // the same process (dashboard SSE polling, other route handlers, etc.).
+  // The shared connection lives for the process lifetime and is cleaned up on
+  // exit. Tests that need isolation should call closeStateDbForTests() directly
+  // in their teardown instead of relying on controlDb.close().
+  const close = opts.path
+    ? () => db.close()
+    : () => {}
+
+  return {
+    db,
+    migrate() {
+      runMigrations(db)
+    },
+    transaction<T>(body: () => T): T {
+      return transaction(db, body)
+    },
+    close,
+  }
+}
+
+function openStandaloneDb(path: string): Database {
+  const db = openDatabase(path)
+  runMigrations(db)
+  return db
+}

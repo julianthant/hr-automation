@@ -1,0 +1,321 @@
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test, beforeEach, vi } from "vitest";
+import assert from "node:assert/strict";
+import ExcelJS from "exceljs";
+
+import { enqueueFromHttp } from "../../../src/core/daemon/enqueue-dispatch.js";
+import { dateLocal, type TrackerEntry } from "../../../src/tracker/jsonl.js";
+import { rowFilePath } from "../../../src/tracker/paths.js";
+
+vi.mock("../../../src/core/daemon/client.js", () => ({
+  ensureDaemonsAndEnqueue: vi.fn().mockResolvedValue({ enqueued: [], daemons: [] }),
+}));
+
+async function enqueueMock() {
+  const client = await import("../../../src/core/daemon/client.js");
+  return client.ensureDaemonsAndEnqueue as ReturnType<typeof vi.fn>;
+}
+
+function tempTrackerDir(): string {
+  return mkdtempSync(join(tmpdir(), "enqueue-dispatch-input-batch-"));
+}
+
+function readRows(trackerDir: string, workflow: string): TrackerEntry[] {
+  const path = rowFilePath(workflow, dateLocal(), trackerDir);
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as TrackerEntry);
+}
+
+beforeEach(async () => {
+  (await enqueueMock()).mockClear();
+});
+
+test("enqueueFromHttp keeps a single input-run item unparented so it renders as one row", async () => {
+  const result = await enqueueFromHttp("person-lookup", [{ name: "Person 905" }], {
+    trackerDir: tempTrackerDir(),
+  });
+
+  assert.equal(result.ok, true);
+
+  const mock = await enqueueMock();
+  assert.equal(mock.mock.calls.length, 1);
+  const [, queuedInputs, , opts] = mock.mock.calls[0] as [unknown, unknown[], unknown, { parentRunId?: string }];
+
+  assert.equal(queuedInputs.length, 1);
+  assert.equal(opts.parentRunId, undefined);
+  assert.equal((queuedInputs[0] as { __runtimeOptions?: unknown }).__runtimeOptions, undefined);
+});
+
+test("enqueueFromHttp forwards an explicit worker count as { parallel: N } daemon flags", async () => {
+  const result = await enqueueFromHttp("person-lookup", [{ name: "Person 905" }], {
+    trackerDir: tempTrackerDir(),
+    runOptions: { parallelWorkers: 4 },
+  });
+
+  assert.equal(result.ok, true);
+
+  const mock = await enqueueMock();
+  const [, , flags] = mock.mock.calls[0] as [unknown, unknown, unknown];
+  assert.deepEqual(flags, { parallel: 4 });
+});
+
+test("enqueueFromHttp passes {} flags for Auto (no runOptions) and for an explicit 1", async () => {
+  await enqueueFromHttp("person-lookup", [{ name: "Person 905" }], { trackerDir: tempTrackerDir() });
+  await enqueueFromHttp("person-lookup", [{ name: "Roe, Ann" }], {
+    trackerDir: tempTrackerDir(),
+    runOptions: { parallelWorkers: 1 },
+  });
+
+  const mock = await enqueueMock();
+  const [, , autoFlags] = mock.mock.calls[0] as [unknown, unknown, unknown];
+  const [, , oneFlags] = mock.mock.calls[1] as [unknown, unknown, unknown];
+  assert.deepEqual(autoFlags, {}, "Auto → no daemon flags");
+  assert.deepEqual(oneFlags, {}, "explicit 1 → no daemon flags (default reuse-or-spawn-one)");
+});
+
+test("enqueueFromHttp marks multi-value input-run batches as normal batch members", async () => {
+  const result = await enqueueFromHttp(
+    "person-lookup",
+    [
+      { name: "Person 905", __runtimeOptions: { preset: "lookup-only" } },
+      { name: "Smith, John" },
+    ],
+    { trackerDir: tempTrackerDir() },
+  );
+
+  assert.equal(result.ok, true);
+
+  const mock = await enqueueMock();
+  assert.equal(mock.mock.calls.length, 1);
+  const [, queuedInputs, , opts] = mock.mock.calls[0] as [unknown, unknown[], unknown, { parentRunId?: string }];
+
+  assert.equal(queuedInputs.length, 2);
+  assert.equal(typeof opts.parentRunId, "string");
+  assert.equal((queuedInputs[0] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.preset, "lookup-only");
+  assert.equal((queuedInputs[0] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.rowShape, "operation-member");
+  assert.equal((queuedInputs[1] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.rowShape, "operation-member");
+});
+
+test("enqueueFromHttp expands one Process EID worksheet request into roster member rows", async () => {
+  const trackerDir = tempTrackerDir();
+  const rosterPath = join(trackerDir, "Onboarding Roster.xlsx");
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("September 14");
+  worksheet.addRows([
+    ["Lived Name", "Transaction Number", "EID"],
+    ["Iobub Minecuci", "T009000059", ""],
+    ["Heg Sep", "T009000060", "Pending"],
+    ["Already Complete", "T009000061", "10090331"],
+  ]);
+  await workbook.xlsx.writeFile(rosterPath);
+
+  const result = await enqueueFromHttp(
+    "process-eid",
+    [{
+      source: "roster-sheet",
+      sheet: "September 14",
+      rosterPath,
+      __runtimeOptions: {
+        preset: "lookup-only",
+        skipSteps: ["unused-future-step"],
+      },
+    }],
+    { trackerDir },
+  );
+
+  assert.equal(result.ok, true);
+  const mock = await enqueueMock();
+  const [, queuedInputs, , opts] = mock.mock.calls[0] as [
+    unknown,
+    Array<Record<string, unknown>>,
+    unknown,
+    { parentRunId?: string },
+  ];
+  assert.equal(typeof opts.parentRunId, "string");
+  assert.deepEqual(
+    queuedInputs.map(({ __runtimeOptions, ...input }) => input),
+    [
+      {
+        source: "person",
+        livedName: "Iobub Minecuci",
+        transactionId: "T009000059",
+        sheet: "September 14",
+        rosterRow: 2,
+      },
+      {
+        source: "person",
+        livedName: "Heg Sep",
+        transactionId: "T009000060",
+        sheet: "September 14",
+        rosterRow: 3,
+      },
+    ],
+  );
+  for (const input of queuedInputs) {
+    const runtimeOptions = input.__runtimeOptions as Record<string, unknown>;
+    assert.equal(runtimeOptions.preset, "lookup-only");
+    assert.deepEqual(runtimeOptions.skipSteps, ["unused-future-step"]);
+    assert.equal(
+      runtimeOptions.rowShape,
+      "operation-member",
+    );
+  }
+});
+
+test("enqueueFromHttp rejects conflicting runtime options before expanding inputs", async () => {
+  const result = await enqueueFromHttp(
+    "process-eid",
+    [
+      {
+        source: "person",
+        livedName: "Iobub Minecuci",
+        transactionId: "T009000059",
+        sheet: "September 14",
+        rosterRow: 2,
+        __runtimeOptions: { preset: "first" },
+      },
+      {
+        source: "person",
+        livedName: "Heg Sep",
+        transactionId: "T009000060",
+        sheet: "September 14",
+        rosterRow: 3,
+        __runtimeOptions: { preset: "second" },
+      },
+    ],
+    { trackerDir: tempTrackerDir() },
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? "", /identical __runtimeOptions/);
+  assert.equal((await enqueueMock()).mock.calls.length, 0);
+});
+
+test("enqueueFromHttp pre-emits person-lookup input-run batches as batch members", async () => {
+  const trackerDir = tempTrackerDir();
+  const result = await enqueueFromHttp(
+    "person-lookup",
+    [
+      { emplId: "10000910" },
+      { name: "Person 905" },
+    ],
+    { trackerDir },
+  );
+
+  assert.equal(result.ok, true);
+
+  const mock = await enqueueMock();
+  const [, queuedInputs, , opts] = mock.mock.calls[0] as [
+    unknown,
+    unknown[],
+    unknown,
+    {
+      parentRunId?: string;
+      onPreEmitPending: (
+        item: unknown,
+        runId: string,
+        parentRunId: string | undefined,
+        itemId: string,
+      ) => void;
+    },
+  ];
+
+  assert.equal(typeof opts.parentRunId, "string");
+  opts.onPreEmitPending(queuedInputs[0], "run-1", opts.parentRunId, "10000910");
+  opts.onPreEmitPending(queuedInputs[1], "run-2", opts.parentRunId, "Person 905");
+
+  const rows = readRows(trackerDir, "person-lookup");
+  assert.equal(rows.length, 3, "coordinator + 2 members");
+  const coordinator = rows.find((row) => row.data?.archetype === "operation");
+  assert.ok(coordinator, "emits an operation coordinator row");
+  assert.equal(coordinator?.runId, opts.parentRunId);
+  const members = rows.filter((row) => row.data?.archetype === "operation-member");
+  assert.equal(members.length, 2);
+  assert.deepEqual(members.map((row) => row.parentRunId), [opts.parentRunId, opts.parentRunId]);
+});
+
+test("enqueueFromHttp batches a SINGLE oath-signature EID input run (alwaysOperationInputRun)", async () => {
+  // oath-signature is never a standalone single row — even one manual EID is a
+  // one-member batch (delegation.alwaysOperationInputRun). person-lookup (the first
+  // test) intentionally stays unparented for a single input.
+  const trackerDir = tempTrackerDir();
+  const result = await enqueueFromHttp("oath-signature", [{ emplId: "10000910" }], { trackerDir });
+
+  assert.equal(result.ok, true);
+
+  const mock = await enqueueMock();
+  const [, queuedInputs, , opts] = mock.mock.calls[0] as [
+    unknown,
+    unknown[],
+    unknown,
+    {
+      parentRunId?: string;
+      onPreEmitPending: (
+        item: unknown,
+        runId: string,
+        parentRunId: string | undefined,
+        itemId: string,
+      ) => void;
+    },
+  ];
+
+  assert.equal(queuedInputs.length, 1);
+  assert.equal(typeof opts.parentRunId, "string", "single oath EID still gets a batch parentRunId");
+  assert.equal(
+    (queuedInputs[0] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.rowShape,
+    "operation-member",
+  );
+  opts.onPreEmitPending(queuedInputs[0], "run-1", opts.parentRunId, "10000910");
+  const rows = readRows(trackerDir, "oath-signature");
+  assert.equal(rows.length, 2, "coordinator + 1 member");
+  assert.ok(rows.some((row) => row.data?.archetype === "operation"));
+  const member = rows.find((row) => row.data?.archetype === "operation-member");
+  assert.equal(member?.parentRunId, opts.parentRunId);
+});
+
+test("enqueueFromHttp pre-emits oath-signature multi-EID input runs as batch members", async () => {
+  const trackerDir = tempTrackerDir();
+  const result = await enqueueFromHttp(
+    "oath-signature",
+    [
+      { emplId: "10000910" },
+      { emplId: "10000002" },
+    ],
+    { trackerDir },
+  );
+
+  assert.equal(result.ok, true);
+
+  const mock = await enqueueMock();
+  const [, queuedInputs, , opts] = mock.mock.calls[0] as [
+    unknown,
+    unknown[],
+    unknown,
+    {
+      parentRunId?: string;
+      onPreEmitPending: (
+        item: unknown,
+        runId: string,
+        parentRunId: string | undefined,
+        itemId: string,
+      ) => void;
+    },
+  ];
+
+  assert.equal(typeof opts.parentRunId, "string");
+  opts.onPreEmitPending(queuedInputs[0], "run-1", opts.parentRunId, "10000910");
+  opts.onPreEmitPending(queuedInputs[1], "run-2", opts.parentRunId, "10000002");
+
+  const rows = readRows(trackerDir, "oath-signature");
+  assert.equal(rows.length, 3, "coordinator + 2 members");
+  assert.ok(rows.some((row) => row.data?.archetype === "operation"));
+  const members = rows.filter((row) => row.data?.archetype === "operation-member");
+  assert.equal(members.length, 2);
+  assert.deepEqual(members.map((row) => row.parentRunId), [opts.parentRunId, opts.parentRunId]);
+});

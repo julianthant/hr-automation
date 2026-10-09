@@ -1,0 +1,256 @@
+import { test } from "vitest";
+import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import {
+  fillHrInquiryForm,
+  parseTicketNumberFromUrl,
+} from "../../../../src/workflows/oath-upload/fill-form.js";
+import { withLogContext } from "../../../../src/utils/log.js";
+import { logsDir } from "../../../../src/tracker/jsonl.js";
+
+test("parseTicketNumberFromUrl: parses HRC0XXXXXX number= param", () => {
+  assert.equal(
+    parseTicketNumberFromUrl("https://support.ucsd.edu/esc?id=ticket&number=HRC0123456"),
+    "HRC0123456",
+  );
+});
+
+test("parseTicketNumberFromUrl: returns null when no number= param", () => {
+  assert.equal(
+    parseTicketNumberFromUrl("https://support.ucsd.edu/esc?id=services"),
+    null,
+  );
+});
+
+test("parseTicketNumberFromUrl: returns null on non-HRC pattern", () => {
+  assert.equal(
+    parseTicketNumberFromUrl("https://support.ucsd.edu/esc?id=ticket&number=ABC123"),
+    null,
+  );
+});
+
+test("parseTicketNumberFromUrl: tolerates malformed URL", () => {
+  assert.equal(parseTicketNumberFromUrl("not a url"), null);
+});
+
+test("fillHrInquiryForm: fills subject, description, attaches file, drives Specifically + Category", async () => {
+  const calls: string[] = [];
+  type FakeLocator = {
+    fill: (v: string) => Promise<void>;
+    click: (opts?: { timeout?: number }) => Promise<void>;
+    setInputFiles: (p: string) => Promise<void>;
+    type: (v: string) => Promise<void>;
+    selectOption: (v: unknown, opts?: { timeout?: number }) => Promise<void>;
+    isVisible: () => Promise<boolean>;
+    textContent: () => Promise<string>;
+    waitFor: (opts?: { state?: string; timeout?: number }) => Promise<void>;
+    first: () => FakeLocator;
+    locator: (sel: string) => FakeLocator;
+    filter: (opts: unknown) => FakeLocator;
+  };
+  const fakeLocator = (label: string): FakeLocator => ({
+    fill: (v) => { calls.push(`fill[${label}]=${v}`); return Promise.resolve(); },
+    click: () => { calls.push(`click[${label}]`); return Promise.resolve(); },
+    setInputFiles: (p) => { calls.push(`setInputFiles[${label}]=${p}`); return Promise.resolve(); },
+    type: (v) => { calls.push(`type[${label}]=${v}`); return Promise.resolve(); },
+    selectOption: (v) => {
+      calls.push(`selectOption[${label}]=${typeof v === "object" ? JSON.stringify(v) : String(v)}`);
+      return Promise.resolve();
+    },
+    isVisible: () => Promise.resolve(true),
+    // Select2 choice anchors show the chosen option's label as their text.
+    textContent: () => Promise.resolve(label),
+    // Attachment-confirmation readback (`getByText(...).first().waitFor(...)`).
+    waitFor: () => { calls.push(`waitFor[${label}]`); return Promise.resolve(); },
+    first: () => fakeLocator(`${label}[0]`),
+    // Select2 v3 helpers chain off getByRole (xpath ancestor) and page.locator
+    // (`.filter({ hasText }).first()`); the fake mirrors that chaining.
+    locator: (sel) => fakeLocator(`${label}»${sel}`),
+    filter: () => fakeLocator(`${label}.filtered`),
+  });
+  const fakePage = {
+    getByRole: (_role: string, opts: { name: string }) => fakeLocator(opts.name),
+    getByText: (text: string) => fakeLocator(`text:${text}`),
+    locator: (sel: string) => fakeLocator(sel),
+    waitForTimeout: (_ms: number) => Promise.resolve(),
+    url: () => "https://support.ucsd.edu/esc?id=ticket&number=HRC0999999",
+    title: () => Promise.resolve("HR General Inquiry - Employee Center"),
+  };
+
+  await fillHrInquiryForm(fakePage as never, {
+    subject: "HDH New Hire Oaths",
+    description: "Please see attached oaths for employees hired under HDH.",
+    specifically: "Signing Ceremony (Oath)",
+    category: "Payroll",
+    attachmentPath: "/tmp/oaths.pdf",
+  });
+
+  assert.ok(
+    calls.includes("fill[Subject]=HDH New Hire Oaths"),
+    `expected Subject fill in calls: ${calls.join(" | ")}`,
+  );
+  assert.ok(
+    calls.includes("fill[Description]=Please see attached oaths for employees hired under HDH."),
+    `expected Description fill in calls: ${calls.join(" | ")}`,
+  );
+  // setInputFiles must hit the file input (registry uses page.locator('input[type="file"]').first()).
+  assert.ok(
+    calls.some((c) => c.startsWith("setInputFiles[") && c.endsWith("=/tmp/oaths.pdf")),
+    `expected setInputFiles call for /tmp/oaths.pdf: ${calls.join(" | ")}`,
+  );
+  // Specifically + Category were exercised somehow.
+  assert.ok(
+    calls.some((c) => c.includes("Specifically")),
+    `expected Specifically interaction: ${calls.join(" | ")}`,
+  );
+  assert.ok(
+    calls.some((c) => c.includes("Category")),
+    `expected Category interaction: ${calls.join(" | ")}`,
+  );
+});
+
+test("fillHrInquiryForm: throws if the attachment never shows a confirmation (fail loud, not a silent submit-ready)", async () => {
+  type FakeLocator = {
+    fill: (v: string) => Promise<void>;
+    click: (opts?: { timeout?: number }) => Promise<void>;
+    setInputFiles: (p: string) => Promise<void>;
+    selectOption: (v: unknown, opts?: { timeout?: number }) => Promise<void>;
+    textContent: () => Promise<string>;
+    waitFor: (opts?: { state?: string; timeout?: number }) => Promise<void>;
+    first: () => FakeLocator;
+    locator: (sel: string) => FakeLocator;
+    filter: (opts: unknown) => FakeLocator;
+  };
+  const fakeLocator = (label: string): FakeLocator => ({
+    fill: async () => {},
+    click: async () => {},
+    setInputFiles: async () => {},
+    selectOption: async () => {},
+    textContent: () => Promise.resolve(label),
+    // The attachment confirmation never surfaces — simulates a failed/lagged upload.
+    waitFor: () => Promise.reject(new Error("timeout waiting for element")),
+    first: () => fakeLocator(`${label}[0]`),
+    locator: (sel) => fakeLocator(`${label}»${sel}`),
+    filter: () => fakeLocator(`${label}.filtered`),
+  });
+  const fakePage = {
+    getByRole: (_role: string, opts: { name: string }) => fakeLocator(opts.name),
+    getByText: (text: string) => fakeLocator(`text:${text}`),
+    locator: (sel: string) => fakeLocator(sel),
+    waitForTimeout: (_ms: number) => Promise.resolve(),
+  };
+
+  await assert.rejects(
+    () => fillHrInquiryForm(fakePage as never, {
+      subject: "HDH New Hire Oaths",
+      description: "Please see attached oaths for employees hired under HDH.",
+      specifically: "Signing Ceremony (Oath)",
+      category: "Payroll",
+      attachmentPath: "/tmp/oaths.pdf",
+    }),
+    /attached "oaths\.pdf" but no confirmation of the upload appeared/,
+  );
+});
+
+test("fillHrInquiryForm: throws on Select2 Enter-to-accept readback mismatch (blind keypress selected the wrong option)", async () => {
+  type FakeLocator = {
+    fill: (v: string) => Promise<void>;
+    click: (opts?: { timeout?: number }) => Promise<void>;
+    setInputFiles: (p: string) => Promise<void>;
+    selectOption: (v: unknown, opts?: { timeout?: number }) => Promise<void>;
+    textContent: () => Promise<string>;
+    waitFor: (opts?: { state?: string; timeout?: number }) => Promise<void>;
+    first: () => FakeLocator;
+    locator: (sel: string) => FakeLocator;
+    filter: (opts: unknown) => FakeLocator;
+  };
+  const fakeLocator = (label: string): FakeLocator => ({
+    fill: async () => {},
+    click: async () => {
+      // The "option" locator always misses — forces the Enter-to-accept fallback.
+      if (label.includes("Select Specifically")) throw new Error("option not found");
+    },
+    setInputFiles: async () => {},
+    selectOption: async () => {},
+    // The Select2 choice anchor ends up showing something OTHER than what we
+    // typed — the blind Enter keypress landed on the wrong highlighted match.
+    textContent: () => Promise.resolve("Some Unrelated Option"),
+    waitFor: async () => {},
+    first: () => fakeLocator(`${label}[0]`),
+    locator: (sel) => fakeLocator(`${label}»${sel}`),
+    filter: () => fakeLocator(`${label}.filtered`),
+  });
+  const fakePage = {
+    getByRole: (_role: string, opts: { name: string }) => fakeLocator(opts.name),
+    getByText: (text: string) => fakeLocator(`text:${text}`),
+    locator: (sel: string) => fakeLocator(sel),
+    waitForTimeout: (_ms: number) => Promise.resolve(),
+    keyboard: { press: (_key: string) => Promise.resolve() },
+  };
+
+  await assert.rejects(
+    () => fillHrInquiryForm(fakePage as never, {
+      subject: "HDH New Hire Oaths",
+      description: "Please see attached oaths for employees hired under HDH.",
+      specifically: "Signing Ceremony (Oath)",
+      category: "Payroll",
+      attachmentPath: "/tmp/oaths.pdf",
+    }),
+    /Specifically readback mismatch after Enter-to-accept/,
+  );
+});
+
+test("fillHrInquiryForm: ServiceNow fields emit selector-health warnings through safeFill/safeClick", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "servicenow-safe-"));
+  try {
+    type FakeLocator = {
+      fill: (v: string) => Promise<void>;
+      click: (opts?: { timeout?: number }) => Promise<void>;
+      setInputFiles: (p: string) => Promise<void>;
+      selectOption: (v: unknown, opts?: { timeout?: number }) => Promise<void>;
+      first: () => FakeLocator;
+    };
+    const fakeLocator = (label: string): FakeLocator => ({
+      fill: async () => {
+        if (label === "Subject") throw new Error("Subject fill failed");
+      },
+      click: async () => {},
+      setInputFiles: async () => {},
+      selectOption: async () => {},
+      first: () => fakeLocator(`${label}[0]`),
+    });
+    const fakePage = {
+      getByRole: (_role: string, opts: { name: string }) => fakeLocator(opts.name),
+      locator: (sel: string) => fakeLocator(sel),
+      waitForTimeout: (_ms: number) => Promise.resolve(),
+    };
+
+    await assert.rejects(
+      () => withLogContext("oath-upload", "servicenow-safe", () =>
+        fillHrInquiryForm(fakePage as never, {
+          subject: "HDH New Hire Oaths",
+          description: "Please see attached oaths for employees hired under HDH.",
+          specifically: "Signing Ceremony (Oath)",
+          category: "Payroll",
+          attachmentPath: "/tmp/oaths.pdf",
+        }), dir),
+      /Subject fill failed/,
+    );
+
+    const logLines = readdirSync(logsDir(dir))
+      .filter((file) => file.endsWith(".jsonl"))
+      .flatMap((file) => readFileSync(join(logsDir(dir), file), "utf-8").trim().split("\n").filter(Boolean))
+      .map((line) => JSON.parse(line) as { level: string; message: string });
+    assert.ok(
+      logLines.some((line) =>
+        line.level === "error" &&
+        line.message.includes("selector fallback triggered: servicenow hr inquiry subject"),
+      ),
+      `expected ServiceNow safeFill selector warning, got ${JSON.stringify(logLines)}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

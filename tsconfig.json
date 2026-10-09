@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "rootDir": ".",
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": true,
+    "jsx": "react-jsx",
+    "types": ["node"],
+    "paths": {
+      "@/*": ["./src/dashboard/*"]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "scripts/rebuild/**/*",
+    "tests/**/*",
+    "vitest.config.ts",
+    "data/documents/make-e2e-roster.mjs"
+  ],
+  "exclude": ["src/dashboard/**/*"]
+}

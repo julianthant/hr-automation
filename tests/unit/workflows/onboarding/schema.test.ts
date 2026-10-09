@@ -1,0 +1,288 @@
+import { describe, it } from "vitest";
+import assert from "node:assert/strict";
+import {
+  validateEmployeeData,
+  OnboardingInputSchema,
+  ONBOARDING_HIRE_MODES,
+} from "../../../../src/workflows/onboarding/schema.js";
+import { ExtractionError } from "../../../../src/systems/crm/types.js";
+
+const VALID_DATA: Record<string, string> = {
+  positionNumber: "40090009",
+  firstName: "Jane",
+  lastName: "Doe",
+  ssn: "000-00-0000",
+  address: "9500 Gilman Dr",
+  city: "La Jolla",
+  state: "CA",
+  postalCode: "92093",
+  wage: "$17.75 per hour",
+  effectiveDate: "01/15/2026",
+};
+
+describe("EmployeeDataSchema", () => {
+  it("accepts valid employee data with all 10 fields", () => {
+    const result = validateEmployeeData(VALID_DATA);
+
+    assert.equal(result.positionNumber, "40090009");
+    assert.equal(result.firstName, "Jane");
+    assert.equal(result.lastName, "Doe");
+    assert.equal(result.ssn, "000-00-0000");
+    assert.equal(result.address, "9500 Gilman Dr");
+    assert.equal(result.city, "La Jolla");
+    assert.equal(result.state, "CA");
+    assert.equal(result.postalCode, "92093");
+    assert.equal(result.wage, "$17.75 per hour");
+    assert.equal(result.effectiveDate, "01/15/2026");
+  });
+
+  it("rejects missing required field with error listing field name", () => {
+    const data = { ...VALID_DATA };
+    delete (data as Record<string, string | undefined>).firstName;
+
+    assert.throws(
+      () => validateEmployeeData(data),
+      (err: unknown) => {
+        assert.ok(err instanceof ExtractionError);
+        assert.ok(err.failedFields?.includes("firstName"));
+        return true;
+      },
+    );
+  });
+
+  it("rejects empty string field via min(1) constraint", () => {
+    const data = { ...VALID_DATA, address: "" };
+
+    assert.throws(
+      () => validateEmployeeData(data),
+      (err: unknown) => {
+        assert.ok(err instanceof ExtractionError);
+        assert.ok(err.failedFields?.includes("address"));
+        return true;
+      },
+    );
+  });
+
+  it("rejects malformed SSN with format error", () => {
+    const data = { ...VALID_DATA, ssn: "12345" };
+
+    assert.throws(
+      () => validateEmployeeData(data),
+      (err: unknown) => {
+        assert.ok(err instanceof ExtractionError);
+        assert.ok(err.failedFields?.includes("ssn"));
+        assert.ok(err.message.includes("XXX-XX-XXXX"));
+        return true;
+      },
+    );
+  });
+
+  it("rejects malformed postal code with format error", () => {
+    const data = { ...VALID_DATA, postalCode: "ABCDE" };
+
+    assert.throws(
+      () => validateEmployeeData(data),
+      (err: unknown) => {
+        assert.ok(err instanceof ExtractionError);
+        assert.ok(err.failedFields?.includes("postalCode"));
+        assert.ok(err.message.includes("XXXXX"));
+        return true;
+      },
+    );
+  });
+
+  it("normalizes truncated postal code suffix (e.g. 92092-100 -> 92092)", () => {
+    const data = { ...VALID_DATA, postalCode: "92092-100" };
+    const result = validateEmployeeData(data);
+    assert.equal(result.postalCode, "92092");
+  });
+
+  it("reports ALL failing field names when multiple fields are missing", () => {
+    const data = { ...VALID_DATA };
+    const mutable = data as Record<string, string | undefined>;
+    delete mutable.firstName;
+    delete mutable.lastName;
+    delete mutable.wage;
+
+    assert.throws(
+      () => validateEmployeeData(data),
+      (err: unknown) => {
+        assert.ok(err instanceof ExtractionError);
+        assert.ok(err.failedFields?.includes("firstName"));
+        assert.ok(err.failedFields?.includes("lastName"));
+        assert.ok(err.failedFields?.includes("wage"));
+        assert.equal(err.failedFields?.length, 3);
+        return true;
+      },
+    );
+  });
+
+  it("ExtractionError has name 'ExtractionError' and carries failedFields", () => {
+    const err = new ExtractionError("test error", ["field1", "field2"]);
+    assert.equal(err.name, "ExtractionError");
+    assert.deepEqual(err.failedFields, ["field1", "field2"]);
+    assert.ok(err instanceof Error);
+    assert.equal(err.message, "test error");
+  });
+
+  it("rejects non-2-letter state code", () => {
+    const data = { ...VALID_DATA, state: "California" };
+
+    assert.throws(
+      () => validateEmployeeData(data),
+      (err: unknown) => {
+        assert.ok(err instanceof ExtractionError);
+        assert.ok(err.failedFields?.includes("state"));
+        return true;
+      },
+    );
+  });
+
+  it("rejects effectiveDate not in MM/DD/YYYY format", () => {
+    const data = { ...VALID_DATA, effectiveDate: "2026-03-14" };
+
+    assert.throws(
+      () => validateEmployeeData(data),
+      (err: unknown) => {
+        assert.ok(err instanceof ExtractionError);
+        assert.ok(err.failedFields?.includes("effectiveDate"));
+        return true;
+      },
+    );
+  });
+
+  it("rejects wage without dollar sign prefix", () => {
+    const data = { ...VALID_DATA, wage: "17.75 per hour" };
+
+    assert.throws(
+      () => validateEmployeeData(data),
+      (err: unknown) => {
+        assert.ok(err instanceof ExtractionError);
+        assert.ok(err.failedFields?.includes("wage"));
+        return true;
+      },
+    );
+  });
+
+  it("accepts missing SSN (international students may not have one)", () => {
+    const data = { ...VALID_DATA };
+    delete (data as Record<string, string | undefined>).ssn;
+
+    const result = validateEmployeeData(data);
+    assert.equal(result.ssn, undefined);
+    assert.equal(result.firstName, "Jane");
+  });
+
+  it("accepts null SSN (extracted as null from page)", () => {
+    const data: Record<string, string | null> = {
+      ...VALID_DATA,
+      ssn: null,
+    };
+
+    const result = validateEmployeeData(data);
+    assert.equal(result.ssn, undefined);
+  });
+
+  it("handles null values by treating them as missing fields", () => {
+    const data: Record<string, string | null> = {
+      ...VALID_DATA,
+      city: null,
+    };
+
+    assert.throws(
+      () => validateEmployeeData(data),
+      (err: unknown) => {
+        assert.ok(err instanceof ExtractionError);
+        assert.ok(err.failedFields?.includes("city"));
+        return true;
+      },
+    );
+  });
+
+  it("accepts data with departmentNumber and recruitmentNumber", () => {
+    const data = {
+      ...VALID_DATA,
+      departmentNumber: "900001",
+      recruitmentNumber: "REQ-12345",
+    };
+
+    const result = validateEmployeeData(data);
+    assert.equal(result.departmentNumber, "900001");
+    assert.equal(result.recruitmentNumber, "REQ-12345");
+  });
+
+  it("accepts data WITHOUT departmentNumber and recruitmentNumber (optional)", () => {
+    // VALID_DATA has no departmentNumber or recruitmentNumber
+    const result = validateEmployeeData(VALID_DATA);
+    assert.equal(result.departmentNumber, undefined);
+    assert.equal(result.recruitmentNumber, undefined);
+  });
+
+  it("rejects departmentNumber that is not 4-6 digits", () => {
+    const data = { ...VALID_DATA, departmentNumber: "abc" };
+
+    assert.throws(
+      () => validateEmployeeData(data),
+      (err: unknown) => {
+        assert.ok(err instanceof ExtractionError);
+        assert.ok(err.failedFields?.includes("departmentNumber"));
+        return true;
+      },
+    );
+  });
+});
+
+describe("OnboardingInputSchema", () => {
+  it("accepts a bare email (dryRun is optional)", () => {
+    const result = OnboardingInputSchema.parse({ email: "fixture018@example.edu" });
+    assert.equal(result.email, "fixture018@example.edu");
+    assert.equal(result.dryRun, undefined);
+  });
+
+  it("accepts { email, dryRun: true }", () => {
+    const result = OnboardingInputSchema.parse({
+      email: "fixture018@example.edu",
+      dryRun: true,
+    });
+    assert.equal(result.email, "fixture018@example.edu");
+    assert.equal(result.dryRun, true);
+  });
+
+  it("accepts { email, dryRun: false }", () => {
+    const result = OnboardingInputSchema.parse({
+      email: "fixture018@example.edu",
+      dryRun: false,
+    });
+    assert.equal(result.dryRun, false);
+  });
+
+  it("rejects a non-boolean dryRun", () => {
+    const result = OnboardingInputSchema.safeParse({
+      email: "fixture018@example.edu",
+      dryRun: "true",
+    });
+    assert.equal(result.success, false);
+  });
+
+  it("rejects a malformed email", () => {
+    const result = OnboardingInputSchema.safeParse({ email: "not-an-email" });
+    assert.equal(result.success, false);
+  });
+});
+
+describe("OnboardingInputSchema.mode (hire type, 2026-08-21)", () => {
+  it("accepts a bare email (mode is optional → new-hire by contract)", () => {
+    const result = OnboardingInputSchema.parse({ email: "fixture001@example.edu" });
+    assert.equal(result.mode, undefined);
+  });
+  it("accepts mode 'new-hire' and 'rehire'", () => {
+    assert.equal(OnboardingInputSchema.parse({ email: "fixture001@example.edu", mode: "new-hire" }).mode, "new-hire");
+    assert.equal(OnboardingInputSchema.parse({ email: "fixture001@example.edu", mode: "rehire" }).mode, "rehire");
+  });
+  it("rejects an unknown mode (no silent coercion onto a hire path)", () => {
+    assert.throws(() => OnboardingInputSchema.parse({ email: "fixture001@example.edu", mode: "concurrent" }));
+  });
+  it("ONBOARDING_HIRE_MODES is exactly new-hire + rehire", () => {
+    assert.deepEqual([...ONBOARDING_HIRE_MODES], ["new-hire", "rehire"]);
+  });
+});

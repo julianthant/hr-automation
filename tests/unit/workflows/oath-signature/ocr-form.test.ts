@@ -1,0 +1,281 @@
+import { test } from "vitest";
+import assert from "node:assert";
+import {
+  oathOcrFormSpec,
+  normalizeOathDate,
+  buildOathSignerInputFromApprovedRecord,
+} from "../../../../src/services/ocr/forms/oath.js";
+import type { RosterRow } from "../../../../src/workflows/ocr/types.js";
+
+const roster: RosterRow[] = [
+  { eid: "10000910", name: "Lape Kazopolofulu" },
+  { eid: "10000002", name: "Aidetupa Ueguba" },
+  { eid: "10000003", name: "Sanez Citi" },
+];
+
+test("oath OCR prompt requires scanning top margin for standalone handwritten EIDs", () => {
+  assert.match(oathOcrFormSpec.prompt, /top (?:page )?margin/i);
+  assert.match(oathOcrFormSpec.prompt, /standalone handwritten/i);
+  assert.match(oathOcrFormSpec.prompt, /above the form header/i);
+});
+
+test("matchRecord: signed row with high-confidence roster name → matched", async () => {
+  const ocr = {
+    formKind: "oath" as const,
+    sourcePage: 1, rowIndex: 0,
+    printedName: "Lape Kazopolofulu",
+    employeeSigned: true, officerSigned: true,
+    dateSigned: "05/01/2026",
+    notes: [], documentType: "expected" as const, originallyMissing: [],
+  };
+  const preview = await oathOcrFormSpec.matchRecord({ record: ocr, roster });
+  assert.equal(preview.matchState, "matched");
+  assert.equal(preview.employeeId, "10000910");
+  assert.equal(preview.selected, true);
+  assert.equal(preview.matchSource, "roster");
+});
+
+test("matchRecord: signed row with one fuzzy roster candidate → matched before active-check", async () => {
+  const ocr = {
+    formKind: "oath" as const,
+    sourcePage: 1, rowIndex: 0,
+    printedName: "Sanez Citii",
+    employeeSigned: true, officerSigned: true,
+    dateSigned: "05/01/2026",
+    notes: [], documentType: "expected" as const, originallyMissing: [],
+  };
+  const preview = await oathOcrFormSpec.matchRecord({ record: ocr, roster });
+  assert.equal(preview.matchState, "matched");
+  assert.equal(preview.employeeId, "10000003");
+  assert.equal(preview.matchSource, "roster");
+  assert.match(preview.warnings.join(" "), /single roster candidate/i);
+});
+
+test("matchRecord: unsigned row → extracted, deselected, no employeeId", async () => {
+  const ocr = {
+    formKind: "oath" as const,
+    sourcePage: 1, rowIndex: 1,
+    printedName: "Some Person",
+    employeeSigned: false, officerSigned: null,
+    dateSigned: null,
+    notes: [], documentType: "expected" as const, originallyMissing: [],
+  };
+  const preview = await oathOcrFormSpec.matchRecord({ record: ocr, roster });
+  assert.equal(preview.matchState, "extracted");
+  assert.equal(preview.employeeId, "");
+  assert.equal(preview.selected, false);
+});
+
+test("matchRecord: signed row with no roster match → lookup-pending", async () => {
+  const ocr = {
+    formKind: "oath" as const,
+    sourcePage: 1, rowIndex: 2,
+    printedName: "Unknown Person Notroster",
+    employeeSigned: true, officerSigned: true,
+    dateSigned: "05/01/2026",
+    notes: [], documentType: "expected" as const, originallyMissing: [],
+  };
+  const preview = await oathOcrFormSpec.matchRecord({ record: ocr, roster });
+  assert.equal(preview.matchState, "lookup-pending");
+  assert.equal(preview.employeeId, "");
+});
+
+test("matchRecord: high OCR name confidence skips roster LLM disambiguation", async () => {
+  const ocr = {
+    formKind: "oath" as const,
+    sourcePage: 1, rowIndex: 0,
+    printedName: "Cugiti D Bemidipu Mirofaw",
+    confidence: 0.94,
+    employeeSigned: true, officerSigned: true,
+    dateSigned: "05/01/2026",
+    notes: [], documentType: "expected" as const, originallyMissing: [],
+  };
+  const preview = await oathOcrFormSpec.matchRecord({
+    record: ocr,
+    roster: [
+      { eid: "10000010", name: "Bemidipu Mirofaw, Cugiti" },
+      { eid: "10000011", name: "Bemidipu, Cugiti D" },
+    ],
+  });
+  assert.equal(preview.matchState, "lookup-pending");
+  assert.equal(preview.matchSource, "manual");
+  assert.equal(preview.employeeId, "");
+  assert.match(preview.warnings.join(" "), /high OCR name confidence/i);
+});
+
+test("matchRecord: low OCR name confidence keeps roster LLM disambiguation path", async () => {
+  const ocr = {
+    formKind: "oath" as const,
+    sourcePage: 1, rowIndex: 0,
+    printedName: "Cugiti D Bemidipu Mirofaw",
+    confidence: 0.42,
+    employeeSigned: true, officerSigned: true,
+    dateSigned: "05/01/2026",
+    notes: [], documentType: "expected" as const, originallyMissing: [],
+  };
+  const preview = await oathOcrFormSpec.matchRecord({
+    record: ocr,
+    roster: [
+      { eid: "10000010", name: "Bemidipu Mirofaw, Cugiti" },
+      { eid: "10000011", name: "Bemidipu, Cugiti D" },
+    ],
+  });
+  assert.equal(preview.matchState, "lookup-pending");
+  assert.notEqual(preview.matchSource, "manual");
+  assert.ok((preview.rosterCandidates?.length ?? 0) > 0);
+});
+
+test("needsLookup: lookup-pending → 'name'", async () => {
+  const r = { matchState: "lookup-pending", employeeId: "" } as any;
+  assert.equal(oathOcrFormSpec.needsLookup(r), "name");
+});
+
+test("needsLookup: matched with eid but no roster source → 'verify'", async () => {
+  const r = { matchState: "matched", employeeId: "10000910", matchSource: "llm" } as any;
+  assert.equal(oathOcrFormSpec.needsLookup(r), "verify");
+});
+
+test("needsLookup: matched via roster → null", async () => {
+  const r = { matchState: "matched", employeeId: "10000910", matchSource: "roster" } as any;
+  assert.equal(oathOcrFormSpec.needsLookup(r), null);
+});
+
+test("needsLookup: matched via form-eid → null", async () => {
+  const r = { matchState: "matched", employeeId: "10000910", matchSource: "form-eid" } as any;
+  assert.equal(oathOcrFormSpec.needsLookup(r), null);
+});
+
+test("needsLookup: extracted (unsigned) → null", async () => {
+  const r = { matchState: "extracted", employeeId: "" } as any;
+  assert.equal(oathOcrFormSpec.needsLookup(r), null);
+});
+
+test("needsLookup: resolved with eid → null (already done)", async () => {
+  const r = { matchState: "resolved", employeeId: "10000910" } as any;
+  assert.equal(oathOcrFormSpec.needsLookup(r), null);
+});
+
+test("carryForwardKey normalizes name", async () => {
+  const r1 = { printedName: "  Lape Kazopolofulu  " } as any;
+  const r2 = { printedName: "lape kazopolofulu" } as any;
+  assert.equal(oathOcrFormSpec.carryForwardKey(r1), oathOcrFormSpec.carryForwardKey(r2));
+});
+
+test("applyCarryForward inherits resolved EID + verification + selection", async () => {
+  const v1 = {
+    employeeId: "10000910",
+    matchState: "resolved" as const,
+    matchSource: "eid-lookup" as const,
+    selected: true,
+    verification: { state: "verified", hrStatus: "Active", department: "HDH", screenshotFilename: "x.png", checkedAt: "2026-05-01T00:00:00Z" },
+    forceResearch: false,
+  } as any;
+  const v2 = {
+    employeeId: "",
+    matchState: "lookup-pending" as const,
+    selected: true,
+  } as any;
+  const merged = oathOcrFormSpec.applyCarryForward({ v2, v1 });
+  assert.equal(merged.employeeId, "10000910");
+  assert.equal(merged.matchState, "resolved");
+  assert.equal(merged.matchSource, "eid-lookup");
+  assert.deepEqual(merged.verification?.state, "verified");
+});
+
+test("oath OCR form spec fans out to BOTH oath-signature (per-record) and oath-upload (per-document)", () => {
+  // OCR-hub fan-out: approveTo enqueues one signer row per approved record;
+  // approveDocumentTo enqueues exactly one oath-upload ticket row per PDF.
+  assert.equal(oathOcrFormSpec.approveTo?.workflow, "oath-signature");
+  assert.equal(typeof oathOcrFormSpec.approveTo?.canFanOut, "function");
+  assert.equal(oathOcrFormSpec.approveDocumentTo?.workflow, "oath-upload");
+  // canFanOut gates selected-but-EID-less records out of the per-record fan-out.
+  assert.equal(
+    oathOcrFormSpec.approveTo!.canFanOut!({ selected: true, employeeId: "10000910" } as never),
+    true,
+  );
+  assert.equal(
+    oathOcrFormSpec.approveTo!.canFanOut!({ selected: true, employeeId: "" } as never),
+    false,
+  );
+});
+
+test("buildOathSignerInputFromApprovedRecord: matched selected record → signer input", () => {
+  const input = buildOathSignerInputFromApprovedRecord({
+    selected: true,
+    employeeId: "10000910",
+    printedName: "Person 905",
+    dateSigned: "05/01/2026",
+  });
+  assert.deepEqual(input, {
+    emplId: "10000910",
+    name: "Person 905",
+    date: "05/01/2026",
+  });
+});
+
+test("buildOathSignerInputFromApprovedRecord normalizes OCR uppercase names for queue display", () => {
+  const comma = buildOathSignerInputFromApprovedRecord({
+    selected: true,
+    employeeId: "10000910",
+    printedName: "ABUVUF, JATIB, L",
+    dateSigned: "05/01/2026",
+  });
+  const natural = buildOathSignerInputFromApprovedRecord({
+    selected: true,
+    employeeId: "10000002",
+    printedName: "CILUVE DULOGO",
+    dateSigned: "05/15/2003",
+  });
+
+  assert.equal(comma?.name, "Abuvuf, Jatib, L");
+  assert.equal(natural?.name, "Ciluve Dulogo");
+});
+
+test("normalizeOathDate: handwritten formats coerce to MM/DD/YYYY", () => {
+  // 2-digit year + dash separators (the case that triggered the user's
+  // validation error: OCR extracted "4-23-26" off the form).
+  assert.equal(normalizeOathDate("4-23-26"), "04/23/2026");
+  assert.equal(normalizeOathDate("12-9-25"), "12/09/2025");
+  // Slash separators, mixed-width components.
+  assert.equal(normalizeOathDate("4/23/2026"), "04/23/2026");
+  assert.equal(normalizeOathDate("04/23/2026"), "04/23/2026");
+  assert.equal(normalizeOathDate("4/23/26"), "04/23/2026");
+  // Already-canonical input is a no-op.
+  assert.equal(normalizeOathDate("01/01/2027"), "01/01/2027");
+  // Whitespace is tolerated.
+  assert.equal(normalizeOathDate("  4/23/2026  "), "04/23/2026");
+});
+
+test("normalizeOathDate: invalid or absent input returns null", () => {
+  assert.equal(normalizeOathDate(null), null);
+  assert.equal(normalizeOathDate(""), null);
+  assert.equal(normalizeOathDate("   "), null);
+  assert.equal(normalizeOathDate("next tuesday"), null);
+  // Out-of-range month/day get rejected so we never send PeopleSoft garbage.
+  assert.equal(normalizeOathDate("13/05/2026"), null);
+  assert.equal(normalizeOathDate("4/32/2026"), null);
+  // Mixed separators inside a single date are rejected.
+  assert.equal(normalizeOathDate("4-23/2026"), "04/23/2026"); // [-] then [/] both allowed at each position
+  // Extra components are rejected.
+  assert.equal(normalizeOathDate("4-23-2026-extra"), null);
+});
+
+test("buildOathSignerInputFromApprovedRecord normalizes 2-digit-year handwritten dateSigned", () => {
+  const input = buildOathSignerInputFromApprovedRecord({
+    selected: true,
+    employeeId: "10000910",
+    dateSigned: "4-23-26",
+  });
+  assert.equal(input?.emplId, "10000910");
+  assert.equal(input?.date, "04/23/2026");
+});
+
+test("buildOathSignerInputFromApprovedRecord drops unparseable date", () => {
+  const input = buildOathSignerInputFromApprovedRecord({
+    selected: true,
+    employeeId: "10000910",
+    dateSigned: "next tuesday",
+  });
+  assert.equal(input?.emplId, "10000910");
+  assert.equal(input?.date, undefined);
+});

@@ -1,0 +1,2279 @@
+import type { Page, Locator, FrameLocator } from "playwright";
+
+/**
+ * UCPath selector registry.
+ *
+ * Every selector used by `src/systems/ucpath/*.ts` lives here. Callers import
+ * from this module rather than constructing locators inline. Each selector is
+ * a function that takes the appropriate root (page / frame / FrameLocator /
+ * scoped Locator) and returns a Playwright Locator, so the call-site
+ * `.click()` / `.fill()` / `.selectOption()` is unchanged.
+ *
+ * Fallback chains (`.or()`) are used where the underlying anchor is known to
+ * mutate — specifically PeopleSoft grid input IDs (`$0` vs `$11` after a page
+ * refresh). Preferred anchor first (accessible-name via `getByRole`), then
+ * the grid-ID fallback, then the pre-refresh variant.
+ *
+ * Verified-date comments preserve the original in-source verification stamp.
+ * This was a re-homing pass, not live re-verification — see
+ * docs/superpowers/plans/2026-04-17-subsystem-a-selector-registry.md.
+ */
+
+// ─── Iframe root ───────────────────────────────────────────────────────────
+
+/**
+ * CSS selector for the PeopleSoft content iframe ELEMENT (the host of the
+ * Classic-mode form). UCPath wraps content in #main_target_win0 (not the older
+ * #ptifrmtgtframe). Use with `getContentFrame` for in-frame interaction, or as
+ * an audit-screenshot `region` to capture the whole in-frame form cleanly (the
+ * kernel grows the iframe to its inner content height first). verified 2026-03-16
+ * @tags iframe, frame, content, peoplesoft, screenshot-region
+ */
+export const UCPATH_CONTENT_FRAME_SELECTOR = "#main_target_win0";
+
+/**
+ * Returns the PeopleSoft content iframe FrameLocator.
+ * UCPath wraps Classic content in #main_target_win0 (not #ptifrmtgtframe).
+ * Every form interaction after initial navigation must go through this frame.
+ * verified 2026-03-16 (iframe ID: main_target_win0)
+ * @tags iframe, frame, content, peoplesoft
+ */
+export function getContentFrame(page: Page): FrameLocator {
+  return page.frameLocator(UCPATH_CONTENT_FRAME_SELECTOR);
+}
+
+// ─── Smart HR Transactions (sidebar + template setup + controls) ──────────
+
+export const smartHR = {
+  /** Employment record on Enter Transaction Details. verified 2026-09-08
+   * @tags termination, employment, record, concurrent, job
+   */
+  employmentRecordSelect: (f: FrameLocator): Locator => f.getByRole("combobox", { name: "Employment Record Number", exact: true }),
+  /** Rendered transaction body for verified header/receipt parsing. verified 2026-09-08
+   * @tags termination, body, header, receipt
+   */
+  transactionBody: (f: FrameLocator): Locator => f.locator("body"),
+  /** Exact in-progress row hyperlink discovered by its DOM id. verified 2026-09-08
+   * @tags termination, in-progress, row, link
+   */
+  transactionLinkById: (f: FrameLocator, id: string): Locator => f.locator(`[id="${id}"]`),
+  /**
+   * Navigation Area button that collapses the sidebar so iframe buttons aren't blocked. verified 2026-03-16
+   * @tags sidebar, collapse, navigation, button
+   */
+  sidebarNavigationToggle: (page: Page): Locator =>
+    page.getByRole("button", { name: "Navigation Area" }),
+
+  /**
+   * Template selection textbox in the Smart HR Transactions form. verified 2026-03-16
+   * @tags template, smart-hr, transaction, textbox
+   */
+  templateInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Select Template" }),
+
+  /**
+   * Effective Date textbox. verified 2026-03-16
+   * @tags effective, date, textbox, smart-hr
+   */
+  effectiveDateInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Effective Date" }),
+
+  /**
+   * Create Transaction button. verified 2026-03-16
+   * @tags create, transaction, smart-hr, button
+   */
+  createTransactionButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Create Transaction" }),
+
+  /**
+   * Reason Code dropdown. verified 2026-03-16
+   * @tags reason, code, dropdown, transaction
+   */
+  reasonCodeSelect: (f: FrameLocator): Locator => f.getByLabel("Reason Code"),
+
+  /**
+   * Continue button after reason code selection. verified 2026-03-16 (id: HR_TBH_WRK_TBH_NEXT)
+   * @tags continue, button, reason, transaction
+   */
+  continueButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Continue" }),
+
+  /**
+   * "Enter Transaction Details" page (EID-bearing templates — UC_CONC_HIRE,
+   * UC_VOL_TERM, …): the person NAME PeopleSoft resolves next to the Empl ID
+   * field once an EID is entered. Load-bearing wrong-person guard — a bogus
+   * EID resolves to SOME real person (10000910 → a different employee), so
+   * the caller must compare this against the expected name before Continue.
+   * verified 2026-08-21 (live probe; id `PERSON_NAME_NAME_DISPLAY`)
+   * @tags empl, id, name, readback, transaction-details, smart-hr
+   */
+  transactionDetailsPersonName: (f: FrameLocator): Locator =>
+    f.locator("#PERSON_NAME_NAME_DISPLAY"),
+
+  /** Tabs within the transaction form. verified 2026-03-16 */
+  tab: {
+    /**
+     * Personal Data tab inside Smart HR transaction form.
+     * @tags tab, personal-data, transaction, smart-hr
+     */
+    personalData: (f: FrameLocator): Locator =>
+      f.getByRole("tab", { name: "Personal Data" }),
+    /**
+     * Job Data tab inside Smart HR transaction form.
+     * @tags tab, job-data, transaction, smart-hr
+     */
+    jobData: (f: FrameLocator): Locator =>
+      f.getByRole("tab", { name: "Job Data" }),
+    /**
+     * Earns Dist tab inside Smart HR transaction form.
+     * @tags tab, earns, dist, transaction, smart-hr
+     */
+    earnsDist: (f: FrameLocator): Locator =>
+      f.getByRole("tab", { name: "Earns Dist" }),
+    /**
+     * Employee Experience tab inside Smart HR transaction form.
+     * @tags tab, employee-experience, transaction, smart-hr
+     */
+    employeeExperience: (f: FrameLocator): Locator =>
+      f.getByRole("tab", { name: "Employee Experience" }),
+  },
+
+  /**
+   * Save and Submit button (the first match — bottom of every tab). verified 2026-03-16
+   * @tags save, submit, transaction, button
+   */
+  saveAndSubmitButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Save and Submit" }).first(),
+
+  /**
+   * Cancel button on the transaction form action bar (discards the in-progress
+   * draft — live 2026-08-21 a cancelled UC_CONC_HIRE left NO "Transactions in
+   * Progress" row). verified 2026-08-21 (id `HR_TBH_WRK_TBH_CANCEL$6$`)
+   * @tags cancel, draft, transaction, button
+   */
+  cancelTransactionButton: (f: FrameLocator): Locator =>
+    f.locator('input[id^="HR_TBH_WRK_TBH_CANCEL"]').first(),
+
+  /**
+   * OK button on the confirmation dialog after Save & Submit. verified 2026-04-01
+   * @tags ok, confirmation, dialog, save, button
+   */
+  confirmationOkButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "OK" }),
+
+  /**
+   * Error/alert region inside the transaction iframe. verified 2026-03-16
+   * @tags error, alert, banner, transaction
+   */
+  errorBanner: (f: FrameLocator): Locator =>
+    f.locator(".PSERROR, #ALERTMSG, .ps_alert-error"),
+
+  // ── Submit-time "Person Match Found" page ──────────────────────────────
+  //
+  // Save and Submit can land on PeopleSoft's own Search/Match review page
+  // ("Person Match Found" — `HR_TBH` match page) instead of the confirmation
+  // dialog when the hire's name/DOB/SSN resembles an existing person. It lists
+  // "Possible Person Matches" (Person ID, Name Type, Name Effective Date,
+  // Legal First Name, Legal Last Name, National ID, Date of Birth, Gender,
+  // Per Org Summary) with a Select button per row and three actions below:
+  // "Not a Match - Continue with Hire", "Save for Later", "Cancel". Until
+  // 2026-08-20 the automation had no locator for it, so a submit that reached
+  // this page timed out blind ("no error banner and no confirmation OK dialog",
+  // live runs 99d5012c/ebd5d59e). Mapped 2026-08-20 from those runs' failure
+  // screenshots (`.tracker/screenshots/*-error-transaction-ucpath-*.png`):
+  // role/name locators on the rendered text; first live exercise is the next
+  // submit that hits the page (it fails loud, never silent, if these drift).
+
+  /**
+   * "Person Match Found" page heading — the DEFINITIVE signal that the submit
+   * landed on the Search/Match review page rather than the confirmation
+   * dialog. mapped 2026-08-20 (live failure screenshots, runs 99d5012c/ebd5d59e)
+   * @tags person-match, search-match, heading, submit, smart-hr
+   */
+  personMatchFoundHeading: (f: FrameLocator): Locator =>
+    f.getByText("Person Match Found", { exact: true }),
+
+  /**
+   * "Not a Match - Continue with Hire" action on the Person Match Found page —
+   * proceeds with the hire as a NEW person. Only clicked when every listed
+   * candidate is excluded (hard-identifier mismatch or operator-reviewed EID);
+   * see `decidePersonMatchContinue`. mapped 2026-08-20 (live failure screenshots)
+   * @tags person-match, not-a-match, continue, button, submit, smart-hr
+   */
+  personMatchNotAMatchButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Not a Match - Continue with Hire" }),
+
+  /**
+   * "Select an Action" page heading — Save and Submit can land here when the
+   * person already has one or more inactive Employee Instances and UCPath
+   * requires an explicit hire-action choice before filing. Live 2026-09-17
+   * (Jemoziw Gozobu concurrent hire: warning "inactive Employee Instances",
+   * Hire option already selected, Save and Submit again to proceed). Without
+   * this signal the submit poll timed out blind.
+   * verified 2026-09-17
+   * @tags select-action, inactive-instance, heading, submit, smart-hr
+   */
+  selectAnActionHeading: (f: FrameLocator): Locator =>
+    f.getByText("Select an Action", { exact: true }),
+
+  /**
+   * Hire-option label on the Select an Action page — PeopleSoft does NOT
+   * expose this control as an accessible `radio` name (live click via
+   * getByRole("radio", …) timed out 2026-09-17 while the option was visibly
+   * selected). Presence of this exact label proves the Hire choice is on
+   * the page; the radio arrives pre-selected, so handlers click Save and
+   * Submit without touching the radio. verified 2026-09-17
+   * @tags select-action, hire, option, submit, smart-hr
+   */
+  createNewEmployeeInstanceHireOption: (f: FrameLocator): Locator =>
+    f.getByText("Create a new employee instance using Hire as the action.", { exact: true }),
+
+  /**
+   * "Possible Person Matches" grid rows on the Person Match Found page — every
+   * data row carries a "Select" button in its first cell; header cells name the
+   * columns (Person ID / Legal First Name / Legal Last Name / National ID /
+   * Date of Birth). `readPersonMatchCandidates` maps the cells by header text
+   * inside the frame. mapped 2026-08-20 (live failure screenshots)
+   * @tags person-match, candidates, grid, row, select, submit, smart-hr
+   */
+  personMatchCandidateRows: (f: FrameLocator): Locator =>
+    f.getByRole("row").filter({ has: f.getByRole("button", { name: "Select", exact: true }) }),
+
+  /**
+   * "Delete Selected Transactions" button under the Smart HR Transactions page's
+   * "Transactions in Progress" grid — deletes the rows whose Select checkbox is
+   * ticked (used to remove a pending termination before recreating it).
+   * Live-verified via playwright-cli against the real in-progress grid (a real
+   * stale duplicate row deleted, keeper preserved) — see the 2026-06-24
+   * `deletePendingTransaction` lesson in src/systems/ucpath/CLAUDE.md.
+   * verified 2026-06-24
+   * @tags delete, selected, transactions, in-progress, button, smart-hr
+   */
+  deleteSelectedTransactionsButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Delete Selected Transactions" }),
+};
+
+// ─── Personal Data tab (inside transaction form) ───────────────────────────
+
+export const personalData = {
+  /**
+   * Legal First Name textbox.
+   * @tags legal, first-name, name, textbox, personal-data
+   */
+  legalFirstName: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Legal First Name" }),
+  /**
+   * Legal Last Name textbox.
+   * @tags legal, last-name, name, textbox, personal-data
+   */
+  legalLastName: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Legal Last Name" }),
+  /**
+   * Legal Middle Name textbox.
+   * @tags legal, middle-name, name, textbox, personal-data
+   */
+  legalMiddleName: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Legal Middle Name" }),
+
+  /**
+   * Preferred/Lived First Name — `exact: true` disambiguates from legal variants. verified 2026-04-16
+   * @tags preferred, lived, first-name, name, textbox, personal-data
+   */
+  preferredFirstName: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "First Name", exact: true }),
+  /**
+   * Preferred/Lived Last Name — `exact: true` disambiguates from legal variants. verified 2026-04-16
+   * @tags preferred, lived, last-name, name, textbox, personal-data
+   */
+  preferredLastName: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Last Name", exact: true }),
+  /**
+   * Preferred/Lived Middle Name — `exact: true` disambiguates from legal variants. verified 2026-04-16
+   * @tags preferred, lived, middle-name, name, textbox, personal-data
+   */
+  preferredMiddleName: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Middle Name", exact: true }),
+
+  /**
+   * Date of Birth textbox.
+   * @tags dob, birth, date, textbox, personal-data
+   */
+  dateOfBirth: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Date of Birth" }),
+
+  /**
+   * SSN / National ID textbox. exact: true avoids matching "National ID Type" dropdown. verified 2026-03-16
+   * @tags ssn, national-id, textbox, personal-data
+   */
+  nationalId: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "National ID", exact: true }),
+
+  /**
+   * Address Line 1 textbox.
+   * @tags address, line, textbox, personal-data
+   */
+  addressLine1: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Address Line 1" }),
+  /**
+   * City textbox.
+   * @tags city, address, textbox, personal-data
+   */
+  city: (f: FrameLocator): Locator => f.getByRole("textbox", { name: "City" }),
+  /**
+   * State textbox.
+   * @tags state, address, textbox, personal-data
+   */
+  state: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "State" }),
+  /**
+   * Postal Code textbox.
+   * @tags postal, zip, code, address, textbox, personal-data
+   */
+  postalCode: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Postal Code" }),
+
+  /**
+   * Phone Type dropdown for row index 6 (Mobile - Personal slot).
+   * verified 2026-03-16 (id: HR_TBH_G_SCR_WK_TBH_G_LG_DD1$6)
+   * @tags phone, type, dropdown, grid, personal-data
+   */
+  phoneTypeSelect: (f: FrameLocator): Locator =>
+    f.locator('[id="HR_TBH_G_SCR_WK_TBH_G_LG_DD1$6"]'),
+
+  /**
+   * Phone number textbox for row index 6.
+   * verified 2026-03-16 (id: HR_TBH_G_SCR_WK_TBH_G_SH_EDIT2$6)
+   * @tags phone, number, textbox, grid, personal-data
+   */
+  phoneNumberInput: (f: FrameLocator): Locator =>
+    f.locator('[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT2$6"]'),
+
+  /**
+   * Preferred-phone checkbox for row index 6.
+   * verified 2026-03-16 (id: HR_TBH_G_SCR_WK_TBH_G_CHK3$6)
+   * @tags phone, preferred, checkbox, grid, personal-data
+   */
+  phonePreferredCheckbox: (f: FrameLocator): Locator =>
+    f.locator('[id="HR_TBH_G_SCR_WK_TBH_G_CHK3$6"]'),
+
+  /**
+   * Email Type dropdown for row index 7 (Home slot).
+   * verified 2026-03-16 (id: HR_TBH_G_SCR_WK_TBH_G_LG_DD1$7)
+   * @tags email, type, dropdown, grid, personal-data
+   */
+  emailTypeSelect: (f: FrameLocator): Locator =>
+    f.locator('[id="HR_TBH_G_SCR_WK_TBH_G_LG_DD1$7"]'),
+
+  /**
+   * Email address textbox for row index 7.
+   * verified 2026-03-16 (id: HR_TBH_G_SCR_WK_TBH_G_LG_EDIT2$7)
+   * @tags email, address, textbox, grid, personal-data
+   */
+  emailAddressInput: (f: FrameLocator): Locator =>
+    f.locator('[id="HR_TBH_G_SCR_WK_TBH_G_LG_EDIT2$7"]'),
+
+  /**
+   * Tracker profile ID textbox (I-9 linkage). verified 2026-03-16
+   * @tags tracker, profile, i9, textbox, personal-data
+   */
+  trackerProfileIdInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Tracker Profile ID" }),
+};
+
+// ─── Comments section (inside transaction form) ────────────────────────────
+
+export const comments = {
+  /**
+   * Comments textarea — exact ID preserved from original. verified 2026-03-16
+   * @tags comments, textarea, transaction
+   */
+  commentsTextarea: (f: FrameLocator): Locator =>
+    f.locator("#HR_TBH_WRK_DESCRLONG_NOTES"),
+
+  /**
+   * Initiator Comments textarea — exact ID preserved from original. verified 2026-03-16
+   * @tags initiator, comments, textarea, transaction
+   */
+  initiatorCommentsTextarea: (f: FrameLocator): Locator =>
+    f.locator("#UC_SS_TRANSACT_COMMENTS"),
+};
+
+// ─── Termination fields (inside transaction form) ─────────────────────────
+
+export const termination = {
+  /**
+   * "Override Last Date Worked" checkbox. The live PeopleSoft DOM rendered
+   * `HR_TBH_SCR_WRK_TBH_CHK2$3`; prefix matching preserves the row suffix.
+   *
+   * `input[type="checkbox"]` is LOAD-BEARING, not cosmetic: on the EDITABLE
+   * transaction form PeopleSoft renders every checkbox as the visible input
+   * PLUS a hidden companion `<FIELD>$chk$<row>` carrying the posted Y/N value
+   * (`HR_TBH_SCR_WRK_TBH_CHK2$chk$3`). Both ids share the prefix, so a bare
+   * `id^=` matched 2 elements and EVERY read threw a strict-mode violation.
+   * (The 2026-07-16 mapping was taken from a read-only submitted record, which
+   * renders no `$chk$` companion — hence the miss.)
+   * verified 2026-07-28 (live editable UC_VOL_TERM form: 1 element)
+   * @tags termination, override, last-date-worked, checkbox, ucpath
+   */
+  overrideLastDateWorkedCheckbox: (f: FrameLocator): Locator =>
+    f.locator('input[type="checkbox"][id^="HR_TBH_SCR_WRK_TBH_CHK2$"]'),
+
+  /**
+   * Editable "Last Date Worked" input. The live read-only transaction rendered
+   * the corresponding `HR_TBH_SCR_WRK_TBH_DATE$3` span; this selector is
+   * deliberately input-specific so a read-only/reused transaction fails closed
+   * instead of masquerading as an editable form. The sibling `$prompt$3`
+   * calendar anchor + its `$prompt$img$3` icon share the prefix but are `<a>`
+   * / `<img>`, so `input` keeps this at exactly 1 element.
+   * verified 2026-07-28 (live editable UC_VOL_TERM form: 1 element)
+   * @tags termination, last-date-worked, date, input, ucpath
+   */
+  lastDateWorkedInput: (f: FrameLocator): Locator =>
+    f.locator('input[id^="HR_TBH_SCR_WRK_TBH_DATE$"]'),
+};
+
+// ─── Job Data tab (inside transaction form) ───────────────────────────────
+
+export const jobData = {
+  /**
+   * Position Number textbox. exact: true avoids "Reports To Position Number". verified 2026-03-16
+   * @tags position, number, textbox, job-data, paypath
+   */
+  positionNumberInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Position Number", exact: true }),
+
+  /**
+   * Employee Classification textbox. verified 2026-03-16
+   * @tags employee, classification, textbox, job-data
+   */
+  employeeClassificationInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Employee Classification" }),
+
+  /**
+   * Comp Rate Code input. Primary: accessible name (resilient to grid-index
+   * shifts). Fallbacks: 4 known grid-ID variants covering pre- and
+   * post-position-number-fill states. verified 2026-04-16
+   *
+   * PeopleSoft grid input IDs mutate from $11 → $0 after the position number
+   * fill triggers a page refresh. Fallback chain captures both.
+   * @tags comp, rate, code, compensation, paypath, dropdown, textbox, job-data
+   */
+  compRateCodeInput: (f: FrameLocator): Locator =>
+    f
+      .getByRole("textbox", { name: "Comp Rate Code" })
+      .or(f.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT1$0"]'))
+      .or(f.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_PROMPT1$11"]'))
+      .or(f.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_PROMPT1$0"]'))
+      .or(f.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT1$11"]')),
+
+  /**
+   * Compensation Rate input. Same shape as Comp Rate Code. verified 2026-04-16
+   * @tags compensation, rate, comp, paypath, textbox, job-data
+   */
+  compensationRateInput: (f: FrameLocator): Locator =>
+    f
+      .getByRole("textbox", { name: "Compensation Rate" })
+      .or(f.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT2$0"]'))
+      .or(f.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_NUM2$11"]'))
+      .or(f.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_NUM2$0"]'))
+      .or(f.locator('input[id="HR_TBH_G_SCR_WK_TBH_G_SH_EDIT2$11"]')),
+
+  /**
+   * Compensation Frequency textbox (accessible name — resilient). verified 2026-04-16
+   * @tags compensation, frequency, comp, textbox, job-data
+   */
+  compensationFrequencyInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Compensation Frequency" }),
+
+  /**
+   * Expected Job End Date textbox. verified 2026-03-16
+   * @tags expected, job, end, date, textbox, job-data
+   */
+  expectedJobEndDateInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Expected Job End Date" }),
+};
+
+// ─── Person Search (pre-transaction duplicate check) ───────────────────────
+
+export const personSearch = {
+  /**
+   * Search Type dropdown (P = Person). verified 2026-03-16
+   * @tags search, type, person, dropdown
+   */
+  searchTypeSelect: (f: FrameLocator): Locator =>
+    f.locator("#HCR_SM_PARM_VW_SM_TYPE"),
+
+  /**
+   * Parameter code input ("PERSON_SEARCH"). verified 2026-03-16
+   * @tags parameter, code, person, search, input
+   */
+  parameterCodeInput: (f: FrameLocator): Locator =>
+    f.locator("#HCR_SM_PARM_VW_SM_PARM_CD"),
+
+  /**
+   * Search button on page 1 (loads the search form). The 2026-08 configurable-
+   * search shell moved it into the "Search Criteria" section with inline
+   * results below; the id is unchanged, but the #PT_SIDE activity-guide
+   * sidebar overlays it — searchPerson collapses the sidebar first. verified 2026-08-05
+   * @tags search, load, form, button, person
+   */
+  loadFormButton: (f: FrameLocator): Locator =>
+    f.locator("#PTS_CFG_CL_WRK_PTS_SRCH_BTN"),
+
+  /**
+   * Result code input ("PERSON_RESULTS"). verified 2026-04-01
+   * @tags result, code, person, search, input
+   */
+  resultCodeInput: (f: FrameLocator): Locator =>
+    f.locator('[id="DERIVED_HCR_SM_SM_RSLT_CD"]'),
+
+  /**
+   * SSN input (CHAR_INPUT$0). verified 2026-04-01
+   * @tags ssn, person, search, input
+   */
+  ssnInput: (f: FrameLocator): Locator =>
+    f.locator('[id="DERIVED_HCR_SM_SM_CHAR_INPUT$0"]'),
+
+  /**
+   * First name input (CHAR_INPUT$1). verified 2026-04-01
+   * @tags first-name, name, person, search, input
+   */
+  firstNameInput: (f: FrameLocator): Locator =>
+    f.locator('[id="DERIVED_HCR_SM_SM_CHAR_INPUT$1"]'),
+
+  /**
+   * Last name input (CHAR_INPUT$2). verified 2026-04-01
+   * @tags last-name, name, person, search, input
+   */
+  lastNameInput: (f: FrameLocator): Locator =>
+    f.locator('[id="DERIVED_HCR_SM_SM_CHAR_INPUT$2"]'),
+
+  /**
+   * DOB input (DATE_INPUT$3). verified 2026-04-01
+   * @tags dob, birth, date, person, search, input
+   */
+  dobInput: (f: FrameLocator): Locator =>
+    f.locator('[id="DERIVED_HCR_SM_SM_DATE_INPUT$3"]'),
+
+  /**
+   * National Id magnifying-glass lookup button (CHAR_INPUT$prompt$0). verified 2026-04-01
+   * @tags ssn, national-id, lookup, button, person, search
+   */
+  ssnLookupButton: (f: FrameLocator): Locator =>
+    f.locator('[id="DERIVED_HCR_SM_SM_CHAR_INPUT$prompt$0"]'),
+
+  /**
+   * Search submit button. verified 2026-04-01
+   * @tags search, submit, button, person
+   */
+  searchSubmitButton: (f: FrameLocator): Locator =>
+    f.locator("#DERIVED_HCR_SM_SM_SEARCH_BTN"),
+
+  /**
+   * Results grid — one Empl ID cell (`span#EMPLID$<row>`) per matched person on
+   * the PERSON_RESULTS grid (`table#l0PERSON$0`). The real results page carries
+   * NO `SEARCH_RESULT` id and no `.PSLEVEL1GRID` class — the previous anchors
+   * matched 0 elements on a live found page, so every genuine match timed out
+   * as an ambiguous outcome (live-verified 2026-07-10, 25/104 HR-Tasks match runs
+   * failed that way). Companion per-row name cells: `HTML2$<row>` (legal first
+   * name) / `HTML4$<row>` (legal last name) — read by `searchPerson`'s match
+   * extraction. verified 2026-07-10
+   * @tags results, grid, rows, person, search, emplid
+   */
+  resultEmplIdCells: (f: FrameLocator): Locator =>
+    f.locator('table[id^="l0PERSON$"] span[id^="EMPLID$"]'),
+};
+
+// ─── Job Summary page (sidebar-less direct URL + iframe cases) ─────────────
+
+export const jobSummary = {
+  /**
+   * Campus discovery page — UCSD link. verified 2026-04-01
+   * @tags campus, discovery, ucsd, link, job-summary
+   */
+  campusDiscoveryUcsdLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "University of California, San Diego" }),
+
+  /**
+   * Empl ID textbox. `root` is either `page.locator("body")` (direct URL) or
+   * `page.frameLocator("#main_target_win0").locator("body")` (iframe case).
+   * verified 2026-04-01
+   * @tags empl, id, employee, textbox, job-summary
+   */
+  emplIdInput: (root: Locator): Locator =>
+    root.getByRole("textbox", { name: "Empl ID" }),
+
+  /**
+   * Search button (exact: true). verified 2026-04-01
+   * @tags search, button, job-summary
+   */
+  searchButton: (root: Locator): Locator =>
+    root.getByRole("button", { name: "Search", exact: true }),
+
+  /**
+   * Work Location tab. PeopleSoft renders these Job-Information sub-tabs as
+   * anchor LINKS styled as tabs, not true `role="tab"` widgets — so a
+   * `getByRole("tab", …)`-only selector times out (live separations run
+   * 2026-06-24: `click failed after 15073ms … getByRole('tab', { name: 'Work
+   * Location' })`). Fall back through the link role and an anchor with the tab
+   * text. verified 2026-04-01; link/anchor fallbacks added 2026-06-24
+   * @tags work, location, tab, link, job-summary
+   */
+  workLocationTab: (root: Locator): Locator =>
+    root
+      .getByRole("tab", { name: "Work Location" })
+      .or(root.getByRole("link", { name: "Work Location" }))
+      .or(root.locator('a:has-text("Work Location")'))
+      .first(),
+
+  /**
+   * Job Information tab. Same link-vs-tab caveat as `workLocationTab` — anchor
+   * link styled as a tab, so the role fallback chain is required.
+   * verified 2026-04-01; link/anchor fallbacks added 2026-06-24
+   * @tags job, information, tab, link, job-summary
+   */
+  jobInformationTab: (root: Locator): Locator =>
+    root
+      .getByRole("tab", { name: "Job Information" })
+      .or(root.getByRole("link", { name: "Job Information" }))
+      .or(root.locator('a:has-text("Job Information")'))
+      .first(),
+
+  /**
+   * Employee display name on the Workforce Job Summary detail page. PeopleSoft
+   * renders the bold header name (e.g. "Jiztir Babocizuk", First Last order)
+   * in a stable derived field `#DERIVED_NAME_DISPLAY_NAME`; the fallback is its
+   * bold-header CSS class. Read after a successful search to verify the EID
+   * resolves to the expected person (separations name↔EID check). `root` is the
+   * `getFormRoot(page)` body locator (iframe or direct-URL case).
+   * verified 2026-06-18
+   * @tags employee, name, display, header, detail, job-summary
+   */
+  personName: (root: Locator): Locator =>
+    root
+      .locator("#DERIVED_NAME_DISPLAY_NAME")
+      .or(root.locator("span.PABOLD11TEXT"))
+      .first(),
+
+  /**
+   * Iframe presence probe — when count > 0 we're in iframe mode. verified 2026-04-01
+   * @tags iframe, probe, job-summary
+   */
+  mainTargetIframeProbe: (page: Page): Locator =>
+    page.locator("#main_target_win0"),
+
+  /**
+   * Multi-row search-results grid container on the modern PeopleSoft Fluid
+   * "Find an Existing Value" page. Zero count → PeopleSoft auto-redirected to
+   * the detail page (single-row case). Non-zero count → multiple rows returned;
+   * caller must drill into one before clicking detail-page tabs. The live grid
+   * is `divgbrPTS_CFG_CL_STD_RSL$<n>`; the old `[id*="SEARCH_RESULT"]` /
+   * `.PSLEVEL1GRID` guesses match ZERO on the Fluid layout (kept only as
+   * classic-grid fallbacks — see LESSONS 2026-06-24). verified 2026-06-24
+   * @tags multi-row, grid, search, results, fluid, job-summary
+   */
+  searchResultsGrid: (root: Locator): Locator =>
+    root
+      .locator('[id^="divgbrPTS_CFG_CL_STD_RSL"]')
+      .or(root.locator('[id*="SEARCH_RESULT"]'))
+      .or(root.locator(".PSLEVEL1GRID")),
+
+  /**
+   * Data rows inside the multi-row search-results grid. On the live Fluid
+   * "Find an Existing Value" page each result row is
+   * `tr[id^="trPTS_CFG_CL_STD_RSL"]` (e.g. `trPTS_CFG_CL_STD_RSL$0_row1`) — a
+   * clickable row whose own `onclick` (`submitAction_win0(..,'#ICRow<n>')`)
+   * drills to the detail page; there is NO `<a>` drill-in link. The legacy
+   * `[id*="SEARCH_RESULT"] tr` / `.PSLEVEL1GRID tr` probes matched ZERO live rows
+   * — the direct cause of the 2026-06-24 "could not reach the detail page
+   * (scoped rows=0)" failures (see LESSONS). The 7+ digit filter keeps
+   * employee-ID rows and skips header / separator rows. verified 2026-06-24
+   * @tags multi-row, rows, grid, search, results, fluid, job-summary
+   */
+  searchResultRows: (root: Locator): Locator =>
+    root
+      .locator('tr[id^="trPTS_CFG_CL_STD_RSL"], [id*="SEARCH_RESULT"] tr, .PSLEVEL1GRID tr')
+      .filter({ hasText: /\d{7,}/ }),
+
+  /**
+   * Payroll Status cell inside a single result row — the signal the caller tests
+   * (`/terminat/i`) to skip already-terminated employments. On the live Fluid
+   * grid this is the `PTS_CFG_CL_RSLT_NUI_SRCH13$…` span (column 13 = Payroll
+   * Status), rendering the literal "Terminated" / "Active". Targeting it by the
+   * stable `SRCH13` column prefix avoids the old `td:has-text("Active")` trap (it
+   * also substring-matched HR Status "Inactive") and the strict-mode multi-match
+   * when two cells both read "Active". `.first()` guarantees a single textContent
+   * read. verified 2026-06-24
+   * @tags multi-row, hr-status, payroll-status, terminated, active, cell, fluid, job-summary
+   */
+  rowHrStatusCell: (row: Locator): Locator =>
+    row
+      .locator('span[id*="PTS_CFG_CL_RSLT_NUI_SRCH13"]')
+      .or(row.locator('td:has-text("Terminated")'))
+      .or(row.locator('span:has-text("Terminated")'))
+      .first(),
+
+  /**
+   * Employment Record cell inside a single result row.
+   * On the live Fluid grid this is column 1 (span `PTS_CFG_CL_RSLT_NUI_SRCH1`).
+   * verified 2026-09-23
+   * @tags multi-row, empl-record, cell, fluid, job-summary
+   */
+  rowEmplRecordCell: (row: Locator): Locator =>
+    row
+      .locator('span[id*="PTS_CFG_CL_RSLT_NUI_SRCH1"]')
+      .or(row.locator("td").nth(1))
+      .first(),
+
+  /**
+   * Job Code cell inside a single result row.
+   * On the live Fluid grid this is column 11 (span `PTS_CFG_CL_RSLT_NUI_SRCH11`).
+   * verified 2026-09-23
+   * @tags multi-row, job-code, cell, fluid, job-summary
+   */
+  rowJobCodeCell: (row: Locator): Locator =>
+    row
+      .locator('span[id*="PTS_CFG_CL_RSLT_NUI_SRCH11"]')
+      .or(row.locator("td").nth(11))
+      .first(),
+
+  /**
+   * Drill-in target that navigates from the grid to the detail page for the
+   * matching row. The Fluid row itself drills in via `onclick`; some live
+   * renderings also include a nested "Drill in" anchor. `.first()` keeps that
+   * valid overlap strict-mode safe while preserving the legacy anchor/EMPLID
+   * fallbacks. verified 2026-08-25 (EID 10090154, active STDT 4 row)
+   * @tags multi-row, drill-in, select, row, fluid, job-summary
+   */
+  rowDrillInLink: (row: Locator): Locator =>
+    row
+      .getByRole("link", { name: /drill in/i })
+      .or(row.locator('a[id*="EMPLID"]'))
+      .or(row)
+      .first(),
+
+  /**
+   * GRID-INDEPENDENT drill-in targets for the Workforce Job Summary results page,
+   * a fallback for when the scoped `searchResultRows` probe somehow misses. On
+   * the live Fluid page the clickable unit is the result ROW
+   * (`tr[id^="trPTS_CFG_CL_STD_RSL"]`, which drills via its own onclick); the
+   * caller clicks `.first()`. The legacy EMPLID/SRCH anchor probes — which the
+   * Fluid layout never emits, leaving us stuck on a tab-less results list (EID
+   * 10090152 / 2026-06-24) — stay as classic-grid fallbacks. verified 2026-06-24
+   * @tags multi-row, drill-in, row, emplid, root, fallback, fluid, job-summary
+   */
+  resultDrillLinks: (root: Locator): Locator =>
+    root
+      .locator('tr[id^="trPTS_CFG_CL_STD_RSL"]')
+      .or(root.getByRole("link", { name: /drill in/i }))
+      .or(root.locator('a[id*="EMPLID"]')),
+};
+
+// ─── HR Tasks navigation (top-level page before iframe interactions) ──────
+//
+// HR Tasks is the activity-guide landing page reached at the URL stored in
+// `UCPATH_SMART_HR_URL`. The left sidebar (`<navigation aria-label="HR Tasks
+// Item List">`) has 7 top-level items; 5 of them are expandable categories
+// whose toggle href is `javascript:void(0);` and whose accessible name ends
+// in "(select to expand or collapse child steps)". The 2 leaf top-level
+// items, plus all 18 leaf children, link to `/c/...GBL?NavColl=true` URLs
+// that load inside `#main_target_win0`. Top-level link names are duplicated
+// (img alt + text — e.g. "Search Person Search Person") so accessible-name
+// matchers should use anchored regex rather than `exact: true`.
+// Sidebar tree mapped 2026-04-24 via playwright-cli.
+
+export const hrTasks = {
+  /**
+   * HR Tasks tile / link. verified 2026-03-16
+   * @tags hr-tasks, tile, link, navigation
+   */
+  tile: (page: Page): Locator =>
+    page.getByRole("link", { name: /HR Tasks/i }).or(page.getByText("HR Tasks")),
+
+  /**
+   * Sidebar `<navigation>` region containing all HR Tasks nav items.
+   * Useful as a scoping root for sidebar-only locators. verified 2026-04-24
+   * @tags sidebar, navigation, region, hr-tasks
+   */
+  itemList: (page: Page): Locator =>
+    page.getByRole("navigation", { name: "HR Tasks Item List" }),
+
+  /**
+   * Sidebar top-level: Search Person (Search/Match form). Top-level links
+   * have duplicated accessible names ("X X"), so anchor with `^X`.
+   * verified 2026-04-24
+   * @tags sidebar, search, person, link, hr-tasks
+   */
+  searchPersonLink: (page: Page): Locator =>
+    page.getByRole("link", { name: /^Search Person/ }),
+
+  /**
+   * Sidebar top-level: Person Organizational Summary. verified 2026-04-24
+   * @tags sidebar, person-org-summary, link, hr-tasks
+   */
+  personOrgSummaryLink: (page: Page): Locator =>
+    page.getByRole("link", { name: /^Person Organizational Summary/ }),
+
+  /**
+   * Sidebar category toggle: Contract Pay (expand/collapse). The "(select to
+   * expand or collapse child steps)" suffix disambiguates the category
+   * header from any child link starting with the same prefix. verified 2026-04-24
+   * @tags sidebar, contract-pay, category, link, hr-tasks
+   */
+  contractPayLink: (page: Page): Locator =>
+    page.getByRole("link", {
+      name: /^Contract Pay .*select to expand or collapse/,
+    }),
+
+  /**
+   * Sidebar leaf under Contract Pay: Contract Payment Details. verified 2026-04-24
+   * @tags sidebar, contract-pay, payment-details, link, hr-tasks
+   */
+  contractPaymentDetailsLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Contract Payment Details", exact: true }),
+
+  /**
+   * Sidebar leaf under Contract Pay: Update Contract Pay NA. verified 2026-04-24
+   * @tags sidebar, contract-pay, update, link, hr-tasks
+   */
+  updateContractPayNaLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Update Contract Pay NA", exact: true }),
+
+  /**
+   * Sidebar category toggle: PayPath/Additional Pay. verified 2026-04-24
+   * @tags sidebar, paypath, additional-pay, category, link, hr-tasks
+   */
+  payPathLink: (page: Page): Locator =>
+    page.getByRole("link", {
+      name: /^PayPath\/Additional Pay .*select to expand or collapse/,
+    }),
+
+  /**
+   * Sidebar leaf under PayPath: Create Additional Pay. verified 2026-04-24
+   * @tags sidebar, paypath, additional-pay, create, link, hr-tasks
+   */
+  createAdditionalPayLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Create Additional Pay", exact: true }),
+
+  /**
+   * Sidebar leaf under PayPath: Self Service Additional Pay. verified 2026-04-24
+   * @tags sidebar, paypath, self-service, additional-pay, link, hr-tasks
+   */
+  selfServiceAdditionalPayLink: (page: Page): Locator =>
+    page.getByRole("link", {
+      name: "Self Service Additional Pay",
+      exact: true,
+    }),
+
+  /**
+   * Sidebar leaf under PayPath: PayPath Actions (combined staff+academic
+   * entry). verified 2026-04-24
+   * @tags sidebar, paypath, actions, link, hr-tasks
+   */
+  payPathActionsLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "PayPath Actions", exact: true }),
+
+  /**
+   * Sidebar leaf under PayPath: PayPath Actions ACAD. verified 2026-04-24
+   * @tags sidebar, paypath, actions, academic, link, hr-tasks
+   */
+  payPathActionsAcadLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "PayPath Actions ACAD", exact: true }),
+
+  /**
+   * Sidebar leaf under PayPath: PayPath Actions STAFF. verified 2026-04-24
+   * @tags sidebar, paypath, actions, staff, link, hr-tasks
+   */
+  payPathActionsStaffLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "PayPath Actions STAFF", exact: true }),
+
+  /**
+   * Sidebar category toggle: Job Data Related. verified 2026-04-24
+   * @tags sidebar, job-data, category, link, hr-tasks
+   */
+  jobDataRelatedLink: (page: Page): Locator =>
+    page.getByRole("link", {
+      name: /^Job Data Related .*select to expand or collapse/,
+    }),
+
+  /**
+   * Sidebar leaf under Job Data Related: Job Data. verified 2026-04-24
+   * @tags sidebar, job-data, link, hr-tasks
+   */
+  jobDataLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Job Data", exact: true }),
+
+  /**
+   * Sidebar leaf under Job Data Related: UC Employee Review. verified 2026-04-24
+   * @tags sidebar, job-data, uc-employee-review, link, hr-tasks
+   */
+  ucEmployeeReviewLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "UC Employee Review", exact: true }),
+
+  /**
+   * Sidebar leaf under Job Data Related: Workforce Job Summary (separations
+   * + emergency-contact entry point). verified 2026-04-24
+   * @tags sidebar, job-data, workforce, job-summary, link, hr-tasks
+   */
+  workforceJobSummaryLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Workforce Job Summary", exact: true }),
+
+  /**
+   * Sidebar category toggle: Personal Data Related. verified 2026-04-24
+   * @tags sidebar, personal-data, category, link, hr-tasks
+   */
+  personalDataRelatedLink: (page: Page): Locator =>
+    page.getByRole("link", {
+      name: /^Personal Data Related .*select to expand or collapse/,
+    }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: Activities. verified 2026-04-24
+   * @tags sidebar, personal-data, activities, link, hr-tasks
+   */
+  activitiesLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Activities", exact: true }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: Emergency Contact. verified 2026-04-24
+   * @tags sidebar, personal-data, emergency-contact, link, hr-tasks
+   */
+  emergencyContactLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Emergency Contact", exact: true }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: Identification Data. verified 2026-04-24
+   * @tags sidebar, personal-data, identification, link, hr-tasks
+   */
+  identificationDataLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Identification Data", exact: true }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: Modify a Person. verified 2026-04-24
+   * @tags sidebar, personal-data, modify, link, hr-tasks
+   */
+  modifyAPersonLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Modify a Person", exact: true }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: Person Checklist. verified 2026-04-24
+   * @tags sidebar, personal-data, checklist, link, hr-tasks
+   */
+  personChecklistLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Person Checklist", exact: true }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: Person Profiles (oath-signature
+   * entry point). verified 2026-04-24
+   * @tags sidebar, personal-data, person-profiles, oath, link, hr-tasks
+   */
+  personProfilesLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Person Profiles", exact: true }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: Security Clearance. verified 2026-04-24
+   * @tags sidebar, personal-data, security-clearance, link, hr-tasks
+   */
+  securityClearanceLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Security Clearance", exact: true }),
+
+  /**
+   * Sidebar leaf under Personal Data Related: UC External System IDs.
+   * verified 2026-04-24
+   * @tags sidebar, personal-data, external-system-ids, link, hr-tasks
+   */
+  ucExternalSystemIdsLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "UC External System IDs", exact: true }),
+
+  /**
+   * Sidebar category toggle: Smart HR Templates. The legacy `getByText`
+   * variant from before 2026-04-24 still matched this same node loosely;
+   * the precise role+regex form here distinguishes the toggle from any
+   * descendant "Smart HR Templates" text. verified 2026-04-24
+   * @tags sidebar, smart-hr, templates, category, link, hr-tasks
+   */
+  smartHRTemplatesLink: (page: Page): Locator =>
+    page.getByText("Smart HR Templates"),
+
+  /**
+   * Sidebar leaf under Smart HR Templates: Smart HR Transactions; exact link role avoids matching "SS Smart HR Transactions". verified 2026-05-27
+   * @tags sidebar, smart-hr, transactions, link, hr-tasks
+   */
+  smartHRTransactionsLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Smart HR Transactions", exact: true }),
+
+  /**
+   * Sidebar leaf under Smart HR Templates: SS Smart HR Transactions
+   * (self-service variant). verified 2026-04-24
+   * @tags sidebar, smart-hr, self-service, transactions, link, hr-tasks
+   */
+  ssSmartHRTransactionsLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "SS Smart HR Transactions", exact: true }),
+
+  /**
+   * Sidebar leaf under Smart HR Templates: Smart HR Transaction Status.
+   * verified 2026-04-24
+   * @tags sidebar, smart-hr, status, transactions, link, hr-tasks
+   */
+  smartHRTransactionStatusLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Smart HR Transaction Status", exact: true }),
+};
+
+// ─── Person Organizational Summary (HR Tasks → sidebar leaf) ──────────────
+//
+// PERSON_ORG_SUMM.GBL is a Find-an-Existing-Value search form distinct from
+// `personSearch.*` (which targets the Search/Match form configured for the
+// PERSON_SEARCH parameter). This form's primary inputs are Empl ID, Last
+// Name, and Name (first/middle); SSN and DOB are not exposed here. eid-lookup
+// uses this page; future workflows that need name-keyed person lookup should
+// reuse these selectors. Single-result redirects skip the grid (see
+// LESSONS.md "Person Org Summary single-result redirect"). verified 2026-04-24
+
+export const personOrgSummary = {
+  // Each search input's accessible name is now "<Label> begins with": PeopleSoft
+  // points `aria-labelledby` at the label AND the adjacent operator <select>
+  // (`<field>$op`), so the operator text is folded into the accessible name.
+  // That silently broke the old `exact: true` arms ("Empl ID" / "Name" match
+  // nothing) while the non-exact "Last Name" arm kept working by substring.
+  // Anchored regexes are used instead of a plain substring because a bare
+  // "Name" substring also matches "Last Name begins with" — two hits, strict
+  // mode violation. `^<Label>\b` pins to the start so each matches exactly one
+  // box, and stays correct if the operator changes ("contains", "=", …).
+  // The `.or()` arms are the record.field element ids, live-verified alongside
+  // the regexes on the same probe, so neither arm is an unverified guess.
+
+  /**
+   * Empl ID textbox. verified 2026-08-04 (live probe — accessible name is
+   * "Empl ID begins with"; id `UC_ORG_SUM_VW_EMPLID`)
+   * @tags empl, id, employee, textbox, person-org-summary
+   */
+  emplIdInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: /^Empl ID\b/ }).or(f.locator("#UC_ORG_SUM_VW_EMPLID")).first(),
+
+  /**
+   * Last Name textbox. verified 2026-08-04 (live probe — accessible name is
+   * "Last Name begins with"; id `UC_ORG_SUM_VW_PARTNER_LAST_NAME`)
+   * @tags last-name, name, textbox, person-org-summary
+   */
+  lastNameInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: /^Last Name\b/ })
+      .or(f.locator("#UC_ORG_SUM_VW_PARTNER_LAST_NAME"))
+      .first(),
+
+  /**
+   * Name (first/middle) textbox. verified 2026-08-04 (live probe — accessible
+   * name is "Name begins with"; id `UC_ORG_SUM_VW_NAME_DISPLAY`)
+   * @tags name, first-name, middle-name, textbox, person-org-summary
+   */
+  nameInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: /^Name\b/ })
+      .or(f.locator("#UC_ORG_SUM_VW_NAME_DISPLAY"))
+      .first(),
+
+  /**
+   * Case Sensitive checkbox — toggles case-aware name matching. verified 2026-04-24
+   * @tags case, sensitive, checkbox, person-org-summary
+   */
+  caseSensitiveCheckbox: (f: FrameLocator): Locator =>
+    f.getByRole("checkbox", { name: "Case Sensitive" }),
+
+  /**
+   * Search submit button. The `#PTS_CFG_CL_WRK_PTS_SRCH_BTN` ID is the
+   * stable PeopleSoft Find-an-Existing-Value search trigger and is shared
+   * with the Search Person / Search/Match form. verified 2026-04-24
+   * @tags search, submit, button, person-org-summary
+   */
+  searchButton: (f: FrameLocator): Locator =>
+    f.locator("#PTS_CFG_CL_WRK_PTS_SRCH_BTN"),
+
+  /**
+   * Clear search criteria button. Used between iterations of name-strategy
+   * fallbacks (Last + First → Last + Middle, etc.) so stale values don't
+   * leak across attempts. verified 2026-04-24
+   * @tags clear, button, person-org-summary
+   */
+  clearButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Clear", exact: true }),
+
+  /**
+   * Person ID value on the single-result detail page. PeopleSoft renders
+   * the header EID as `PERSON_NPC_VW_EMPLID` (no grid suffix); older
+   * deployments / variant code paths also expose `PER_INST_EMP_VW_OPRID$0`
+   * and `PER_INST_EMP_VW_EMPLID$0`. verified 2026-07-08 (live probe,
+   * EID 10090134 — primary arm matched)
+   * @tags person-id, emplid, detail, person-org-summary
+   */
+  personIdValue: (f: FrameLocator): Locator =>
+    f.locator("#PERSON_NPC_VW_EMPLID").or(
+      f.locator("#PER_INST_EMP_VW_OPRID\\$0").or(
+        f.locator("#PER_INST_EMP_VW_EMPLID\\$0"),
+      ),
+    ),
+
+  /**
+   * Employee display name on the detail page header. Primary anchor is
+   * `#PERSON_NAME_NAME` (the bold PABOLD11TEXT header span) — a live DOM
+   * probe of a real detail page (EID 10090134) found NO element for any
+   * `PERSON_NPC_VW_*NAME*` variant while `#PERSON_NAME_NAME` held the name,
+   * i.e. the old chain missed entirely and the body-scan heuristic in
+   * person-org-summary.ts was silently carrying production. The NPC arms
+   * are kept only as legacy fallbacks for older renderings.
+   * verified 2026-07-08
+   * @tags name, display, header, detail, person-org-summary
+   */
+  personNameValue: (f: FrameLocator): Locator =>
+    f.locator("#PERSON_NAME_NAME")
+      .or(f.locator("#PERSON_NPC_VW_NAME_DISPLAY"))
+      .or(f.locator("#PERSON_NPC_VW_NAME_DISPL"))
+      .or(f.locator("#PERSON_NPC_VW_NAME"))
+      .or(f.locator("[id*='PERSON_NPC_VW'][id*='NAME']").first()),
+
+  /**
+   * Body of the Person Org Summary iframe, used for DOM extraction where the
+   * page renders values as label-adjacent text nodes. verified 2026-04-24
+   * @tags body, evaluate, detail, person-org-summary
+   */
+  body: (f: FrameLocator): Locator =>
+    f.locator("body"),
+
+  /**
+   * Last Hire Date on the detail page's ORG Instance section. verified 2026-04-24
+   * @tags hire-date, start-date, detail, person-org-summary
+   */
+  lastHireDate: (f: FrameLocator): Locator =>
+    f.locator("#PER_INST_EMP_VW_LAST_HIRE_DT\\$0"),
+
+  /**
+   * Termination Date on the detail page's ORG Instance section. Empty means
+   * active employment. verified 2026-04-24
+   * @tags termination-date, end-date, detail, person-org-summary
+   */
+  terminationDate: (f: FrameLocator): Locator =>
+    f.locator("#PER_INST_EMP_VW_TERMINATION_DT\\$0"),
+
+  /**
+   * Termination Reason (PeopleSoft action-reason description) on the detail
+   * page's ORG Instance section, rendered next to the Termination Date — e.g.
+   * "Resign - Personal Reasons". Empty for active employment. verified 2026-06-05
+   * @tags termination-reason, action-reason, end-date, detail, person-org-summary
+   */
+  terminationReason: (f: FrameLocator): Locator =>
+    f.locator("#PER_INST_EMP_VW_DESCR\\$0"),
+
+  /**
+   * Empty-state copy shown before any search has run. verified 2026-04-24
+   * @tags empty-state, text, person-org-summary
+   */
+  nothingYetText: (f: FrameLocator): Locator =>
+    f.getByText("Nothing yet"),
+
+  /**
+   * No-results copy shown after PeopleSoft finds no matching values.
+   * verified 2026-04-24
+   * @tags no-results, text, person-org-summary
+   */
+  noMatchingValuesText: (f: FrameLocator): Locator =>
+    f.getByText("No matching values were found"),
+
+  /**
+   * View All link on paginated search results. verified 2026-04-24
+   * @tags view-all, pagination, person-org-summary
+   */
+  viewAllLink: (f: FrameLocator): Locator =>
+    f.getByRole("link", { name: "View All" }),
+
+  /**
+   * PeopleSoft configurable search results grid. verified 2026-04-24
+   * @tags results, table, grid, person-org-summary
+   */
+  resultsTable: (f: FrameLocator): Locator =>
+    f.locator("table[id='tdgbrPTS_CFG_CL_STD_RSL$0']"),
+
+  /**
+   * Row drill-in icon in the search results grid. verified 2026-04-24
+   * @tags drill-in, results, person-org-summary
+   */
+  drillInButton: (f: FrameLocator, rowIndex: number): Locator =>
+    f.locator(`[id="PTS_CFG_CL_RSLT_PTS_DRILLIN$40$$IMG$${rowIndex}"]`),
+
+  /**
+   * Return to Search button on the Person Org Summary detail page.
+   * verified 2026-04-24
+   * @tags return, search, detail, person-org-summary
+   */
+  returnToSearchButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Return to Search", exact: true }),
+};
+
+// ─── PayPath Actions (HR Tasks → PayPath/Additional Pay → PayPath Actions) ─
+//
+// `/c/UC_EXTENSIONS.UC_E102_STAFF_ACAD.GBL` — combined staff+academic entry.
+// Find-an-Existing-Value search form drills into the actual PayPath edit
+// page where Job Data fields (position, comp rate, etc.) are filled. The
+// edit page reuses `jobData.*` selectors; this group covers the search
+// form. work-study uses this navigation chain via the sidebar (see
+// `src/workflows/work-study/enter.ts`). The post-search Save button has
+// the unique ID `UC_E102_PP_WRK_SUBMIT_BTN` and is registered here for
+// shared reuse. ACAD-only and STAFF-only variants live at
+// `UC_E102_ACAD_ACTNS.GBL` / `UC_E102_STAF_ACTNS.GBL` and have the same
+// search-form shape — selectors here apply to all three.
+// verified 2026-04-24
+
+export const payPathActions = {
+  /**
+   * Empl ID textbox. Most common search key. verified 2026-04-24
+   * @tags empl, id, employee, textbox, paypath-actions
+   */
+  emplIdInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Empl ID", exact: true }),
+
+  /**
+   * Empl Record textbox. Disambiguates between concurrent jobs for the
+   * same employee. verified 2026-04-24
+   * @tags empl, record, textbox, paypath-actions
+   */
+  emplRecordInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Empl Record" }),
+
+  /**
+   * Name textbox. exact: true required because "Last Name" and other
+   * cells contain "Name". verified 2026-04-24
+   * @tags name, textbox, paypath-actions
+   */
+  nameInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Name", exact: true }),
+
+  /**
+   * Business Unit textbox. exact: true avoids matching "Look up Business
+   * Unit". verified 2026-04-24
+   * @tags business-unit, textbox, paypath-actions
+   */
+  businessUnitInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Business Unit", exact: true }),
+
+  /**
+   * Business Unit magnifying-glass lookup button. verified 2026-04-24
+   * @tags business-unit, lookup, button, paypath-actions
+   */
+  businessUnitLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Business Unit" }),
+
+  /**
+   * Position Number textbox. verified 2026-04-24
+   * @tags position, number, textbox, paypath-actions
+   */
+  positionNumberInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Position Number", exact: true }),
+
+  /**
+   * Position Number lookup button. verified 2026-04-24
+   * @tags position, number, lookup, button, paypath-actions
+   */
+  positionNumberLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Position Number" }),
+
+  /**
+   * Department textbox. verified 2026-04-24
+   * @tags department, textbox, paypath-actions
+   */
+  departmentInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Department", exact: true }),
+
+  /**
+   * Department lookup button. verified 2026-04-24
+   * @tags department, lookup, button, paypath-actions
+   */
+  departmentLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Department" }),
+
+  /**
+   * Job Code textbox. verified 2026-04-24
+   * @tags job-code, textbox, paypath-actions
+   */
+  jobCodeInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Job Code", exact: true }),
+
+  /**
+   * Job Code lookup button. verified 2026-04-24
+   * @tags job-code, lookup, button, paypath-actions
+   */
+  jobCodeLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Job Code" }),
+
+  /**
+   * Employee Classification textbox. verified 2026-04-24
+   * @tags employee, classification, textbox, paypath-actions
+   */
+  employeeClassificationInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Employee Classification", exact: true }),
+
+  /**
+   * Employee Classification lookup button. verified 2026-04-24
+   * @tags employee, classification, lookup, button, paypath-actions
+   */
+  employeeClassificationLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Employee Classification" }),
+
+  /**
+   * Employee Status combobox. Options: Active, Leave With Pay, Leave of
+   * Absence, Short Work Break. verified 2026-04-24
+   * @tags employee, status, combobox, paypath-actions
+   */
+  employeeStatusSelect: (f: FrameLocator): Locator =>
+    f.getByRole("combobox", { name: "Employee Status" }),
+
+  /**
+   * Case Sensitive checkbox. verified 2026-04-24
+   * @tags case, sensitive, checkbox, paypath-actions
+   */
+  caseSensitiveCheckbox: (f: FrameLocator): Locator =>
+    f.getByRole("checkbox", { name: "Case Sensitive" }),
+
+  /**
+   * Search submit button. Shared `#PTS_CFG_CL_WRK_PTS_SRCH_BTN` ID with
+   * other Find-an-Existing-Value forms. verified 2026-04-24
+   * @tags search, submit, button, paypath-actions
+   */
+  searchButton: (f: FrameLocator): Locator =>
+    f.locator("#PTS_CFG_CL_WRK_PTS_SRCH_BTN"),
+
+  /**
+   * Clear search criteria button. verified 2026-04-24
+   * @tags clear, button, paypath-actions
+   */
+  clearButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Clear", exact: true }),
+
+  /**
+   * Save and Submit button on the post-search PayPath edit page. The
+   * `UC_E102_PP_WRK_SUBMIT_BTN` ID is unique to PayPath Actions (distinct
+   * from Smart HR's `smartHR.saveAndSubmitButton`). Verified in
+   * `src/workflows/work-study/enter.ts`.
+   * @tags save, submit, button, paypath-actions, edit
+   */
+  saveAndSubmitButton: (f: FrameLocator): Locator =>
+    f.locator("#UC_E102_PP_WRK_SUBMIT_BTN"),
+
+  // ── Edit-page selectors (post-search, work-study PayPath transaction) ──
+  // verified 2026-03-17 (original inline comment in enter.ts)
+
+  /**
+   * PeopleSoft alert dialog OK button (e.g. "payroll in progress" warning).
+   * verified 2026-03-17
+   * @tags alert, dialog, ok, button, paypath-actions
+   */
+  alertOkButton: (page: Page): Locator =>
+    page.getByRole("button", { name: "OK" }),
+
+  /**
+   * Employee name display span in the Position Data header (after search).
+   * Falls back to any element whose ID contains "NAME_DISPLAY". verified 2026-03-17
+   * @tags employee, name, display, position-data, paypath-actions
+   */
+  employeeNameDisplay: (f: FrameLocator): Locator =>
+    f.locator('[id="UC_E102_PP_WRK_NAME_DISPLAY"]')
+      .or(f.locator('[id*="NAME_DISPLAY"]').first()),
+
+  /**
+   * Effective Date textbox on the Position Data tab. verified 2026-03-17
+   * @tags effective-date, textbox, position-data, paypath-actions
+   */
+  effectiveDateInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Effective Date:" }),
+
+  /**
+   * Position Change Reason textbox on the Position Data tab. verified 2026-03-17
+   * @tags position, change-reason, textbox, position-data, paypath-actions
+   */
+  positionChangeReasonInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Position Change Reason:" }),
+
+  /**
+   * Position Pool textbox on the Position Data tab. verified 2026-03-17
+   * @tags position, pool, textbox, position-data, paypath-actions
+   */
+  positionPoolInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Position Pool:" }),
+
+  /**
+   * Job Data tab on the PayPath edit page. verified 2026-03-17
+   * @tags job-data, tab, paypath-actions
+   */
+  jobDataTab: (f: FrameLocator): Locator =>
+    f.getByRole("tab", { name: "Job Data" }),
+
+  /**
+   * Job Data Comments textbox. verified 2026-03-17
+   * @tags job-data, comments, textbox, paypath-actions
+   */
+  jobDataCommentsInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Job Data Comments:" }),
+
+  /**
+   * Additional Pay Data tab on the PayPath edit page. verified 2026-03-17
+   * @tags additional-pay, tab, paypath-actions
+   */
+  additionalPayDataTab: (f: FrameLocator): Locator =>
+    f.getByRole("tab", { name: "Additional Pay Data" }),
+
+  /**
+   * Initiator's Comments textbox on the Additional Pay Data tab. verified 2026-03-17
+   * @tags initiators-comments, textbox, additional-pay, paypath-actions
+   */
+  initiatorsCommentsInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Initiator's Comments" }),
+};
+
+// ─── SS Smart HR Transactions (self-service Smart HR) ─────────────────────
+//
+// `/c/UC_EXTENSIONS.UC_SS_TBH.GBL` — self-service variant of Smart HR
+// Transactions, surfacing in-flight self-service hires/changes for review.
+// Find-an-Existing-Value search form keyed on Transaction ID, Empl ID,
+// Action, Approval Status, and Business Unit. Distinct from the standard
+// Smart HR Transactions page (which is `smartHR.*`). verified 2026-08-05
+// (search-form arms re-probed live after the `$op` accessible-name drift)
+
+export const ssSmartHRTransactions = {
+  /** Employee drill-in link on the transaction receipt. verified 2026-09-08
+   * @tags ss-smart-hr, employee, detail, link
+   */
+  detailPersonLink: (f: FrameLocator): Locator => f.locator('[id="NAME$0"]'),
+  // Search-input accessible names are "<Label> begins with" (the operator
+  // <select>, `<field>$op`, is folded in via aria-labelledby:
+  // `<FIELD>_LBL$star <FIELD>_LBL <FIELD>$op`) — the same PeopleSoft
+  // Find-an-Existing-Value change that broke personOrgSummary (see the
+  // 2026-08-04 LESSONS.md entry). Every old `exact: true` arm matched zero
+  // elements (separations transaction-check died on the Empl ID fill timeout,
+  // doc 4493, 2026-08-05). Anchored `^<Label>\b` regexes + the live-probed
+  // record.field element ids replace them; both arms verified on the same
+  // 2026-08-05 probe.
+
+  /**
+   * Transaction ID textbox (accessible name "Transaction ID begins with").
+   * verified 2026-08-05 (live probe; id `UC_SS_TBH_DVW_UC_TRANSACT_ID`)
+   * @tags transaction, id, textbox, ss-smart-hr
+   */
+  txnNumberTextbox: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: /^Transaction ID\b/ })
+      .or(f.locator("#UC_SS_TBH_DVW_UC_TRANSACT_ID"))
+      .first(),
+
+  /**
+   * Name textbox (accessible name "Name begins with"). verified 2026-08-05
+   * (live probe; id `UC_SS_TBH_DVW_NAME`)
+   * @tags name, textbox, ss-smart-hr
+   */
+  nameInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: /^Name\b/ })
+      .or(f.locator("#UC_SS_TBH_DVW_NAME"))
+      .first(),
+
+  /**
+   * Empl ID textbox (accessible name "Empl ID begins with"). verified
+   * 2026-08-05 (live probe; id `UC_SS_TBH_DVW_EMPLID`)
+   * @tags empl, id, employee, textbox, ss-smart-hr
+   */
+  emplIdInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: /^Empl ID\b/ })
+      .or(f.locator("#UC_SS_TBH_DVW_EMPLID"))
+      .first(),
+
+  /**
+   * Action textbox (PeopleSoft action code, e.g. HIR, REH; accessible name
+   * "Action begins with"). verified 2026-08-05 (live probe; id
+   * `UC_SS_TBH_DVW_ACTION`)
+   * @tags action, code, textbox, ss-smart-hr
+   */
+  actionInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: /^Action\b/ })
+      .or(f.locator("#UC_SS_TBH_DVW_ACTION"))
+      .first(),
+
+  /**
+   * Action lookup button. verified 2026-04-24
+   * @tags action, lookup, button, ss-smart-hr
+   */
+  actionLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Action" }),
+
+  /**
+   * Approval Status combobox (accessible name "Approval Status =" — the `=`
+   * operator select is folded in). Options: Approved, Denied, Error, Manually
+   * Processed, Pending, Pushed Back. verified 2026-08-05 (live probe; id
+   * `UC_SS_TBH_DVW_APPR_STATUS`)
+   * @tags approval, status, combobox, ss-smart-hr
+   */
+  approvalStatusSelect: (f: FrameLocator): Locator =>
+    f.getByRole("combobox", { name: /^Approval Status\b/ })
+      .or(f.locator("select#UC_SS_TBH_DVW_APPR_STATUS"))
+      .first(),
+
+  /**
+   * Business Unit textbox (accessible name "Business Unit begins with").
+   * verified 2026-08-05 (live probe; id `UC_SS_TBH_DVW_BUSINESS_UNIT`)
+   * @tags business-unit, textbox, ss-smart-hr
+   */
+  businessUnitInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: /^Business Unit\b/ })
+      .or(f.locator("#UC_SS_TBH_DVW_BUSINESS_UNIT"))
+      .first(),
+
+  /**
+   * Business Unit lookup button. verified 2026-04-24
+   * @tags business-unit, lookup, button, ss-smart-hr
+   */
+  businessUnitLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Business Unit" }),
+
+  /**
+   * Case Sensitive checkbox. verified 2026-04-24
+   * @tags case, sensitive, checkbox, ss-smart-hr
+   */
+  caseSensitiveCheckbox: (f: FrameLocator): Locator =>
+    f.getByRole("checkbox", { name: "Case Sensitive" }),
+
+  /**
+   * Search submit button (`#PTS_CFG_CL_WRK_PTS_SRCH_BTN`). verified 2026-04-24
+   * @tags search, submit, button, ss-smart-hr
+   */
+  searchButton: (f: FrameLocator): Locator =>
+    f.locator("#PTS_CFG_CL_WRK_PTS_SRCH_BTN"),
+
+  /**
+   * Clear search criteria button. verified 2026-09-16
+   * (live leftover T009000006 after Heg Sep Return to Search)
+   * @tags clear, button, ss-smart-hr
+   */
+  clearButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Clear", exact: true }),
+
+  /**
+   * Result rows on the SS Smart HR Find-an-Existing-Value grid. Each row's
+   * `onclick` drills into Transaction Details. verified 2026-09-16
+   * (live Heg Sep grid after Return to Search)
+   * @tags result, row, grid, ss-smart-hr
+   */
+  searchResultRows: (f: FrameLocator): Locator =>
+    f.locator('tr[id^="trPTS_CFG_CL_STD_RSL"]'),
+
+  /**
+   * Verified empty-search banner. Absence is not proof of no match; this
+   * text is. verified 2026-09-16 (live "NoSuch ProcessEid 987654")
+   * @tags no-match, empty, search, ss-smart-hr
+   */
+  noMatchingValuesMessage: (root: Page | FrameLocator): Locator =>
+    root.getByText(/No matching values were found/i),
+
+  /**
+   * Return to Search on a Transaction Details page. Restores the Name box
+   * without a full HR-Tasks reload. The label is PeopleSoft-generic (Job
+   * Summary detail has the same button) — callers MUST also require an SS
+   * receipt marker (`transactionDetailTxnId`) before treating this as SS
+   * Smart HR detail (see `isSsSmartHrReturnToSearchEligible`).
+   * verified 2026-09-18 (live Job Summary false-positive + SS T009000022)
+   * @tags return, search, detail, ss-smart-hr
+   */
+  returnToSearchButton: (root: Page | FrameLocator): Locator =>
+    root.getByRole("button", { name: "Return to Search", exact: true }),
+
+  /**
+   * Drill into a specific transaction from the results grid by its Transaction
+   * ID — opens the Transaction Details page (where the effective date / "Effdt:"
+   * is shown). The Transaction ID column is a DISPLAY-ONLY `<span>`
+   * (`PSEDITBOX_DISPONLY`), NOT a hyperlink — the clickable element is the
+   * result ROW `<tr id^="trPTS_CFG_CL_STD_RSL">`, which carries the row's
+   * onclick. Filter the row by the (per-row unique) Transaction ID text. Falls
+   * back to a link named after the id for any PeopleSoft view that does render
+   * the id as a hyperlink.
+   * verified 2026-06-24 (playwright-cli, live SS Smart HR EID 10090217 → row T009000014, Effdt 2025-07-01)
+   * @tags transaction, drill-in, row, result, detail, effdt, ss-smart-hr
+   */
+  transactionResultRow: (f: FrameLocator, transactionId: string): Locator =>
+    f
+      .locator('tr[id^="trPTS_CFG_CL_STD_RSL"]')
+      .filter({ hasText: transactionId })
+      .first()
+      .or(f.getByRole("link", { name: transactionId, exact: true }))
+      .first(),
+
+  /**
+   * Transaction DETAIL page — the receipt's Transaction ID display span
+   * (`#UC_SS_TRANSACT_UC_TRANSACT_ID`). Half of the post-submit receipt PAIR;
+   * read together with {@link ssSmartHRTransactions.transactionDetailApprovalStatus}.
+   * verified 2026-08-04
+   *
+   * Anchored on the PeopleSoft `RECORD_FIELD` id because these are BARE
+   * `<span>`s with no label association — `getByLabel`/`getByRole` have nothing
+   * to bind to here. That is specific to this PeopleSoft route: do NOT
+   * generalize it to Kuali, where role+label remains the rule.
+   *
+   * Root is `Page | FrameLocator`: the detail route
+   * (`UC_EXTENSIONS.UC_SS_TBH.GBL`, addressable as
+   * `?Action=U&UC_TRANSACT_ID=T…`) renders at TOP level, where
+   * `getContentFrame()` resolves to nothing — while the results grid the
+   * drill-in starts from is served inside `#main_target_win0`. Callers probe
+   * both roots for this same unique id and fail loud when neither resolves.
+   *
+   * An UNKNOWN transaction id renders the ordinary search form with NO error
+   * and NO banner, and the URL is byte-identical after a reload — so "the page
+   * loaded" and "the URL says T…" both prove nothing. A caller MUST assert this
+   * span resolved AND that its text equals the requested id.
+   * @tags transaction, id, receipt, detail, span, record-field, ss-smart-hr
+   */
+  transactionDetailTxnId: (root: Page | FrameLocator): Locator =>
+    root.locator("#UC_SS_TRANSACT_UC_TRANSACT_ID"),
+
+  /**
+   * Transaction DETAIL page — the receipt's Approval Status display span
+   * (`#UC_SS_TRANSACT_APPR_STATUS`), e.g. `Approved` / `Denied` / `Pending`.
+   * The other half of the post-submit receipt PAIR. verified 2026-08-04
+   *
+   * A `T…` transaction NUMBER is issued regardless of outcome (live
+   * `T009000033` is **Denied** and carries a well-formed number), so the number
+   * ALONE never proves a successful submit — this status is what does. Same
+   * bare-span / `RECORD_FIELD` anchoring and same dual-root rule as
+   * {@link ssSmartHRTransactions.transactionDetailTxnId}.
+   * @tags approval, status, receipt, detail, span, record-field, ss-smart-hr
+   */
+  transactionDetailApprovalStatus: (root: Page | FrameLocator): Locator =>
+    root.locator("#UC_SS_TRANSACT_APPR_STATUS"),
+
+  /**
+   * Transaction DETAIL page — the Hire Details grid's Name anchor(s). This is
+   * the name UCPATH holds for the transaction, the only way to prove a
+   * transaction number belongs to the person a roster row claims.
+   *
+   * One anchor PER GRID ROW (`NAME$0`, `NAME$1`, …). A single-hire transaction
+   * renders exactly one; the caller must fail loud on any other count rather
+   * than read row 0 of a multi-hire grid as "the" person. The sibling
+   * `span#NAME$span$0` wrapper is deliberately NOT matched (an `[id^="NAME$"]`
+   * probe returns both nodes per row) — the attribute selector avoids escaping
+   * the `$` a CSS id selector would need.
+   * verified 2026-09-16 (live T009000066 → `a#NAME$0` = "Rarof Lis")
+   * @tags transaction, detail, hire, name, grid, anchor, ss-smart-hr
+   */
+  transactionDetailHireNames: (root: Page | FrameLocator): Locator =>
+    root.locator('a[id^="NAME$"]:not([id*="$span$"])'),
+
+  /**
+   * Transaction DETAIL page — routing strip for one exact transaction, e.g.
+   * `Transaction: T009000059, ID: 10090331, Effdt: 2026-09-28, Unit: SDCMP`.
+   * This is the authoritative assigned-EID read for Process EID. The anchored
+   * text excludes the larger ancestor cell whose text starts with
+   * "Transaction Details".
+   * verified 2026-09-16 (live Iobub Minecuci / T009000059)
+   * @tags transaction, eid, employee-id, routing, detail, ss-smart-hr
+   */
+  transactionDetailRoutingStrip: (
+    root: Page | FrameLocator,
+    transactionId: string,
+  ): Locator =>
+    root.getByText(
+      new RegExp(`^Transaction:\\s*${transactionId}\\s*,\\s*ID:`, "i"),
+    ),
+};
+
+// ─── Smart HR Transaction Status (filter + results dashboard) ─────────────
+//
+// `/c/ADMINISTER_WORKFORCE_(GBL).HR_TBH_STATUS.GBL` — distinct shape from
+// the other HR Tasks pages: a filter form with a results grid below it,
+// not a Find-an-Existing-Value drill-in form. Surfaces all in-flight
+// Smart HR transactions for review (status: Pending, Processed, Cancelled,
+// etc.). The Download button stays disabled until a Refresh runs and
+// returns rows. Date inputs default to a 20-day window centered on today
+// — caller should overwrite both before searching across longer ranges.
+// verified 2026-04-24
+
+export const smartHRTransactionStatus = {
+  /**
+   * HR Review Status combobox — top filter. Options: All, Cancelled,
+   * My Transactions, Pending, Processed. verified 2026-04-24
+   * @tags hr-review, status, combobox, transaction-status
+   */
+  hrReviewStatusSelect: (f: FrameLocator): Locator =>
+    f.getByRole("combobox", { name: "HR Review Status" }),
+
+  /**
+   * Business Unit textbox filter. verified 2026-04-24
+   * @tags business-unit, textbox, transaction-status
+   */
+  businessUnitInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Business Unit", exact: true }),
+
+  /**
+   * Business Unit lookup button. verified 2026-04-24
+   * @tags business-unit, lookup, button, transaction-status
+   */
+  businessUnitLookupButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Look up Business Unit" }),
+
+  /**
+   * Transaction Type combobox. Options: All, Change Job Data, Change Job
+   * and Profile Data, Change Personal Data, Change Personal and Job Data,
+   * Change Personal and Profile Data, Change Personal/Job and Profile Data,
+   * Change Profile Data, Hire/Rehire, Hire/Rehire and Profile Data,
+   * RecruitingHire/Rehire/Transfer. verified 2026-04-24
+   * @tags transaction-type, combobox, transaction-status
+   */
+  transactionTypeSelect: (f: FrameLocator): Locator =>
+    f.getByRole("combobox", { name: "Transaction Type" }),
+
+  /**
+   * Empl ID textbox filter. verified 2026-04-24
+   * @tags empl, id, employee, textbox, transaction-status
+   */
+  emplIdInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Empl ID", exact: true }),
+
+  /**
+   * Transaction Status combobox. Options: Action Required, All, Cancel,
+   * Completed, Denied, Error, Hired/Added, Requested. verified 2026-04-24
+   * @tags transaction-status, combobox, status, transaction-status
+   */
+  transactionStatusSelect: (f: FrameLocator): Locator =>
+    f.getByRole("combobox", { name: "Transaction Status" }),
+
+  /**
+   * First Name textbox filter. verified 2026-04-24
+   * @tags first-name, name, textbox, transaction-status
+   */
+  firstNameInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "First Name" }),
+
+  /**
+   * Start Date From textbox (MM/DD/YYYY). Defaults to ~10 days before
+   * today. verified 2026-04-24
+   * @tags start-date, from, date, textbox, transaction-status
+   */
+  startDateFromInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Start Date From" }),
+
+  /**
+   * Calendar picker for Start Date From. verified 2026-04-24
+   * @tags start-date, from, calendar, button, transaction-status
+   */
+  startDateFromCalendarButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Calendar Start Date From" }),
+
+  /**
+   * "To" date textbox (MM/DD/YYYY) — paired with Start Date From.
+   * Defaults to ~10 days after today. verified 2026-04-24
+   * @tags to-date, end-date, date, textbox, transaction-status
+   */
+  toDateInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "To", exact: true }),
+
+  /**
+   * Calendar picker for the To date. verified 2026-04-24
+   * @tags to-date, end-date, calendar, button, transaction-status
+   */
+  toDateCalendarButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Calendar To" }),
+
+  /**
+   * Last Name textbox filter. verified 2026-04-24
+   * @tags last-name, name, textbox, transaction-status
+   */
+  lastNameInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Last Name" }),
+
+  /**
+   * Download button — stays disabled until a Refresh has populated rows.
+   * verified 2026-04-24
+   * @tags download, button, transaction-status
+   */
+  downloadButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Download", exact: true }),
+
+  /**
+   * Refresh button — runs the filter and populates the results grid.
+   * verified 2026-04-24
+   * @tags refresh, button, transaction-status
+   */
+  refreshButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Refresh", exact: true }),
+
+  /**
+   * Clear button — resets all filter fields to defaults. verified 2026-04-24
+   * @tags clear, button, transaction-status
+   */
+  clearButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Clear", exact: true }),
+
+  /**
+   * Toolbar button: "Download Transaction Status Table to Excel" — exports
+   * the results grid as XLSX. verified 2026-04-24
+   * @tags download, excel, export, button, transaction-status
+   */
+  downloadToExcelButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Download Transaction Status Table to Excel" }),
+
+  /**
+   * "Smart HR Transactions" return link at the bottom of the form.
+   * Submits a JS action that navigates back to the Smart HR Transactions
+   * landing. verified 2026-04-24
+   * @tags return, smart-hr, link, transaction-status
+   */
+  returnToSmartHRLink: (f: FrameLocator): Locator =>
+    f.getByRole("link", { name: "Smart HR Transactions" }),
+};
+
+// ─── Emergency Contact (standalone, deep-link URL, no iframe) ─────────────
+
+export const emergencyContact = {
+  /**
+   * Empl ID textbox at page top level. verified 2026-04-14
+   * @tags empl, id, employee, textbox, emergency-contact
+   */
+  emplIdInput: (page: Page): Locator =>
+    page.getByRole("textbox", { name: "Empl ID" }).first(),
+
+  /**
+   * Search button (exact: true). verified 2026-04-14
+   * @tags search, button, emergency-contact
+   */
+  searchButton: (page: Page): Locator =>
+    page.getByRole("button", { name: "Search", exact: true }).first(),
+
+  /**
+   * "No matching values were found." message. verified 2026-04-14
+   * @tags no-match, message, emergency-contact, search
+   */
+  noMatchMessage: (page: Page): Locator =>
+    page.getByText("No matching values were found."),
+
+  /**
+   * Drill-in link in multi-result grid. verified 2026-04-14
+   * @tags drill-in, link, results, emergency-contact
+   */
+  drillInLink: (page: Page): Locator =>
+    page.getByRole("link", { name: /drill in/i }),
+
+  /**
+   * Every Contact Name textbox on the editor (for duplicate checking).
+   * verified 2026-04-14
+   * @tags contact, name, textbox, emergency-contact, duplicate
+   */
+  contactNameInputs: (page: Page): Locator =>
+    page.getByRole("textbox", { name: "Contact Name" }),
+
+  /**
+   * Every Primary Contact checkbox on the editor — one per row, in
+   * document order, parallel to `contactNameInputs`. Used by
+   * `demoteExistingContact` to uncheck the primary on a fuzzy-matched
+   * historical contact (e.g. "Tebifo Livovot" demoted in favor of
+   * the correctly-spelled "Tomoko Luvovot"). verified 2026-04-28
+   * @tags primary, contact, checkbox, emergency-contact, demote
+   */
+  primaryContactCheckboxes: (page: Page): Locator =>
+    page.getByRole("checkbox", { name: "Primary Contact" }),
+
+  /**
+   * Save button at the bottom of the editor. verified 2026-04-14
+   * @tags save, button, emergency-contact
+   */
+  saveButton: (page: Page): Locator =>
+    page.getByRole("button", { name: "Save", exact: true }).first(),
+
+  /**
+   * PeopleSoft "Message" alert dialog raised after a failed editor save
+   * (e.g. the (1000,110) only-one-primary-contact conflict).
+   * NEEDS LIVE VERIFY — factored out of the emergency-contact
+   * primary-conflict recovery WIP, not yet confirmed via playwright-cli.
+   * verified 2026-07-08
+   * @tags message, dialog, alert, error, save, emergency-contact
+   */
+  messageDialog: (page: Page): Locator =>
+    page.getByRole("alertdialog", { name: "Message" }),
+
+  /**
+   * OK button inside the "Message" alert dialog — dismisses the save error.
+   * NEEDS LIVE VERIFY — factored out of the emergency-contact
+   * primary-conflict recovery WIP, not yet confirmed via playwright-cli.
+   * verified 2026-07-08
+   * @tags ok, button, message, dialog, emergency-contact
+   */
+  messageDialogOkButton: (page: Page): Locator =>
+    page
+      .getByRole("alertdialog", { name: "Message" })
+      .getByRole("button", { name: "OK" }),
+
+  /**
+   * Page-level PeopleSoft error banner on the emergency contact editor
+   * (same class/id family as the frame-scoped `smartHR.errorBanner`).
+   * NEEDS LIVE VERIFY — factored out of the emergency-contact
+   * primary-conflict recovery WIP, not yet confirmed via playwright-cli.
+   * verified 2026-07-08
+   * @tags error, banner, alert, save, emergency-contact
+   */
+  saveErrorBanner: (page: Page): Locator =>
+    page.locator(".PSERROR, #ALERTMSG, .ps_alert-error").first(),
+
+  /**
+   * "Add a new row at row 1" button on the editor grid — inserts a blank
+   * contact row as row 1. verified 2026-07-08 (inherited from working
+   * production code — same locator, moved)
+   * @tags add, new, row, button, emergency-contact
+   */
+  addNewRowButton: (page: Page): Locator =>
+    page.getByRole("button", { name: /add a new row/i }).first(),
+
+  // ── Row-anchored editor selectors (View All mode) ─────────────────────────
+  //
+  // The Emergency Contact scroll pages ONE ROW AT A TIME by default; after
+  // "Add a new row" the counter reads "2 of 2" and role-based `.first()`
+  // selectors interact with whichever row happens to be rendered — which is
+  // how the 2026-08-05 batch scattered its fills across two rows and always
+  // reached Save with a blank required row. The fix drives the editor in
+  // View All mode and anchors every field to the PeopleSoft `RECORD_FIELD$row`
+  // id, so a postback re-render can never silently retarget a write. Attribute
+  // form (`[id="..."]`) is used because `#` CSS ids would need `$` escaping.
+  // All ids live-verified 2026-08-05 on EID 10090326.
+
+  /**
+   * "View All" toggle link on the contact scroll. Reads "View All" in paged
+   * mode and "View 1" once expanded; absent on some single-row renders. Click
+   * only when it reads "View All". verified 2026-08-05 (live probe, id
+   * `$ICField2$hviewall$0`)
+   * @tags view-all, scroll, link, emergency-contact
+   */
+  viewAllLink: (page: Page): Locator =>
+    page.getByRole("link", { name: /^View All$/i }).first(),
+
+  /**
+   * Contact Name textbox at a specific scroll row. verified 2026-08-05
+   * @tags contact, name, textbox, row, emergency-contact
+   */
+  contactNameAt: (page: Page, row: number): Locator =>
+    page.locator(`input[id="EMERGENCY_CNTCT_CONTACT_NAME$${row}"]`),
+
+  /**
+   * Primary Contact checkbox at a specific scroll row. `input[type=checkbox]`
+   * keeps PeopleSoft's hidden `$chk$` twin out (2026-07-28 lesson).
+   * verified 2026-08-05
+   * @tags primary, contact, checkbox, row, emergency-contact
+   */
+  primaryContactAt: (page: Page, row: number): Locator =>
+    page.locator(`input[type="checkbox"][id="EMERGENCY_CNTCT_PRIMARY_CONTACT$${row}"]`),
+
+  /**
+   * Relationship dropdown at a specific scroll row. Note a blank row DEFAULTS
+   * to value "O", whose label is literally "(Invalid Value)". verified 2026-08-05
+   * @tags relationship, select, row, emergency-contact
+   */
+  relationshipAt: (page: Page, row: number): Locator =>
+    page.locator(`select[id="EMERGENCY_CNTCT_RELATIONSHIP$${row}"]`),
+
+  /**
+   * Same Address as Employee checkbox at a specific scroll row.
+   * verified 2026-08-05
+   * @tags same, address, checkbox, row, emergency-contact
+   */
+  sameAddressAt: (page: Page, row: number): Locator =>
+    page.locator(`input[type="checkbox"][id="EMERGENCY_CNTCT_SAME_ADDRESS_EMPL$${row}"]`),
+
+  /**
+   * Edit Address button at a specific scroll row (opens the shared
+   * DERIVED_ADDRESS modal). verified 2026-08-05 (id
+   * `DERIVED_ADDR_UPDATE_ADDRESS$<row>`)
+   * @tags edit, address, button, row, emergency-contact
+   */
+  editAddressButtonAt: (page: Page, row: number): Locator =>
+    page.locator(`input[id="DERIVED_ADDR_UPDATE_ADDRESS$${row}"]`),
+
+  /**
+   * Phone textbox at a specific scroll row. verified 2026-08-05
+   * @tags phone, textbox, row, emergency-contact
+   */
+  phoneAt: (page: Page, row: number): Locator =>
+    page.locator(`input[id="EMERGENCY_CNTCT_PHONE$${row}"]`),
+
+  /**
+   * "Relationship to Employee" dropdown on the editor's newly-added row.
+   * verified 2026-07-08 (inherited from working production code — same
+   * locator, moved)
+   * @tags relationship, combobox, emergency-contact
+   */
+  relationshipComboBox: (page: Page): Locator =>
+    page.getByRole("combobox", { name: "Relationship to Employee" }).first(),
+
+  /**
+   * "Same Address as Employee" checkbox on the editor's newly-added row.
+   * verified 2026-07-08 (inherited from working production code — same
+   * locator, moved)
+   * @tags same, address, employee, checkbox, emergency-contact
+   */
+  sameAddressAsEmployeeCheckbox: (page: Page): Locator =>
+    page.getByRole("checkbox", { name: "Same Address as Employee" }).first(),
+
+  /**
+   * "Edit Address" button, shown after unchecking Same Address as Employee.
+   * verified 2026-07-08 (inherited from working production code — same
+   * locator, moved)
+   * @tags edit, address, button, emergency-contact
+   */
+  editAddressButton: (page: Page): Locator =>
+    page.getByRole("button", { name: "Edit Address" }).first(),
+
+  /**
+   * Address 1 textbox inside the Edit Address modal. verified 2026-07-08
+   * (inherited from working production code — same locator, moved)
+   * @tags address, street, textbox, modal, emergency-contact
+   */
+  address1Input: (page: Page): Locator =>
+    page.getByRole("textbox", { name: "Address 1" }).first(),
+
+  /**
+   * City textbox inside the Edit Address modal. verified 2026-07-08
+   * (inherited from working production code — same locator, moved)
+   * @tags address, city, textbox, modal, emergency-contact
+   */
+  cityInput: (page: Page): Locator =>
+    page.getByRole("textbox", { name: "City" }).first(),
+
+  /**
+   * State textbox inside the Edit Address modal. verified 2026-07-08
+   * (inherited from working production code — same locator, moved)
+   * @tags address, state, textbox, modal, emergency-contact
+   */
+  stateInput: (page: Page): Locator =>
+    page.getByRole("textbox", { name: "State" }).first(),
+
+  /**
+   * Postal textbox inside the Edit Address modal. verified 2026-07-08
+   * (inherited from working production code — same locator, moved)
+   * @tags address, postal, zip, textbox, modal, emergency-contact
+   */
+  postalInput: (page: Page): Locator =>
+    page.getByRole("textbox", { name: "Postal" }).first(),
+
+  /**
+   * OK button inside the Edit Address modal (exact match — disambiguates
+   * from other OK-labeled buttons on the page). verified 2026-07-08
+   * (inherited from working production code — same locator, moved)
+   * @tags ok, button, modal, emergency-contact
+   */
+  editAddressOkButton: (page: Page): Locator =>
+    page.getByRole("button", { name: "OK", exact: true }).first(),
+
+  /**
+   * Phone textbox (exact match) on the Contact Address/Phone tab. verified
+   * 2026-07-08 (inherited from working production code — same locator,
+   * moved)
+   * @tags phone, textbox, emergency-contact
+   */
+  phoneInput: (page: Page): Locator =>
+    page.getByRole("textbox", { name: "Phone", exact: true }).first(),
+
+  // Editor header identity. PeopleSoft splits every display-only field into a
+  // LABEL div (`win0div<RECORD>_<FIELD>lbl`) and a separate VALUE div/span
+  // (`<RECORD>_<FIELD>`). They are siblings, NOT parent/child — so anchoring on
+  // the label text and walking to its parent can never reach the value. The
+  // previous `getByText("Person ID").first().locator("..")` did exactly that and
+  // always yielded the bare string "Person ID"; see the 2026-08-05 lesson.
+  // The editor renders at TOP LEVEL — no iframe (live-probed 2026-08-05), so
+  // these take `Page`, not a FrameLocator.
+
+  /**
+   * Employee ID VALUE in the editor header ("Person ID <emplId>"). The `.or()`
+   * arm is PeopleSoft's wrapper div around the same span; both were read live
+   * and both return the bare EID. verified 2026-08-05 (live probe, EID
+   * 10090325 — span `#PERSON_NPC_VW_EMPLID` and div
+   * `#win0divPERSON_NPC_VW_EMPLID` each returned "10090325")
+   * @tags person, id, emplid, value, header, emergency-contact
+   */
+  personIdValue: (page: Page): Locator =>
+    page.locator("#PERSON_NPC_VW_EMPLID").or(page.locator("#win0divPERSON_NPC_VW_EMPLID")).first(),
+
+  /**
+   * Employee NAME VALUE in the editor header. Note the record differs from the
+   * EID's (`PERSON_NAME` vs `PERSON_NPC_VW`) — do not derive one id from the
+   * other. verified 2026-08-05 (live probe, EID 10090325 — span
+   * `#PERSON_NAME_NAME` and div `#win0divPERSON_NAME_NAME` each returned
+   * "Person 1480"; `PERSON_NPC_VW_NAME` does NOT exist)
+   * @tags person, name, value, header, emergency-contact
+   */
+  personNameValue: (page: Page): Locator =>
+    page.locator("#PERSON_NAME_NAME").or(page.locator("#win0divPERSON_NAME_NAME")).first(),
+};
+
+// ─── Person Profiles → Oath Signature (standalone deep-link URL) ──────────
+//
+// Person Profile uses a DIFFERENT iframe from Smart HR:
+//   - Smart HR / PayPath → `#main_target_win0`   (use `getContentFrame`)
+//   - Person Profiles     → `#ptifrmtgtframe`     (use `getPersonProfileFrame`)
+//
+// The component URL path is `c/SETUP_PROFILE_MANAGEMENT.JPM_PERSON_PROFILE.GBL`.
+// See `src/workflows/oath-signature/enter.ts` for the full flow.
+// verified 2026-04-22 via playwright-cli on EID 10090301
+
+export const oathSignature = {
+  /**
+   * Person Profiles content iframe FrameLocator. Distinct from Smart HR's
+   * `#main_target_win0` — this component mounts inside `#ptifrmtgtframe`
+   * (name="TargetContent"). verified 2026-04-22
+   * @tags iframe, frame, person-profile, oath
+   */
+  getPersonProfileFrame: (page: Page): FrameLocator =>
+    page.frameLocator("#ptifrmtgtframe"),
+
+  /**
+   * Empl ID textbox on the Find-an-Existing-Value search form. verified 2026-04-22
+   * @tags empl, id, employee, textbox, person-profile, search
+   */
+  emplIdInput: (f: FrameLocator): Locator =>
+    f.getByRole("textbox", { name: "Empl ID" }),
+
+  /**
+   * Search button (exact: true disambiguates from "Save Search"). verified 2026-04-22
+   * @tags search, button, person-profile
+   */
+  searchButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Search", exact: true }),
+
+  /**
+   * Clear button on the search form — clears Empl ID between iterations. verified 2026-04-22
+   * @tags clear, button, person-profile, search
+   */
+  clearSearchButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Clear", exact: true }),
+
+  /**
+   * "Add New Oath Signature Date" link on the loaded Person Profile. The
+   * primary anchor is the PeopleSoft action id; accessible-name fallback
+   * covers rename-proof backups. Two links share the same name (icon +
+   * text) — `.first()` picks the icon/primary anchor.
+   * verified 2026-04-22 (id: DERIVED_JPM_JP_JPM_JP_ADD_CAT_ITM$41$$0)
+   * @tags add, new, oath, signature, link, person-profile
+   */
+  addNewOathLink: (f: FrameLocator): Locator =>
+    f
+      .locator('[id="DERIVED_JPM_JP_JPM_JP_ADD_CAT_ITM$41$$0"]')
+      .or(f.getByRole("link", { name: "Add New Oath Signature Date" }).first()),
+
+  /**
+   * "There are currently no Oath Signature Date for this profile..." sentinel.
+   * When visible on the loaded profile, the employee has no existing oath —
+   * safe to add. When absent, an oath already exists (idempotency skip).
+   * verified 2026-04-22
+   * @tags no, existing, oath, sentinel, text, person-profile
+   */
+  noOathSentinel: (f: FrameLocator): Locator =>
+    f.getByText("There are currently no Oath Signature Date", { exact: false }),
+
+  /**
+   * Oath Signature Date textbox inside the "Add New Oath Signature Date"
+   * sub-form. Defaults to today's date on open. It is a PeopleSoft
+   * effective-date input (`id="EFFDT$0"`) with NO accessible name, so the
+   * old `getByRole("textbox", { name: "Oath Signature Date" })` matched
+   * nothing — the editable `EFFDT` input is the real anchor (only the oath
+   * row is in add-mode during this flow, so it's the sole editable EFFDT).
+   * Role selector kept as a rename-proof fallback. verified 2026-07-01 (EID 10090134)
+   * @tags oath, signature, date, textbox, person-profile, effdt
+   */
+  oathDateInput: (f: FrameLocator): Locator =>
+    f
+      .locator('input[id^="EFFDT"]')
+      .or(f.getByRole("textbox", { name: "Oath Signature Date" }))
+      .first(),
+
+  /**
+   * OK button on the oath-detail sub-form — applies the row and returns to
+   * the profile. verified 2026-04-22
+   * @tags ok, button, oath, sub-form, person-profile
+   */
+  oathOkButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "OK", exact: true }),
+
+  /**
+   * Cancel button on the oath-detail sub-form — used by test/dry paths. verified 2026-04-22
+   * @tags cancel, button, oath, sub-form, person-profile
+   */
+  oathCancelButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Cancel", exact: true }),
+
+  /**
+   * Save button at the bottom of the Person Profile form — commits the
+   * staged oath row to the database. verified 2026-04-22
+   * @tags save, button, person-profile
+   */
+  saveButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Save", exact: true }),
+
+  /**
+   * Return to Search button shown after save — clears the profile and
+   * returns to the empty search form for the next EID. verified 2026-04-22
+   * @tags return, search, button, person-profile
+   */
+  returnToSearchButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Return to Search", exact: true }),
+
+  /**
+   * Employee name display on the loaded Person Profile — visible near the
+   * Empl ID header. Extracted for tracker rows + dashboard. The live element
+   * is `span#PERSON_NAME_NAME_DISPLAY` (class `PABOLD11TEXT`); the previous
+   * `UC_JPM_PRS_I_PERSON_NAME` / `PSXLATITEM_XLATLONGNAME` anchors matched
+   * NOTHING, so the employee name was never recorded. Kept as trailing
+   * fallbacks. verified 2026-07-01 (EID 10090134 → "Lamowuz Oinob")
+   * @tags employee, name, display, person-profile
+   */
+  employeeNameDisplay: (f: FrameLocator): Locator =>
+    f
+      .locator(
+        '[id*="PERSON_NAME_NAME_DISPLAY"], [id*="UC_JPM_PRS_I_PERSON_NAME"], [id*="PSXLATITEM_XLATLONGNAME"]',
+      )
+      .first(),
+
+  /**
+   * The EXISTING (already-saved) Oath Signature Date on the loaded profile — a
+   * display-only span `#EFFDT$0.PSEDITBOX_DISPONLY` shown when an oath row is
+   * already present. DISTINCT from `oathDateInput` (the editable `input[id^=EFFDT]`
+   * on the Add-New sub-form): before Add is clicked, only this display span
+   * exists. Read on the skip-existing path so the tracker records the signature
+   * date even when someone else entered the oath (dashboard showed "—" before).
+   * verified 2026-07-02 (EID 10090316 → "07/02/2026")
+   * @tags existing, oath, signature, date, display, person-profile, effdt
+   */
+  existingOathDate: (f: FrameLocator): Locator =>
+    f.locator('span[id^="EFFDT"]').first(),
+
+  /**
+   * The Empl ID displayed on the loaded Person Profile header — display-only
+   * span `#JPM_PROFILE_EMPLID$1$` (class `PSEDITBOX_DISPONLY`); prefix-matched
+   * because the `$1$` suffix is a PeopleSoft row index. Exactly ONE match on a
+   * loaded profile (probed live). Read by the pre-add identity gate
+   * (`assertDisplayedIdentity`) to confirm the profile belongs to the searched
+   * EID before add+save. Do NOT use `LASTUPDOPRID$…` (last-updated-by column —
+   * a different person's EID). verified 2026-07-08 (EID 10090134)
+   * @tags empl-id, display, person-profile, identity, gate
+   */
+  emplIdDisplay: (f: FrameLocator): Locator =>
+    f.locator('span[id^="JPM_PROFILE_EMPLID"]').first(),
+};
+
+// ─── Barrel: grouped namespace export ──────────────────────────────────────
+
+/**
+ * Grouped namespace for ergonomic call sites:
+ *   ucpathSelectors.jobData.positionNumberInput(frame).fill(positionNum)
+ *
+ * Flat per-group imports (`import { jobData } from "./selectors.js"`) are also
+ * supported for files that only touch one group.
+ */
+export const ucpathSelectors = {
+  smartHR,
+  personalData,
+  comments,
+  termination,
+  jobData,
+  personSearch,
+  jobSummary,
+  hrTasks,
+  personOrgSummary,
+  payPathActions,
+  ssSmartHRTransactions,
+  smartHRTransactionStatus,
+  emergencyContact,
+  oathSignature,
+  getContentFrame,
+};

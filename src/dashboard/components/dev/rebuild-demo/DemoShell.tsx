@@ -1,0 +1,1958 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type SVGProps } from "react";
+import {
+  Activity,
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Camera,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  CircleHelp,
+  Eye,
+  FlaskConical,
+  Hourglass,
+  ListChecks,
+  LayoutDashboard,
+  Minus,
+  PanelLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Pause,
+  PictureInPicture2,
+  Plus,
+  RotateCw,
+  Moon,
+  Settings,
+  ShieldCheck,
+  Stethoscope,
+  Sun,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { effectiveStatus, fmtElapsed, type DemoRow } from "./demo-data";
+import {
+  agoSeconds,
+  appVersionTag,
+  buildWorkflowCategoryGroups,
+  DEMO_APP_VERSION,
+  DEMO_APP_VERSION_PARTS,
+  DEMO_WORKFLOW_LIST,
+  DEMO_WORKFLOWS,
+  fmtClockSec,
+  plural,
+  type DemoWorkflowCategory,
+  type DemoWorkflowId,
+} from "./demo-wire";
+import {
+  DEMO_PREFLIGHT,
+  PREFLIGHT_ADVISORY_NOTE,
+  preflightVerdict,
+  runPreflight,
+  type PreflightVerdict,
+  type StorageMode,
+} from "./demo-settings-wire";
+import { DEMO_DAY, topLevelRowsForDay } from "./demo-days";
+import {
+  DEMO_SESSIONS,
+  MAX_WORKER_SPAWN,
+  WORKER_SPAWN_WORKFLOWS,
+  planWorkerSpawn,
+  type BrowserHealth,
+  type DemoBrowser,
+  type DemoSession,
+  type SessionPhase,
+  type WorkerSpawnResult,
+} from "./demo-workers-wire";
+import {
+  DemoDateNav,
+  DemoNotificationBell,
+  DemoSearchControl,
+  type DemoNavigateTo,
+} from "./DemoTopBarSurfaces";
+import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
+import { toolbarControl } from "./DemoBulkBar";
+import {
+  Badge,
+  Button,
+  DEMO_THEME_LABEL,
+  DS_STATUS,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  Field,
+  IconButton,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Select,
+  type DemoTheme,
+  dsBorder,
+  dsElev,
+  dsClip,
+  dsFocus,
+  dsIcon,
+  dsLayer,
+  dsMotion,
+  dsRadius,
+  dsSize,
+  dsSurface,
+  dsText,
+} from "./demo-ui";
+
+/**
+ * DEV-ONLY — the replica shell around the rebuild demo.
+ *
+ * The queue and log panel were already faithful; everything AROUND them was
+ * missing, so the demo could not be used to plan the real dashboard. This file
+ * adds the other four named surfaces — Top Bar, Workflow Panel, Status Bar and
+ * Session Panel — at production fidelity.
+ *
+ * One rule is load-bearing here and is the fix for the legacy "badges always
+ * error out" bug: the Workflow Panel badges, the Status Bar pills and the
+ * Queue Panel rows all read from `countRows` below. There is exactly ONE
+ * counting path, so two surfaces can never disagree.
+ */
+
+const NOOP = () => {};
+
+// ---------------------------------------------------------------------------
+// One counting path — the whole point
+// ---------------------------------------------------------------------------
+
+/**
+ * `all` + a composite `Needs you` + the eight ratified statuses. Every status is
+ * reachable; none is folded away.
+ *
+ * The old bar had SEVEN buckets and counted some rows twice — a
+ * Done-with-warnings row landed in both `attention` and `done`, so the pills
+ * summed to more than the queue held. Here each row lands in exactly one status
+ * bucket, and `needsYou` is the only deliberate overlap (it is a composite of
+ * two of them, labelled as such).
+ */
+export type StatusBucket = "all" | "needsYou" | ProposedStatus;
+
+/**
+ * The panel the app opens on. There is no "All workflows" entry: an operator
+ * works one workflow at a time, the cross-panel view was a fifteenth rail row
+ * that no triage pass ever used, and a queue mixing fourteen workflows made
+ * every row's title carry a workflow label to stay legible. Read from the
+ * registry rather than typed as a string, so renaming a workflow cannot leave
+ * the app opening on a panel that does not exist.
+ */
+export const DEFAULT_WORKFLOW = DEMO_WORKFLOWS["oath-signature"].label;
+
+/**
+ * Every top-level row ON A DAY (members belong to their group, never to the
+ * counts). The day is a parameter rather than a constant because the queue is
+ * day-partitioned: moving the date must move the corpus every surface counts,
+ * or the badges and the rows start disagreeing again.
+ */
+export function topLevelRows(day: string = DEMO_DAY): DemoRow[] {
+  return topLevelRowsForDay(day);
+}
+
+export function rowsForWorkflow(rows: DemoRow[], workflow: string): DemoRow[] {
+  return rows.filter((r) => r.wfLabel === workflow);
+}
+
+export function rowInBucket(row: DemoRow, bucket: StatusBucket): boolean {
+  if (bucket === "all") return true;
+  const s = effectiveStatus(row);
+  if (bucket === "needsYou") return s === "waiting" || s === "parked";
+  return s === bucket;
+}
+
+/**
+ * Every workflow's counts, off the SAME path, in one pass.
+ *
+ * This exists because of a real disagreement the operator caught: the collapsed
+ * launcher read `👁 6` while the rail's own badges summed to 4. Neither number
+ * was stale — they were counting different things. The launcher counted the
+ * day's `Needs you` (waiting + parked) across every panel, which is 6; the rail
+ * was showing each workflow's QUEUED count in an unlabelled numeric chip, which
+ * is 4. Two quantities, two badges, no nouns on either, and nothing on screen
+ * that added up to anything.
+ *
+ * The fix is structural rather than cosmetic: there is now ONE derivation of
+ * per-workflow attention, the rail badge and the launcher both read it, and the
+ * launcher is scoped to the panels the rail is not showing you — so the two
+ * numbers beside each other are disjoint and additive by construction, not by
+ * a comment asking you to trust them. Pinned by
+ * `tests/unit/dashboard/rebuild-demo-attention-counts.test.ts`.
+ */
+export function countRowsByWorkflow(rows: DemoRow[]): Map<string, Record<StatusBucket, number>> {
+  const out = new Map<string, Record<StatusBucket, number>>();
+  for (const row of rows) {
+    let counts = out.get(row.wfLabel);
+    if (!counts) {
+      counts = countRows([]);
+      out.set(row.wfLabel, counts);
+    }
+    const s = effectiveStatus(row);
+    counts.all += 1;
+    counts[s] += 1;
+    if (s === "waiting" || s === "parked") counts.needsYou += 1;
+  }
+  return out;
+}
+
+/**
+ * A rail entry's PAIR: what is moving, over everything.
+ *
+ * The rail used to carry three numbers per row — an amber eye badge for
+ * attention, then `queued │ all`. Operator: *"remove the eye icons and put the
+ * numbers in there instead of the 0s."* And the `0`s were the tell: `queued`
+ * alone is not "what is happening in this panel", because the moment a run
+ * starts it leaves `queued` and the column reads zero while the workflow is
+ * plainly working. So the left number is now ACTIVE — queued PLUS running — the
+ * union of "accepted, not finished". A panel with three runs in flight reads
+ * `3 │ 8` rather than `0 │ 8` with a badge beside it.
+ *
+ * Attention is NOT folded in. It is a different question ("does this need me")
+ * with a different answer surface (the Status Bar's `Needs you` pill, the
+ * launcher's amber count), and merging two quantities into one badge is the
+ * exact bug the eye badge was introduced to fix in the first place.
+ */
+export function railEntryCounts(counts: Record<StatusBucket, number> | undefined): { active: number; total: number } {
+  if (!counts) return { active: 0, total: 0 };
+  return { active: counts.queued + counts.running, total: counts.all };
+}
+
+/**
+ * The whole day, as the pair the launcher renders: `active` of `all`.
+ *
+ * The launcher used to carry the day's `Needs you` count — a different
+ * quantity from the rail's `active │ all` column (queued + running). The
+ * collapsed control then read amber `6` while the open rail's orange actives
+ * summed to `12`, so nothing on screen added up. Both now read the same pair:
+ * what is moving (queued + running), over everything today. Attention stays on
+ * the Status Bar's `Needs you` pill — a different shape, a different question.
+ */
+export function attentionAcrossWorkflows(rows: DemoRow[]): { active: number; all: number } {
+  const totals = countRows(rows);
+  return { active: totals.queued + totals.running, all: totals.all };
+}
+
+export function countRows(rows: DemoRow[]): Record<StatusBucket, number> {
+  const out: Record<StatusBucket, number> = {
+    all: 0,
+    needsYou: 0,
+    queued: 0,
+    running: 0,
+    waiting: 0,
+    parked: 0,
+    verifiedDone: 0,
+    doneWarnings: 0,
+    failed: 0,
+    cancelled: 0,
+  };
+  for (const r of rows) {
+    const s = effectiveStatus(r);
+    out.all += 1;
+    out[s] += 1;
+    if (s === "waiting" || s === "parked") out.needsYou += 1;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Top Bar
+// ---------------------------------------------------------------------------
+
+/**
+ * The demo's top-level views.
+ *
+ * The switcher is the PRODUCT's page switcher (Dashboard · Archive · Explorer ·
+ * Activity). Demo scaffolding (catalog, design-system kit, storage fixture)
+ * lives behind a quiet flask icon in the right chrome — not a loud "rebuild
+ * demo" pill beside the title. `settings` stays a takeover behind the gear.
+ */
+export type DemoShellView = "queue" | "catalog" | "kit" | "settings" | "archive" | "explorer" | "report";
+
+const SWITCHER_VIEWS = ["queue", "archive", "explorer", "report"] as const;
+
+const SHELL_VIEW_LABEL: Record<(typeof SWITCHER_VIEWS)[number], string> = {
+  queue: "Dashboard",
+  archive: "Archive",
+  explorer: "Explorer",
+  report: "Activity",
+};
+
+const DEMO_SURFACES: { key: DemoShellView; label: string; note: string }[] = [
+  { key: "catalog", label: "Row & panel catalog", note: "every row variant and panel kind, named" },
+  { key: "kit", label: "Design system", note: "every primitive in every state" },
+];
+
+/**
+ * The doctor, as a standing indicator rather than a Settings section.
+ *
+ * It was a read-only panel plus a "Run doctor again" button with no `onClick`,
+ * filed under a page of preferences — so the one thing it is for (knowing what
+ * will fail BEFORE you spend a Duo prompt finding out) was three clicks away
+ * from where a run is started. Here it is always on screen, it carries its own
+ * verdict, and re-running it is a real command with a real answer.
+ */
+function DemoDoctorPopover({ tick }: { tick: number }) {
+  const [checks, setChecks] = useState(DEMO_PREFLIGHT);
+  const verdict = preflightVerdict(checks);
+  const failing = checks.filter((c) => c.verdict === "fail").length;
+  const warning = checks.filter((c) => c.verdict === "warning").length;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <IconButton
+          size="sm"
+          label={
+            verdict === "pass"
+              ? "Preflight — every check passes"
+              : `Preflight — ${failing} failing, ${warning} warning`
+          }
+          icon={<Stethoscope aria-hidden className={dsIcon.md} />}
+          className={cn(
+            verdict === "fail" && "text-[color:var(--ds-danger)]",
+            verdict === "warning" && "text-[color:var(--ds-status-waiting-fg)]",
+          )}
+        />
+      </PopoverTrigger>
+      <PopoverContent title="Preflight" description={PREFLIGHT_ADVISORY_NOTE} width="lg" side="bottom" align="end">
+        <div className="flex flex-col gap-[var(--ds-space-base)]">
+          {checks.map((check) => (
+            <div key={check.id} className="flex min-w-0 flex-col gap-[var(--ds-space-hair)]">
+              <div className="flex min-w-0 items-center gap-[var(--ds-space-snug)]">
+                <Badge tone={PREFLIGHT_TONE[check.verdict]}>{check.verdict}</Badge>
+                <span className={cn(dsText.ui, "min-w-0 truncate font-medium text-[color:var(--ds-fg)]")}>{check.label}</span>
+                <span className={cn(dsText.micro, dsText.nums, "ml-auto shrink-0 text-[color:var(--ds-fg-faint)]")}>
+                  {check.checkedAt}
+                </span>
+              </div>
+              <span className={cn(dsText.body, "text-[color:var(--ds-fg-muted)]")}>{check.detail}</span>
+              {check.blocks.length > 0 && (
+                <span className={cn(dsText.meta, "text-[color:var(--ds-status-waiting-fg)]")}>
+                  Blocks: {check.blocks.join(" · ")}
+                </span>
+              )}
+              {check.remediation && (
+                <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>Fix: {check.remediation}</span>
+              )}
+            </div>
+          ))}
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<ListChecks aria-hidden className={dsIcon.md} />}
+            onClick={() => setChecks(runPreflight(fmtClockSec(agoSeconds(-tick))))}
+          >
+            Run doctor again
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+const PREFLIGHT_TONE: Record<PreflightVerdict, "success" | "warning" | "danger"> = {
+  pass: "success",
+  warning: "warning",
+  fail: "danger",
+};
+
+/**
+ * Demo scaffolding (catalog, kit, storage fixture), behind a quiet flask icon.
+ * It used to be a loud "rebuild demo · synthetic data" pill beside the title —
+ * that slot now holds the product view switcher. The storage fixture switch
+ * must not live in Settings (a demo control inside a product surface).
+ */
+function DemoSurfacesPopover({
+  view,
+  onView,
+  storage,
+  onStorage,
+}: {
+  view: DemoShellView;
+  onView: (v: DemoShellView) => void;
+  storage: StorageMode;
+  onStorage: (mode: StorageMode) => void;
+}) {
+  const onScaffold = view === "catalog" || view === "kit";
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <IconButton
+          size="sm"
+          label="Demo surfaces — synthetic data"
+          aria-pressed={onScaffold}
+          icon={<FlaskConical aria-hidden className={dsIcon.md} />}
+          className={cn(onScaffold && "bg-[var(--ds-surface-3)] text-[color:var(--ds-fg)]")}
+        />
+      </PopoverTrigger>
+      <PopoverContent title="Demo surfaces" description="Synthetic scaffolding — not product chrome." width="md" side="bottom" align="end">
+        <div className="flex flex-col gap-[var(--ds-space-base)]">
+          <div className="flex flex-col gap-[var(--ds-space-hair)]">
+            {DEMO_SURFACES.map((surface) => (
+              <button
+                key={surface.key}
+                type="button"
+                aria-current={view === surface.key ? "page" : undefined}
+                onClick={() => onView(surface.key)}
+                className={cn(
+                  "flex min-w-0 flex-col rounded-[var(--ds-radius-md)] px-[var(--ds-space-base)] py-[var(--ds-space-snug)] text-left",
+                  dsFocus,
+                  dsMotion.fast,
+                  view === surface.key
+                    ? "bg-[var(--ds-surface-selected)] text-[color:var(--ds-fg)]"
+                    : "text-[color:var(--ds-fg-secondary)] hover:bg-[var(--ds-surface-3)]",
+                )}
+              >
+                <span className={cn(dsText.ui, "font-medium")}>{surface.label}</span>
+                <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>{surface.note}</span>
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-col gap-[var(--ds-space-snug)] border-t border-[color:var(--ds-border-subtle)] pt-[var(--ds-space-base)]">
+            <span className={cn(dsText.meta, "text-[color:var(--ds-fg-muted)]")}>
+              Which storage snapshot the mock server returns.
+            </span>
+            <span className="flex items-center gap-[var(--ds-space-tight)]">
+              <Button
+                size="sm"
+                variant={storage === "read-write" ? "primary" : "outline"}
+                aria-pressed={storage === "read-write"}
+                onClick={() => onStorage("read-write")}
+              >
+                Healthy
+              </Button>
+              <Button
+                size="sm"
+                variant={storage === "read-only-degraded" ? "danger" : "outline"}
+                aria-pressed={storage === "read-only-degraded"}
+                onClick={() => onStorage("read-only-degraded")}
+              >
+                Degraded
+              </Button>
+            </span>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * The two history controls, as the Top Bar sees them. The shell owns the
+ * history value itself (`demo-nav-history.ts`); this is only what the pair of
+ * buttons needs to render and to call.
+ */
+export interface DemoNavControls {
+  canBack: boolean;
+  canForward: boolean;
+  /** the place each direction lands on, named — undefined when there is none */
+  backTo?: string;
+  forwardTo?: string;
+  onBack: () => void;
+  onForward: () => void;
+}
+
+/**
+ * BACK AND FORWARD, and they sit in the Top Bar rather than on the queue.
+ *
+ * The thing they undo is a jump BETWEEN panels — a delegation chip, a back
+ * link, a search hit — so they belong to the shell, beside the view switcher
+ * that is the other way of changing where you are, and not inside one of the
+ * panels the jump moves you out of.
+ *
+ * A disabled direction stays in place rather than disappearing: a pair that
+ * collapses to one button at the start of a session moves every control to its
+ * right by 28px the first time you navigate, which is a layout that shifts
+ * under the pointer.
+ */
+function DemoNavHistoryControls({ nav }: { nav: DemoNavControls }) {
+  return (
+    <span className="flex shrink-0 items-center gap-[var(--ds-space-hair)]">
+      <IconButton
+        size="sm"
+        label="Back"
+        title={nav.backTo ? `Back to ${nav.backTo}` : "Back — nowhere to go yet"}
+        disabled={!nav.canBack}
+        onClick={nav.onBack}
+        icon={<ArrowLeft aria-hidden className={dsIcon.md} />}
+      />
+      <IconButton
+        size="sm"
+        label="Forward"
+        title={nav.forwardTo ? `Forward to ${nav.forwardTo}` : "Forward — nowhere to go yet"}
+        disabled={!nav.canForward}
+        onClick={nav.onForward}
+        icon={<ArrowRight aria-hidden className={dsIcon.md} />}
+      />
+    </span>
+  );
+}
+
+export function DemoTopBar({
+  view,
+  onView,
+  day,
+  onDay,
+  onNavigate,
+  tick,
+  theme,
+  onToggleTheme,
+  storage,
+  onStorage,
+  nav,
+}: {
+  view: DemoShellView;
+  onView: (v: DemoShellView) => void;
+  /** the day partition the whole app is reading */
+  day: string;
+  onDay: (day: string) => void;
+  /** jump to a row from search or a notification link — panel + row + its day */
+  onNavigate: DemoNavigateTo;
+  tick: number;
+  /** the demo's theme pair — see `ds/theme.ts` */
+  theme: DemoTheme;
+  onToggleTheme: () => void;
+  /** fixture switch behind the quiet flask icon — never a product control */
+  storage: StorageMode;
+  onStorage: (mode: StorageMode) => void;
+  /** where the operator has been — see `demo-nav-history.ts` */
+  nav: DemoNavControls;
+}) {
+  return (
+    <header
+      className={cn(
+        "flex shrink-0 items-center border-b",
+        dsSize.hTopbar,
+        dsBorder.base,
+        dsSurface.card,
+        "gap-[var(--ds-space-cozy)] px-[var(--ds-shell-inset)]",
+      )}
+    >
+      {/* The app's name is the page's ONE h1. It reads at `dsText.ui` like the
+          chrome it is — heading LEVEL is the document outline, not a type size —
+          and it is the outline's root on every view, including the takeovers,
+          whose `PageHeader` deliberately does not compete for it. */}
+      <div className="flex shrink-0 items-center gap-[var(--ds-space-base)]">
+        <span
+          aria-hidden
+          className={cn("flex items-center justify-center", dsRadius.md, "size-[var(--ds-h-sm)] bg-[var(--ds-accent-quiet)]")}
+        >
+          <ShieldCheck className={cn(dsIcon.md, "text-[color:var(--ds-accent-mark)]")} />
+        </span>
+        <h1 className={cn(dsText.ui, dsText.flush, "font-semibold text-[color:var(--ds-fg)]")}>HR Automation</h1>
+      </div>
+
+      {/* Product navigation sits where the synthetic badge used to shout —
+          history + the Dashboard / Archive / Explorer / Activity switcher.
+          Operator: remove the rebuild-demo pill; put this chrome in its place. */}
+      <DemoNavHistoryControls nav={nav} />
+
+      <div
+        className={cn(
+          "inline-flex shrink-0 border p-[var(--ds-space-hair)]",
+          dsRadius.md,
+          dsBorder.base,
+          "bg-[var(--ds-surface-2)]",
+        )}
+      >
+        {SWITCHER_VIEWS.map((v) => (
+          <button
+            key={v}
+            type="button"
+            aria-pressed={view === v}
+            onClick={() => onView(v)}
+            className={cn(
+              "inline-flex cursor-pointer items-center px-[var(--ds-space-base)]",
+              "h-[var(--ds-h-sm)]",
+              dsRadius.sm,
+              dsText.meta,
+              dsFocus,
+              dsMotion.fast,
+              view === v
+                ? "bg-[var(--ds-surface-3)] font-semibold text-[color:var(--ds-fg)]"
+                : "font-medium text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]",
+            )}
+          >
+            {SHELL_VIEW_LABEL[v]}
+          </button>
+        ))}
+      </div>
+
+      {/* Search, the date navigator and the bell are real surfaces — see
+          `DemoTopBarSurfaces`. The date here IS the day the queue reads. */}
+      <DemoSearchControl onNavigate={onNavigate} />
+
+      <DemoDateNav day={day} onDay={onDay} />
+
+      <span className="flex shrink-0 items-center gap-[var(--ds-space-hair)]">
+        {/* Preflight, on screen at all times rather than three clicks inside a
+            page of preferences. Its glyph carries the worst verdict. */}
+        <DemoDoctorPopover tick={tick} />
+        <DemoNotificationBell onNavigate={onNavigate} tick={tick} />
+        {/* THE KEYBOARD GLYPH IS GONE. Operator: *"the keyboard icon will be
+            removed from there since we already have help in settings."* The
+            registry it opened is unchanged and still has one home —
+            Settings → Help → Keyboard — which is where every other reference
+            surface in this product already lives. A second door to a reference
+            page is not discoverability, it is a second thing to maintain. */}
+        {/* The theme pair. One control, and its LABEL names the destination
+            ("Switch to Paper Ink"), because a lone sun/moon glyph never says
+            which of the two states it is reporting. */}
+        <IconButton
+          size="sm"
+          label={`Switch to ${DEMO_THEME_LABEL[theme === "dark" ? "light" : "dark"]}`}
+          onClick={onToggleTheme}
+          icon={
+            theme === "dark" ? (
+              <Sun aria-hidden className={dsIcon.md} />
+            ) : (
+              <Moon aria-hidden className={dsIcon.md} />
+            )
+          }
+        />
+        {/* Quiet door to catalog / kit / storage fixture — demoted from the
+            loud synthetic pill that used to sit beside the title. */}
+        <DemoSurfacesPopover view={view} onView={onView} storage={storage} onStorage={onStorage} />
+        {/* The gear opens Settings — eight editable leaves and the read-only
+            Status group. It is no longer a door to anywhere else. */}
+        <IconButton
+          size="sm"
+          label="Settings"
+          aria-pressed={view === "settings"}
+          onClick={() => onView("settings")}
+          icon={<Settings aria-hidden className={dsIcon.md} />}
+          className={cn(view === "settings" && "bg-[var(--ds-surface-3)] text-[color:var(--ds-fg)]")}
+        />
+      </span>
+    </header>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Workflow Panel (left rail)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-entry copy the registry cannot carry.
+ *
+ * Everything ELSE about the rail comes from the registry: the entries are
+ * `/api/workflow-definitions` (mocked by `DEMO_WORKFLOWS`) and the groups are
+ * each descriptor's OWN `category`, so a workflow the backend serves can never
+ * be missing from the rail and can never sit under a heading the product does
+ * not use.
+ */
+const RAIL_NOTES: Partial<Record<string, string>> = {};
+
+/**
+ * The rail's groups, in display order.
+ *
+ * The ONLY hardcoded thing here is the order (`DEMO_CATEGORY_ORDER`), exactly
+ * as production hardcodes `PREFERRED_CATEGORY_ORDER` and derives everything
+ * else. Membership is the descriptor's `category`; an unlisted category is
+ * appended; an uncategorised workflow falls into a trailing `Other`; and a
+ * category nothing is registered under is DROPPED rather than rendered as an
+ * empty heading.
+ *
+ * This replaces a closed three-value union — People / Documents / Data — that
+ * the demo invented and re-binned every workflow into, so Oath Signature read
+ * as `Documents` here and `Onboarding` in the product the demo is planning.
+ */
+const RAIL_GROUPS: { label: DemoWorkflowCategory; entries: { label: string; note?: string }[] }[] =
+  buildWorkflowCategoryGroups().map((g) => ({
+    label: g.label,
+    entries: g.workflows.map((w) => ({ label: w.label, note: RAIL_NOTES[w.label] })),
+  }));
+
+/** label → the workflow's own 2-char code, the prefix of every one of its trace ids */
+const WORKFLOW_CODE: Record<string, string> = Object.fromEntries(DEMO_WORKFLOW_LIST.map((w) => [w.label, w.code]));
+
+/**
+ * Where the Workflow Panel is, and how much of the window it costs.
+ *
+ * `floating` — a window over the panels. It costs no column, so the queue and
+ * the detail panel get the full width; it is dismissable, and dismissing it
+ * lands on `icon`.
+ * `icon` — nothing is drawn over the content at all. The toggle in the action
+ * bar is the launcher, and it keeps carrying the `Needs you` count so a
+ * collapsed panel can never hide one.
+ * `sidebar` — docked, 200px, always visible. For the operator who wants it.
+ */
+export type WorkflowPanelMode = "floating" | "icon" | "sidebar";
+
+const PANEL_MODE_CYCLE: WorkflowPanelMode[] = ["floating", "icon", "sidebar"];
+
+export const WORKFLOW_PANEL_MODE_LABEL: Record<WorkflowPanelMode, string> = {
+  floating: "floating window",
+  icon: "icon",
+  sidebar: "sidebar",
+};
+
+const PANEL_MODE_STORAGE_KEY = "rebuild-demo.workflow-panel";
+const WORKFLOW_PANEL_ID = "demo-workflow-panel";
+const WORKFLOW_PANEL_TOGGLE_ID = "demo-workflow-panel-toggle";
+
+function readStoredPanelMode(): WorkflowPanelMode {
+  if (typeof window === "undefined") return "floating";
+  try {
+    const stored = window.localStorage.getItem(PANEL_MODE_STORAGE_KEY);
+    return PANEL_MODE_CYCLE.find((m) => m === stored) ?? "floating";
+  } catch {
+    // A blocked localStorage (private mode, storage off) is a real browser
+    // state, not a failure to read a mode: it means there is no stored
+    // preference, which is the documented default.
+    return "floating";
+  }
+}
+
+/**
+ * Owns the mode, its persistence, and one thing more: whether the OPERATOR has
+ * moved it this session (`opened`).
+ *
+ * That flag is what keeps the window honest on first paint. A window that
+ * animates in and grabs focus because it was the persisted default is animating
+ * on page load and stealing the caret from the queue — both banned. Opened by a
+ * press, the same window should do exactly that, because then it did come from
+ * somewhere and the operator is looking at it.
+ */
+export function useWorkflowPanelMode(): {
+  mode: WorkflowPanelMode;
+  setMode: (mode: WorkflowPanelMode) => void;
+  cycleMode: () => void;
+  opened: boolean;
+} {
+  const [mode, setModeState] = useState<WorkflowPanelMode>(readStoredPanelMode);
+  const [opened, setOpened] = useState(false);
+
+  const setMode = useCallback((next: WorkflowPanelMode) => {
+    setOpened(true);
+    setModeState(next);
+    try {
+      window.localStorage.setItem(PANEL_MODE_STORAGE_KEY, next);
+    } catch {
+      // Same as above: an unwritable store loses the preference for next time,
+      // which is not a reason to refuse the operator this one.
+    }
+  }, []);
+
+  const cycleMode = useCallback(() => {
+    setMode(PANEL_MODE_CYCLE[(PANEL_MODE_CYCLE.indexOf(mode) + 1) % PANEL_MODE_CYCLE.length]);
+  }, [mode, setMode]);
+
+  return { mode, setMode, cycleMode, opened };
+}
+
+interface PanelModeProps {
+  mode: WorkflowPanelMode;
+  onMode: (mode: WorkflowPanelMode) => void;
+}
+
+/**
+ * The panel's own window controls. Every transition is one press from here or
+ * from the toggle, and `w` cycles all three from anywhere — a state you can only
+ * reach with the mouse is one a keyboard operator does not have.
+ */
+function WorkflowPanelControls({ mode, onMode }: PanelModeProps) {
+  return (
+    <span className="flex shrink-0 items-center gap-[var(--ds-space-hair)]">
+      {mode === "sidebar" ? (
+        <IconButton
+          size="sm"
+          label="Float the Workflow Panel"
+          onClick={() => onMode("floating")}
+          icon={<PictureInPicture2 aria-hidden className={dsIcon.md} />}
+        />
+      ) : (
+        <IconButton
+          size="sm"
+          label="Dock the Workflow Panel as a sidebar"
+          onClick={() => onMode("sidebar")}
+          icon={<PanelLeft aria-hidden className={dsIcon.md} />}
+        />
+      )}
+      <IconButton
+        size="sm"
+        label="Minimise the Workflow Panel to an icon"
+        onClick={() => onMode("icon")}
+        icon={<Minus aria-hidden className={dsIcon.md} />}
+      />
+    </span>
+  );
+}
+
+/**
+ * The launcher, and the one control present in all three modes.
+ *
+ * WHAT WENT WRONG, because it was a counting bug and not a labelling one. This
+ * control rendered the day's `Needs you` across EVERY panel — 6 — while the
+ * rail beside it showed each workflow's QUEUED count in an unlabelled numeric
+ * chip, and those summed to 4. The operator read the chips as attention badges,
+ * added them up, and correctly reported that the shell disagreed with itself.
+ * Wave 9 had already relabelled the launcher's number and it did not help,
+ * because relabelling one of two incompatible quantities does not make them
+ * compatible.
+ *
+ * Both ends are fixed at the counting layer: the rail's badge IS attention now
+ * (`countRowsByWorkflow`), so the two numbers are the same KIND of thing, and
+ * this control renders the rail's own pair summed down its length.
+ *
+ * ONE NUMBER, AND IT IS THE DEMAND. This carried a PAIR — `6 | 38` — on the
+ * argument that two quantities cannot be misread as one quantity rendered
+ * twice. Operator: *"no need 38, just 6 is enough."* And they are right: the
+ * denominator is the day's whole corpus, which is a number nobody acts on and
+ * which was there to disambiguate rather than to inform. A control earns its
+ * pixels by what it tells you to DO, and `38 rows exist` tells you nothing.
+ *
+ * The scope it was protecting survives where scope belongs — the tooltip and
+ * the accessible name, both of which say the count spans every workflow.
+ *
+ * It still carries the workflow's 2-char code — the prefix of every one of its
+ * trace ids — so the control is never an anonymous glyph.
+ */
+export function DemoWorkflowPanelToggle({
+  mode,
+  onMode,
+  active,
+  rows,
+}: PanelModeProps & {
+  active: string;
+  /** the day's corpus — every panel's rows, not the active panel's */
+  rows: DemoRow[];
+}) {
+  const { active: dayActive, all } = useMemo(() => attentionAcrossWorkflows(rows), [rows]);
+  const showing = mode !== "icon";
+  const code = WORKFLOW_CODE[active] ?? "";
+  // The scope has to survive somewhere, and with the word gone it lives here.
+  // Both numbers, both nouns, and the span they cover — an operator who hovers
+  // or listens gets the full sentence; the face of the control gets the pair.
+  // Same quantity as the rail's orange `active` column, summed — so the
+  // collapsed badge and the open list cannot disagree.
+  const scope = `${dayActive} of ${plural(all, "row")} across every workflow are queued or running today`;
+  return (
+    <button
+      id={WORKFLOW_PANEL_TOGGLE_ID}
+      type="button"
+      aria-expanded={showing}
+      aria-controls={mode === "floating" ? WORKFLOW_PANEL_ID : undefined}
+      // The counts go in the LABEL, not only in the badges: an `aria-label`
+      // replaces a button's contents outright, so the numbers were being
+      // announced to nobody — the thing this control exists to carry.
+      aria-label={`Workflow Panel — ${active}${showing ? `, ${WORKFLOW_PANEL_MODE_LABEL[mode]}` : ", minimised"}. ${scope}`}
+      title={`Workflow Panel — ${active} (${code})\n${scope}\nThe Status Bar's Needs you pill is attention, not this count\nw cycles floating · icon · sidebar`}
+      onClick={() => onMode(showing ? "icon" : "floating")}
+      className={cn(
+        toolbarControl(),
+        dsMotion.fast,
+        "active:translate-y-px",
+        showing
+          ? cn(dsBorder.loud, "bg-[var(--ds-surface-selected)] font-semibold text-[color:var(--ds-fg)]")
+          // Resting edge was `--ds-border` (8% white) — invisible next to the
+          // blue Start a run. Strong (16%) reads as a real outline; selected
+          // still steps up to loud.
+          : cn(dsBorder.strong, dsSurface.card, "text-[color:var(--ds-fg-muted)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]"),
+      )}
+    >
+      {showing ? (
+        <PanelLeftClose aria-hidden className={dsIcon.sm} />
+      ) : (
+        <PanelLeftOpen aria-hidden className={dsIcon.sm} />
+      )}
+      <span className={dsText.nums}>{code}</span>
+      {/* The rule separates the panel you are IN from a count that belongs to
+          the whole day. It sits on the control's OWN surface, where
+          `--ds-border` against a white card is not a line anybody sees. */}
+      <span aria-hidden className={cn("mx-[var(--ds-space-hair)] h-4 w-px shrink-0", "bg-[var(--ds-border-loud)]")} />
+      {/* ACTIVE (queued + running) across every workflow — same orange as the
+          rail's left column, and the same total when you add that column down.
+          At zero it dims rather than vanishing so the action bar does not
+          reflow every time the day goes idle. */}
+      <span
+        className={cn(
+          dsText.nums,
+          "shrink-0 tabular-nums",
+          dsMotion.base,
+          dayActive > 0
+            ? "font-semibold text-[color:var(--ds-status-waiting-fg)]"
+            : "text-[color:var(--ds-fg-faint)]",
+        )}
+      >
+        {dayActive}
+      </span>
+    </button>
+  );
+}
+
+function WorkflowEntryList({
+  active,
+  onActive,
+  rows,
+}: {
+  active: string;
+  onActive: (label: string) => void;
+  /** the day's corpus — the SAME array the Status Bar and the queue read */
+  rows: DemoRow[];
+}) {
+  // Same counting path as the Status Bar, the launcher and the queue, over the
+  // same rows. Not a second tally, and not a second corpus.
+  const counts = useMemo(() => countRowsByWorkflow(rows), [rows]);
+
+  /** Every rail entry is the same object; the label IS what it filters by. */
+  const entry = (label: string, active: number, total: number, on: boolean, note?: string) => (
+    <button
+      type="button"
+      aria-current={on ? "page" : undefined}
+      title={note}
+      onClick={() => onActive(label)}
+      className={cn(
+        "group flex w-full cursor-pointer items-stretch text-left",
+        "gap-[var(--ds-space-base)] pl-[var(--ds-space-tight)] pr-[var(--ds-space-base)]",
+        dsSize.hRow,
+        dsRadius.md,
+        dsFocus,
+        dsMotion.base,
+        on ? "bg-[var(--ds-surface-selected)]" : "hover:bg-[var(--ds-surface-3)]",
+      )}
+    >
+      {/* The 3px marker is the non-colour cue for "this is the panel you are
+          in" — the fill alone is too quiet at this density. */}
+      <span
+        aria-hidden
+        className={cn(
+          "my-[var(--ds-space-snug)] w-[var(--ds-border-w-rail)] rounded-r-full",
+          dsMotion.base,
+          // The selection ink, not the action ink: on the dark theme the accent
+          // is near-white, and a rail that bright made "which panel am I in"
+          // the loudest mark in the sidebar.
+          on ? "bg-[var(--ds-ring)]" : "bg-transparent group-hover:bg-[var(--ds-border-loud)]",
+        )}
+      />
+      <span className="flex min-w-0 flex-1 items-center">
+        <span
+          className={cn(
+            dsText.ui,
+            "truncate",
+            on ? "font-semibold text-[color:var(--ds-fg)]" : "font-medium text-[color:var(--ds-fg-secondary)]",
+          )}
+        >
+          {label}
+        </span>
+      </span>
+      {/* `active │ all`, PER WORKFLOW, and it is the ONLY badge on the row.
+          The amber eye that used to sit to its left is gone: it was a THIRD
+          number in a row that already carried two, and every panel wearing one
+          read `0` in the column beside it — because `queued` empties the moment
+          a run starts. `active` is queued + running, so the column says what
+          the panel is doing rather than what it has not begun.
+
+          Active (left) wears the same amber as the launcher badge — operator:
+          mark queued and running in orange — and at zero it DIMS rather than
+          disappearing so the eye does not have to re-scan an idle panel. */}
+      <span
+        title={`${label}: ${active} active (queued or running) of ${total} row${total === 1 ? "" : "s"} today`}
+        aria-label={`${active} active of ${total} in ${label}`}
+        className={cn(dsText.meta, dsText.nums, "flex shrink-0 items-center justify-end gap-[var(--ds-space-hair)]")}
+      >
+        <span
+          className={
+            active === 0
+              ? "text-[color:var(--ds-fg-faint)]"
+              : "font-semibold text-[color:var(--ds-status-waiting-fg)]"
+          }
+        >
+          {active}
+        </span>
+        <span aria-hidden className="text-[color:var(--ds-fg-faint)]">│</span>
+        <span
+          className={
+            total === 0
+              ? "text-[color:var(--ds-fg-faint)]"
+              : on
+                ? "font-semibold text-[color:var(--ds-fg)]"
+                : "text-[color:var(--ds-fg-secondary)]"
+          }
+        >
+          {total}
+        </span>
+      </span>
+    </button>
+  );
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-[var(--ds-space-cozy)]">
+      {/* The pair is named ONCE, as a column head, not per row: two bare
+          numbers beside a rule is exactly the anonymous-badge problem the
+          launcher had, and a caption on every entry would be the same word
+          fourteen times. */}
+      <div
+        className={cn(
+          dsText.caps,
+          "flex items-center justify-end gap-[var(--ds-space-hair)] px-[var(--ds-space-cozy)] pb-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]",
+        )}
+      >
+        <span>active</span>
+        <span aria-hidden className="text-[color:var(--ds-fg-faint)]">│</span>
+        <span>all</span>
+      </div>
+      {RAIL_GROUPS.map((g) => (
+        <div key={g.label} className="pb-[var(--ds-space-cozy)]">
+          {/* More air above a group heading than below it — the label belongs to
+              the list under it, not to the one it just left. */}
+          <div className={cn(dsText.caps, "px-[var(--ds-space-cozy)] pb-[var(--ds-space-snug)] text-[color:var(--ds-fg-muted)]")}>
+            {g.label}
+          </div>
+          <ul className="flex flex-col gap-px px-[var(--ds-space-snug)]">
+            {g.entries.map((e) => {
+              const pair = railEntryCounts(counts.get(e.label));
+              // Rows are deliberately icon-free — the workflow icons live on
+              // Session Cards and the add-worker picker, not here.
+              return (
+                <li key={e.label}>{entry(e.label, pair.active, pair.total, active === e.label, e.note)}</li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+      {/* The standing note that used to close this list ("Badges, Status Bar
+          pills and the queue all go through one counting path — they cannot
+          disagree") is gone. It was the product asserting its own correctness
+          to the operator, in a panel with no room to spare — and the operator
+          had just caught two of those numbers disagreeing, which is precisely
+          what a claim like that costs when it is only a sentence. The invariant
+          is now held by `countRowsByWorkflow` and a unit test. */}
+    </div>
+  );
+}
+
+/** The header both presentations share: the surface's name, then its controls. */
+function WorkflowPanelHeader({ mode, onMode }: PanelModeProps) {
+  return (
+    <div
+      className={cn(
+        "flex shrink-0 items-center border-b",
+        dsSize.hBar,
+        dsBorder.subtle,
+        "gap-[var(--ds-space-base)] pl-[var(--ds-space-cozy)] pr-[var(--ds-space-snug)]",
+      )}
+    >
+      <span className={cn(dsText.caps, "min-w-0 flex-1 truncate text-[color:var(--ds-fg-muted)]")}>Workflow Panel</span>
+      <WorkflowPanelControls mode={mode} onMode={onMode} />
+    </div>
+  );
+}
+
+interface WorkflowPanelProps extends PanelModeProps {
+  active: string;
+  onActive: (label: string) => void;
+  rows: DemoRow[];
+}
+
+/** `sidebar` — docked, consuming a 200px column, exactly as it always did. */
+export function DemoWorkflowSidebar({ mode, onMode, active, onActive, rows }: WorkflowPanelProps) {
+  return (
+    <nav
+      aria-label="Workflow Panel"
+      className={cn("flex min-h-0 shrink-0 flex-col border-r", dsSize.wRail, dsBorder.base, dsSurface.card)}
+    >
+      <WorkflowPanelHeader mode={mode} onMode={onMode} />
+      <WorkflowEntryList active={active} onActive={onActive} rows={rows} />
+    </nav>
+  );
+}
+
+/**
+ * `floating` — the same panel as a window over the panel region.
+ *
+ * It is deliberately NOT built on `Popover`/`Dialog`. Both of those register
+ * modal presence, which makes the toast viewport step aside and go inert for as
+ * long as they are mounted, and this is the DEFAULT state — a demo that boots
+ * with its toasts permanently inert would be reporting a bug, not a design. So
+ * it composes the sanctioned floating tokens directly and owns the three things
+ * Radix would have given it: Escape, outside-click, and focus.
+ *
+ * Focus is scoped, not seized. Tab cycles inside the window once the caret is
+ * in it and Escape leaves — but the window never pulls focus off the queue just
+ * because it happens to be the persisted mode on a fresh load.
+ */
+export function DemoWorkflowWindow({
+  mode,
+  onMode,
+  active,
+  onActive,
+  rows,
+  /** did the operator open this, or is it simply how the app booted? */
+  opened,
+}: WorkflowPanelProps & { opened: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [entered, setEntered] = useState(!opened);
+
+  // It arrives from the toggle above it — so it is allowed to be animated, and
+  // only when it actually arrived rather than was already there.
+  useEffect(() => {
+    if (entered) return;
+    const id = window.requestAnimationFrame(() => setEntered(true));
+    return () => window.cancelAnimationFrame(id);
+  }, [entered]);
+
+  // Opened by a press: put the caret on the panel you are in, so the keyboard
+  // route into the list is one press and not fourteen tabs.
+  useEffect(() => {
+    if (!opened) return;
+    ref.current?.querySelector<HTMLElement>('[aria-current="page"]')?.focus();
+  }, [opened]);
+
+  // Clicking anywhere else dismisses it. Capture phase, so the click that
+  // dismisses the window still reaches the row it landed on — you never lose a
+  // press to a panel you were finished with.
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const el = ref.current;
+      const target = e.target as Node | null;
+      if (!el || !target) return;
+      if (el.contains(target)) return;
+      // The toggle owns its own press; letting this fire too would minimise and
+      // re-open in one click.
+      if (document.getElementById(WORKFLOW_PANEL_TOGGLE_ID)?.contains(target)) return;
+      onMode("icon");
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [onMode]);
+
+  /**
+   * Hand focus back to the launcher — but ONLY when it was inside the window.
+   * Stealing it from whatever the operator just clicked would be worse than not
+   * returning it at all, which is why the outside-click path above does not
+   * route through here.
+   *
+   * It runs BEFORE the state change, not in an unmount cleanup: a passive
+   * cleanup fires after React has already detached the node, by which point the
+   * caret is on `<body>` and there is nothing left to ask.
+   */
+  const leave = useCallback(
+    (next: WorkflowPanelMode) => {
+      if (ref.current?.contains(document.activeElement)) {
+        document.getElementById(WORKFLOW_PANEL_TOGGLE_ID)?.focus();
+      }
+      onMode(next);
+    },
+    [onMode],
+  );
+
+  return (
+    <div
+      ref={ref}
+      id={WORKFLOW_PANEL_ID}
+      role="dialog"
+      aria-label="Workflow Panel"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          leave("icon");
+          return;
+        }
+        if (e.key !== "Tab") return;
+        const focusable = Array.from(
+          ref.current?.querySelectorAll<HTMLElement>("button:not([disabled])") ?? [],
+        );
+        if (focusable.length === 0) return;
+        const edge = e.shiftKey ? focusable[0] : focusable[focusable.length - 1];
+        if (document.activeElement !== edge) return;
+        e.preventDefault();
+        (e.shiftKey ? focusable[focusable.length - 1] : focusable[0]).focus();
+      }}
+      className={cn(
+        "absolute left-[var(--ds-space-cozy)] flex flex-col overflow-hidden border",
+        "inset-y-[var(--ds-space-cozy)]",
+        dsSize.wRail,
+        dsLayer.menu,
+        dsRadius.lg,
+        dsElev.high,
+        dsMotion.enter,
+        "origin-top-left border-[color:var(--ds-border-strong)] bg-[var(--ds-surface-overlay)]",
+        entered ? "translate-y-0 scale-100 opacity-100" : "-translate-y-1 scale-[0.985] opacity-0",
+      )}
+    >
+      <WorkflowPanelHeader mode={mode} onMode={leave} />
+      <WorkflowEntryList active={active} onActive={onActive} rows={rows} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Status Bar (count pills)
+// ---------------------------------------------------------------------------
+
+/**
+ * One row: `All`, the composite `Needs you`, then every one of the eight
+ * statuses. Nothing is hidden behind an overflow menu — a status you cannot
+ * click is a status you cannot triage — and nothing is counted twice.
+ */
+const STATUS_PILL_ORDER: ProposedStatus[] = [
+  "queued",
+  "running",
+  "waiting",
+  "parked",
+  "verifiedDone",
+  "doneWarnings",
+  "failed",
+  "cancelled",
+];
+
+/**
+ * The pill's icon tone. Read from the ONE status table rather than restated
+ * here — this map used to say `queued: amber`, `cancelled: amber` and
+ * `running: primary`, which put four of the eight pills in the same amber and
+ * disagreed with the chip on the row each pill filters to.
+ */
+const statusPillTone = (s: ProposedStatus): string => DS_STATUS[s].soloTone;
+
+/**
+ * The queue's status filters — one GROUP inside the composed action bar, not a
+ * band of its own.
+ *
+ * WHAT WAS WRONG WITH IT, in the operator's words: *"just sloppy work rn"*.
+ * Ten pills at identical visual weight, five of them zero, so `Cancelled 0` had
+ * the same border, fill and footprint as `Failed 1`; and `All` and `Needs you`
+ * — which are COMPOSITES over the other eight — sat in the same row in the same
+ * shape as primitives like `Queued`, so the bar read as ten peers when it holds
+ * two of one kind and eight of another.
+ *
+ * Two changes, both structural:
+ *
+ *  - **The composites are a segmented control.** One bordered container with
+ *    two segments, exactly like the Top Bar's view switcher. A different SHAPE
+ *    for a different kind of thing beats a hairline asking the eye to infer it.
+ *  - **A zero genuinely recedes** — it drops its border, its fill AND its
+ *    label, down to an icon and a `0` at `--ds-fg-faint`. It is still there, it
+ *    is still clickable, it still carries its full name to a screen reader, and
+ *    it stops spending the width of a word on a status that is not happening.
+ *    (A long status word used to cost ~130px at rest; at zero it is ~34px.)
+ */
+export function DemoStatusFilters({
+  counts,
+  active,
+  onSelect,
+}: {
+  counts: Record<StatusBucket, number>;
+  active: StatusBucket;
+  onSelect: (b: StatusBucket) => void;
+}) {
+  /** the two composites — one control, two segments */
+  const scope = (
+    key: StatusBucket,
+    label: string,
+    Icon: ComponentType<SVGProps<SVGSVGElement>>,
+    tone: string,
+    title: string,
+    edge: "start" | "end",
+  ) => {
+    const on = active === key;
+    return (
+      <button
+        key={key}
+        type="button"
+        aria-pressed={on}
+        title={title}
+        onClick={() => onSelect(on ? "all" : key)}
+        className={cn(
+          // Same OUTER height as `Start a run` and every status pill
+          // (`--ds-h-toolbar`). Nesting these inside a padded/bordered shell
+          // left them 22–26px beside a 28px primary, so the primary looked
+          // taller than the rest of the bar.
+          "inline-flex h-[var(--ds-h-toolbar)] shrink-0 cursor-pointer items-center border",
+          "gap-[var(--ds-space-tight)] px-[var(--ds-space-base)]",
+          edge === "start" ? "rounded-l-[var(--ds-radius-md)] border-r-0" : "rounded-r-[var(--ds-radius-md)]",
+          dsBorder.base,
+          dsText.meta,
+          dsText.flush,
+          dsFocus,
+          dsMotion.fast,
+          on
+            ? "bg-[var(--ds-surface-3)] font-semibold text-[color:var(--ds-fg)]"
+            : cn("bg-[var(--ds-surface-2)] font-medium text-[color:var(--ds-fg-muted)] hover:text-[color:var(--ds-fg)]"),
+        )}
+      >
+        <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0", tone)} />
+        {label}
+        <span className={dsText.nums}>{counts[key]}</span>
+      </button>
+    );
+  };
+
+  /** one of the eight — a primitive status, and a chip rather than a segment */
+  const statusPill = (s: ProposedStatus) => {
+    const on = active === s;
+    const n = counts[s];
+    const empty = n === 0 && !on;
+    const spec = PROPOSED_STATUS[s];
+    const Icon = spec.icon;
+    return (
+      <button
+        key={s}
+        type="button"
+        aria-pressed={on}
+        aria-label={`${spec.label} — ${n}`}
+        title={spec.meaning}
+        onClick={() => onSelect(on ? "all" : s)}
+        className={cn(
+          "inline-flex shrink-0 cursor-pointer items-center border",
+          // ONE BOX, WHATEVER IS IN IT. Height AND inset are the bar's
+          // constants for every pill — operator: *"all these should be the same
+          // height no matter what. the buttons and all."* An empty bucket still
+          // gives up its FILL, its EDGE and its word (that cue is real, and a
+          // full bucket must not look like an empty one), but it no longer also
+          // gives up 8px of padding, which was making a row of identically
+          // sized controls read as controls of three different sizes.
+          "h-[var(--ds-h-toolbar)] gap-[var(--ds-space-snug)] px-[var(--ds-space-base)]",
+          empty && "border-transparent",
+          dsRadius.md,
+          dsText.meta,
+          dsText.flush,
+          dsFocus,
+          dsMotion.fast,
+          on
+            ? cn(dsBorder.loud, "bg-[var(--ds-surface-selected)] font-semibold text-[color:var(--ds-fg)]")
+            : empty
+              ? "text-[color:var(--ds-fg-faint)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg-muted)]"
+              : cn(dsBorder.base, dsSurface.card, "text-[color:var(--ds-fg-muted)] hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)]"),
+        )}
+      >
+        <Icon
+          aria-hidden
+          className={cn(
+            dsIcon.sm,
+            "shrink-0",
+            empty ? "text-[color:var(--ds-fg-faint)]" : statusPillTone(s),
+            s === "running" && n > 0 && "animate-spin motion-reduce:animate-none",
+          )}
+        />
+        {/* A status that is not happening spends an icon and a digit, not a
+            word. The word is still its accessible name. */}
+        {!empty && spec.label}
+        <span className={dsText.nums}>{n}</span>
+      </button>
+    );
+  };
+
+  return (
+    // A status is never hidden behind an overflow menu — one you cannot click
+    // is one you cannot triage — so at a narrow window the group scrolls.
+    <div
+      role="group"
+      aria-label="Filter the queue by status"
+      className="flex min-w-0 items-center gap-[var(--ds-space-tight)] overflow-x-auto"
+    >
+      <div
+        className="inline-flex h-[var(--ds-h-toolbar)] shrink-0"
+        role="group"
+        aria-label="Scope the queue"
+      >
+        {scope("all", "All", LayoutDashboard, "text-[color:var(--ds-fg-muted)]", "Every row in this view", "start")}
+        {scope(
+          "needsYou",
+          "Needs you",
+          Eye,
+          "text-[color:var(--ds-status-waiting-fg)]",
+          "Waiting on you + Write parked — the two states that are stuck on a decision from you",
+          "end",
+        )}
+      </div>
+      {STATUS_PILL_ORDER.map(statusPill)}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Session Panel (bottom drawer)
+// ---------------------------------------------------------------------------
+
+/**
+ * The worker/session fixture and spawn command moved to
+ * `demo-workers-wire.ts` when the Session Panel's `+` became real. The dialog
+ * numbers new worker ids from the SAME array these cards render, so the spawn
+ * result and the Session Panel cannot disagree about the live worker count.
+ */
+
+/**
+ * A worker's phase. Same hue ramp as everything else in the demo, so "this
+ * daemon is alive" and "this row is running" are not two unrelated blues.
+ */
+const PHASE_TONE: Record<SessionPhase, { dot: string; label: string; text: string }> = {
+  running: { dot: "bg-[var(--ds-success-fg)]", label: "Running", text: "text-[color:var(--ds-success-fg)]" },
+  authenticating: {
+    dot: "bg-[var(--ds-status-waiting-fg)] animate-pulse motion-reduce:animate-none",
+    label: "Authenticating",
+    text: "text-[color:var(--ds-status-waiting-fg)]",
+  },
+  idle: { dot: "bg-[var(--ds-fg-faint)]", label: "Idle", text: "text-[color:var(--ds-fg-muted)]" },
+  keepalive: { dot: "bg-[var(--ds-info-fg)]", label: "Keep-alive", text: "text-[color:var(--ds-info-fg)]" },
+  complete: { dot: "bg-[var(--ds-success-fg)] opacity-60", label: "Complete", text: "text-[color:var(--ds-fg-muted)]" },
+  failed: { dot: "bg-[var(--ds-danger)]", label: "Failed", text: "text-[color:var(--ds-danger)]" },
+};
+
+/**
+ * A browser's health. `unknown` is deliberately NOT styled like `healthy` — a
+ * session that was never probed must not read as one that passed. It is the
+ * only tile with no fill at all, which is the same "nothing has happened yet"
+ * cue the Queued status uses.
+ */
+const HEALTH_TONE: Record<BrowserHealth, { cls: string; icon: typeof Activity; label: string }> = {
+  healthy: {
+    cls: "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
+    icon: CheckCircle2,
+    label: "Ready",
+  },
+  unknown: {
+    cls: "border-[color:var(--ds-border-subtle)] bg-transparent text-[color:var(--ds-fg-faint)]",
+    icon: CircleHelp,
+    label: "Not checked",
+  },
+  refreshing: {
+    cls: "border-[color:var(--ds-info-border)] bg-[var(--ds-info-bg)] text-[color:var(--ds-info-fg)]",
+    icon: RotateCw,
+    label: "Refreshing",
+  },
+  unhealthy: {
+    cls: "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]",
+    icon: AlertTriangle,
+    label: "Unhealthy",
+  },
+  failed: {
+    cls: "border-[color:var(--ds-danger-border)] bg-[var(--ds-danger-quiet)] text-[color:var(--ds-danger)]",
+    icon: AlertTriangle,
+    label: "Failed",
+  },
+  paused: {
+    cls: "border-[color:var(--ds-status-parked-border)] bg-[var(--ds-status-parked-bg)] text-[color:var(--ds-status-parked-fg)]",
+    icon: Pause,
+    label: "Paused",
+  },
+};
+
+/**
+ * `span` fills the second column when a card holds an ODD number of browsers.
+ * A lone half-width tile beside dead space reads as a tile that failed to
+ * render, which is exactly the wrong thing for a panel about health.
+ */
+function BrowserTile({ b, span }: { b: DemoBrowser; span?: boolean }) {
+  const tone = HEALTH_TONE[b.health];
+  const Icon = tone.icon;
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={cn("relative", span && "col-span-2")}>
+      {/* Zero chrome at rest — the state word owns the full tile width. An
+          earlier design crammed six hover glyphs in here and crushed
+          "Refreshing" to "R". Actions live behind a right-click menu. */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={`${b.label} — ${tone.label} · ${b.url}\nRight-click (two-finger click) for browser actions`}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setOpen((v) => !v);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen((v) => !v);
+          }
+        }}
+        className={cn(
+          "flex w-full min-w-0 cursor-pointer flex-col border",
+          "gap-[var(--ds-space-hair)] px-[var(--ds-space-base)] py-[var(--ds-space-tight)]",
+          dsRadius.md,
+          dsFocus,
+          dsMotion.base,
+          tone.cls,
+          open && "border-[color:var(--ds-border-loud)]",
+        )}
+      >
+        <span className={cn(dsText.caps, "flex items-center gap-[var(--ds-space-tight)]")}>
+          <Icon aria-hidden className={cn(dsIcon.sm, "shrink-0", b.health === "refreshing" && "animate-spin motion-reduce:animate-none")} />
+          {b.label}
+        </span>
+        <span className={cn(dsText.micro, "truncate opacity-80")}>{tone.label}</span>
+      </div>
+      {open && (
+        <div
+          role="menu"
+          className={cn(
+            "absolute bottom-full left-0 mb-[var(--ds-space-tight)] w-44 overflow-hidden border py-[var(--ds-space-tight)]",
+            dsLayer.menu,
+            dsRadius.md,
+            dsBorder.base,
+            "bg-[var(--ds-surface-overlay)]",
+            dsElev.mid,
+          )}
+        >
+          {["Peek (live screenshot)", "Check now", "Bring to front", "Refresh page", "Reopen tab", b.health === "paused" ? "Resume auto-recovery" : "Pause auto-recovery"].map(
+            (item, i) => (
+              <button
+                key={item}
+                type="button"
+                role="menuitem"
+                onClick={() => setOpen(false)}
+                className={cn(
+                  "flex w-full cursor-pointer items-center text-left",
+                  "gap-[var(--ds-space-snug)] px-[var(--ds-space-cozy)] py-[var(--ds-space-tight)]",
+                  dsText.body,
+                  dsMotion.fast,
+                  "text-[color:var(--ds-fg-secondary)] outline-none",
+                  "hover:bg-[var(--ds-surface-3)] hover:text-[color:var(--ds-fg)] focus-visible:bg-[var(--ds-surface-3)]",
+                  (i === 1 || i === 5) && cn("border-t", dsBorder.subtle),
+                )}
+              >
+                {i === 0 && <Camera aria-hidden className={dsIcon.sm} />}
+                {item}
+              </button>
+            ),
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One compact chip shape for the collapsed Session bar's wait and browser
+ * health summaries. They were two
+ * near-identical hand-rolled spans at 9.5px, which is below the type floor and
+ * made the row wrap ragged whenever a card carried three systems.
+ *
+ * It also absorbed `barChip`, the collapsed Session bar's summary chip — the
+ * SAME nine lines declared a second time ~230 lines below this one, differing
+ * only in the name of its boolean. Two declarations of one shape is how the two
+ * drift; there is now one, and it sits at module scope where the second copy
+ * could not have been written without noticing the first.
+ */
+const capacityChip = (full: boolean): string =>
+  cn(
+    "inline-flex shrink-0 items-center border text-ellipsis",
+    dsClip.token,
+    "h-[var(--ds-h-xs)] gap-[var(--ds-space-tight)] px-[var(--ds-space-snug)]",
+    dsRadius.sm,
+    dsText.micro,
+    full
+      ? "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)] text-[color:var(--ds-status-waiting-fg)]"
+      : "border-[color:var(--ds-recess-border)] bg-[var(--ds-recess-bg)] text-[color:var(--ds-recess-fg-quiet)]",
+  );
+
+function SessionCard({ s, tick }: { s: DemoSession; tick: number }) {
+  const tone = PHASE_TONE[s.phase];
+  const inFlight = s.phase === "running";
+
+  // A daemon that died before its browser opened is a different object: no
+  // tiles, no timer, nothing to stop. Keep it visible so the failure is learned.
+  if (s.crashed) {
+    return (
+      <article
+        className={cn(
+          // No explicit height: `align-items: stretch` only stretches an item
+        // whose cross size computes to `auto`, so an `h-full` here would opt
+        // every card straight back out of the uniform row.
+        "flex shrink-0 flex-col border",
+          "w-[var(--ds-w-session-card)] gap-[var(--ds-space-tight)] p-[var(--ds-space-base)]",
+          dsRadius.lg,
+          "border-[color:var(--ds-danger-border)] bg-[var(--ds-danger-quiet)]",
+        )}
+      >
+        <div className="flex items-center gap-[var(--ds-space-base)]">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--ds-danger)]" />
+          <span className={cn(dsText.ui, "min-w-0 flex-1 truncate font-semibold text-[color:var(--ds-fg)]")}>{s.workflow}</span>
+          <span className={cn(dsText.caps, "shrink-0 text-[color:var(--ds-danger)]")}>Launch failed</span>
+        </div>
+        <p className={cn(dsText.meta, "text-[color:var(--ds-danger)] opacity-85")}>{s.subline}</p>
+      </article>
+    );
+  }
+
+  return (
+    <article
+      className={cn(
+        // No explicit height: `align-items: stretch` only stretches an item
+        // whose cross size computes to `auto`, so an `h-full` here would opt
+        // every card straight back out of the uniform row.
+        "flex shrink-0 flex-col border",
+        "w-[var(--ds-w-session-card)] gap-[var(--ds-space-snug)] p-[var(--ds-space-base)]",
+        dsRadius.lg,
+        dsSurface.card,
+        s.phase === "failed" ? "border-[color:var(--ds-danger-border)]" : dsBorder.base,
+      )}
+    >
+      <div className="flex items-center gap-[var(--ds-space-snug)]">
+        <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
+        {/* the trailing instance ordinal is always stripped from the title */}
+        <span className={cn(dsText.ui, "min-w-0 truncate font-semibold text-[color:var(--ds-fg)]")}>{s.workflow}</span>
+        {s.queued ? (
+          <span
+            className={cn(
+              "inline-flex shrink-0 items-center border px-[var(--ds-space-tight)]",
+              "h-[var(--ds-h-xs)] gap-[var(--ds-space-hair)]",
+              dsRadius.sm,
+              dsText.micro,
+              "border-[color:var(--ds-status-queued-border)] text-[color:var(--ds-status-queued-fg)]",
+            )}
+          >
+            <span className={dsText.nums}>{s.queued}</span> queued
+          </span>
+        ) : null}
+        <span className={cn(dsText.caps, "ml-auto shrink-0", tone.text)}>{tone.label}</span>
+      </div>
+      <span className={cn(dsText.meta, "-mt-[var(--ds-space-tight)] truncate text-[color:var(--ds-fg-muted)]", inFlight && dsText.nums)}>
+        {s.subline}
+      </span>
+
+      {/* WHY nothing is progressing. Named lease, named holder, ticking age —
+          an executor that is alive, healthy and stuck must say so, or the panel
+          is decorative. */}
+      {s.waiting && (
+        <div
+          className={cn(
+            "flex items-start border",
+            "gap-[var(--ds-space-snug)] px-[var(--ds-space-base)] py-[var(--ds-space-tight)]",
+            dsRadius.md,
+            "border-[color:var(--ds-status-waiting-border)] bg-[var(--ds-status-waiting-bg)]",
+          )}
+        >
+          <Hourglass aria-hidden className={cn(dsIcon.sm, "mt-px shrink-0 text-[color:var(--ds-status-waiting-fg)]")} />
+          <span className={cn(dsText.meta, "min-w-0 text-[color:var(--ds-status-waiting-fg)]")}>
+            Waiting <span className={dsText.nums}>{fmtElapsed(s.waiting.sinceSec + tick)}</span> for the{" "}
+            <span className="font-semibold">{s.waiting.system}</span> lease — held by {s.waiting.heldByWorkflow}{" "}
+            <span className={dsText.nums}>{s.waiting.heldByTrace}</span>
+          </span>
+        </div>
+      )}
+
+      {/* An odd last tile spans both columns: a lone half-width tile beside
+          dead space reads as one that failed to render. */}
+      <div className="grid grid-cols-2 gap-[var(--ds-space-tight)]">
+        {s.browsers.map((b, i) => (
+          <BrowserTile key={b.id} b={b} span={s.browsers.length % 2 === 1 && i === s.browsers.length - 1} />
+        ))}
+      </div>
+
+      {/*
+        THE BASE — pipeline then footer, pinned to the bottom as one block.
+
+        Everything above this varies by card: a lease-wait note may appear, and
+        a tile grid is one row or two. Anchoring the base (rather than only the
+        footer, which is what `mt-auto` used to do) is what puts every card's
+        progress bar on ONE baseline instead of wherever its own content
+        happened to end — the operator's ask, and the reason the row of cards
+        can be read across at all.
+
+        The pipeline's row is RESERVED at a fixed height on every card, so a
+        worker with no item in flight keeps the same baseline without being
+        given a bar it has not earned. The slack lands above, and it is left
+        EMPTY on purpose: an idle worker genuinely has less to say than a
+        blocked one, and padding it out would dress it up as busier than it is.
+      */}
+      <div className="mt-auto flex flex-col gap-[var(--ds-space-snug)]">
+        <div className={cn("flex shrink-0 items-center", dsSize.hMicroPipeline)}>
+          {/* micro pipeline — where the in-flight item is, without opening anything */}
+          {s.steps && s.steps.length >= 2 && (
+            <span aria-hidden className="flex flex-1 items-center" title={s.steps.map((st) => st.label).join(" · ")}>
+              {s.steps.map((st, i) => (
+                <span key={st.label} className="flex flex-1 items-center last:flex-none">
+                  <span
+                    className={cn(
+                      "size-1.5 shrink-0 rounded-full",
+                      st.state === "done" && "bg-[var(--ds-success-fg)] opacity-85",
+                      st.state === "current" && "bg-[var(--ds-accent)] ring-2 ring-[color:var(--ds-accent-quiet)]",
+                      st.state === "pending" && cn("border bg-[var(--ds-surface-2)]", dsBorder.base),
+                    )}
+                  />
+                  {i < s.steps!.length - 1 && (
+                    <span
+                      className={cn(
+                        "h-px min-w-[3px] flex-1",
+                        st.state === "done" ? "bg-[var(--ds-success-fg)] opacity-30" : "bg-[var(--ds-border)]",
+                      )}
+                    />
+                  )}
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
+        <div
+          className={cn(
+            dsText.meta,
+            "flex items-center border-t text-[color:var(--ds-fg-muted)]",
+            dsBorder.subtle,
+            "gap-[var(--ds-space-snug)] pt-[var(--ds-space-snug)]",
+          )}
+        >
+          {/* STEP first, hard left. It is the one thing on this line that
+              answers "what is this worker doing", and it was sitting in the
+              middle behind a clock. The elapsed time is a QUALIFIER on it, so
+              it now sits right-aligned against the verb that can end it —
+              `Filling the form · 4m 12s · Stop` reads as one sentence, and the
+              row of cards can be scanned down its left edge.
+
+              `12s/task sleep` is gone. A pacing constant the operator cannot
+              change from here and would not act on if they could is a
+              diagnostic wearing a status line; it belonged to whoever tunes the
+              daemon, not to whoever is watching it work. */}
+          <span className="min-w-0 flex-1 truncate" title={s.step ?? undefined}>
+            {s.step ?? ""}
+          </span>
+          <span className={cn(dsText.nums, "shrink-0 tabular-nums")}>
+            {s.elapsedSec > 0 ? fmtElapsed(s.elapsedSec + tick) : "—"}
+          </span>
+          <Button size="sm" variant="outline" onClick={NOOP} className="shrink-0">
+            Stop
+          </Button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/**
+ * ADD WORKERS — workflow + count. No capacity gate.
+ *
+ * Operator: *"make this plus icon work … spawn n amount of parallel workflows."*
+ * Follow-up: UCPath's `1/1` is **per worker / per browser session**, not a
+ * global singleton — and the dialog must not invent hardcaps. Pick a workflow,
+ * pick how many, start them. Every requested worker starts.
+ */
+function AddWorkersDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const [workflowId, setWorkflowId] = useState<DemoWorkflowId>(WORKER_SPAWN_WORKFLOWS[0].id);
+  const [count, setCount] = useState(1);
+  const [result, setResult] = useState<WorkerSpawnResult | null>(null);
+
+  // A fresh open is a fresh ask. Leaving the previous vector on screen would
+  // put an answer above a question that has not been asked yet.
+  useEffect(() => {
+    if (!open) return;
+    setResult(null);
+    setCount(1);
+  }, [open]);
+  useEffect(() => setResult(null), [workflowId]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="md" title="Add workers" description="Start parallel executors for one workflow">
+        <DialogBody>
+          <div className="flex flex-col gap-[var(--ds-space-loose)]">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-[var(--ds-space-base)]">
+              <Field label="Workflow">
+                <Select value={workflowId} onChange={(e) => setWorkflowId(e.target.value as DemoWorkflowId)}>
+                  {WORKER_SPAWN_WORKFLOWS.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              {/* THE COUNT IS THE ASK. A stepper, not a repeat press.
+                  It is NOT wrapped in `Field`: `Field` labels one form control
+                  through its context, and this is a group of three. Its label
+                  row mirrors `Field`'s exactly — same type class, same gap — so
+                  the two controls sit on one baseline. */}
+              <div role="group" aria-label="How many workers to start" className="flex min-w-0 flex-col gap-[var(--ds-space-tight)]">
+                <span className={cn(dsText.meta, "font-medium text-[color:var(--ds-fg-secondary)]")}>Workers</span>
+                <span className="flex items-center gap-[var(--ds-space-tight)]">
+                  <IconButton
+                    size="md"
+                    label="One fewer worker"
+                    disabled={count <= 1}
+                    onClick={() => setCount((n) => Math.max(1, n - 1))}
+                    icon={<Minus aria-hidden className={dsIcon.md} />}
+                  />
+                  <span
+                    aria-live="polite"
+                    className={cn(dsText.section, dsText.nums, "w-8 text-center font-semibold text-[color:var(--ds-fg)]")}
+                  >
+                    {count}
+                  </span>
+                  <IconButton
+                    size="md"
+                    label="One more worker"
+                    disabled={count >= MAX_WORKER_SPAWN}
+                    onClick={() => setCount((n) => Math.min(MAX_WORKER_SPAWN, n + 1))}
+                    icon={<Plus aria-hidden className={dsIcon.md} />}
+                  />
+                </span>
+              </div>
+            </div>
+
+            {result && (
+              <div className="flex flex-col gap-[var(--ds-space-snug)]" aria-live="polite" data-demo-spawn-result="">
+                <span className={cn(dsText.ui, "font-semibold text-[color:var(--ds-fg)]")}>{result.headline}</span>
+                <div className={cn("flex flex-col overflow-hidden border", dsRadius.md, dsBorder.base)}>
+                  {result.outcomes.map((o) => (
+                    <span
+                      key={o.index}
+                      className={cn(
+                        "flex min-w-0 items-center border-b last:border-b-0",
+                        dsBorder.subtle,
+                        "h-[var(--ds-h-row)] gap-[var(--ds-space-base)] px-[var(--ds-space-base)]",
+                        dsText.meta,
+                      )}
+                    >
+                      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--ds-success-fg)]" />
+                      <span className={cn(dsText.nums, "w-12 shrink-0 text-[color:var(--ds-fg-muted)]")}>#{o.index}</span>
+                      <span className={cn(dsText.caps, "w-16 shrink-0 text-[color:var(--ds-success-fg)]")}>started</span>
+                      <span className="min-w-0 flex-1 truncate text-[color:var(--ds-fg-muted)]">
+                        opens {o.claimed.join(" · ")}
+                      </span>
+                      <span className={cn(dsText.nums, "shrink-0 text-[color:var(--ds-fg-secondary)]")}>{o.instance}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogBody>
+        <DialogFooter meta={result ? `${result.started} started` : undefined}>
+          <Button variant="secondary" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+          <Button variant="primary" onClick={() => setResult(planWorkerSpawn(workflowId, count))}>
+            Start {count} {count === 1 ? "worker" : "workers"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function DemoSessionPanel({ tick }: { tick: number }) {
+  const [addOpen, setAddOpen] = useState(false);
+  const [open, setOpen] = useState(false);
+  const running = DEMO_SESSIONS.filter((s) => s.phase === "running").length;
+  const auth = DEMO_SESSIONS.filter((s) => s.phase === "authenticating").length;
+  const idle = DEMO_SESSIONS.filter((s) => s.phase === "idle" || s.phase === "keepalive").length;
+  const failed = DEMO_SESSIONS.filter((s) => s.phase === "failed").length;
+  const sickBrowsers = DEMO_SESSIONS.flatMap((s) => s.browsers).filter((b) => b.health !== "healthy").length;
+  // `blocked` is the headline the operator actually needs: three cards can say
+  // "Running" while one is waiting for a concrete browser session.
+  const blocked = DEMO_SESSIONS.filter((s) => s.waiting);
+
+  return (
+    <section aria-label="Session Panel" className={cn("shrink-0 border-t", dsBorder.base, dsSurface.card)}>
+      <div className={cn("flex items-center", dsSize.hBar, "gap-[var(--ds-space-base)] px-[var(--ds-shell-inset)]")}>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className={cn(
+            "flex min-w-0 flex-1 cursor-pointer items-center overflow-hidden text-left",
+            "h-[var(--ds-h-md)] gap-[var(--ds-space-cozy)] px-[var(--ds-space-tight)]",
+            dsRadius.md,
+            dsFocus,
+            dsMotion.fast,
+            "hover:bg-[var(--ds-surface-3)]",
+          )}
+        >
+          {open ? (
+            <ChevronDown aria-hidden className={cn(dsIcon.md, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+          ) : (
+            <ChevronUp aria-hidden className={cn(dsIcon.md, "shrink-0 text-[color:var(--ds-fg-muted)]")} />
+          )}
+          <span className={cn(dsText.ui, "shrink-0 font-semibold text-[color:var(--ds-fg)]")}>Sessions</span>
+          {/* 3-way split — a daemon that is alive but has not reported a phase is
+              still AUTHENTICATING, never idle. Calling it idle misreads capacity. */}
+          <span className={cn(dsText.meta, "flex shrink-0 items-center gap-[var(--ds-space-cozy)] text-[color:var(--ds-fg-muted)]")}>
+            <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+              <span aria-hidden className="size-1.5 rounded-full bg-[var(--ds-success-fg)]" />
+              {running} running
+            </span>
+            <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+              <span
+                aria-hidden
+                className="size-1.5 rounded-full bg-[var(--ds-status-waiting-fg)] animate-pulse motion-reduce:animate-none"
+              />
+              {auth} authenticating
+            </span>
+            <span className="inline-flex items-center gap-[var(--ds-space-tight)]">
+              <span aria-hidden className="size-1.5 rounded-full bg-[var(--ds-fg-faint)]" />
+              {idle} idle
+            </span>
+            {failed > 0 && (
+              <span className="inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-danger)]">
+                <span aria-hidden className="size-1.5 rounded-full bg-[var(--ds-danger)]" />
+                {failed} failed
+              </span>
+            )}
+          </span>
+          {blocked.length > 0 && (
+            <span
+              title={blocked.map((s) => `${s.workflow} is waiting on the ${s.waiting?.system} lease`).join(" · ")}
+              className={capacityChip(true)}
+            >
+              <Hourglass aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
+              {blocked.length} waiting on a lease
+            </span>
+          )}
+          {sickBrowsers > 0 && (
+            <span className={capacityChip(true)}>
+              <AlertTriangle aria-hidden className={cn(dsIcon.sm, "shrink-0")} />
+              {sickBrowsers} browsers need attention
+            </span>
+          )}
+        </button>
+        <span className="flex shrink-0 items-center gap-[var(--ds-space-snug)]">
+          {/* N AT ONCE, never one at a time. The dialog owns the count and the
+              per-worker answer; this is only its door. */}
+          <IconButton
+            size="sm"
+            label="Add workers"
+            title="Start parallel executors — pick a workflow and how many"
+            aria-haspopup="dialog"
+            onClick={() => setAddOpen(true)}
+            icon={<Plus aria-hidden className={dsIcon.md} />}
+          />
+          {/* The APP's version, stated ONCE for the whole dashboard.
+              It used to ride the context rail's Provenance chips, i.e. on every
+              run — and the app build is not a property of a run, it is a
+              property of the thing you are looking at. Every run on screen is
+              being SERVED by this build, so one statement in the one bar that is
+              mounted under every view says it for all of them. The archived and
+              historical runs keep their OWN `appVersion` where it genuinely
+              differs, which is exactly why it must not be repeated here. */}
+          <span
+            title={`App ${DEMO_APP_VERSION} — MAJOR moves when a dashboard change reaches some or all workflows (prior-version runs archive); MINOR when it reaches none. A run that RAN under a different version carries its own, which is a fact about the run and stays on the run.`}
+            className={cn(dsText.meta, dsText.nums, "shrink-0 text-[color:var(--ds-fg-muted)]")}
+          >
+            {appVersionTag(DEMO_APP_VERSION_PARTS)}
+          </span>
+          <span aria-hidden className="h-[var(--ds-h-xs)] w-px shrink-0 bg-[var(--ds-border)]" />
+          <span className={cn(dsText.meta, "inline-flex items-center gap-[var(--ds-space-tight)] text-[color:var(--ds-success-fg)]")}>
+            <span aria-hidden className="size-1.5 rounded-full bg-[var(--ds-success-fg)] animate-pulse motion-reduce:animate-none" />
+            Live
+          </span>
+        </span>
+      </div>
+
+      {open && (
+        <div
+          className={cn(
+            // items-stretch: every card is as tall as the tallest. This
+            // OVERRIDES an earlier "a card is as tall as what it knows" — true
+            // of one card, wrong of the row, because five intrinsic heights
+            // made the strip read as ragged debris and put every footer on its
+            // own baseline, so `Stop` was in five places and the elapsed clocks
+            // could not be compared down a column. Uniform height is what makes
+            // the row scannable; the empty space inside a quiet card is left
+            // empty (see the footer note in `SessionCard`) rather than filled.
+            "flex items-stretch overflow-x-auto border-t",
+            dsBorder.subtle,
+            "gap-[var(--ds-space-base)] px-[var(--ds-shell-inset)] py-[var(--ds-space-cozy)]",
+          )}
+        >
+          {DEMO_SESSIONS.map((s) => (
+            <SessionCard key={s.id} s={s} tick={tick} />
+          ))}
+        </div>
+      )}
+
+      <AddWorkersDialog open={addOpen} onOpenChange={setAddOpen} />
+    </section>
+  );
+}

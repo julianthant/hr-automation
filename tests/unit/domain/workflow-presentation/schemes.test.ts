@@ -1,0 +1,35 @@
+// tests/unit/domain/workflow-presentation/schemes.test.ts
+import { describe, it, expect } from "vitest";
+import { SCHEME_LIBRARY, resolveTitle, resolveSubtitle } from "../../../../src/domain/workflow-presentation/schemes.js";
+
+const vars = { name: "Person 905", emplId: "10090001", pdfOriginalName: "oath.pdf", traceId: "ou-143012-a3f1", label: "Onboarding Roster" };
+
+describe("resolveTitle", () => {
+  it("person-name → name", () => expect(resolveTitle(vars, { scheme: "person-name" })).toBe("Person 905"));
+  it("pdf-filename → pdf name", () => expect(resolveTitle(vars, { scheme: "pdf-filename" })).toBe("oath.pdf"));
+  it("catalog-label → label", () => expect(resolveTitle(vars, { scheme: "catalog-label" })).toBe("Onboarding Roster"));
+  it("operation-anchor → empty (count badge identifies it)", () => expect(resolveTitle(vars, { scheme: "operation-anchor" })).toBe(""));
+  it("custom-template renders", () => expect(resolveTitle(vars, { scheme: "custom-template", template: "{name} #{emplId}" })).toBe("Person 905 #10090001"));
+});
+
+describe("resolveSubtitle", () => {
+  it("eid-else-trace → eid when present", () => expect(resolveSubtitle(vars, { scheme: "eid-else-trace" })).toBe("10090001"));
+  it("eid-else-trace → trace when no eid", () => expect(resolveSubtitle({ ...vars, emplId: "" }, { scheme: "eid-else-trace" })).toBe("ou-143012-a3f1"));
+  it("trace-only → trace", () => expect(resolveSubtitle(vars, { scheme: "trace-only" })).toBe("ou-143012-a3f1"));
+  it("trace-only → suffixed trace when runOrdinal is set", () =>
+    expect(resolveSubtitle({ ...vars, runOrdinal: "2" }, { scheme: "trace-only" })).toBe("ou-143012-a3f1-2"));
+});
+
+describe("SCHEME_LIBRARY", () => {
+  it("lists every title scheme id with a label", () => {
+    const ids = SCHEME_LIBRARY.title.map((s) => s.id);
+    expect(ids).toEqual(expect.arrayContaining(["person-name", "pdf-filename", "catalog-label", "operation-anchor", "custom-template"]));
+    expect(SCHEME_LIBRARY.title.every((s) => s.label.length > 0)).toBe(true);
+  });
+});
+
+describe("resolveTitle — readQueueTitle precedence", () => {
+  it("catalog-label: readQueueTitle wins over label when __queueTitle is set", () => {
+    expect(resolveTitle({ __queueTitle: "QT", label: "L" }, { scheme: "catalog-label" })).toBe("QT");
+  });
+});

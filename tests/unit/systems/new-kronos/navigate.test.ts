@@ -1,0 +1,463 @@
+/**
+ * Pins resolveSearchResult — the New Kronos employee-search outcome resolver.
+ *
+ * Regression guard for ISS-B04 (surfaced by the live separations e2e): a New
+ * Kronos search for an employee with no usable record timed out after 15s and
+ * THREW `[New Kronos] Timed out waiting for search results`, a fatal-looking `✗`
+ * even though New Kronos is a BEST-EFFORT source (the separations handler falls
+ * back to the Kuali Last Day Worked when New Kronos returns nothing). The race
+ * now resolves a both-waiters-rejected timeout to NOT FOUND (`false`) with a
+ * `log.warn`, not a throw.
+ */
+
+import { describe, it, vi } from "vitest";
+import assert from "node:assert/strict";
+import type { Page } from "playwright";
+
+import {
+  resolveSearchResult,
+  getSeparationTimecardData,
+  splitTimecardDateRange,
+  assertTimecardDateCoverage,
+  resolveSearchPresence,
+  createSearchOutcomeSettler,
+  NO_RESULTS_STABLE_MS,
+  parseMmddyyyy,
+  mmddyyyyToDate,
+  resolveSeparationTimecardDates,
+  toIsoDate,
+  normalizeRangeDateReadback,
+  calendarDayLabelPattern,
+  parseCalendarHeaderOrdinal,
+  probeEidInTimecardText,
+  scanTimecardEmployeeHeader,
+  payRuleCodeCommittedInCell,
+  peopleHeaderShowsEid,
+} from "../../../../src/systems/new-kronos/navigate.js";
+import { log } from "../../../../src/utils/log.js";
+
+describe("mmddyyyyToDate", () => {
+  it("builds a local-midnight Date from M/D/YYYY", () => {
+    assert.equal(mmddyyyyToDate("6/11/2026").getTime(), new Date(2026, 5, 11).getTime());
+    assert.equal(mmddyyyyToDate("01/02/2026").getTime(), new Date(2026, 0, 2).getTime());
+  });
+
+  it("throws on a malformed date string (via parseMmddyyyy)", () => {
+    assert.throws(() => mmddyyyyToDate("2026-06-11"));
+  });
+
+  it("throws on an impossible calendar date instead of accepting JS Date rollover", () => {
+    assert.throws(() => mmddyyyyToDate("2/30/2026"), /invalid calendar date/);
+    assert.throws(() => mmddyyyyToDate("2/29/2026"), /invalid calendar date/);
+  });
+});
+
+describe("resolveSeparationTimecardDates", () => {
+  // 12/01/2025 – 01/31/2026: the Dec→Jan boundary window that used to
+  // year-stamp December rows with January's year.
+  const range = { start: new Date(2025, 11, 1), end: new Date(2026, 0, 31) };
+
+  it("resolves each raw month/day against the requested range (Dec→Jan safe)", () => {
+    const out = resolveSeparationTimecardDates(
+      {
+        lastPunch: { mon: 12, day: 30 },
+        sick: [{ mon: 1, day: 2 }],
+        holiday: [{ mon: 12, day: 25 }],
+      },
+      range,
+    );
+    assert.deepEqual(out, {
+      lastPunchDate: "12/30/2025",
+      sickDates: ["01/02/2026"],
+      holidayDates: ["12/25/2025"],
+    });
+  });
+
+  it("returns a null lastPunchDate (and empty lists) when the grid had no matching rows", () => {
+    const out = resolveSeparationTimecardDates({ lastPunch: null, sick: [], holiday: [] }, range);
+    assert.deepEqual(out, { lastPunchDate: null, sickDates: [], holidayDates: [] });
+  });
+
+  it("throws (fail loud) when a parsed day cannot fall inside the requested range", () => {
+    assert.throws(
+      () => resolveSeparationTimecardDates({ lastPunch: { mon: 6, day: 15 }, sick: [], holiday: [] }, range),
+      /6\/15/,
+    );
+  });
+});
+
+describe("probeEidInTimecardText", () => {
+  it("matches the exact EID in the authoritative timecard header", () => {
+    const probe = probeEidInTimecardText(" 10090279 ", "10090279");
+    assert.equal(probe.match, true);
+    assert.equal(probe.otherEid, null);
+  });
+
+  it("reports a different 8-digit EID as a wrong-person signal", () => {
+    const probe = probeEidInTimecardText(
+      "10090268",
+      "10090279",
+    );
+    assert.equal(probe.match, false);
+    assert.equal(probe.otherEid, "10090268");
+  });
+
+  it("returns no otherEid when the header is blank or malformed", () => {
+    const probe = probeEidInTimecardText("Loading…", "10090279");
+    assert.equal(probe.match, false);
+    assert.equal(probe.otherEid, null);
+  });
+
+  it("does not match a target EID embedded elsewhere in body-like text", () => {
+    const probe = probeEidInTimecardText(
+      "Employee Search 10090279 … header 10090268",
+      "10090279",
+    );
+    assert.equal(probe.match, false);
+    assert.equal(probe.otherEid, null);
+  });
+});
+
+describe("scanTimecardEmployeeHeader", () => {
+  it("reads only .emp-nav-id and never page-wide text", async () => {
+    let evaluateCalled = false;
+    const locator = {
+      first: () => locator,
+      innerText: async () => "10090268",
+    };
+    const page = {
+      locator: (selector: string) => {
+        assert.equal(selector, ".emp-nav-id");
+        return locator;
+      },
+      evaluate: async () => {
+        evaluateCalled = true;
+        return "Employee Search 10090279";
+      },
+    };
+    assert.deepEqual(
+      await scanTimecardEmployeeHeader(page as never, "10090279"),
+      { ok: false, shownEid: "10090268" },
+    );
+    assert.equal(evaluateCalled, false);
+  });
+});
+
+/**
+ * Pins the pay-rule commit readback (fail-loud guard for the live 2026-07-02
+ * EID 10090035 failure: the lookup-modal OK click intermittently no-ops, so the
+ * modal-hidden wait timed out AND, worse, could have closed without committing
+ * the code — `addPayRule` now gates Save on this predicate matching the grid
+ * cell so an empty/wrong pay rule is never persisted).
+ */
+describe("payRuleCodeCommittedInCell", () => {
+  it("matches the chosen code regardless of surrounding whitespace/nested-span noise", () => {
+    assert.equal(payRuleCodeCommittedInCell("  SX-8Hol-8-OT-30 ", "SX-8Hol-8-OT-30"), true);
+    assert.equal(payRuleCodeCommittedInCell("SX-8Hol-8-OT-30\n", "SX-8Hol-8-OT-30"), true);
+  });
+
+  it("is case-insensitive (jqx can re-case the rendered label)", () => {
+    assert.equal(payRuleCodeCommittedInCell("sx-8hol-8-ot-30", "SX-8Hol-8-OT-30"), true);
+  });
+
+  it("is false for a blank cell (missed OK → nothing committed)", () => {
+    assert.equal(payRuleCodeCommittedInCell("", "SX-8Hol-8-OT-30"), false);
+    assert.equal(payRuleCodeCommittedInCell("   ", "SX-8Hol-8-OT-30"), false);
+  });
+
+  it("is false for a DIFFERENT code (wrong selection must not pass the gate)", () => {
+    assert.equal(payRuleCodeCommittedInCell("SX-8Hol-8-CT-30", "SX-8Hol-8-OT-30"), false);
+  });
+});
+
+/**
+ * Pins the batch employee-switch identity check (fail-loud guard for the live
+ * 2026-07-02 "redoes the old one" bug: `waitForPeopleEmployee` matched the
+ * searched EID anywhere in `document.body` — including the still-open global
+ * Employee Search box — so batch item 2 reported "already open" while the People
+ * editor still displayed the PREVIOUS person, re-adding the pay rule to them.
+ * The check now reads the editor's `.empName` header, whose title is
+ * "<Full Name> <EID>").
+ */
+describe("peopleHeaderShowsEid", () => {
+  it("matches the EID in the .empName title format '<Name> <EID>'", () => {
+    assert.equal(peopleHeaderShowsEid("Kosogotaz, Mepaicz L 10090114", "10090114"), true);
+  });
+
+  it("matches the EID from the concatenated title + text node", () => {
+    assert.equal(
+      peopleHeaderShowsEid("Kosogotaz, Mepaicz L 10090114 Kosogotaz, Mepaicz L\n10090114", "10090114"),
+      true,
+    );
+  });
+
+  it("is false when the header shows a DIFFERENT employee (the previous person)", () => {
+    // The target 10090035 lingers elsewhere on the page, but the header is the previous person.
+    assert.equal(peopleHeaderShowsEid("Kosogotaz, Mepaicz L 10090114", "10090035"), false);
+  });
+
+  it("word-boundary: an 8-digit EID does not partially match a longer number", () => {
+    assert.equal(peopleHeaderShowsEid("Someone 1009003500", "10090035"), false);
+    assert.equal(peopleHeaderShowsEid("", "10090035"), false);
+  });
+});
+
+describe("resolveSearchPresence", () => {
+  it("returns found when a result is present, even if no-results text is also visible", () => {
+    assert.equal(resolveSearchPresence(true, true), "found");
+    assert.equal(resolveSearchPresence(true, false), "found");
+  });
+
+  it("returns not-found only when no-results is visible and no result is present", () => {
+    assert.equal(resolveSearchPresence(false, true), "not-found");
+  });
+
+  it("returns pending while the grid is still loading", () => {
+    assert.equal(resolveSearchPresence(false, false), "pending");
+  });
+});
+
+describe("resolveSearchResult", () => {
+  it("returns true when the result checkbox appears first", async () => {
+    const result = await resolveSearchResult(
+      Promise.resolve(), // checkbox visible
+      new Promise(() => {}), // no-results sentinel never appears
+      "10000910",
+    );
+    assert.equal(result, true);
+  });
+
+  it("returns false when the no-results sentinel appears first", async () => {
+    const result = await resolveSearchResult(
+      new Promise(() => {}), // checkbox never appears
+      Promise.resolve(), // "no items to display"
+      "10000002",
+    );
+    assert.equal(result, false);
+  });
+
+  it("treats a timeout (neither waiter resolves) as NOT FOUND, never throws (ISS-B04)", async () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    try {
+      const result = await resolveSearchResult(
+        Promise.reject(new Error("checkbox timeout")),
+        Promise.reject(new Error("no-results timeout")),
+        "10000003",
+      );
+      assert.equal(result, false, "a both-rejected race resolves to not-found, not a throw");
+      assert.ok(warn.mock.calls.length >= 1, "the best-effort miss is logged as a warning");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+/**
+ * Pins the "Select range" date helpers. The WFD range fields are DUAL-MODE
+ * (`ng-attr-type="{{rangeInput.useNativeDateInput ? 'date' : 'text'}}"`, live
+ * 2026-07-30): `toIsoDate` is what `setRangeDate` fills in NATIVE mode, and
+ * `normalizeRangeDateReadback` is what makes the readback verify mode-agnostic;
+ * `parseMmddyyyy`, `calendarDayLabelPattern`, and `parseCalendarHeaderOrdinal`
+ * drive the calendar grid (the one path that works in BOTH modes).
+ */
+describe("toIsoDate", () => {
+  it("converts M/D/YYYY to the ISO value a native date input accepts", () => {
+    assert.equal(toIsoDate("5/11/2026"), "2026-05-11");
+    assert.equal(toIsoDate("05/11/2026"), "2026-05-11");
+    assert.equal(toIsoDate("12/1/2026"), "2026-12-01");
+  });
+
+  it("throws loud on a malformed date instead of applying a wrong window", () => {
+    assert.throws(() => toIsoDate("2026-05-11"));
+    assert.throws(() => toIsoDate("13/40/2026"));
+  });
+});
+
+/**
+ * Regression guard for the 2026-07-30 production abort (WFP-00889): the
+ * calendar had ALREADY set the right day, but the field read back `5/10/2026`
+ * (text mode) while the verify string-compared against ISO `2026-05-10`, so a
+ * CORRECT range was rejected and the separations run lost its Kronos read.
+ * The verify now compares calendar dates, in either mode's spelling.
+ */
+describe("normalizeRangeDateReadback", () => {
+  it("accepts the TEXT-mode spelling the live field actually returns", () => {
+    // Live 2026-07-30: WFD does not pad consistently — the same open picker
+    // showed start "07/30/2026" and end "7/30/2026".
+    assert.equal(normalizeRangeDateReadback("5/10/2026"), "2026-05-10");
+    assert.equal(normalizeRangeDateReadback("05/10/2026"), "2026-05-10");
+    assert.equal(normalizeRangeDateReadback("12/1/2026"), "2026-12-01");
+  });
+
+  it("accepts the NATIVE-mode ISO spelling unchanged", () => {
+    assert.equal(normalizeRangeDateReadback("2026-05-10"), "2026-05-10");
+    assert.equal(normalizeRangeDateReadback("2026-12-01"), "2026-12-01");
+  });
+
+  it("treats both spellings of the same day as equal (the actual bug)", () => {
+    assert.equal(
+      normalizeRangeDateReadback("5/10/2026"),
+      normalizeRangeDateReadback("2026-05-10"),
+    );
+  });
+
+  it("returns null on empty/unparseable so the caller fails loud", () => {
+    assert.equal(normalizeRangeDateReadback(""), null);
+    assert.equal(normalizeRangeDateReadback("   "), null);
+    assert.equal(normalizeRangeDateReadback("not a date"), null);
+    assert.equal(normalizeRangeDateReadback("2026-05"), null);
+  });
+
+  it("rejects impossible days in BOTH spellings — never normalizes a non-date", () => {
+    assert.equal(normalizeRangeDateReadback("2026-02-31"), null);
+    assert.equal(normalizeRangeDateReadback("2/31/2026"), null);
+    assert.equal(normalizeRangeDateReadback("13/01/2026"), null);
+  });
+});
+
+describe("parseMmddyyyy", () => {
+  it("parses to 0-based month for calendar math", () => {
+    assert.deepEqual(parseMmddyyyy("6/11/2026"), { year: 2026, monthIndex: 5, day: 11 });
+    assert.deepEqual(parseMmddyyyy("01/01/2026"), { year: 2026, monthIndex: 0, day: 1 });
+  });
+});
+
+describe("calendarDayLabelPattern", () => {
+  it("matches the day cell's full-date aria-label, weekday-agnostic", () => {
+    const re = calendarDayLabelPattern({ year: 2026, monthIndex: 5, day: 11 });
+    assert.ok(re.test("Monday, June 11, 2026"));
+    assert.ok(re.test("June 11, 2026"));
+  });
+
+  it("does not let a single-digit day match a two-digit day (June 1 vs June 11)", () => {
+    const re = calendarDayLabelPattern({ year: 2026, monthIndex: 5, day: 1 });
+    assert.ok(re.test("Monday, June 1, 2026"));
+    assert.equal(re.test("Thursday, June 11, 2026"), false);
+  });
+});
+
+describe("parseCalendarHeaderOrdinal", () => {
+  it("parses the moment-picker header ('Jun 2026') to a comparable month ordinal", () => {
+    const jun = parseCalendarHeaderOrdinal("Jun 2026");
+    const may = parseCalendarHeaderOrdinal("May 2026");
+    const jul = parseCalendarHeaderOrdinal("Jul 2026");
+    assert.equal(jun, 2026 * 12 + 5);
+    assert.equal(may! < jun!, true, "May steps backward from Jun");
+    assert.equal(jul! > jun!, true, "Jul steps forward from Jun");
+  });
+
+  it("tolerates trailing whitespace and full month names", () => {
+    assert.equal(parseCalendarHeaderOrdinal("Jun 2026 "), 2026 * 12 + 5);
+    assert.equal(parseCalendarHeaderOrdinal("June 2026"), 2026 * 12 + 5);
+  });
+
+  it("returns null on an unparseable header (caller stops navigating)", () => {
+    assert.equal(parseCalendarHeaderOrdinal(""), null);
+    assert.equal(parseCalendarHeaderOrdinal("loading…"), null);
+  });
+});
+
+describe("createSearchOutcomeSettler", () => {
+  // 2026-08-21 (doc 4546, EID 10090234): the no-results sentinel is ALSO the
+  // search panel's pre-search resting state, so a single poll of
+  // "sentinel visible + no result yet" must NOT resolve not-found.
+  it("stays pending while the sentinel has not held for the stable window", () => {
+    const s = createSearchOutcomeSettler(2_000);
+    assert.equal(s.observe(false, true, 0), "pending");
+    assert.equal(s.observe(false, true, 200), "pending");
+    assert.equal(s.observe(false, true, 1_999), "pending");
+  });
+
+  it("resolves not-found once the sentinel has held continuously for the window", () => {
+    const s = createSearchOutcomeSettler(2_000);
+    s.observe(false, true, 0);
+    assert.equal(s.observe(false, true, 2_000), "not-found");
+  });
+
+  it("a found signal wins immediately, even after the sentinel was visible", () => {
+    const s = createSearchOutcomeSettler(2_000);
+    assert.equal(s.observe(false, true, 0), "pending");
+    assert.equal(s.observe(true, true, 300), "found");
+    assert.equal(s.observe(true, false, 300), "found");
+  });
+
+  it("a pending poll (neither signal) resets the sentinel clock", () => {
+    const s = createSearchOutcomeSettler(2_000);
+    s.observe(false, true, 0);
+    assert.equal(s.observe(false, false, 1_500), "pending");
+    assert.equal(s.observe(false, true, 3_000), "pending"); // clock restarted at 3000
+    assert.equal(s.observe(false, true, 4_999), "pending");
+    assert.equal(s.observe(false, true, 5_000), "not-found");
+  });
+
+  it("defaults to NO_RESULTS_STABLE_MS", () => {
+    const s = createSearchOutcomeSettler();
+    s.observe(false, true, 0);
+    assert.equal(s.observe(false, true, NO_RESULTS_STABLE_MS - 1), "pending");
+    assert.equal(s.observe(false, true, NO_RESULTS_STABLE_MS), "not-found");
+  });
+});
+
+
+describe("complete hire-to-current timecard coverage", () => {
+  it("splits multiple years without gaps or ambiguous yearless dates", () => {
+    assert.deepEqual(splitTimecardDateRange("10/24/2024", "10/06/2026"), [
+      { startDate: "10/24/2024", endDate: "10/23/2025" },
+      { startDate: "10/24/2025", endDate: "10/6/2026" },
+    ]);
+  });
+  it("keeps a same-day range", () => assert.deepEqual(splitTimecardDateRange("06/08/2026", "06/08/2026"), [{ startDate: "6/8/2026", endDate: "6/8/2026" }]));
+  it("rejects reversed and malformed ranges", () => {
+    assert.throws(() => splitTimecardDateRange("06/09/2026", "06/08/2026"));
+    assert.throws(() => splitTimecardDateRange("bad", "06/08/2026"));
+  });
+  const range = { start: new Date(2024, 1, 28), end: new Date(2024, 2, 1) };
+  it("accepts complete leap-day coverage and duplicate pay rows", () => {
+    assertTimecardDateCoverage([{ mon: 2, day: 28 }, { mon: 2, day: 29 }, { mon: 2, day: 29 }, { mon: 3, day: 1 }], range);
+  });
+  it("rejects a skipped virtualized date even when a later punch exists", () => {
+    assert.throws(() => assertTimecardDateCoverage([{ mon: 2, day: 28 }, { mon: 3, day: 1 }], range), /missing date 02\/29\/2024/);
+  });
+  it("rejects empty grids and dates outside the requested range", () => {
+    assert.throws(() => assertTimecardDateCoverage([], range), /missing date/);
+    assert.throws(() => assertTimecardDateCoverage([{ mon: 1, day: 1 }], range));
+  });
+});
+
+
+describe("virtualized separation timecard reader", () => {
+  it("scrolls past initially rendered dates and excludes verified overnight padding", async () => {
+    const labels = ["Tue 12/30", "Wed 12/31", "Thu 1/1", "Fri 1/2"];
+    const makeViewport = (dates: boolean) => ({
+      scrollTop: 0, clientHeight: 100, scrollHeight: 400,
+      dispatchEvent: () => true,
+      querySelectorAll() {
+        const index = Math.floor(this.scrollTop / 100);
+        return [{
+          textContent: dates ? labels[index] : "",
+          getBoundingClientRect: () => ({ top: 0 }),
+          querySelectorAll: () => ["", index === 1 || index === 3 ? "1:00 PM" : "", "", "", ""].map(textContent => ({ textContent })),
+        }];
+      },
+    });
+    const viewports = [makeViewport(true), makeViewport(false)];
+    vi.stubGlobal("document", { querySelectorAll: () => viewports });
+    vi.stubGlobal("requestAnimationFrame", (callback: () => void) => { callback(); return 1; });
+    const page = {
+      locator: () => ({ count: async () => 2 }),
+      evaluate: async (callback: (bounds: { start: number[]; end: number[] }) => unknown, bounds: { start: number[]; end: number[] }) => callback(bounds),
+    } as unknown as Page;
+    try {
+      assert.deepEqual(await getSeparationTimecardData(page, { start: new Date(2025, 11, 31), end: new Date(2026, 0, 2) }), { lastPunchDate: "01/02/2026", sickDates: [], holidayDates: [] });
+      assert.equal(viewports[1].scrollTop, 300);
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it("rejects a missing grid instead of substituting an empty timecard", async () => {
+    const locator = { count: async () => 0, filter: () => locator, isVisible: async () => false };
+    vi.stubGlobal("document", { querySelectorAll: () => [] });
+    const page = { locator: () => locator, evaluate: async (callback: (bounds: unknown) => unknown, bounds: unknown) => callback(bounds) } as unknown as Page;
+    try {
+      await assert.rejects(getSeparationTimecardData(page, { start: new Date(2026, 0, 1), end: new Date(2026, 0, 3) }), /Expected two timecard viewports; found 0/);
+    } finally { vi.unstubAllGlobals(); }
+  });
+});

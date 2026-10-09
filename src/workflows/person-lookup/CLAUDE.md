@@ -1,0 +1,133 @@
+# Person Lookup Workflow
+
+One operator-facing workflow with two UCPath modes and an optional CRM check:
+
+- **Search** (default) — resolves an employee by name or EID via Person Organizational Summary, optionally cross-verifies in CRM, then derives active/HDH status.
+- **Match** — checks whether UCPath already knows a person via the HR-Tasks Search/Match form keyed by legal name plus SSN and/or DOB. This preserves the former Person Match workflow's distinct UCPath surface inside Person Lookup rather than maintaining a second workflow identity.
+
+**Kernel-based (daemon mode).** Registered in `WORKFLOW_LOADERS` and dashboard input runs. One `defineWorkflow`: `personLookupWorkflow`. The stable handler steps remain `searching` → `cross-verification` → `active-status` → `crm-dates`: Match reuses `searching`, then skips the two status/date steps; a disabled CRM check skips `cross-verification` without stamping a false CRM miss. Search defaults `crmCheck` on; Match defaults it off.
+
+CRM remains in the workflow's **eager auth chain even when `crmCheck` is false**. The shared-context pool has four tabs and `defineSsoLogin` has no single-flight guard; deferring CRM auth would let workers race into concurrent Duo prompts. `crmCheck` gates CRM steps, not browser launch/auth. Revisit only after the auth layer owns a verified single-flight guard.
+
+Each dashboard input run enqueues N people as N kernel items to an alive daemon (session reused — no re-Duo between items). A one-person input run is a `single` row. A multi-person input run is an operation surface: every person row is stamped `operation-member` under the shared input-run `parentRunId`.
+
+## Search and Match inputs
+
+`mode` is `"search" | "match"` and defaults to `"search"` so every existing name/EID caller keeps its behavior. `crmCheck?: boolean` resolves to `true` for Search and `false` for Match unless explicitly supplied.
+
+Match-mode dashboard text is `Last, First, DOB, SSN`, with people separated by `;`. Parsing is deterministic: the final two comma fields are DOB then SSN and everything before them rejoins as the name. Case-insensitive `x` means an identifier is unavailable. Fewer than three fields or `x` for both identifiers fails at entry; UCPath cannot search a name alone.
+
+## Internal primitive: `lookupPersonInUcpath`
+
+`lookup.ts` exports `lookupPersonInUcpath` — the raw UCPath Person Org search. Other workflows (OCR orchestrator, force-research, retry-page) call this function or delegate to `personLookupWorkflow` for EID-resolution work. Do not call `searchByName` / `searchByEid` directly from composing workflows — route through `lookupPersonInUcpath` so hidden Employment Instances are handled consistently.
+
+## Delegated by separations (name↔EID verification)
+
+`separations` delegates to `personLookupWorkflow` via `ctx.delegateTo` at its `identity-check` step — but **CONDITIONALLY**, only when its Workforce Job Summary search flags a problem (found-but-name-mismatch, or not-found-with-a-short-EID); a clean Job-Summary name match skips the delegation entirely. In `{ name: employeeName }`, out the resolved EID at `result.data.emplId` (the 8-digit `emplId` stamped by the `searching`/`active-status` steps). The name is authoritative — separations takes the name-derived EID when it differs (e.g. a valid-format but wrong EID like the Punuv `10090171` case) and **fails loud** when person-lookup resolves no valid EID (never proceeds with an unverified EID). person-lookup is daemon-capable, so this routes through a person-lookup daemon (its own UCPath + CRM auth — an extra auth pass + latency, now paid only on suspicious separations, not every run). See `src/workflows/separations/CLAUDE.md` ("Conditional name↔EID verification", 2026-06-18).
+
+## Status derivation
+
+`outcome.ts` exports:
+
+- `deriveActiveCheckOutcome` — derives the operator-facing `ActiveCheckOutcome` (activeStatus: `active` | `inactive` | `not-found` | `non-hdh` | `ambiguous` | `n/a`; `isActive`; `isHdhAccepted`; `terminationDate`; `terminationReason` (blank unless terminated); `candidateEids`).
+- `deriveCrmOnlyCheckOutcome` — CRM matched but UCPath Person Org missed → `activeStatus: "n/a"` / `hrStatus: "N/A"` with CRM name/dept/EID filled (no A/IA chip; not a terminal Not-found badge).
+- `derivePersonLookupSelection` — selects the preferred result row for multi-instance EID sets (active row wins over inactive for the same EID).
+- `resolvePersonLookupForEidLookup` — narrows a multi-result name search by CRM-matched EID.
+- `systemPresence` — stamps grid fields `ucpathFound` / `crmFound` as `Found` | `Not found`.
+
+**Either-system found:** the run is overall found if UCPath **or** CRM hits. Terminal `not-found` (queue "Not found" badge) only when **both** miss. Identity fill: UCPath wins when present; else CRM. Start Date stays CRM First Day of Service when CRM has it.
+
+`startDate` (the operator-facing **Start Date**) is **CRM First Day of Service only** — sourced in `cross-verification` via `searchCrmByEidOrName` + `pickCrmStartDate`, never from UCPath. It is left **blank** when CRM has no matching record / no date (no UCPath fallback). The UCPath Last Hire (`ActiveCheckOutcome.startDate`) is kept only as backend context on the row as `ucpathStartDate`; `effdt` remains the assignment row EFFDT. `stampActiveCheckFields` must NOT write `startDate`, or active-status (which runs after cross-verification) would clobber the CRM value.
+
+## Selector intelligence
+
+This workflow touches two systems: **ucpath** and **crm**.
+
+- Before mapping or remapping any selector, run `npm run selector:search "<intent>"` (e.g. `"person org summary"`, `"crm name search"`, `"sdcmp filter"`).
+- Per-system lessons:
+  - [`src/systems/ucpath/LESSONS.md`](../../systems/ucpath/LESSONS.md)
+  - [`src/systems/crm/LESSONS.md`](../../systems/crm/LESSONS.md)
+- Per-system catalogs:
+  - [`src/systems/ucpath/SELECTORS.md`](../../systems/ucpath/SELECTORS.md)
+  - [`src/systems/crm/SELECTORS.md`](../../systems/crm/SELECTORS.md)
+
+## Shared-context pool semantics
+
+- Up to 4 workers share UCPath + CRM `BrowserContext`s. Each worker opens its own Page on first `ctx.page(id)` call (lazy allocation).
+- Queue-based distribution inside `runWorkflowSharedContextPool` — workers pull items from a shared queue until empty.
+- Per-item failures become `failed` tracker rows; the worker continues to the next queue item.
+- Duplicate names/EIDs in an input run are deduped before enqueue (`prepareNames` / `dedupeNames`). Duplicate-item requests would collide on the derived `itemId`.
+
+## Name Search Strategy
+
+Input is first normalized via `normalizeName` → "Last, First Middle" title-case. Search then tries strategies in order:
+
+1. Try full name: `lastName, firstName middleName`
+2. If no SDCMP candidates: try `lastName, firstName` (drop middle)
+3. If still nothing: try `lastName, middleName` (middle as first)
+
+After each successful strategy the SDCMP candidate list is filtered by `isAcceptedHdhDepartment` (HDH keyword whitelist). A candidate is **only** accepted if its department passes the HDH filter — a SDCMP-BU row at a non-HDH dept (e.g. QUALCOMM INSTITUTE) is rejected and lets the CRM-only fallback surface a better EID.
+
+EID inputs skip the name-disambiguation logic in `cross-verification`, but the step still runs for them to fetch the CRM record (by EID first, then the UCPath-resolved name) and stamp the CRM-sourced Start Date.
+
+## HDH department filtering
+
+`isAcceptedHdhDepartment` (in `src/domain/hdh/departments.ts`) matches: `"Housing"`, `"Dining"`, `"Hospitality"`, `"On Campus Housing"`, and the canonical `"HOUSING/DINING/HOSPITALITY"` string. Case-insensitive. `keepNonHdh: true` bypasses the filter (Active Check–style operator review).
+
+## Gotchas
+
+- PeopleSoft search results table ID: `tdgbrPTS_CFG_CL_STD_RSL$0`
+- Valid data rows must have exactly 9 cells with numeric Empl ID (5+ digits) in first cell
+- Drill-in selector: `PTS_CFG_CL_RSLT_PTS_DRILLIN$40$$IMG${rowIndex}` — row index must be exact
+- Assignment table scan: finds first row with 12+ cells where cell[3] matches business unit pattern and cell[6] is department description
+- "View All" button may need re-clicking after drill-in if results are paginated (rowIndex > 10)
+- CRM search uses different strategy: last name first, then first name. For EID inputs, `searchCrmByEidOrName` searches CRM by the EID (`?q=<eid>`) first and selects the record whose `ucpathEmployeeId` matches, then falls back to the name search.
+- The operator-facing Start Date is `pickCrmStartDate(records, eid)` = the CRM First Day of Service of the EID-matched record (else first record); blank when CRM has none. Screenshots: `cross-verification` captures the CRM **record** page (`crmRecordScreenshot`), not the search grid.
+- CRM `crmMatch` date matching uses ±7 day tolerance against UCPath `startDate` (Last Hire / first day of service), falling back to assignment EFFDT only when `startDate` is missing. (This UCPath date drives EID disambiguation only — it is not the displayed Start Date.)
+- Each worker gets its own UCPath tab AND its own CRM tab — concurrent CRM name searches on separate pages
+- Person Org may return multiple SDCMP rows for the same EID / employment history. `lookupPersonInUcpath` expands Employment Instances and selects the preferred assignment row (active first, HDH-active before non-HDH) before workflow status derivation.
+
+## CRM-date enrichment (`includeCrmDates`)
+
+Set `includeCrmDates: true` in the input to run an extra `crm-dates` step after `active-status`. The step searches CRM by the resolved `searchName`, then stamps two fields onto the tracker row's output data:
+
+- `employmentDate` — CRM "First Day of Service (Effective Date)" field
+- `oathDate` — CRM "Date Signed" field (the oath taken-and-subscribed date)
+
+Selection: prefers the CRM record whose `ucpathEmployeeId` matches the resolved EID; falls back to the first record when no EID match is found.
+
+**Best-effort:** parse failures, CRM search errors, and empty result sets all log and return gracefully without failing the overall lookup. Never throws.
+
+**Off by default.** Omitting `includeCrmDates` (or setting it to `false`) causes the step to be skipped via `ctx.skipStep("crm-dates")` so the step list stays consistent across all runs. Normal dashboard input runs are unaffected.
+
+**Not in `detailFields`:** `employmentDate` and `oathDate` are output-data fields for a delegating parent to read. Adding them to `detailFields` would trigger a runtime warning for every run where the flag is off.
+
+Currently used by: the OCR `verify` flow.
+
+## Dead code note
+
+The `ocr-active-check` task dependency kind and `createOcrActiveCheckDependencyBatch` (in `src/tracker/tasks/store.ts`) are vestigial dead code — OCR only ever delegates to person-lookup via `ocr-eid-lookup`. These are intentionally retained for historical reasons; do not remove or rename them.
+
+## Lessons Learned
+
+- **2026-07-30: Person Match merged into Person Lookup as Search/Match modes without collapsing the two UCPath surfaces.** Search still uses Person Organizational Summary for department/status; Match still uses HR-Tasks Search/Match for the rehire-vs-new-hire question. The old "do not merge" warning protected those distinct questions, not the workflow id; modes preserve both while giving the operator one panel and one queue. CRM is an independent flag on either mode (default on for Search, off for Match) but stays eagerly authenticated until SSO login has a single-flight guard. The HR-Tasks result-grid lesson moved with Match: the live results grid is `table#l0PERSON$0` with `EMPLID$<n>`/`HTML2$<n>`/`HTML4$<n>` cells; the retired `[id*="SEARCH_RESULT"]`/`.PSLEVEL1GRID` selector could only observe not-found dialogs and made every genuine match time out as ambiguous. Keep `searchPerson` on the verified `personSearch.resultEmplIdCells` path; a dead arm in a result-vs-dialog race surfaces as a timeout, not a selector error. Full live evidence remains in `src/systems/ucpath/LESSONS.md` (2026-07-13).
+
+- **2026-07-17: UCPath miss + CRM hit is still found (`n/a`), with UCPath/CRM Found|Not found grid fields.** Person Lookup used to treat a UCPath Person Org miss as terminal `activeStatus: "not-found"` even when CRM returned a matched onboarding record (and only stamped CRM Start Date). Operators then saw blank Name/Dept beside a CRM start date. Fix: stamp `ucpathFound`/`crmFound` (`Found`|`Not found`) on every path; when UCPath misses but CRM hits, fill Name/Dept/EID from the CRM record and stamp `activeStatus: "n/a"` / `hrStatus: "N/A"` via `deriveCrmOnlyCheckOutcome` (no A/IA chip). Terminal Not-found badge remains only when **both** systems miss. Spec: `docs/superpowers/specs/2026-07-17-person-lookup-system-presence-design.md`.
+- **2026-07-08: `crm-search.ts` no longer owns CRM selectors — the raw search/scrape + record extraction moved to `src/systems/crm/onboarding-records.ts`.** `crm-search.ts` now only owns query-strategy orchestration (`buildCrmNameSearchQueries`, `searchCrmByName`, `searchCrmByEidOrName`, `pickCrmStartDate`/`pickCrmPayrollTitle`, `datesWithinDays`) on top of the systems-layer primitives `searchCrmOnboardingResultRows` / `extractCrmOnboardingRecord`. The record extractor now throws (post-navigation identity sanity check) instead of silently returning a blank-ish record on a failed/redirected navigation — see `src/systems/crm/CLAUDE.md` (2026-07-08). `CrmRecord` is now a type alias for `CrmOnboardingRecord` (systems/crm) — same shape, same import path from `crm-search.js` for existing callers. The `matchCrmEid` ±7-day CRM-vs-UCPath date tolerance (`workflow.ts`) was reviewed in the same pass: it stays — it's a bounded FALLBACK below the exact-EID check, pinned by a test (`crm-start-date.test.ts`), and only affects which CRM record's dates are surfaced (not an HR transaction) — see the inline rationale on `matchCrmEid`'s JSDoc.
+- **2026-06-11: Never stamp prose into `emplId` — it's the EID identity field (bug A2).** The name-search error and not-found paths in `searchingStep` used to `ctx.updateData({ emplId: "Error" })` / `{ emplId: "Not found" }`. `emplId` is the EID identity field — it feeds the queue-row subtitle (`resolveEid` in `domain/queue-row-presentation.ts`) AND is carried forward as a "resolved" EID by `tracker/queue-row-count.ts`. A prose value there leaked "Not found" / "Error" into the subtitle and propagated across re-run attempts. Fix: prose goes in the **`hrStatus` DETAIL field** instead (matching the EID-input paths, which already stamped `hrStatus` and the real searched EID into `emplId`); the not-found STATE stays structured via `activeStatus: "not-found"` (stamped by the active-status step → drives the `notFound` badge), and a thrown search error already lands the row `failed`. Leaving `emplId` unset lets the subtitle fall through to the trace id, and a later crm-only resolution can still stamp a real EID. `resolveEid` was also hardened to reject non-numeric values (defense in depth). Pinned by `tests/unit/domain/queue-row-presentation.test.ts`.
+- **2026-06-05: Termination Reason grid field is UCPath-sourced (Person Org Summary action-reason).** The log-panel grid shows `terminationReason` (label "Term Reason") after End Date. It comes from UCPath Person Org Summary's ORG Instance section, rendered next to the Termination Date — selector `personOrgSummary.terminationReason` = `#PER_INST_EMP_VW_DESCR$0` (same `PER_INST_EMP_VW_*$0` family as Last Hire / Termination Date). Extracted in **both** detail paths (`drillInAndGetDetails` + the single-result detail path) and carried `EidResult.terminationReason → PersonLookupResult → ActiveCheckOutcome.terminationReason`, then stamped in `stampActiveCheckFields`. **Gated on the termination date**: blanked at extraction (`selectedTermDate ? termReason : ""`) AND again in `deriveActiveCheckOutcome` (`terminationDate ? reason : ""`) so an active row never shows a stale action-reason. Unlike Start Date (CRM), this is the one operator-facing field sourced from UCPath, not CRM.
+- **2026-07-01: Person Lookup detail grid shows Search (input) + Name (resolved) — Payroll Title removed.** `searchName` now stays the operator's original query (typed name or EID display); the UCPath-resolved name rides `resolvedName` (label "Name") beside it in the log-panel grid. `payrollTitle` is no longer stamped or shown. OCR person-lookup fan-out reads `resolvedName` (fallback `searchName`) and patches preview records with split `firstName`/`lastName` via `applyPersonLookupNameToOcrRecord` (`src/domain/identity/ocr-person-name.ts`).
+- **2026-06-05: Payroll Title grid field is CRM-sourced and code-stripped.** ~~The log-panel grid now shows `payrollTitle`~~ **Retired 2026-07-01** — replaced by the resolved-name field above. `pickCrmPayrollTitle` remains in `crm-search.ts` for any internal callers but is no longer stamped on the tracker row.
+- **2026-05-28: Person Lookup merged from EID Lookup + Active Check.** Both former workflows are deleted. All callers import from `src/workflows/person-lookup/`. The workflow name is `"person-lookup"`, label `"Person Lookup"`.
+- **2026-05-28: Retired workflow ids are not dashboard surfaces.** Historical `eid-lookup` and `active-check` tracker rows stay readable for audit/debugging, but dashboard workflow lists/counts filter them out. Do not re-add either id to workflow metadata, input-run registries, or dashboard rail logic.
+- **Normalize and dedupe names before enqueue.** `normalizeName` title-cases and canonicalizes separator; `prepareNames` + `dedupeNames` prevent itemId collisions.
+- **HDH acceptance is department-level, not BU-level.** SDCMP alone is too broad. Rejected SDCMP/non-HDH rows should log why they were ignored so CRM-only fallback can surface the better EID.
+- **Person Org active-row selection is shared.** Do not fork active/inactive parsing. Keep status derivation fed by `lookupPersonInUcpath` / `derivePersonLookupSelection` so hidden active Employment Instances are handled consistently.
+- **2026-06-02: Start Date is CRM First Day of Service only (supersedes "Start Date is Last Hire").** The operator-facing `startDate` is sourced from CRM in `cross-verification` (`searchCrmByEidOrName` → `pickCrmStartDate`), never from UCPath, and is **blank** when CRM has no record/date (no fallback). `cross-verification` now runs for **both** name and EID inputs (EID inputs search CRM by EID first, then the resolved name). `stampActiveCheckFields` no longer writes `startDate` (it would clobber the CRM value since active-status runs after cross-verification); the UCPath Last Hire rides as backend-only `ucpathStartDate`. The UCPath `startDate`/`effdt` distinction in `EidResult`/`ActiveCheckOutcome` is retained for EID disambiguation (`crmMatch` date tolerance) only.
+- **2026-06-02: Person Lookup screenshots are system-scoped + post-resolution.** `searching` captures the resolved UCPath detail (`personOrgScreenshot`, `{ systems: ["ucpath"] }`) and only captures the search grid (`personOrgSearchScreenshot`) when nothing resolves (not-found audit). `cross-verification` captures the CRM **record** page (`crmRecordScreenshot`, `{ systems: ["crm"] }`), not the search grid. `ctx.captureAndStampScreenshot(label, dataKey, { systems })` stamps the file for the requested system instead of a blind `files[0]`, so a multi-system run can't stamp the wrong page.
+- **Runtime policy uses default row actions + memberRow person title + always-batch-when-delegated.** `PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY` spreads `DEFAULT_WORKFLOW_RUNTIME_POLICY`, sets `memberRow.titleSource: "person"`, and sets `delegation.alwaysBatchDelegatedMembers: true`. Direct one-person input runs are `single`; direct multi-person input runs are grouped `batch-member` rows under the input-run `parentRunId`.
+- **2026-06-02: Delegated lookups always render as a batch, even one.** OCR's EID-resolution fan-out used to render a lone delegated lookup as a flat single row (the queue classifier collapses a 1-member delegated set to a flat single). `delegation.alwaysBatchDelegatedMembers: true` on the person-lookup policy keeps even one delegated lookup as a one-member batch surface in the Person Lookup tab. Only delegated rows are affected — direct one-person input runs (root rows, no `parentRunId`) stay `single`. The flag rides the serialized `runtimePolicy` to the client classifier; `queue-surfaces.ts` reads it via `getWorkflowRuntimePolicy(...).delegation?.alwaysBatchDelegatedMembers`.
+- **2026-05-28: Batch means multiple people, not one daemon/session.** Keep `personLookupWorkflow.archetype` as `single` because each schema item is one person. The `/api/enqueue` boundary marks multi-value input runs with `__runtimeOptions.rowShape = "batch-member"` and a shared `parentRunId`, which is what makes a 5-ID Person Lookup request a batch surface.
+- **Dashboard input run is the public start path.** `npm run person-lookup:stop` stops the daemon pool. Typed name/EID starts go through `InputRunPanel` and `/api/enqueue`. There is no `npm run person-lookup` launch script.
+- **2026-06-02: `oathDate` = CRM "Date Signed"; `includeCrmDates` is purely additive and gated.** The CRM date enrichment step (`crm-dates`) stamps `employmentDate` (First Day of Service) and `oathDate` (Date Signed — the oath taken-&-subscribed date) only when `input.includeCrmDates === true`. The step is always declared in the `steps` tuple and skipped via `ctx.skipStep("crm-dates")` when the flag is off, so the step list is consistent across all runs. Neither field is in `detailFields` — they are output-data fields for delegating parents (OCR verify flow) to read. Normal dashboard input runs are unaffected.
+- **2026-06-07: No-data / error paths now capture screenshots for operator evidence.** Every early-return and error path in `searching` and `crossVerificationStep` captures a best-effort screenshot via bare `await ctx.captureAndStampScreenshot(...)` before returning or rethrowing. The helper (`src/core/kernel/ctx.ts`) wraps its body in try/catch and only `log.warn`s on failure — it CANNOT throw — so no workflow-local try/catch wrapper is needed or correct (per `src/core/CLAUDE.md` invariant). Added captures (7 total): (1) EID search ERROR before rethrow → `personOrgSearchScreenshot` label `"UCPath EID search failed"` (ucpath); (2) EID "Not found" → `personOrgSearchScreenshot` label `"no UCPath detail"` (ucpath); (3) name-search ERROR before rethrow → `personOrgSearchScreenshot` label `"UCPath search failed"` (ucpath); (4) `stampCrmStartDateAndScreenshot` no-records path → `crmSearchScreenshot` label `"no CRM record"` (crm); (5) EID CRM search ERROR → `crmSearchScreenshot` label `"CRM search failed"` (crm); (6) name-search CRM ERROR → `crmSearchScreenshot` label `"CRM search failed"` (crm); (7) name-search empty-CRM-results branch in `crossVerificationStep` → `crmSearchScreenshot` label `"no CRM record"` (crm). On rethrow paths the screenshot always runs BEFORE the throw. **Requires live verification** — screens can only be confirmed with real UCPath/CRM sessions.

@@ -1,0 +1,547 @@
+import { rmSync } from "node:fs";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+import type { CaptureSession, CaptureSessionStore } from "./sessions.js";
+import { qrSvgFor } from "./qr.js";
+import { bundlePhotosToPdf } from "./pdf-bundle.js";
+import { log } from "../../utils/log.js";
+
+export interface RouteResult {
+  status: number;
+  body: unknown;
+}
+
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024; // 10 MB
+// Crockford-style alphabet (no 0/O/I/L confusables) so an operator can
+// read the shortcode aloud without ambiguity.
+const SHORTCODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+function genShortcode(): string {
+  const bytes = randomBytes(4);
+  let out = "";
+  for (const b of bytes) out += SHORTCODE_ALPHABET[b % SHORTCODE_ALPHABET.length];
+  return `${out.slice(0, 2)}-${out.slice(2, 4)}`;
+}
+
+function uniquePhotoFilename(ext: string): string {
+  return `${Date.now()}-${randomBytes(4).toString("hex")}${ext}`;
+}
+
+const MIME_BY_EXT: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  heic: "image/heic",
+  heif: "image/heif",
+};
+
+function mimeFromExt(name: string): string {
+  const m = name.match(/\.([a-z0-9]+)$/i);
+  if (!m) return "application/octet-stream";
+  return MIME_BY_EXT[m[1].toLowerCase()] ?? "application/octet-stream";
+}
+
+function extFromMime(mime: string, fallback: string): string {
+  const entry = Object.entries(MIME_BY_EXT).find(([, m]) => m === mime);
+  return entry ? `.${entry[0]}` : fallback;
+}
+
+type PhotoStoreMeta = {
+  filename: string;
+  sizeBytes: number;
+  mime: string;
+  blurScore?: number;
+  blurFlagged?: boolean;
+};
+
+/**
+ * Write `bytes` to `fullPath`, build the store-ready photo metadata, and call
+ * `storeOp`. If the store op returns null (session went terminal mid-flight),
+ * the file is unlinked and null is returned so the caller can emit 409.
+ */
+async function persistPhoto<T>(
+  fullPath: string,
+  bytes: Uint8Array,
+  meta: { filename: string; mime: string },
+  blurScore: number | undefined,
+  storeOp: (m: PhotoStoreMeta) => T | null,
+): Promise<T | null> {
+  await writeFile(fullPath, bytes);
+  const blurFlagged = typeof blurScore === "number" ? blurScore < 80 : undefined;
+  const storeMeta: PhotoStoreMeta = {
+    filename: meta.filename,
+    sizeBytes: bytes.length,
+    mime: meta.mime,
+    ...(typeof blurScore === "number" ? { blurScore } : {}),
+    ...(blurFlagged !== undefined ? { blurFlagged } : {}),
+  };
+  const result = storeOp(storeMeta);
+  if (result === null) {
+    await unlink(fullPath).catch(() => {});
+    return null;
+  }
+  return result;
+}
+
+// ─── handleStart ────────────────────────────────────────────
+
+export interface HandleStartInput {
+  workflow: string;
+  contextHint?: string;
+}
+
+export interface HandleStartContext {
+  store: CaptureSessionStore;
+  /**
+   * Required full origin (ngrok HTTPS URL or manually forwarded origin) for
+   * phone Capture. Trailing slash is tolerated.
+   */
+  publicUrl?: string;
+  /**
+   * Called once after photo upload completes and the user finalizes. The
+   * handler bundles the PDF + invokes this callback in the background; HTTP
+   * response returns immediately on finalize.
+   */
+  onFinalize: CaptureSession["onFinalize"];
+}
+
+export async function handleStart(
+  input: HandleStartInput,
+  ctx: HandleStartContext,
+): Promise<RouteResult> {
+  if (!input.workflow || typeof input.workflow !== "string") {
+    return { status: 400, body: { ok: false, error: "workflow is required" } };
+  }
+  if (ctx.publicUrl && !/^https?:\/\//i.test(ctx.publicUrl)) {
+    return {
+      status: 503,
+      body: {
+        ok: false,
+        error: `CAPTURE_PUBLIC_URL must start with http:// or https:// (got "${ctx.publicUrl}")`,
+      },
+    };
+  }
+  if (!ctx.publicUrl) {
+    return {
+      status: 503,
+      body: {
+        ok: false,
+        error:
+          "Capture requires ngrok or CAPTURE_PUBLIC_URL; no LAN fallback is available. Restart with npm run dashboard or set CAPTURE_PUBLIC_URL manually.",
+      },
+    };
+  }
+  const baseUrl = ctx.publicUrl.replace(/\/+$/, "");
+
+  const session = ctx.store.create({
+    workflow: input.workflow,
+    contextHint: input.contextHint,
+    onFinalize: ctx.onFinalize,
+  });
+
+  const captureUrl = `${baseUrl}/capture/${session.token}`;
+  const qrSvg = await qrSvgFor(captureUrl);
+  const shortcode = genShortcode();
+
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      sessionId: session.sessionId,
+      token: session.token,
+      captureUrl,
+      qrSvg,
+      shortcode,
+      expiresAt: session.expiresAt,
+    },
+  };
+}
+
+// ─── handleManifest ─────────────────────────────────────────
+
+export interface HandleManifestContext {
+  store: CaptureSessionStore;
+  /** When supplied, the manifest GET marks the phone as connected. */
+  phoneInfo?: { userAgent?: string; ip?: string };
+}
+
+export function handleManifest(
+  token: string,
+  ctx: HandleManifestContext,
+): RouteResult {
+  const session = ctx.store.getByToken(token);
+  if (!session) {
+    return { status: 404, body: { ok: false, error: "session not found" } };
+  }
+  // First manifest hit from the phone is treated as "phone connected" —
+  // useful both for the dashboard UI and audit trail. Idempotent.
+  ctx.store.markPhoneConnected(session.sessionId, ctx.phoneInfo);
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      state: session.state,
+      // Spec says PhotoSummary[]; older callers tolerate either shape.
+      // Phone uses .forEach, so the array is required.
+      photos: session.photos,
+      workflow: session.workflow,
+      contextHint: session.contextHint,
+      expiresAt: session.expiresAt,
+    },
+  };
+}
+
+// ─── handleUpload ───────────────────────────────────────────
+
+export interface HandleUploadInput {
+  token: string;
+  bytes: Buffer;
+  originalName: string;
+  /** Optional client-side blur metric — surfaced as a UX hint, never
+   * gates uploads. */
+  blurScore?: number;
+}
+
+export interface HandleUploadContext {
+  store: CaptureSessionStore;
+  /** Directory under which photos are written: <photosDir>/<sessionId>/<N>.jpg */
+  photosDir: string;
+}
+
+export async function handleUpload(
+  input: HandleUploadInput,
+  ctx: HandleUploadContext,
+): Promise<RouteResult> {
+  const session = ctx.store.getByToken(input.token);
+  if (!session) {
+    return { status: 404, body: { ok: false, error: "session not found" } };
+  }
+  if (session.state !== "open") {
+    return {
+      status: 409,
+      body: { ok: false, error: `session is ${session.state}` },
+    };
+  }
+  if (input.bytes.length === 0) {
+    return { status: 400, body: { ok: false, error: "photo is empty" } };
+  }
+  if (input.bytes.length > MAX_PHOTO_BYTES) {
+    return { status: 413, body: { ok: false, error: "photo too large (>10 MB)" } };
+  }
+
+  const dir = join(ctx.photosDir, session.sessionId);
+  await mkdir(dir, { recursive: true });
+  // Read mime from the original name so the served file later carries
+  // the right Content-Type. Phone may send heic; we keep the upload
+  // exact and let the phone's polyfill convert before the bundle step.
+  const mime = mimeFromExt(input.originalName);
+  const ext = extFromMime(mime, ".jpg");
+  const filename = uniquePhotoFilename(ext);
+  const fullPath = join(dir, filename);
+  const photo = await persistPhoto(fullPath, input.bytes, { filename, mime }, input.blurScore,
+    (m) => ctx.store.addPhoto(session.sessionId, m));
+  if (!photo) {
+    return { status: 409, body: { ok: false, error: "session no longer open" } };
+  }
+
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      photoIndex: photo.index,
+      totalPhotos: session.photos.length,
+      ...(typeof photo.blurScore === "number" ? { blurScore: photo.blurScore } : {}),
+      ...(typeof photo.blurFlagged === "boolean" ? { blurFlagged: photo.blurFlagged } : {}),
+    },
+  };
+}
+
+// ─── handleDeletePhoto ──────────────────────────────────────
+
+export interface HandleDeletePhotoInput {
+  token: string;
+  /** Stable photo id (CapturedPhoto.index). */
+  index: number;
+}
+
+export async function handleDeletePhoto(
+  input: HandleDeletePhotoInput,
+  ctx: HandleUploadContext,
+): Promise<RouteResult> {
+  const session = ctx.store.getByToken(input.token);
+  if (!session) {
+    return { status: 404, body: { ok: false, error: "session not found" } };
+  }
+  if (session.state !== "open") {
+    return {
+      status: 409,
+      body: { ok: false, error: `session is ${session.state}` },
+    };
+  }
+  if (!Number.isInteger(input.index) || input.index < 0) {
+    return { status: 400, body: { ok: false, error: "index out of range" } };
+  }
+  const removed = ctx.store.removePhoto(session.sessionId, input.index);
+  if (!removed) {
+    return { status: 400, body: { ok: false, error: "index out of range" } };
+  }
+  await unlink(join(ctx.photosDir, session.sessionId, removed.filename)).catch(() => {});
+  return {
+    status: 200,
+    body: { ok: true, totalPhotos: session.photos.length },
+  };
+}
+
+// ─── handleReplacePhoto ─────────────────────────────────────
+
+export interface HandleReplacePhotoInput {
+  token: string;
+  /** Stable photo id (CapturedPhoto.index). */
+  index: number;
+  bytes: Buffer;
+  originalName: string;
+  blurScore?: number;
+}
+
+/**
+ * Replace the photo with stable id `index`. Writes a fresh file with a
+ * timestamp suffix so the old copy is preserved on disk for forensics
+ * (and so cache-busting Just Works — the URL changes implicitly when
+ * the dashboard re-renders against the new filename).
+ */
+export async function handleReplacePhoto(
+  input: HandleReplacePhotoInput,
+  ctx: HandleUploadContext,
+): Promise<RouteResult> {
+  const session = ctx.store.getByToken(input.token);
+  if (!session) {
+    return { status: 404, body: { ok: false, error: "session not found" } };
+  }
+  if (session.state !== "open") {
+    return {
+      status: 409,
+      body: { ok: false, error: `session is ${session.state}` },
+    };
+  }
+  if (!Number.isInteger(input.index) || input.index < 0) {
+    return { status: 400, body: { ok: false, error: "index out of range" } };
+  }
+  if (input.bytes.length === 0) {
+    return { status: 400, body: { ok: false, error: "photo is empty" } };
+  }
+  if (input.bytes.length > MAX_PHOTO_BYTES) {
+    return { status: 413, body: { ok: false, error: "photo too large (>10 MB)" } };
+  }
+
+  const existing = session.photos.find((p) => p.index === input.index);
+  if (!existing) {
+    return { status: 400, body: { ok: false, error: "index out of range" } };
+  }
+
+  const dir = join(ctx.photosDir, session.sessionId);
+  await mkdir(dir, { recursive: true });
+  const mime = mimeFromExt(input.originalName);
+  const ext = extFromMime(mime, ".jpg");
+  // Stable id + timestamp keeps the new file distinct from the old one.
+  // Old file stays on disk as a forensic record; the photo serving route
+  // resolves through the store, not the directory, so it never serves
+  // an orphaned old copy.
+  const filename = `${String(input.index).padStart(3, "0")}-${uniquePhotoFilename(ext)}`;
+  const fullPath = join(dir, filename);
+  const result = await persistPhoto(fullPath, input.bytes, { filename, mime }, input.blurScore,
+    (m) => ctx.store.replacePhoto(session.sessionId, input.index, m));
+  if (!result) {
+    return { status: 409, body: { ok: false, error: "session no longer open" } };
+  }
+
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      ...(typeof result.replaced.blurScore === "number" ? { blurScore: result.replaced.blurScore } : {}),
+      ...(typeof result.replaced.blurFlagged === "boolean" ? { blurFlagged: result.replaced.blurFlagged } : {}),
+    },
+  };
+}
+
+// ─── handleReorder ──────────────────────────────────────────
+
+export interface HandleReorderInput {
+  token: string;
+  /** Source array position (NOT a stable photo id). */
+  fromIndex: number;
+  /** Destination array position. */
+  toIndex: number;
+}
+
+export function handleReorder(
+  input: HandleReorderInput,
+  ctx: { store: CaptureSessionStore },
+): RouteResult {
+  const session = ctx.store.getByToken(input.token);
+  if (!session) {
+    return { status: 404, body: { ok: false, error: "session not found" } };
+  }
+  if (session.state !== "open") {
+    return {
+      status: 409,
+      body: { ok: false, error: `session is ${session.state}` },
+    };
+  }
+  const ok = ctx.store.reorderPhotos(
+    session.sessionId,
+    input.fromIndex,
+    input.toIndex,
+  );
+  if (!ok) {
+    return { status: 400, body: { ok: false, error: "invalid reorder" } };
+  }
+  return {
+    status: 200,
+    body: { ok: true, order: session.photos.map((p) => p.index) },
+  };
+}
+
+// ─── handleValidate ─────────────────────────────────────────
+
+export interface HandleValidateInput {
+  sessionId: string;
+}
+
+/**
+ * Default per-session validation. Workflows can register a richer
+ * `validate` handler in the future; for now, the only universally-true
+ * blocker is "no photos".
+ */
+export function handleValidate(
+  input: HandleValidateInput,
+  ctx: { store: CaptureSessionStore },
+): RouteResult {
+  const session = ctx.store.getById(input.sessionId);
+  if (!session) {
+    return { status: 404, body: { ok: false, error: "session not found" } };
+  }
+  const photoCount = session.photos.length;
+  const totalBytes = session.photos.reduce((n, p) => n + p.sizeBytes, 0);
+  const blockers: string[] = [];
+  const warnings: string[] = [];
+  if (photoCount === 0) blockers.push("No photos captured.");
+  if (photoCount > 50) {
+    warnings.push(`${photoCount} photos — bundle may be large.`);
+  }
+  if (totalBytes > 80 * 1024 * 1024) {
+    warnings.push(
+      `Bundle size ${(totalBytes / 1024 / 1024).toFixed(1)} MB — server PDF build may be slow.`,
+    );
+  }
+  return {
+    status: 200,
+    body: {
+      ok: blockers.length === 0,
+      ...(warnings.length > 0 ? { warnings } : {}),
+      ...(blockers.length > 0 ? { blockers } : {}),
+    },
+  };
+}
+
+// ─── handleFinalize ─────────────────────────────────────────
+
+export interface HandleFinalizeInput {
+  token: string;
+}
+
+export interface HandleFinalizeContext {
+  store: CaptureSessionStore;
+  photosDir: string;
+  uploadsDir: string;
+}
+
+export async function handleFinalize(
+  input: HandleFinalizeInput,
+  ctx: HandleFinalizeContext,
+): Promise<RouteResult> {
+  const session = ctx.store.getByToken(input.token);
+  if (!session) {
+    return { status: 404, body: { ok: false, error: "session not found" } };
+  }
+  if (session.state !== "open") {
+    return {
+      status: 409,
+      body: { ok: false, error: `session is ${session.state}` },
+    };
+  }
+  if (session.photos.length === 0) {
+    return {
+      status: 400,
+      body: { ok: false, error: "cannot finalize: no photos captured" },
+    };
+  }
+
+  ctx.store.setState(session.sessionId, "finalizing");
+
+  // Background: bundle PDF + run onFinalize. HTTP returns immediately so
+  // the mobile UI doesn't hang on a slow OCR pipeline.
+  void (async () => {
+    try {
+      const photoPaths = session.photos.map((p) =>
+        join(ctx.photosDir, session.sessionId, p.filename),
+      );
+      const pdfPath = join(ctx.uploadsDir, `${session.sessionId}.pdf`);
+      await bundlePhotosToPdf(photoPaths, pdfPath);
+      ctx.store.setPdfPath(session.sessionId, pdfPath);
+      ctx.store.setState(session.sessionId, "finalized");
+      const updated = ctx.store.getById(session.sessionId);
+      if (updated) {
+        try {
+          await updated.onFinalize(updated);
+        } catch (err) {
+          // The caller's pipeline failure isn't the session's failure (the
+          // session is still finalized with a bundled PDF on disk), but it must
+          // NOT be swallowed: a thrown onFinalize means NO OCR-prep/operation
+          // row appeared (e.g. the ISS-009 "pdfFileId is required" throw).
+          // Fail loud so the operator/logs see why the capture produced no row.
+          log.warn(
+            `capture onFinalize failed (session ${session.sessionId}): ${String(err)}`,
+          );
+        }
+      }
+    } catch (err) {
+      log.warn(`capture finalize bundle failed (session ${session.sessionId}): ${String(err)}`);
+      ctx.store.setState(session.sessionId, "discarded");
+    }
+  })();
+
+  return { status: 200, body: { ok: true, sessionId: session.sessionId } };
+}
+
+// ─── handleDiscard ──────────────────────────────────────────
+
+export interface HandleDiscardInput {
+  sessionId: string;
+  reason?: string;
+}
+
+export interface HandleDiscardContext {
+  store: CaptureSessionStore;
+  photosDir: string;
+}
+
+export function handleDiscard(
+  input: HandleDiscardInput,
+  ctx: HandleDiscardContext,
+): RouteResult {
+  const session = ctx.store.getById(input.sessionId);
+  if (!session) {
+    return { status: 404, body: { ok: false, error: "session not found" } };
+  }
+  ctx.store.setState(session.sessionId, "discarded");
+  try {
+    rmSync(join(ctx.photosDir, session.sessionId), {
+      recursive: true,
+      force: true,
+    });
+  } catch {
+    /* best-effort */
+  }
+  return { status: 200, body: { ok: true } };
+}

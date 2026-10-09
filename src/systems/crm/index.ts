@@ -1,0 +1,47 @@
+export { searchByEmail, searchCrmOnboardingRecords, selectLatestResult } from "./search.js";
+export { pickLatestOnboardingSearchRowIndex, isDeadOnboardingStage } from "./pick-latest-search-row.js";
+export type { CrmSearchRowPickInput } from "./pick-latest-search-row.js";
+export { navigateToSection } from "./navigate.js";
+export { extractField, extractCrmPersonName } from "./extract.js";
+export type { CrmPersonName } from "./extract.js";
+export { ExtractionError } from "./types.js";
+export { crmSelectors, onboardingHistory, idocsViewer } from "./selectors.js";
+export {
+  readOnboardingOathHistory,
+  findOathSignedTransition,
+  parseCrmHistoryTimestamp,
+  WITNESS_OATH_NEW_HIRE_SIGNED,
+} from "./history.js";
+export type { OnboardingOathHistory } from "./history.js";
+export {
+  searchCrmOnboardingResultRows,
+  extractCrmOnboardingRecord,
+  hasIdentifyingCrmData,
+  navigatedToCrmRecordHost,
+} from "./onboarding-records.js";
+export type {
+  CrmOnboardingSearchRow,
+  CrmOnboardingRecord,
+} from "./onboarding-records.js";
+export {
+  DEFAULT_CRM_DOC_INDICES,
+  resolveDefaultCrmDocIndices,
+  buildCrmDocumentDownloadPath,
+  onboardingDateFolder,
+  buildCrmDocumentFolderName,
+  sanitizeOnboardingFolderName,
+  ensureCrmDocumentDownloadFolder,
+  parseCrmDocumentFilename,
+  downloadCrmIdocsDocuments,
+  readCrmIdocsViewerInfo,
+  zipCrmDocumentFolder,
+} from "./idocs-download.js";
+export type {
+  CrmDocumentDownloadSubject,
+  DownloadedCrmDocument,
+  CrmIdocsDownloadOptions,
+  CrmIdocsViewerInfo,
+  CrmDocumentArchive,
+} from "./idocs-download.js";
+export { folderSubjectFromLegalLived } from "./document-folder-subject.js";
+export type { CrmDocumentFolderSubject } from "./document-folder-subject.js";

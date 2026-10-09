@@ -1,0 +1,493 @@
+import { existsSync } from "node:fs";
+import { basename, dirname } from "node:path";
+import { transaction, type Database, type Statement } from "../../infra/sqlite/index.js";
+
+import type { TrackerEntry, LogEntry } from "../jsonl-core.js";
+import { dateLocal, getRunIdOr, isTrackerEntry } from "../jsonl-core.js";
+import { isResolvedPrepEntry } from "../dashboard/prep-rows.js";
+import { trackerWarn } from "../log-sink.js";
+import type { SessionEvent, ScreenshotSessionEvent } from "../session-event-types.js";
+import { registerLocalFile } from "../files/files.js";
+import type { ProjectionSourceRef } from "./types.js";
+
+interface CachedStatements {
+  insertRunEvent: Statement;
+  upsertRun: Statement;
+  selectRunExists: Statement;
+  upsertItem: Statement;
+  insertLog: Statement;
+  updateRunLogTs: Statement;
+  insertSessionEvent: Statement;
+  selectRunForScreenshot: Statement;
+  countRunsForScreenshot: Statement;
+  updateRunScreenshotCount: Statement;
+  assignNextRunOrdinalForRun: Statement;
+  selectSourceGeneration: Statement;
+}
+
+const stmtCache = new WeakMap<Database, CachedStatements>();
+
+function stmts(db: Database): CachedStatements {
+  let cached = stmtCache.get(db);
+  if (cached) return cached;
+  cached = {
+    insertRunEvent: db.prepare(`
+      INSERT OR IGNORE INTO run_events (
+        source_path, source_generation, source_line, source_offset, workflow, tracker_date, item_id,
+        run_id, parent_run_id, status, step, event_ts, event_ms, data_json,
+        typed_data_json, input_json, error, applied_at
+      ) VALUES (
+        @sourcePath, @sourceGeneration, @sourceLine, @sourceOffset, @workflow, @trackerDate, @itemId,
+        @runId, @parentRunId, @status, @step, @eventTs, @eventMs, @dataJson,
+        @typedDataJson, @inputJson, @error, @appliedAt
+      )
+    `),
+    upsertRun: db.prepare(`
+      INSERT INTO runs (
+        workflow, tracker_date, item_id, run_id, parent_run_id,
+        first_any_ts, first_work_ts, latest_tracker_ts, latest_status, latest_step,
+        latest_data_json, latest_typed_data_json, latest_input_json, latest_error,
+        terminal_at, updated_at
+      ) VALUES (
+        @workflow, @trackerDate, @itemId, @runId, @parentRunId,
+        @eventTs, @firstWorkTs, @eventTs, @status, @step,
+        @dataJson, @typedDataJson, @inputJson, @error,
+        @terminalAt, @updatedAt
+      )
+      ON CONFLICT(workflow, tracker_date, item_id, run_id) DO UPDATE SET
+        parent_run_id = COALESCE(excluded.parent_run_id, runs.parent_run_id),
+        first_any_ts = CASE WHEN excluded.first_any_ts < runs.first_any_ts THEN excluded.first_any_ts ELSE runs.first_any_ts END,
+        first_work_ts = CASE
+          WHEN excluded.first_work_ts IS NULL THEN runs.first_work_ts
+          WHEN runs.first_work_ts IS NULL THEN excluded.first_work_ts
+          WHEN excluded.first_work_ts < runs.first_work_ts THEN excluded.first_work_ts
+          ELSE runs.first_work_ts
+        END,
+        latest_tracker_ts = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_tracker_ts ELSE runs.latest_tracker_ts END,
+        latest_status = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_status ELSE runs.latest_status END,
+        latest_step = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_step ELSE runs.latest_step END,
+        latest_data_json = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_data_json ELSE runs.latest_data_json END,
+        latest_typed_data_json = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_typed_data_json ELSE runs.latest_typed_data_json END,
+        latest_input_json = COALESCE(runs.latest_input_json, excluded.latest_input_json),
+        latest_error = CASE WHEN excluded.latest_tracker_ts >= runs.latest_tracker_ts THEN excluded.latest_error ELSE runs.latest_error END,
+        terminal_at = CASE
+          WHEN runs.terminal_at IS NOT NULL THEN runs.terminal_at
+          WHEN excluded.terminal_at IS NOT NULL THEN excluded.terminal_at
+          ELSE NULL
+        END,
+        updated_at = excluded.updated_at
+    `),
+    selectRunExists: db.prepare(`
+      SELECT 1
+      FROM runs
+      WHERE workflow = @workflow
+        AND tracker_date = @trackerDate
+        AND item_id = @itemId
+        AND run_id = @runId
+      LIMIT 1
+    `),
+    upsertItem: db.prepare(`
+      INSERT INTO items (
+        workflow, tracker_date, item_id, latest_run_id, latest_status,
+        latest_step, latest_ts, latest_data_json, latest_error, resolved_prep,
+        latest_empl_id, updated_at
+      ) VALUES (
+        @workflow, @trackerDate, @itemId, @runId, @status,
+        @step, @eventTs, @dataJson, @error, @resolvedPrep,
+        @emplId, @updatedAt
+      )
+      ON CONFLICT(workflow, tracker_date, item_id) DO UPDATE SET
+        latest_run_id = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_run_id ELSE items.latest_run_id END,
+        latest_status = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_status ELSE items.latest_status END,
+        latest_step = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_step ELSE items.latest_step END,
+        latest_ts = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_ts ELSE items.latest_ts END,
+        latest_data_json = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_data_json ELSE items.latest_data_json END,
+        latest_error = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.latest_error ELSE items.latest_error END,
+        resolved_prep = CASE WHEN excluded.latest_ts >= items.latest_ts THEN excluded.resolved_prep ELSE items.resolved_prep END,
+        latest_empl_id = CASE
+          WHEN excluded.latest_empl_id IS NOT NULL THEN excluded.latest_empl_id
+          ELSE items.latest_empl_id
+        END,
+        updated_at = excluded.updated_at
+    `),
+    insertLog: db.prepare(`
+      INSERT OR IGNORE INTO logs (
+        source_path, source_generation, source_line, source_offset, workflow, tracker_date, item_id,
+        run_id, level, message, ts, ts_ms, raw_json, applied_at
+      ) VALUES (
+        @sourcePath, @sourceGeneration, @sourceLine, @sourceOffset, @workflow, @trackerDate, @itemId,
+        @runId, @level, @message, @ts, @tsMs, @rawJson, @appliedAt
+      )
+    `),
+    updateRunLogTs: db.prepare(`
+      UPDATE runs SET
+        first_log_ts = CASE
+          WHEN first_log_ts IS NULL THEN @ts
+          WHEN @ts < first_log_ts THEN @ts
+          ELSE first_log_ts
+        END,
+        last_log_ts = CASE
+          WHEN last_log_ts IS NULL THEN @ts
+          WHEN @ts >= last_log_ts THEN @ts
+          ELSE last_log_ts
+        END,
+        last_log_message = CASE
+          WHEN last_log_ts IS NULL THEN @message
+          WHEN @ts >= last_log_ts THEN @message
+          ELSE last_log_message
+        END,
+        updated_at = @updatedAt
+      WHERE workflow = @workflow
+        AND tracker_date = @trackerDate
+        AND item_id = @itemId
+        AND run_id = @runId
+    `),
+    insertSessionEvent: db.prepare(`
+      INSERT OR IGNORE INTO session_events (
+        source_path, source_generation, source_line, source_offset, tracker_date, event_type, workflow_instance,
+        run_id, timestamp, ts_ms, raw_json, applied_at
+      ) VALUES (
+        @sourcePath, @sourceGeneration, @sourceLine, @sourceOffset, @trackerDate, @eventType, @workflowInstance,
+        @runId, @timestamp, @tsMs, @rawJson, @appliedAt
+      )
+    `),
+    selectRunForScreenshot: db.prepare(`
+      SELECT workflow, item_id, tracker_date
+      FROM runs
+      WHERE run_id = ?
+      ORDER BY latest_tracker_ts DESC
+      LIMIT 1
+    `),
+    countRunsForScreenshot: db.prepare(
+      "SELECT COUNT(*) AS n FROM runs WHERE run_id = ?",
+    ),
+    updateRunScreenshotCount: db.prepare(`
+      UPDATE runs
+      SET screenshot_count = screenshot_count + @delta, updated_at = @updatedAt
+      WHERE run_id = @runId
+    `),
+    // Stable run ordinals: assign the next integer for a NEW run only. Gaps are
+    // preserved when a middle run is deleted (no ROW_NUMBER recompute).
+    assignNextRunOrdinalForRun: db.prepare(`
+      UPDATE runs
+      SET run_ordinal = (
+        SELECT COALESCE(MAX(r2.run_ordinal), 0) + 1
+        FROM runs r2
+        WHERE r2.workflow = @workflow
+          AND r2.tracker_date = @date
+          AND r2.item_id = @itemId
+          AND r2.run_id != @runId
+      )
+      WHERE workflow = @workflow
+        AND tracker_date = @date
+        AND item_id = @itemId
+        AND run_id = @runId
+    `),
+    selectSourceGeneration: db.prepare(`
+      SELECT generation FROM source_generations WHERE path = ?
+    `),
+  };
+  stmtCache.set(db, cached);
+  return cached;
+}
+
+function sourceGeneration(db: Database, source: ProjectionSourceRef): number {
+  if (source.generation !== undefined) return source.generation;
+  const row = stmts(db).selectSourceGeneration.get(source.path) as { generation: number } | undefined;
+  return row?.generation ?? 1;
+}
+
+function toMs(ts: string | undefined, fallback = 0): number {
+  const ms = Date.parse(ts ?? "");
+  return Number.isFinite(ms) ? ms : fallback;
+}
+
+function trackerDateFromTimestamp(ts: string): string {
+  return dateLocal(new Date(ts));
+}
+
+function extractEmplId(data: Record<string, string> | undefined): string | null {
+  if (!data) return null;
+  const raw = data.emplId;
+  if (typeof raw === "string" && raw.trim().length > 0) return raw.trim();
+  return null;
+}
+
+/** Mirrors {@link isResolvedPrepEntry} for SQLite `items.resolved_prep` (sidebar wfCounts). */
+function isResolvedPrepData(
+  workflow: string,
+  status: TrackerEntry["status"],
+  step: string | undefined,
+  data: Record<string, string> | undefined,
+): number {
+  const entry: TrackerEntry = {
+    workflow,
+    timestamp: "",
+    id: "",
+    runId: "",
+    status,
+    ...(step ? { step } : {}),
+    ...(data ? { data } : {}),
+  };
+  return isResolvedPrepEntry(entry) ? 1 : 0;
+}
+
+export function applyTrackerEntry(
+  db: Database,
+  entry: TrackerEntry,
+  source: ProjectionSourceRef,
+): void {
+  if (!isTrackerEntry(entry)) {
+    trackerWarn(
+      `[apply] skipping invalid tracker entry workflow=${String((entry as TrackerEntry).workflow)} ` +
+        `item=${String((entry as TrackerEntry).id)} status=${String((entry as TrackerEntry).status)} ` +
+        `source=${source.path}:${source.line ?? "?"}`,
+    );
+    return;
+  }
+  const trackerDate = source.trackerDate ?? trackerDateFromTimestamp(entry.timestamp);
+  const runId = getRunIdOr(entry);
+  const eventMs = toMs(entry.timestamp);
+  const dataJson = entry.data ? JSON.stringify(entry.data) : null;
+  const typedDataJson = entry.typedData ? JSON.stringify(entry.typedData) : null;
+  const inputJson = entry.input ? JSON.stringify(entry.input) : null;
+  const now = new Date().toISOString();
+  const isWork = entry.status !== "pending";
+  const isTerminal =
+    entry.status === "done" ||
+    entry.status === "failed" ||
+    entry.status === "skipped";
+
+  const s = stmts(db);
+  transaction(db, () => {
+    s.insertRunEvent.run({
+      sourcePath: source.path,
+      sourceGeneration: sourceGeneration(db, source),
+      sourceLine: source.line ?? 0,
+      sourceOffset: source.offset,
+      workflow: entry.workflow,
+      trackerDate,
+      itemId: entry.id,
+      runId,
+      parentRunId: entry.parentRunId ?? null,
+      status: entry.status,
+      step: entry.step ?? null,
+      eventTs: entry.timestamp,
+      eventMs,
+      dataJson,
+      typedDataJson,
+      inputJson,
+      error: entry.error ?? null,
+      appliedAt: now,
+    });
+
+    const existingRun = s.selectRunExists.get({
+      workflow: entry.workflow,
+      trackerDate,
+      itemId: entry.id,
+      runId,
+    });
+
+    s.upsertRun.run({
+      workflow: entry.workflow,
+      trackerDate,
+      itemId: entry.id,
+      runId,
+      parentRunId: entry.parentRunId ?? null,
+      eventTs: entry.timestamp,
+      firstWorkTs: isWork ? entry.timestamp : null,
+      status: entry.status,
+      step: entry.step ?? null,
+      dataJson,
+      typedDataJson,
+      inputJson,
+      error: entry.error ?? null,
+      terminalAt: isTerminal ? entry.timestamp : null,
+      updatedAt: now,
+    });
+
+    s.upsertItem.run({
+      workflow: entry.workflow,
+      trackerDate,
+      itemId: entry.id,
+      runId,
+      status: entry.status,
+      step: entry.step ?? null,
+      eventTs: entry.timestamp,
+      dataJson,
+      error: entry.error ?? null,
+      resolvedPrep: isResolvedPrepData(entry.workflow, entry.status, entry.step, entry.data),
+      emplId: extractEmplId(entry.data),
+      updatedAt: now,
+    });
+
+    if (!existingRun) {
+      s.assignNextRunOrdinalForRun.run({
+        workflow: entry.workflow,
+        date: trackerDate,
+        itemId: entry.id,
+        runId,
+      });
+    }
+  });
+}
+
+export function applyLogEntry(
+  db: Database,
+  entry: LogEntry,
+  source: ProjectionSourceRef,
+): void {
+  const trackerDate = source.trackerDate ?? trackerDateFromTimestamp(entry.ts);
+  const runId = entry.runId;
+  if (!runId) {
+    return;
+  }
+  const tsMs = toMs(entry.ts);
+  const now = new Date().toISOString();
+  const s = stmts(db);
+  transaction(db, () => {
+    s.insertLog.run({
+      sourcePath: source.path,
+      sourceGeneration: sourceGeneration(db, source),
+      sourceLine: source.line ?? 0,
+      sourceOffset: source.offset,
+      workflow: entry.workflow,
+      trackerDate,
+      itemId: entry.itemId,
+      runId,
+      level: entry.level,
+      message: entry.message,
+      ts: entry.ts,
+      tsMs,
+      rawJson: JSON.stringify(entry),
+      appliedAt: now,
+    });
+
+    s.updateRunLogTs.run({
+      workflow: entry.workflow,
+      trackerDate,
+      itemId: entry.itemId,
+      runId,
+      ts: entry.ts,
+      message: entry.message,
+      updatedAt: now,
+    });
+  });
+}
+
+function isScreenshotSessionEvent(
+  event: SessionEvent | ScreenshotSessionEvent,
+): event is ScreenshotSessionEvent {
+  return event.type === "screenshot" && "files" in event;
+}
+
+export function applySessionEvent(
+  db: Database,
+  event: SessionEvent | ScreenshotSessionEvent,
+  source: ProjectionSourceRef,
+): void {
+  if (isScreenshotSessionEvent(event)) {
+    const screenshotEvent = event;
+    const timestamp = screenshotEvent.timestamp;
+    const tsMs = screenshotEvent.ts;
+    const trackerDate = source.trackerDate ?? trackerDateFromTimestamp(timestamp);
+    const inserted = stmts(db).insertSessionEvent.run({
+      sourcePath: source.path,
+      sourceGeneration: sourceGeneration(db, source),
+      sourceLine: source.line ?? 0,
+      sourceOffset: source.offset,
+      trackerDate,
+      eventType: screenshotEvent.type,
+      workflowInstance: null,
+      runId: screenshotEvent.runId,
+      timestamp,
+      tsMs,
+      rawJson: JSON.stringify(screenshotEvent),
+      appliedAt: new Date().toISOString(),
+    });
+    if (inserted.changes > 0) {
+      applyScreenshotFiles(db, screenshotEvent, dirname(dirname(source.path)));
+    }
+    return;
+  }
+
+  const timestamp = event.timestamp;
+  const tsMs = toMs(timestamp);
+  const trackerDate = source.trackerDate ?? trackerDateFromTimestamp(timestamp);
+  stmts(db).insertSessionEvent.run({
+    sourcePath: source.path,
+    sourceGeneration: sourceGeneration(db, source),
+    sourceLine: source.line ?? 0,
+    sourceOffset: source.offset,
+    trackerDate,
+    eventType: event.type,
+    workflowInstance: event.workflowInstance ?? null,
+    runId: event.runId ?? null,
+    timestamp,
+    tsMs,
+    rawJson: JSON.stringify(event),
+    appliedAt: new Date().toISOString(),
+  });
+}
+
+function applyScreenshotFiles(
+  db: Database,
+  event: ScreenshotSessionEvent,
+  trackerDir: string,
+): void {
+  const files = Array.isArray(event.files) ? event.files : [];
+  // Look up workflow + item_id from the runs table so the files row is
+  // queryable by the (workflow, item_id, run_id) index via queryScreenshotsForItem.
+  let workflow: string | undefined;
+  let itemId: string | undefined;
+  let trackerDate: string | undefined;
+  if (event.runId) {
+    const s = stmts(db);
+    const matchCount = s.countRunsForScreenshot.get(event.runId) as { n: number } | undefined;
+    if (matchCount && matchCount.n > 1) {
+      trackerWarn(
+        `applyScreenshotFiles: run_id ${event.runId} matches ${matchCount.n} runs — using latest tracker row`,
+      );
+    }
+    const run = s.selectRunForScreenshot.get(event.runId) as {
+      workflow: string;
+      item_id: string;
+      tracker_date: string;
+    } | undefined;
+    if (run) {
+      workflow = run.workflow;
+      itemId = run.item_id;
+      trackerDate = run.tracker_date;
+    }
+  }
+  let registeredCount = 0;
+  for (const file of files) {
+    if (!file.path || !existsSync(file.path)) continue;
+    registerLocalFile(db, {
+      trackerDir,
+      kind: "screenshot",
+      mimeType: "image/png",
+      path: file.path,
+      originalName: basename(file.path),
+      source: "screenshot-event",
+      runId: event.runId,
+      workflow,
+      itemId,
+      trackerDate,
+      metadata: {
+        system: file.system,
+        label: event.label,
+        step: event.step,
+        kind: event.kind,
+      },
+    });
+    registeredCount++;
+  }
+  if (registeredCount > 0) {
+    stmts(db).updateRunScreenshotCount.run({
+      delta: registeredCount,
+      updatedAt: new Date().toISOString(),
+      runId: event.runId,
+    });
+  }
+}

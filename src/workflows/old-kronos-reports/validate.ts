@@ -1,0 +1,123 @@
+import { createRequire } from "module";
+import { readFile, stat, unlink } from "fs/promises";
+import { log } from "../../utils/log.js";
+
+const require = createRequire(import.meta.url);
+
+// pdf-parse is CJS-required (its ESM entry misbehaves under tsx); the module
+// has no usable types through createRequire, so declare the two calls we use.
+interface PdfParseTextResult {
+  pages?: Array<{ text?: string }>;
+}
+interface PdfParseInstance {
+  load(): Promise<void>;
+  getText(): Promise<PdfParseTextResult>;
+}
+const { PDFParse } = require("pdf-parse") as {
+  PDFParse: new (opts: { url: string }) => PdfParseInstance;
+};
+
+/**
+ * Validate a downloaded PDF report.
+ * Checks that the file exists, has content, and doesn't contain
+ * the "No Data Returned" placeholder.
+ *
+ * @returns true if PDF contains actual report data
+ */
+export async function validatePdf(filepath: string): Promise<boolean> {
+  const fileStat = await stat(filepath);
+  if (fileStat.size === 0) return false;
+
+  const buffer = await readFile(filepath);
+  const text = buffer.toString("utf-8");
+
+  // PyPDF2 equivalent: check for the "No Data Returned" placeholder
+  if (text.includes("No Data Returned")) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Extract the employee name and ID from the first page of a PDF using pdf-parse.
+ * The Time Detail report starts with: "LastName, FirstName ID: 12345678"
+ */
+export async function extractPdfIdentity(
+  filepath: string,
+): Promise<{ pdfName: string; pdfId: string }> {
+  try {
+    const parser = new PDFParse({ url: filepath });
+    await parser.load();
+    const result = await parser.getText();
+    const text: string = result.pages?.[0]?.text ?? "";
+
+    // First line format: "Maley, Gwendolyn ID: 10090037 Time Zone: Pacific"
+    const match = text.match(/^(.+?)\s+ID:\s*(\d+)/);
+    if (match) {
+      return { pdfName: match[1].trim(), pdfId: match[2] };
+    }
+    return { pdfName: "", pdfId: "" };
+  } catch {
+    return { pdfName: "", pdfId: "" };
+  }
+}
+
+/**
+ * Verify that a PDF's internal name/ID matches the filename.
+ * Returns "x" if matched, mismatch description if not, empty if can't read.
+ */
+export async function verifyPdfMatch(
+  filepath: string,
+  expectedName: string,
+  expectedId: string,
+): Promise<string> {
+  const { pdfName, pdfId } = await extractPdfIdentity(filepath);
+
+  if (!pdfName && !pdfId) return "Could not read PDF";
+
+  // An empty-vs-empty comparison is not a real match — it would silently
+  // defeat the cross-worker name guard whenever extraction fails on both
+  // sides. Require both sides non-empty for a positive match.
+  const nameMatch = pdfName !== "" && expectedName !== "" && pdfName === expectedName;
+  const idMatch = pdfId === expectedId;
+
+  if (nameMatch && idMatch) return "x";
+
+  const mismatches: string[] = [];
+  if (!nameMatch) mismatches.push(`name: '${pdfName}' vs '${expectedName}'`);
+  if (!idMatch) mismatches.push(`id: '${pdfId}' vs '${expectedId}'`);
+  return mismatches.join("; ");
+}
+
+/**
+ * Validate a PDF and delete it if it contains no data.
+ * Returns validation result.
+ */
+export async function validateAndClean(
+  filepath: string,
+  employeeId: string,
+): Promise<{ valid: boolean }> {
+  let valid: boolean;
+  try {
+    valid = await validatePdf(filepath);
+  } catch (err) {
+    // A read/stat I/O error is NOT the same as a confirmed-empty/invalid
+    // report — it may be transient (partial write, FS hiccup). Do not
+    // delete a report we couldn't actually inspect; fail loud instead.
+    const reason = err instanceof Error ? err.message : String(err);
+    log.warn(`[${employeeId}] Failed to read PDF for validation (${filepath}): ${reason} — not deleting`);
+    throw err;
+  }
+
+  if (!valid) {
+    log.step(`[${employeeId}] PDF contains no data — deleting`);
+    try {
+      await unlink(filepath);
+    } catch {
+      // File may not exist
+    }
+  }
+
+  return { valid };
+}

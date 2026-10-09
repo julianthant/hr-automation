@@ -1,0 +1,458 @@
+import type { Page } from "playwright";
+import { setTimeout as sleep } from "node:timers/promises";
+import { log } from "../../utils/log.js";
+import { errorMessage } from "../../utils/errors.js";
+import type { I9EmployeeInput, I9Result } from "./types.js";
+import { profile, remoteI9, dashboard } from "./selectors.js";
+import {
+  clickWithKendoRecovery,
+  closeAllKendoWindows,
+  snapshotKendoWindows,
+} from "./navigate.js";
+import { I9_APP_URL } from "../../config.js";
+import { safeClick, safeFill } from "../common/index.js";
+
+export function classifyI9CreateSignals(
+  errorVisible: boolean,
+  successVisible: boolean,
+): "error" | "success" | "pending" {
+  if (errorVisible) return "error";
+  if (successVisible) return "success";
+  return "pending";
+}
+
+/** Strict same-profile route confirmation after the success alert is accepted. */
+export function isI9PostCreateRoute(rawUrl: string, expectedProfileId: string): boolean {
+  if (!URL.canParse(rawUrl)) return false;
+  const url = new URL(rawUrl);
+  if (url.origin !== new URL(I9_APP_URL).origin) return false;
+  if (url.pathname !== `/employee/profile/${encodeURIComponent(expectedProfileId)}`) return false;
+  if (url.hash) return false;
+  if (url.search === "") return true;
+  return (
+    url.searchParams.size === 1 &&
+    url.searchParams.get("isNewProfileCreated") === "true"
+  );
+}
+
+async function waitForI9CreateOutcome(
+  page: Page,
+  timeoutMs = 15_000,
+): Promise<"error" | "success" | "timeout"> {
+  const errorLocator = remoteI9.createErrorMessage(page);
+  const successLocator = remoteI9.createSuccessConfirmation(page);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const signal = classifyI9CreateSignals(
+      await errorLocator.isVisible(),
+      await successLocator.isVisible(),
+    );
+    if (signal !== "pending") return signal;
+    await sleep(250);
+  }
+  return "timeout";
+}
+
+/**
+ * Create a new I-9 employee record in I9 Complete.
+ *
+ * Flow (mapped via playwright-cli on 2026-03-16):
+ *   1. Click "Create New I-9 : New Employee" on dashboard
+ *   2. Fill Employee Profile form (name, SSN, DOB, email, worksite)
+ *   3. Click "Save & Continue" → OK on confirmation dialog
+ *   4. Grab profile ID from URL (/employee/profile/{profileId})
+ *   5. Select "Remote - Section 1 Only" radio
+ *   6. Fill Start Date, verify email pre-filled
+ *   7. Click "Create I-9" → OK on confirmation dialog
+ *
+ * @param page - Playwright page, must be authenticated and on I9 dashboard
+ * @param input - Employee data from CRM extraction
+ * @returns I9Result with profileId on success
+ */
+/**
+ * DRY-RUN counterpart to `createI9Employee`: perform steps 1-2 only — open the
+ * Employee Profile form and fill it exactly as a live run would — then ABANDON
+ * it without ever clicking "Save & Continue".
+ *
+ * Nothing is persisted: the I-9 profile record is created by the Save, so an
+ * unsaved form that is navigated away from leaves NO record behind. There is no
+ * mapped "Cancel" control on this form, so the abandon is done by navigating
+ * back to the dashboard, which is equivalent in effect (and avoids clicking an
+ * unverified selector).
+ *
+ * Returns the abandoned state so the caller can log/stamp it. Throws if the
+ * form could not be opened or filled — a dry run that silently failed to
+ * exercise the form would defeat the whole point of the rehearsal.
+ *
+ * verified 2026-08-18 (fill path shared verbatim with the live create)
+ */
+export async function fillI9EmployeeProfileWithoutSaving(
+  page: Page,
+  input: I9EmployeeInput,
+): Promise<{ filled: true }> {
+  log.step("DRY RUN: opening the I-9 Employee Profile form (will fill, then abandon without saving)...");
+  await closeAllKendoWindows(page);
+  await clickWithKendoRecovery(page, dashboard.createNewI9Link(page), "create new I-9");
+  await page.waitForURL("**/employee/profile", { timeout: 10_000 });
+  log.step("Employee Profile form loaded");
+
+  // Identical fill to the live path — this is what the rehearsal is proving.
+  await fillEmployeeProfile(page, input);
+  log.success("DRY RUN: I-9 Employee Profile form filled (Save & Continue deliberately NOT clicked)");
+
+  return { filled: true };
+}
+
+/**
+ * Leave the filled-but-unsaved I-9 profile form.
+ *
+ * Uses history BACK rather than a hardcoded dashboard path: the profile form is
+ * reached by clicking `dashboard.createNewI9Link`, so the previous history entry
+ * IS the dashboard that link lives on. (A guessed `${I9_APP_URL}/dashboard`
+ * deep-link is NOT a real route — it fails with
+ * `net::ERR_HTTP_RESPONSE_CODE_FAILURE`.) Playwright auto-dismisses any
+ * beforeunload prompt, so this cannot hang on a modal.
+ *
+ * Fails loud if the form is still open afterwards. This matters for daemon
+ * reuse: the next item starts by clicking the create link on the DASHBOARD, so
+ * a browser left parked on a filled profile form would break that item — and a
+ * silent "cleanup didn't work" is exactly the class of failure that then looks
+ * like an unrelated selector bug one run later.
+ *
+ * verified 2026-08-18
+ */
+export async function abandonI9ProfileForm(page: Page): Promise<void> {
+  await page.goBack({ waitUntil: "domcontentloaded", timeout: 20_000 });
+  const url = page.url();
+  if (/\/employee\/profile/.test(url)) {
+    throw new Error(
+      `I-9 profile form was not abandoned — still on ${url} after going back. `
+      + `The browser is parked on a filled, unsaved profile form; the next item's `
+      + `"Create New I-9" click would fail.`,
+    );
+  }
+  log.step(`DRY RUN: I-9 profile form abandoned, back on ${url} (no profile created)`);
+}
+
+export async function createI9Employee(
+  page: Page,
+  input: I9EmployeeInput,
+): Promise<I9Result> {
+  try {
+    // Step 1: Navigate to new employee profile
+    log.step("Clicking 'Create New I-9 : New Employee'...");
+    await closeAllKendoWindows(page);
+    log.debug(`I9 create — pre-click state: ${await snapshotKendoWindows(page)}`);
+    await clickWithKendoRecovery(page, dashboard.createNewI9Link(page), "create new I-9");
+    await page.waitForURL("**/employee/profile", { timeout: 10_000 });
+    log.step("Employee Profile form loaded");
+
+    // Step 2: Fill employee information
+    await fillEmployeeProfile(page, input);
+
+    // Step 3: Save profile and handle post-save dialog
+    log.step("Clicking Save & Continue...");
+    await safeClick(profile.saveContinueButton(page), {
+      timeout: 10_000,
+      label: "i9 save and continue button",
+    });
+
+    await profile
+      .loaderOverlay(page)
+      .waitFor({ state: "hidden", timeout: 15_000 })
+      .catch(() => {});
+    await page.waitForTimeout(1_000);
+
+    // Handle validation errors
+    const errorSummary = profile.errorSummary(page);
+    const hasError = await errorSummary.isVisible({ timeout: 3_000 }).catch(() => false);
+    if (hasError) {
+      const errorText = await errorSummary.locator("..").locator("div").textContent().catch(() => "Unknown validation error"); // allow-inline-selector -- DOM traversal for error readback
+      return { success: false, profileId: null, error: `Validation error: ${errorText}` };
+    }
+
+    // Two possible post-save flows:
+    // Path 1 (new employee): OK confirmation dialog → URL becomes /employee/profile/{id}?saveAndContinue=true
+    // Path 2 (duplicate found): Duplicate Employee Record dialog → select existing row → View/Edit Selected Record
+    const okBtn = profile.okButtonFirst(page);
+    const duplicateDialog = profile.duplicateDialog(page);
+
+    // Poll for a NAMED post-save outcome rather than two one-shot visibility
+    // checks (5 s OK + 2 s duplicate). Live 2026-08-20 (Macod Ruwem Sokamu):
+    // the OK confirmation rendered late, the run reported "No confirmation
+    // dialog found" and FAILED — yet the profile HAD been saved (the retry's SSN
+    // search found it, 2209408). The save is a remote mutation; a late
+    // confirmation must not be read as "nothing happened". Outcomes, in
+    // priority order: validation error → duplicate dialog → OK dialog → the
+    // profile route itself (`/employee/profile/<id>` with a real id — the app
+    // only navigates there after a successful save).
+    let isOk = false;
+    let isDuplicate = false;
+    let savedRouteId: string | null = null;
+    {
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        if (await errorSummary.isVisible().catch(() => false)) {
+          const errorText = await errorSummary.locator("..").locator("div").textContent().catch(() => "Unknown validation error"); // allow-inline-selector -- DOM traversal for error readback
+          return { success: false, profileId: null, error: `Validation error: ${errorText}` };
+        }
+        if (await duplicateDialog.isVisible().catch(() => false)) { isDuplicate = true; break; }
+        if (await okBtn.isVisible().catch(() => false)) { isOk = true; break; }
+        const routeId = extractProfileId(page.url());
+        if (routeId && routeId !== "0") { savedRouteId = routeId; break; }
+        await sleep(500);
+      }
+    }
+
+    let profileId: string | null = null;
+
+    if (isDuplicate) {
+      log.step("Duplicate employee found — selecting existing record...");
+      await safeClick(profile.duplicateFirstRow(page), {
+        timeout: 5_000,
+        label: "i9 duplicate first row",
+      });
+      await safeClick(profile.viewEditSelectedButton(page), {
+        timeout: 5_000,
+        label: "i9 view edit selected button",
+      });
+      await page.waitForURL("**/employee/profile/*", { timeout: 10_000 });
+      profileId = extractProfileId(page.url());
+      if (!profileId) {
+        return { success: false, profileId: null, error: "Could not extract profile ID after duplicate selection" };
+      }
+      // Navigate with saveAndContinue param to reveal the Create I-9 radio section
+      await page.goto(`${I9_APP_URL}/employee/profile/${profileId}?saveAndContinue=true`, { timeout: 10_000 });
+      await page.waitForTimeout(1_000);
+      log.step(`Using existing profile: ${profileId}`);
+    } else if (isOk) {
+      await safeClick(okBtn, { timeout: 5_000, label: "i9 profile ok button" });
+      await page.waitForURL("**/employee/profile/*", { timeout: 15_000 }).catch(() => {});
+      await page.waitForTimeout(1_000);
+      profileId = extractProfileId(page.url());
+      if (!profileId) {
+        return { success: false, profileId: null, error: "Could not extract profile ID from URL" };
+      }
+      log.step(`Profile saved: ${profileId}`);
+    } else if (savedRouteId) {
+      // The app navigated to the saved profile's own route without a visible
+      // OK dialog (or we missed it). The route id is positive evidence of the
+      // save; continue exactly as the OK branch would have.
+      log.warn(
+        `I-9 profile route resolved (${page.url()}) without a confirmation dialog — treating the `
+        + `saved route as the confirmation (profile ${savedRouteId}).`,
+      );
+      await sleep(1_000);
+      profileId = savedRouteId;
+      log.step(`Profile saved: ${profileId}`);
+    } else {
+      return {
+        success: false,
+        profileId: null,
+        error:
+          "No confirmation dialog, duplicate dialog, validation error, or saved-profile route appeared "
+          + `within 15 s after Save & Continue (still at ${page.url()}). The save outcome is unknown — `
+          + "a retry is safe because the next run searches by SSN/name before creating.",
+      };
+    }
+
+    // Step 5: Select Remote - Section 1 Only
+    log.step("Selecting 'Remote - Section 1 Only'...");
+    await safeClick(remoteI9.remoteSection1OnlyRadio(page), {
+      timeout: 5_000,
+      label: "i9 remote section 1 only radio",
+    });
+
+    // Step 6: Fill start date (email is pre-filled from profile)
+    log.step("Filling start date...");
+    await safeFill(remoteI9.startDateInput(page), input.startDate, {
+      timeout: 5_000,
+      label: "i9 start date",
+    });
+
+    // Step 7: Create I-9
+    log.step("Clicking Create I-9...");
+    await safeClick(remoteI9.createI9Button(page), {
+      timeout: 10_000,
+      label: "i9 create i9 button",
+    });
+
+    // Observe the definitive callback signal BEFORE dismissing its alert. The
+    // live app reports remote-create failures through `.ErrorMessage` and
+    // success through one of two exact alert strings. Error wins a tie.
+    const createOutcome = await waitForI9CreateOutcome(page);
+    if (createOutcome === "error") {
+      const detail = (await remoteI9.createErrorMessage(page).innerText()).trim();
+      return {
+        success: false,
+        profileId,
+        error:
+          `I-9 creation failed for profile ${profileId}: ` +
+          (detail || "the remote-create error surface was visible but blank"),
+      };
+    }
+    if (createOutcome === "timeout") {
+      return {
+        success: false,
+        profileId,
+        error:
+          `I-9 creation outcome is unknown for profile ${profileId} — neither the exact success ` +
+          `alert nor the remote-create error surface appeared. Refusing to retry or report success.`,
+      };
+    }
+
+    await safeClick(remoteI9.createI9OkButton(page), {
+      timeout: 10_000,
+      label: "i9 remote create success ok button",
+    });
+
+    try {
+      await page.waitForURL(
+        (url) => isI9PostCreateRoute(url.href, profileId),
+        { timeout: 15_000 },
+      );
+    } catch {
+      return {
+        success: false,
+        profileId,
+        error:
+          `I-9 success alert appeared for profile ${profileId}, but the app did not return to ` +
+          `that profile's post-create route. Outcome requires operator review; refusing to retry.`,
+      };
+    }
+
+    log.success(`I-9 created for profile ${profileId}`);
+
+    return { success: true, profileId };
+  } catch (error) {
+    const msg = errorMessage(error);
+    log.error(`I-9 creation failed: ${msg}`);
+    return { success: false, profileId: null, error: msg };
+  }
+}
+
+/**
+ * Fill the Employee Profile form fields.
+ */
+async function fillEmployeeProfile(page: Page, input: I9EmployeeInput): Promise<void> {
+  await safeFill(profile.firstName(page), input.firstName, {
+    timeout: 5_000,
+    label: "i9 first name",
+  });
+  log.step(`First Name: filled`);
+
+  if (input.middleName) {
+    await safeFill(profile.middleName(page), input.middleName, {
+      timeout: 5_000,
+      label: "i9 middle name",
+    });
+    log.step(`Middle Name: filled`);
+  }
+
+  await safeFill(profile.lastName(page), input.lastName, {
+    timeout: 5_000,
+    label: "i9 last name",
+  });
+  log.step(`Last Name: filled`);
+
+  // SSN: 9 digits, no dashes. A person with no SSN yet (CRM's all-9s
+  // placeholder, or an ITIN in the 900-999 range) gets the field LEFT BLANK —
+  // I-9 Complete rejects such a value outright ("The SSN number is not valid or
+  // is not entered correctly"), and a blank is the honest representation.
+  const ssnDigits = input.ssn ? input.ssn.replace(/-/g, "") : "";
+  if (!ssnDigits) {
+    log.step("SSN: none on file — leaving the I-9 SSN field blank");
+  } else {
+  await safeFill(profile.ssn(page), ssnDigits, {
+    timeout: 5_000,
+    label: "i9 ssn",
+  });
+  log.step(`SSN: filled`);
+  }
+
+  await safeFill(profile.dob(page), input.dob, {
+    timeout: 5_000,
+    label: "i9 dob",
+  });
+  log.step(`DOB: filled`);
+
+  // Hide the jQuery datepicker that opens after DOB fill — Escape doesn't dismiss it,
+  // so we force-hide via JS. Without this, the datepicker overlay intercepts Worksite clicks.
+  await page.evaluate(() => {
+    const dp = document.getElementById("ui-datepicker-div");
+    if (dp) dp.style.display = "none";
+  });
+
+  await safeFill(profile.email(page), input.email, {
+    timeout: 5_000,
+    label: "i9 email",
+  });
+  log.step(`Email: filled`);
+
+  // Select worksite by department number (format: "6-{deptNum} DESCRIPTION")
+  await selectWorksite(page, input.departmentNumber);
+}
+
+/**
+ * Select worksite from dropdown by matching department number.
+ * Worksite options are formatted as "6-{deptNum} DESCRIPTION".
+ */
+export async function selectWorksite(page: Page, departmentNumber: string): Promise<void> {
+  if (!/^\d{6}$/.test(departmentNumber)) throw new Error(`Invalid I-9 department number: ${departmentNumber}`);
+  const optionPattern = new RegExp(`^6-${departmentNumber}(?:\\s|$)`);
+
+  // The Worksite list is a Kendo dropdown that ANIMATES open. Clicking an option
+  // while that animation is in flight fails with "element is not stable", and if
+  // the list has already collapsed again it fails with "element is not visible"
+  // (live 2026-08-18: the option resolved to the right <li> and the click still
+  // timed out at 5s). Re-opening the dropdown and clicking again clears it.
+  //
+  // This is a transient RETRY of the same operation — it re-runs the open+click,
+  // it never substitutes a different worksite. A genuinely absent department
+  // still throws on the last attempt.
+  const attempts = 3;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const worksiteDropdown = profile.worksiteListbox(page);
+    await safeClick(worksiteDropdown, { timeout: 5_000, label: "i9 worksite dropdown" });
+
+    const option = profile.worksiteOption(page, optionPattern);
+    const target = option.first();
+    try {
+      await target.waitFor({ state: "visible", timeout: 5_000 });
+      const count = await option.count();
+      if (count !== 1) throw new Error(`Expected one worksite for department ${departmentNumber}, found ${count}`);
+      await target.scrollIntoViewIfNeeded({ timeout: 3_000 });
+      await target.click({ timeout: 8_000 });
+      const selected = (await worksiteDropdown.innerText()).trim();
+      if (!optionPattern.test(selected)) {
+        throw new Error(`Worksite readback does not match department ${departmentNumber}`);
+      }
+      log.step(`Worksite selected and verified: dept ${departmentNumber}`);
+      return;
+    } catch (err) {
+      if (attempt === attempts) {
+        throw new Error(
+          `Worksite option "6-${departmentNumber}" could not be uniquely selected and verified after `
+          + `${attempts} attempts: ${errorMessage(err)}`,
+          { cause: err },
+        );
+      }
+      log.warn(
+        `Worksite option click failed (attempt ${attempt}/${attempts}) — reopening the dropdown and retrying: `
+        + errorMessage(err),
+      );
+      // Collapse the half-open list so the next attempt starts from a clean state.
+      await page.keyboard.press("Escape").catch(() => {});
+      await sleep(750);
+    }
+  }
+}
+
+/**
+ * Extract profile ID from the URL path.
+ * URL format: /employee/profile/{profileId}?saveAndContinue=true
+ */
+function extractProfileId(url: string): string | null {
+  const match = url.match(/\/employee\/profile\/(\d+)/);
+  return match ? match[1] : null;
+}

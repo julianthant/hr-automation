@@ -1,0 +1,255 @@
+import { useCallback } from "react";
+import type {
+  WorkflowActionDescriptor,
+  WorkflowActionKind,
+  WorkflowActionScope,
+  WorkflowActionSource,
+} from "../../../domain/workflow-runtime/types.js";
+import { compact } from "@/lib/utils";
+import { actionScopeBody, findEnabledAction } from "@/lib/workflow-action-utils";
+
+export type WorkflowActionTransport =
+  | "retry"
+  | "delete-entry"
+  | "cancel-queued";
+
+export type BulkWorkflowActionTransport =
+  | "retry-bulk"
+  | "delete-bulk";
+
+export interface WorkflowActionFallbackTarget {
+  workflowId: string;
+  id: string;
+  runId?: string;
+  date?: string;
+  status?: string;
+}
+
+export interface BuildWorkflowActionRequestArgs {
+  transport: WorkflowActionTransport;
+  kind: WorkflowActionKind;
+  action?: WorkflowActionDescriptor;
+  actions?: WorkflowActionDescriptor[];
+  fallbackTarget: WorkflowActionFallbackTarget;
+  parentRunId?: string;
+  ocrSessionId?: string;
+  parentWorkflow?: string;
+  parentItemId?: string;
+  formType?: string;
+  reason?: string;
+  /**
+   * Current row status — forwarded to `/api/cancel-queued` so the backend
+   * routes a running-row cancel through `buildCancelRunningHandler` instead
+   * of the queued path (which 409s when a daemon already claimed the row).
+   * Contract 5: one cancel route, status discriminates the handler.
+   */
+  status?: "pending" | "running";
+}
+
+export interface WorkflowActionBulkItem {
+  workflowId: string;
+  id: string;
+  runId?: string;
+  date?: string;
+}
+
+export interface BuildBulkWorkflowActionRequestArgs {
+  transport: BulkWorkflowActionTransport;
+  kind: Extract<WorkflowActionKind, "retry" | "delete">;
+  workflow: string;
+  items: WorkflowActionBulkItem[];
+  action?: WorkflowActionDescriptor;
+  actions?: WorkflowActionDescriptor[];
+  date?: string;
+  parentRunId?: string;
+  source?: WorkflowActionSource;
+  scope?: WorkflowActionScope;
+}
+
+export interface WorkflowActionHttpRequest {
+  path: string;
+  body: Record<string, unknown>;
+}
+
+export interface WorkflowActionDispatchResult<TBody = Record<string, unknown>> {
+  ok: boolean;
+  status: number;
+  body: TBody;
+  error?: string;
+  request: WorkflowActionHttpRequest;
+}
+
+function resolveAction(
+  kind: WorkflowActionKind,
+  action?: WorkflowActionDescriptor,
+  actions?: WorkflowActionDescriptor[],
+): WorkflowActionDescriptor | undefined {
+  return action ?? findEnabledAction(actions, kind);
+}
+
+function resolveTarget(
+  action: WorkflowActionDescriptor | undefined,
+  fallbackTarget: WorkflowActionFallbackTarget,
+): WorkflowActionFallbackTarget {
+  return action?.targets[0] ?? fallbackTarget;
+}
+
+function readError(body: unknown, status: number): string {
+  if (body && typeof body === "object" && "error" in body) {
+    const error = (body as { error?: unknown }).error;
+    if (typeof error === "string" && error.trim()) return error;
+  }
+  return `HTTP ${status}`;
+}
+
+export function buildWorkflowActionRequest({
+  transport,
+  kind,
+  action,
+  actions,
+  fallbackTarget,
+  parentRunId,
+  ocrSessionId,
+  parentWorkflow,
+  parentItemId,
+  formType,
+  reason,
+  status,
+}: BuildWorkflowActionRequestArgs): WorkflowActionHttpRequest {
+  const resolvedAction = resolveAction(kind, action, actions);
+  const target = resolveTarget(resolvedAction, fallbackTarget);
+  const workflow = target.workflowId || fallbackTarget.workflowId;
+  const id = target.id || fallbackTarget.id;
+  const runId = target.runId ?? fallbackTarget.runId;
+  const date = target.date ?? fallbackTarget.date;
+
+  if (transport === "retry") {
+    return {
+      path: "/api/retry",
+      body: compact({ workflow, id, runId, date, parentRunId }),
+    };
+  }
+
+  if (transport === "delete-entry") {
+    return {
+      path: "/api/delete-entry",
+      body: compact({ workflow, id, runId, date }),
+    };
+  }
+
+  // Contract 5: there is one cancel mechanism now. The legacy `force-stop`
+  // transport routed to `/api/task/force-stop` which set the same cancel
+  // flag as `/api/cancel-queued` plus navigated the page to about:blank;
+  // the AbortSignal-based unified cancel makes both fast, so the transport
+  // collapses into one route.
+  return {
+    path: "/api/cancel-queued",
+    body: compact({
+      workflow,
+      id,
+      runId,
+      status,
+      ...actionScopeBody(resolvedAction),
+      ocrSessionId,
+      parentWorkflow,
+      parentRunId,
+      parentItemId,
+      formType,
+      reason,
+    }),
+  };
+}
+
+export function buildBulkWorkflowActionRequest({
+  transport,
+  kind,
+  workflow,
+  items,
+  action,
+  actions,
+  date,
+  parentRunId,
+  source,
+  scope,
+}: BuildBulkWorkflowActionRequestArgs): WorkflowActionHttpRequest {
+  const resolvedAction = resolveAction(kind, action, actions);
+  const resolvedSource = source ?? resolvedAction?.source;
+  const resolvedScope = scope ?? resolvedAction?.scope;
+  const normalizedItems = items.map((item) =>
+    compact({
+      workflowId: item.workflowId,
+      id: item.id,
+      runId: item.runId,
+      date: item.date,
+    }),
+  );
+
+  return {
+    path: transport === "retry-bulk" ? "/api/retry-bulk" : "/api/delete-bulk",
+    body: compact({
+      workflow,
+      items: normalizedItems,
+      date,
+      ...(transport === "retry-bulk" ? { parentRunId } : {}),
+      source: resolvedSource,
+      scope: resolvedScope,
+    }),
+  };
+}
+
+export async function postWorkflowActionRequest<TBody = Record<string, unknown>>(
+  request: WorkflowActionHttpRequest,
+): Promise<WorkflowActionDispatchResult<TBody>> {
+  try {
+    const res = await fetch(request.path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request.body),
+    });
+    // Fail loud: every action route responds with an explicit `ok` flag, so a
+    // malformed/unparseable 2xx body must NOT read as success — require
+    // `ok === true` and treat a parse failure as a hard error (never fall
+    // back to `res.ok`), so bulk retry/delete/cancel never acts on every
+    // targeted row when the real per-item outcome is unknown.
+    let body: TBody | undefined;
+    try {
+      body = (await res.json()) as TBody;
+    } catch {
+      body = undefined;
+    }
+    const bodyOk = Boolean(body && typeof body === "object" && (body as { ok?: unknown }).ok === true);
+    const ok = res.ok && bodyOk;
+    return {
+      ok,
+      status: res.status,
+      body: (body ?? {}) as TBody,
+      ...(ok ? {} : { error: body === undefined ? "Malformed server response" : readError(body, res.status) }),
+      request,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      body: {} as TBody,
+      error: err instanceof Error ? err.message : String(err),
+      request,
+    };
+  }
+}
+
+export function useWorkflowActionDispatcher() {
+  const dispatchWorkflowAction = useCallback(
+    <TBody = Record<string, unknown>>(args: BuildWorkflowActionRequestArgs) => {
+      return postWorkflowActionRequest<TBody>(buildWorkflowActionRequest(args));
+    },
+    [],
+  );
+  const dispatchBulkWorkflowAction = useCallback(
+    <TBody = Record<string, unknown>>(args: BuildBulkWorkflowActionRequestArgs) => {
+      return postWorkflowActionRequest<TBody>(buildBulkWorkflowActionRequest(args));
+    },
+    [],
+  );
+
+  return { dispatchWorkflowAction, dispatchBulkWorkflowAction };
+}
