@@ -32,10 +32,10 @@ When an onboarding hire or rehire transaction is submitted in UCPath, it receive
 4. **Read the Detail & Routing Strip**:
    - At the bottom of the Transaction Details page, inspect the routing strip:
      ```text
-     Transaction: T002235451, ID: 10002345, Effdt: 2026-09-28, Unit: SDCMP
+     Transaction: T002235451, ID: id:bf5c81799e6f558c, Effdt: 2026-09-28, Unit: SDCMP
      ```
    - Extract the `ID`:
-     * **`Found`**: Numeric ID (e.g., `10002345`, 8 digits). The candidate has been assigned an EID.
+     * **`Found`**: Numeric ID (e.g., `id:bf5c81799e6f558c`, 8 digits). The candidate has been assigned an EID.
      * **`Pending`**: ID says `NEW`, `PENDING`, or is blank/empty. The transaction is still in flight (e.g. pending location or central review). This is an expected intermediate state, not an error.
      * **`Not found`**: No matching transaction exists in UCPath (e.g. typo, or transaction was never submitted).
 5. **Verify Name Match**:

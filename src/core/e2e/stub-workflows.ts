@@ -138,7 +138,7 @@ const emergencyContactScript: StepDataFn = (input) => {
 
 /**
  * Deterministic fake EID for a name-keyed stub lookup. A CONSTANT default
- * (the old "10000910") collided across records — every name-keyed lookup in a
+ * (the old "id:dfa73f9264a72c07") collided across records — every name-keyed lookup in a
  * batch "resolved" to the same person, masking identity bugs and clobbering
  * distinct paper EIDs through the verify patch (E2E-014). Hash the name into
  * a stable 1xxxxxxx EID instead so each identity stays distinct across runs.

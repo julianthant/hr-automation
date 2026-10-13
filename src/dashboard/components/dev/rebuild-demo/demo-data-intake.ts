@@ -25,6 +25,7 @@
  *    confirmation before Run unlocks.
  */
 
+import { privateValue } from "../../../../private-data.js";
 import { at, DEMO_WORKFLOWS, plural, type DemoWorkflowId } from "./demo-wire";
 
 // ---------------------------------------------------------------------------
@@ -176,18 +177,18 @@ export const SOURCE_SHEETS: SourceSheet[] = [
       ["UCSD Work-Study Award Export", "", "", "", "", ""],
       ["Generated 2026-07-24 08:12 · RRSS", "", "", "", "", ""],
       ["Employee ID#", "Legal Name", "Award $", "Effective", "Dept", "Campus Email"],
-      ["10084412", "Delgado, Maria", "2400.00", "07/01/2026", "HDH01", "person@example.edu"],
-      ["10091755", "Iglesias, Rosa", "1800.00", "07/01/2026", "HDH01", "person@example.edu"],
-      ["10-4567", "Okafor, Daniel", "2200.00", "07/01/2026", "LIB22", "person@example.edu"],
-      ["10102846", "Raman, Priya", "n/a", "07/01/2026", "LIB22", "person@example.edu"],
-      ["10066519", "Nguyen, Tuan", "2400.00", "2026-13-45", "HDH01", "person@example.edu"],
-      ["10077300", "Park, Sujin", "1950.00", "07/01/2026", "HDH01", "person@example.edu"],
-      ["10084412", "Delgado, Maria", "2400.00", "07/15/2026", "HDH01", "person@example.edu"],
-      ["10055501", "Rivera, Tomás", "0.00", "06/01/2026", "LIB22", "person@example.edu"],
-      ["10068220", "Torres, Rita", "2100.00", "07/01/2026", "ATH09", "person@example.edu"],
-      ["10071144", "Boateng, Kwame", "1750.00", "07/01/2026", "ATH09", "person@example.edu"],
-      ["10093382", "Silva, Ana", "2250.00", "07/01/2026", "LIB22", "person@example.edu"],
-      ["10088017", "Person 2082", "1600.00", "07/01/2026", "HDH01", "person@example.edu"],
+      ["10084412", "Delgado, Maria", "2400.00", "07/01/2026", "HDH01", privateValue("ucsd:b54bd62b932c6bbc")],
+      ["10091755", "Iglesias, Rosa", "1800.00", "07/01/2026", "HDH01", privateValue("ucsd:fd0748f20091f770")],
+      ["10-4567", "Okafor, Daniel", "2200.00", "07/01/2026", "LIB22", privateValue("ucsd:9815114e898e3ad5")],
+      ["10102846", "Raman, Priya", "n/a", "07/01/2026", "LIB22", privateValue("ucsd:2725cffe4b0d03da")],
+      ["10066519", "Nguyen, Tuan", "2400.00", "2026-13-45", "HDH01", privateValue("ucsd:122bda412654614b")],
+      ["10077300", "Park, Sujin", "1950.00", "07/01/2026", "HDH01", privateValue("ucsd:68edb8a41a9291f4")],
+      ["10084412", "Delgado, Maria", "2400.00", "07/15/2026", "HDH01", privateValue("ucsd:b54bd62b932c6bbc")],
+      ["10055501", "Rivera, Tomás", "0.00", "06/01/2026", "LIB22", privateValue("ucsd:595d88d2a3f86590")],
+      ["10068220", "Torres, Rita", "2100.00", "07/01/2026", "ATH09", privateValue("ucsd:80b22b67b62f2604")],
+      ["10071144", "Boateng, Kwame", "1750.00", "07/01/2026", "ATH09", privateValue("ucsd:ed9252e0a466f4bf")],
+      ["10093382", "Silva, Ana", "2250.00", "07/01/2026", "LIB22", privateValue("ucsd:6f933e8315911f1a")],
+      ["10088017", privateValue("name:3c4f05e80d694ced"), "1600.00", "07/01/2026", "HDH01", privateValue("ucsd:27004eb33138c330")],
     ],
     headerCandidates: [
       { row: 1, confidence: 0.08, why: "1 of 6 cells filled — reads like a report title" },
@@ -208,14 +209,14 @@ export const SOURCE_SHEETS: SourceSheet[] = [
     grid: [
       ["Work-Study — week 29", "", "", "", "", "", ""],
       ["EmpID", "Name", "Name", "Award $", "Dept Code", "Start Date", "Campus Email"],
-      ["10084412", "Delgado, Maria", "M. Delgado", "2400.00", "HDH01", "07/01/2026", "person@example.edu"],
-      ["10091755", "Iglesias, Rosa", "R. Iglesias", "1800.00", "HDH01", "07/01/2026", "person@example.edu"],
-      ["10077300", "Park, Sujin", "S. Park", "1950.00", "HDH01", "07/01/2026", "person@example.edu"],
-      ["10068220", "Torres, Rita", "R. Torres", "2100.00", "ATH09", "07/01/2026", "person@example.edu"],
-      ["10071144", "Boateng, Kwame", "K. Boateng", "1750.00", "ATH09", "07/01/2026", "person@example.edu"],
-      ["10093382", "Silva, Ana", "A. Silva", "2250.00", "LIB22", "07/01/2026", "person@example.edu"],
-      ["10088017", "Person 2082", "W. Chen", "1600.00", "HDH01", "07/01/2026", "person@example.edu"],
-      ["10102846", "Raman, Priya", "P. Raman", "2050.00", "LIB22", "07/01/2026", "person@example.edu"],
+      ["10084412", "Delgado, Maria", "M. Delgado", "2400.00", "HDH01", "07/01/2026", privateValue("ucsd:b54bd62b932c6bbc")],
+      ["10091755", "Iglesias, Rosa", "R. Iglesias", "1800.00", "HDH01", "07/01/2026", privateValue("ucsd:fd0748f20091f770")],
+      ["10077300", "Park, Sujin", "S. Park", "1950.00", "HDH01", "07/01/2026", privateValue("ucsd:68edb8a41a9291f4")],
+      ["10068220", "Torres, Rita", "R. Torres", "2100.00", "ATH09", "07/01/2026", privateValue("ucsd:80b22b67b62f2604")],
+      ["10071144", "Boateng, Kwame", "K. Boateng", "1750.00", "ATH09", "07/01/2026", privateValue("ucsd:ed9252e0a466f4bf")],
+      ["10093382", "Silva, Ana", "A. Silva", "2250.00", "LIB22", "07/01/2026", privateValue("ucsd:6f933e8315911f1a")],
+      ["10088017", privateValue("name:3c4f05e80d694ced"), "W. Chen", "1600.00", "HDH01", "07/01/2026", privateValue("ucsd:27004eb33138c330")],
+      ["10102846", "Raman, Priya", "P. Raman", "2050.00", "LIB22", "07/01/2026", privateValue("ucsd:2725cffe4b0d03da")],
     ],
     headerCandidates: [
       { row: 1, confidence: 0.06, why: "1 of 7 cells filled — reads like a report title" },
@@ -846,7 +847,7 @@ export const PRIOR_MANIFESTS: PriorManifestFacts[] = [
       { itemId: "ws:10068220", inputHash: "", label: "Rita Torres" },
       { itemId: "ws:10071144", inputHash: "", label: "Kwame Boateng" },
       { itemId: "ws:10093382", inputHash: "", label: "Ana Silva" },
-      { itemId: "ws:10088017", inputHash: "", label: "Person 2082" },
+      { itemId: "ws:10088017", inputHash: "", label: privateValue("name:743f5cf0dccef4a7") },
     ],
     excludedCount: 1,
   },

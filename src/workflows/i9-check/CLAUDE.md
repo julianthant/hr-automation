@@ -32,7 +32,7 @@ I-9)"), pairs each person's two — usually NON-adjacent — pages by name
 `src/services/matching/employee-action-history.ts`) **BY NAME** for PPS EID /
 roster Empl ID / separation date. Names are normalized to the title-cased
 "Last, First M" display convention (`displayPersonName` inside
-`buildI9DisplayName`) — a hand-printed "Person 2080" renders "Person 2080"
+`buildI9DisplayName`) — a hand-printed "name:18f37248e6218d8c" renders "name:153632e983eae72a"
 on the review pane, member rows, and the spreadsheet. **No UCPath search runs
 during OCR.** The spec sets `completeDelegatedRun: true`, so the delegated run
 completes `done` right after enrichment (no approve gate). A missing Action

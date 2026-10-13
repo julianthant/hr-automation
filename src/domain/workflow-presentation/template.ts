@@ -33,7 +33,7 @@ export function extractTokens(tpl: string): string[] {
  * Render a `{token}` template against a flat string record. Missing/empty token
  * values render empty; we then collapse the whitespace and trim dangling
  * separators (`()`, ` - `, ` · `) so "{name} ({emplId})" with no EID reads
- * "Person 905", not "Person 905 ()". Pure; never throws on unknown tokens.
+ * "name:01332c876518a793", not "name:01332c876518a793 ()". Pure; never throws on unknown tokens.
  */
 export function renderTemplate(tpl: string, vars: Record<string, string>): string {
   const raw = tpl.replace(TOKEN_RE, (_full, tok: string) => (vars[tok] ?? "").trim());

@@ -24,7 +24,7 @@
 
 The 6 not imported are all deliberate: b1 p11 (DMV form), b1 p12 (blank),
 b1 p37 / b2 p19 / b3 p11 (older duplicates — newest-only rule), b4 p11
-(Person 1416, offer rescinded — operator said drop).
+(name:7364f7bb6a7e927e, offer rescinded — operator said drop).
 
 Note: `Xerox Scan_07282026135349.pdf` has been REMOVED from the project root.
 That is fine — imports resolve from the content-addressed blob store
@@ -76,10 +76,10 @@ that OnBase would have accepted while reporting success:
 
 | form | wrong EID | actually belongs to | real EID |
 |---|---|---|---|
-| Person 255 | 10001394 | Person 2019 | 10001402 |
-| Person 1346 | 10002152 | Sarah Sanchez | 10002149 |
-| Person 1096 | 10002096 | Kaeyaa Sane | 10002120 |
-| Person 1685 | 10001543 | Kurumi Nakamura | 10001544 |
+| name:3e4e9d649279a2f2 | id:6aaec654e2ba7b65 | name:8155d2fb7cc75301 | id:fe0088383f170a9c |
+| name:b5d42184a0da84c0 | id:afabfb1309893b4f | Sarah Sanchez | id:fe53f915a8cdc155 |
+| name:4528fcc3dc0d5a5e | id:7ef3eec987eb80e9 | Kaeyaa Sane | id:440bbba29e3269b8 |
+| name:e34c0906eb959dd8 | id:5a951ee3810d1b8f | Kurumi Nakamura | id:acd4cf0921b9ebb3 |
 
 Without the EID-mode check these four file silently onto the wrong person.
 
@@ -98,18 +98,18 @@ Without the EID-mode check these four file silently onto the wrong person.
    it.** Same hand ⇒ same letterform ambiguity. I misread `r` as `v` in BOTH
    Schaerer's name and his email, then called the email corroboration. It was
    circular. Independent = typed by someone else (CRM, UCPath, a roster).
-3. **An EID-mode "Not found" can be a FALSE NEGATIVE.** Person 157'
-   10001127 returned "Not found" by EID but a name search returned that exact
+3. **An EID-mode "Not found" can be a FALSE NEGATIVE.** name:7c8af28209d2b03c'
+   id:84f0d11d6b6a5f1a returned "Not found" by EID but a name search returned that exact
    EID (`Reyes-Gomez, Andrew`). Re-run every negative once before trusting it.
 4. **Compound surnames defeat the naive `First Last` → `Last, First` flip.**
-   `person@example.edu` revealed the surname was *Sanchez Hernandez*.
+   `ucsd:4762fabc08dc4768` revealed the surname was *Sanchez Hernandez*.
    Derive the search key from the email local-part when the flip fails.
-5. **CRM overrides date/department heuristics.** For Person 140 I argued for
-   10001339 from start-date proximity; CRM said **10001371**. CRM won.
+5. **CRM overrides date/department heuristics.** For name:c06d03adc43f0638 I argued for
+   id:2a8172d5e5154886 from start-date proximity; CRM said **id:b28868f07c8bfabb**. CRM won.
 6. **Never guess a digit.** A 7-digit EID or one with a leading `0` is a dropped
    digit — look it up by name, don't reconstruct it.
 7. **Completion check = per-page diff, not prose.** I lost track of one page
-   (Person 599) by reconciling counts in text. Always run the §8
+   (name:fab6caf73496f460) by reconciling counts in text. Always run the §8
    "missing pages" query as the gate.
 
 ---
@@ -118,40 +118,40 @@ Without the EID-mode check these four file silently onto the wrong person.
 
 ```
 page | name | eid | pid | email | notes
-1 | Person 1661 | - | A17122390 | pivazquez | EID BLANK
-2 | Person 2118 | 10001913 | A18406708 | xcvazquezgue?rero |
-3 | Person 634 | - | A17926543 | e3vega | EID BLANK
-4 | Person 726 | 10002014 | A19131143 | - |
-5 | Person 2017 | 10002127 | A17985550 | v4vega | EID digits 6-8 OVERWRITTEN, low conf
-6 | Laisha P. Velazquez | 10001757 | A18529364 | l3velazquez |
-7 | Person 792 | - | A17479221 | hvermillion | EID BLANK
-8 | Person 1457 | 10001761 | A18524768 | mavetus |
-9 | Person 2027 | 10002163 | A18754059 | vvidrialeszavate | name/email surname DISAGREE
+1 | name:b1dd21c651192ea5 | - | A17122390 | pivazquez | EID BLANK
+2 | name:cd1e353b3cd8e87d | id:27ba53d7629f76fb | A18406708 | xcvazquezgue?rero |
+3 | name:6cbd3d575b4aca6c | - | A17926543 | e3vega | EID BLANK
+4 | name:ea41fe8f6eba53cc | id:338a1c044f005ead | A19131143 | - |
+5 | name:fe8674c728141779 | id:beb67e01413c6f13 | A17985550 | v4vega | EID digits 6-8 OVERWRITTEN, low conf
+6 | Laisha P. Velazquez | id:b0e32eb5aaa92bd3 | A18529364 | l3velazquez |
+7 | name:e5f6ae4c25f781b3 | - | A17479221 | hvermillion | EID BLANK
+8 | name:74fa09f04daf6850 | id:2d5a60e35bb0790a | A18524768 | mavetus |
+9 | name:d7cc91ed07948eb3 | id:1fd81b30f9aa2920 | A18754059 | vvidrialeszavate | name/email surname DISAGREE
 10 | Kaylin M. Villa | - | A17408816 | k2villa | EID BLANK
-11 | Person 511 | - | A17840695 | dvillagrana | EID BLANK
-12 | Person 2015 | - | A16511261 | vvillalo | EID BLANK
-13 | Person 160 | 10001692 | A18342768 | avillalva |
-14 | Person 1090 | 10001741 | A17413340 | juvillani |
-15 | Person 928 | 10002129 | A19184891 | jav013 |
-16 | Person 1580 | 10001532 | A17897174 | N1Valdez |
-17 | Person 96 | - | AV17762948 | A9valencia | EID BLANK; PID MALFORMED
-18 | Edgar A. Valencia | 10001530 | A17475595 | - |
+11 | name:5444a6d8fa974a24 | - | A17840695 | dvillagrana | EID BLANK
+12 | name:abdb43d62b69df96 | - | A16511261 | vvillalo | EID BLANK
+13 | name:6c506dc77e6c535f | id:3043ae315a287ec9 | A18342768 | avillalva |
+14 | name:2dccefd48e63ab77 | id:252cf3471b1c1497 | A17413340 | juvillani |
+15 | name:93e19c01739ac8bb | id:b86bf70f720d1900 | A19184891 | jav013 |
+16 | name:22bb7947ebf9c4c8 | id:4af41fa8838969f1 | A17897174 | N1Valdez |
+17 | name:c36ff5444148b3c9 | - | AV17762948 | A9valencia | EID BLANK; PID MALFORMED
+18 | Edgar A. Valencia | id:ed4977f432bb340d | A17475595 | - |
 19 | Edgar A. Valencia | - | - | - | *** DMV Employer Pull Notice, NOT an EC form ***
-20 | Person 661 | - | A17761038 | esvalenzuela | EID BLANK
-21 | Juan Valenzuela Burgos | 10002054 | A18852994 | - | name LOW CONFIDENCE (cursive)
-22 | Shaila Tamar Valenzuela Rojo | 10001667 | A78362378 | svalenzuelarojo |
-23 | Person 1034 | 10002116 | A18332504 | JValerio |
-24 | Sophia Valiente | 10001938 | A17737513 | svaliente | EID 7th digit OVERWRITTEN
-25 | Person 677 | 1840309 | A18276569 | edvang | *** EID MALFORMED: 7 digits, no leading 10 ***
-26 | Person 26 | 10002027 | A18735786 | advannarath |
-27 | Person 1568 | 10002042 | A18933825 | n3vargas |
-28 | Person 1795 | 10002030 | A18372151 | s9vargas |
-29 | Person 1620 | 10001503 | A69027876 | nvasant |
-30 | Person 208 | - | A17794137 | - | EID BLANK; reads "Any" not "Amy"
-31 | Person 898 | 10001917 | A18720029 | j2vaughan |
+20 | name:cd2ec5650aee83de | - | A17761038 | esvalenzuela | EID BLANK
+21 | Juan Valenzuela Burgos | id:9f40c27fb6c0fd70 | A18852994 | - | name LOW CONFIDENCE (cursive)
+22 | Shaila Tamar Valenzuela Rojo | id:f696c76391078a05 | A78362378 | svalenzuelarojo |
+23 | name:04122d7a6dda1941 | id:70e4ea28ab797c3c | A18332504 | JValerio |
+24 | Sophia Valiente | id:33d8b5ccf7cd414f | A17737513 | svaliente | EID 7th digit OVERWRITTEN
+25 | name:31781010a30d7134 | 1840309 | A18276569 | edvang | *** EID MALFORMED: 7 digits, no leading 10 ***
+26 | name:49c299a01cef1549 | id:c8a1752bf81c9e55 | A18735786 | advannarath |
+27 | name:7f4ce887b1b8b2a8 | id:680a51a096c23320 | A18933825 | n3vargas |
+28 | name:1cfff0db29f30b6c | id:d26ff54105e4ae5c | A18372151 | s9vargas |
+29 | name:f158317eade94c75 | id:ee04425ffb201148 | A69027876 | nvasant |
+30 | name:f833b4007da4a1e2 | - | A17794137 | - | EID BLANK; reads "Any" not "Amy"
+31 | name:70dc83d6d6b5d9d9 | id:702d241d2ffba554 | A18720029 | j2vaughan |
 ```
 
-**Exclude:** p19 (DMV form; p18 is Person 575's real EC form — import p18).
+**Exclude:** p19 (DMV form; p18 is name:e958bcce170eebfb's real EC form — import p18).
 **Two alphabetical runs:** p1–15 Vazquez→Villanueva, p16–31 restarts at Valdez.
 **Lookups queued (results NOT yet harvested):** names — Vazquez Paula, Vega Emily,
 Vermillion Hazel, Villa Kaylin M, Villagrana Danitza, Villalobos Valeria,
@@ -164,55 +164,55 @@ EIDs — the 20 listed above.
 
 ```
 page | name | eid | pid | email | notes
-1 | Person 1705 | 10001519 | A17649663 | rgwalkup |
-2 | Jian Ren Person 698 | 10002000 | A19117100 | frw001 |
-3 | Kitong Wang | 10001868 | A18021016 | yiw235 | NAME/EMAIL CONFLICT (yiw→Yitong?)
-4 | Person 1353 | 10002132 | A18785501 | luw039 |
-5 | Person 1774 | 10001753 | A18427425 | ryw007 |
-6 | Person 1877 | 10002029 | A18936558 | shw190 |
-7 | Shuran Wang | 10002133 | A18740922 | elw022 | NAME/EMAIL CONFLICT
-8 | Person 2192 | 10002004 | A18498681 | - |
-9 | Person 943 | 10001659 | A17986752 | jrwarren |
-10 | Mitsum Watanabe | 10001714 | A69036536 | miwatanabe |
-11 | Person 697 | 10001771 | A19227535 | - | dated 10/30 — DUP with p12
-12 | Person 697 | 10001771 | A19227535 | nwatanaharuetai | dated 2/11 — NEWER
-13 | Person 359 | 10002134 | A18240003 | cwaysz |
-14 | Person 948 | 10002034 | A18935941 | jew087 |
-15 | Person 325 | - | A17680518 | brwelch | EID BLANK (personal: briannawelch@gmail.com)
-16 | Person 1718 | 10001539 | - | renen | HDH-HR variant, no PID
-17 | Person 607 | 10001968 | A19139575 | eawerley |
-18 | Person 1543 | - | A17836965 | mwhatley | EID BLANK
-19 | Person 121 | 10001786 | A18234279 | agwignall |
-20 | Person 1374 | 10001936 | A18749132 | kwikert |
-21 | Person 1460 | 10001860 | A18536364 | mhwilcox |
-22 | Person 1883 | 10001396 | A17493003 | swilhelmy |
-23 | Person 1244. | - | A17411138 | kdwilkerson | EID BLANK
-24 | Person 211 | 10001187 | A53242287 | - | email line holds SUPERVISOR's
-25 | Person 274 | 10001580 | A59026018 | avwilliams | @health.ucsd.edu
-26 | Person 894 | 10001933 | A19080378 | jkw011 |
-27 | Person 1594 | 10001451 | A17298517 | n3williams |
-28 | Alyana N. Wilson | 10001674 | A17737550 | alw032 |
-29 | Person 1796 | 1076?943 | A18218300 | - | *** EID 5th char AMBIGUOUS — look up by name ***
-30 | Rena Rose Witkin | 10001807 | A17800779 | - |
-31 | Thomas J Woods | 10001934 | A78669477 | tgwoods |
-32 | Person 565 | 10001991 | A18792434 | d5wen | out of sequence
-33 | Person 418 | 10001870 | A18381788 | cjw018 |
-34 | Person 1143 | 10001985 | A18922958 | - |
-35 | Person 161 | 10001924 | A18513839 | - |
-36 | Person 310 | 10001965 | A19087912 | bow023 |
-37 | Person 533 | 10001546 | - | dcwu | HDH-HR variant, no PID
-38 | Person 985 | 10002005 | A18781813 | - |
-39 | Sixian Wu | 10001995 | A18938709 | naw012 | NAME/EMAIL CONFLICT (nancywu0618@gmail.com)
-40 | Mina Itzel Villanueva | 10001904 | A18799025 | m9villanueva |
-41 | Person 215 | 10001442 | - | arvillarreal | HDH-HR variant, no PID
-42 | Person 642 | - | A17454516 | eviray | TYPED form; EID BLANK
-43 | Person 1204 | 10001979 | A18554065 | khv007 |
-44 | Person 808 | - | A17292498 | h4vu | EID BLANK
-45 | Person 842 | 10002039 | A18273156 | isvue |
-46 | Person 2148 | 10002017 | A18705424 | yevue |
-47 | Vanessa Valentina Vuong | 10001733 | A18303514 | - |
-48 | Person 135 | 10001672 | A17670796 | - | out of sequence
-49 | Akitsugu Uchida | 10001780 | A18512329 | - | U surname, filed last
+1 | name:d10c962c03a60e7e | id:d7a6fe8cf1b5808c | A17649663 | rgwalkup |
+2 | Jian Ren name:3903782982b6a4a5 | id:d8aa98892e09e15e | A19117100 | frw001 |
+3 | Kitong Wang | id:5d8f147bf55a67ff | A18021016 | yiw235 | NAME/EMAIL CONFLICT (yiw→Yitong?)
+4 | name:efdf67175b482e15 | id:509b920dce4f37df | A18785501 | luw039 |
+5 | name:4af90320ce08d7e7 | id:8ac34578f704b894 | A18427425 | ryw007 |
+6 | name:56c0658a888aed6f | id:9363a753752944db | A18936558 | shw190 |
+7 | Shuran Wang | id:6c92b34c1191efb4 | A18740922 | elw022 | NAME/EMAIL CONFLICT
+8 | name:1bdadc4fa45f4ad8 | id:ae8af46f433c7cbf | A18498681 | - |
+9 | name:a9cf45911f6c8225 | id:9b0266e12951dedd | A17986752 | jrwarren |
+10 | Mitsum Watanabe | id:1242039082076fec | A69036536 | miwatanabe |
+11 | name:d56cd9ba8269e707 | id:bc6905e92a5ffc22 | A19227535 | - | dated 10/30 — DUP with p12
+12 | name:d56cd9ba8269e707 | id:bc6905e92a5ffc22 | A19227535 | nwatanaharuetai | dated 2/11 — NEWER
+13 | name:5e63fab26f1965c2 | id:5e93643682f5e74e | A18240003 | cwaysz |
+14 | name:aa02af7a6dccea6d | id:e2cccad4a19115c7 | A18935941 | jew087 |
+15 | name:d215625532829706 | - | A17680518 | brwelch | EID BLANK (personal: briannawelch@gmail.com)
+16 | name:1deab3294bf32945 | id:5a89e8a7f2a378fe | - | renen | HDH-HR variant, no PID
+17 | name:5d467a3f24ec65aa | id:63182bee4ca380f9 | A19139575 | eawerley |
+18 | name:d673983728ca6af5 | - | A17836965 | mwhatley | EID BLANK
+19 | name:297f1917206314af | id:8741eb003e276702 | A18234279 | agwignall |
+20 | name:496b0fa038776b13 | id:1c1914610c211889 | A18749132 | kwikert |
+21 | name:2034f3fb0ad8c788 | id:479bd32637db3041 | A18536364 | mhwilcox |
+22 | name:481d0a5bfda69dc0 | id:3b20ecfea27c0d13 | A17493003 | swilhelmy |
+23 | name:5dd201561e14c61d. | - | A17411138 | kdwilkerson | EID BLANK
+24 | name:15de6a6d32b73791 | id:a0f08c812769456f | A53242287 | - | email line holds SUPERVISOR's
+25 | name:972502208909cdcd | id:69b7273cc92306ee | A59026018 | avwilliams | @health.ucsd.edu
+26 | name:a2d2eaf61b73bdbe | id:ead99c413728ef24 | A19080378 | jkw011 |
+27 | name:69085ceb8017db81 | id:dc9c09f7fcee675c | A17298517 | n3williams |
+28 | Alyana N. Wilson | id:9f48dd1ec042e7e1 | A17737550 | alw032 |
+29 | name:12a74f063e683226 | 1076?943 | A18218300 | - | *** EID 5th char AMBIGUOUS — look up by name ***
+30 | Rena Rose Witkin | id:17d0f8638ee067ee | A17800779 | - |
+31 | Thomas J Woods | id:e5467961b968493b | A78669477 | tgwoods |
+32 | name:7aaabf3ca5d3a28c | id:ffacfe40e60ad626 | A18792434 | d5wen | out of sequence
+33 | name:6ef7d98710dcc7be | id:1b5e4c340ca41c79 | A18381788 | cjw018 |
+34 | name:076b2c7e1563534d | id:7155c7d4d5b8718d | A18922958 | - |
+35 | name:7a31b3ae4e4c310d | id:8b4c4db652ec5d4b | A18513839 | - |
+36 | name:99350e7a2efd5302 | id:c108c90bc35240b9 | A19087912 | bow023 |
+37 | name:1d2c1295c127ca62 | id:90a57b9e2017d8b5 | - | dcwu | HDH-HR variant, no PID
+38 | name:5ee4712a4938d954 | id:a69c564915dbd753 | A18781813 | - |
+39 | Sixian Wu | id:304193a6c8eba5f9 | A18938709 | naw012 | NAME/EMAIL CONFLICT (nancywu0618@gmail.com)
+40 | Mina Itzel Villanueva | id:aaa0047b3dea6f01 | A18799025 | m9villanueva |
+41 | name:981446661eaf2d9a | id:8b0a397dd4cc6265 | - | arvillarreal | HDH-HR variant, no PID
+42 | name:94cf8c495f0b748e | - | A17454516 | eviray | TYPED form; EID BLANK
+43 | name:7c4dfef69009e52f | id:3c6648fa80011ea0 | A18554065 | khv007 |
+44 | name:c9b226c86296b138 | - | A17292498 | h4vu | EID BLANK
+45 | name:6465cfeb80265d55 | id:bf1c31061f2460c9 | A18273156 | isvue |
+46 | name:b79eed31ce4fccb4 | id:7bde69f1b66383df | A18705424 | yevue |
+47 | Vanessa Valentina Vuong | id:b7f0e59a4811a59b | A18303514 | - |
+48 | name:4231e4a9508e8d35 | id:f9dee6df9bfe6ca8 | A17670796 | - | out of sequence
+49 | Akitsugu Uchida | id:dc6ad4b4ae480116 | A18512329 | - | U surname, filed last
 ```
 
 **Duplicate:** p11/p12 same person, same EID — **import p12 (2/11, newer), skip p11.**
@@ -362,31 +362,31 @@ only builds `{name}` inputs.
 |---|---|---|---|---|
 | `Xerox Scan_08042026140534.pdf` | 31 | 30 | p19 DMV | `073e49b5-840a-4f20-9ce3-d8e35b6c8bfe` |
 | `Xerox Scan_08042026140631.pdf` | 49 | 48 | p11 older dup | `e5f675d7-dfc1-4932-b344-0a316bfaa959` |
-| `Xerox Scan_08042026140440.pdf` | 37 | 36 | p18 Person 1222 Not found | `0360212e-f668-4e51-8181-b9efe7eba1c4` |
+| `Xerox Scan_08042026140440.pdf` | 37 | 36 | p18 name:4ee1ecca7f502f81 Not found | `0360212e-f668-4e51-8181-b9efe7eba1c4` |
 | `Xerox Scan_08042026140602.pdf` | 56 | 56 | — | `d3c6dba7-bb39-4772-b8e4-fd932f9ae268` |
 | `Xerox Scan_08042026140410.pdf` | 84 | 81 | p25/58/64 older dups | `73d4400a-98cd-4e05-b833-d2df19818213` |
 
 ### Wrong EIDs caught by EID-mode verification this batch
 | form | wrong EID | actually belongs to | real EID |
 |---|---|---|---|
-| Person 2026 (140534 p9) | 10002163 (misread 4 as 9) | Sergio Datugan | **10002140** |
-| Person 614 (140440 p30) | 10001798 | Isa Green | **10001797** |
-| Person 1541 (140602 p21) | 10001229 | Jarrod Hoogland | **10001238** |
-| Person 676 (140410 p49) | 10002143 | Samuel Habib | **10002144** |
+| name:d322a2973746fbb4 (140534 p9) | id:1fd81b30f9aa2920 (misread 4 as 9) | Sergio Datugan | **id:0b841fe1efc2e94d** |
+| name:1bc08428bb419269 (140440 p30) | id:b514f85f84586f5e | Isa Green | **id:c4ddcf909c8c2b51** |
+| name:f8fd93ac64cc19df (140602 p21) | id:be82f6a3791660fb | Jarrod Hoogland | **id:ca82f8e1f47df7cf** |
+| name:1a2c5353008d15a0 (140410 p49) | id:a6feffa7ac64676f | Samuel Habib | **id:27d74c45a63b33fc** |
 
 ### Other notable resolutions
-- Person 677 form "1840309" → **10001939** (dropped leading 10)
-- Person 1147 form "70800066" → **10001796**
-- Person 1471 overwritten EID → **10002048**
-- Person 687 / Person 1700 → **10001425** (annot + EID)
-- "Rintoy/Person 1761" → **Person 793 10002142**
-- "Person 762" → **Person 747 10001974**
-- "Person 1311" → **Person 1310 10001464**
-- "Person 1063" → **Person 927 10001233** (a/o misread)
-- Person 2176 ambiguous → **10001480** (Person 2176)
-- Person 1796 ambiguous digit → **10001621**
+- name:31781010a30d7134 form "1840309" → **id:009fdc04dd01fa2a** (dropped leading 10)
+- name:67dfd052d4f580cc form "70800066" → **id:95406c1b138c94c6**
+- name:1108bac82af3b7d0 overwritten EID → **id:f75e5f9febe71302**
+- name:802acf3d30032b00 / name:85382c0db63baace → **id:1b05984a74161701** (annot + EID)
+- "Rintoy/name:358399cfc0363401" → **name:6649f3fdc6f8bcaf id:baa4a0b1fb80afa5**
+- "name:88d7a8b1cdb457a0" → **name:4cc49f51c4e96fa7 id:1913347323d76f2d**
+- "name:d731004c3bc2e465" → **name:5653ea8f175388a3 id:361b18845e078d8b**
+- "name:e47bcaa1d140ec67" → **name:7fa8a6e9fde2f4e1 id:fe891352fecdd1e4** (a/o misread)
+- name:467af346513ed1eb ambiguous → **id:7437d4f6a4745802** (name:8cec298406af516f)
+- name:12a74f063e683226 ambiguous digit → **id:e521d9b5b015c1d8**
 
 ### Permanent hold
-- **Person 1222** (140440 p18): blank EID, Not found under Kirsten/Kristen/Person 1224. PID A17409858, personal email kirtni413@gmail.com.
+- **name:4ee1ecca7f502f81** (140440 p18): blank EID, Not found under Kirsten/Kristen/name:97279f5aac2fcac2. PID A17409858, personal email kirtni413@gmail.com.
 
 Transcriptions preserved in `scripts/.tmp/transcribe-*.md`.

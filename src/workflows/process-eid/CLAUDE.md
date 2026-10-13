@@ -13,14 +13,14 @@ operation coordinator. The member searches SS Smart HR Transactions by the
 roster's **transaction number** and reads the EID from the transaction detail
 routing strip:
 
-`Transaction: T002235451, ID: 10002345, Effdt: 2026-09-28, Unit: SDCMP`
+`Transaction: T002235451, ID: id:bf5c81799e6f558c, Effdt: 2026-09-28, Unit: SDCMP`
 
 ## The transaction number is the key; the name is the PROOF (2026-09-16)
 
 The lookup used to search by Lived Name and then require the roster's
 transaction number in the results. That is backwards: a transaction number is
 unique in UCPath and a name is not, and a roster lived name is frequently not
-the name UCPath holds (`Person 1734` / `Person 756`).
+the name UCPath holds (`name:d8041f5d6adea3e2` / `name:48ad2576a56f8612`).
 
 So `findTransactionEidByTransactionId` searches the Transaction ID box, and the
 member row then **proves the transaction belongs to the person who supplied
@@ -32,9 +32,9 @@ row with both names in the message and records NO EID.
 
 This is not theoretical. On the first CSV run (2026-09-16, `26-27 Student
 Applicants(Sept 28)`), five rows carried a transaction number belonging to
-somebody else entirely — `T002236424` is Person 1513, not Person 404;
-`T002236428` is Person 1928, not Person 1810; `T002236431` is Person 1981,
-`T002236500` is Person 801, `T002237975` is Person 657. A block of T-ids
+somebody else entirely — `T002236424` is name:5c99b552a30986f3, not name:4d2d12ec1a49ea8a;
+`T002236428` is name:b52b30a9eeb74fb3, not name:972c8edb106da3be; `T002236431` is name:654636b864d5d5fc,
+`T002236500` is name:b9e866afe29e6c4c, `T002237975` is name:a8814818c3a95445. A block of T-ids
 had been pasted onto the wrong rows. Without the name proof, each of those rows
 would have recorded a real, plausible, WRONG EID into the roster.
 

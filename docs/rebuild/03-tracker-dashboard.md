@@ -327,9 +327,9 @@ flowchart LR
   RM --> LP
   RM -->|"on version bump"| AR
 
-  classDef auth stroke:#c0392b,stroke-width:2px,fill:#10000000;
-  classDef proj stroke:#7f8c8d,fill:#10000000;
-  classDef ledger stroke:#8e44ad,stroke-width:2px,fill:#10000000;
+  classDef auth stroke:#c0392b,stroke-width:2px,fill:#id:7e071fd9b023ed8f;
+  classDef proj stroke:#7f8c8d,fill:#id:7e071fd9b023ed8f;
+  classDef ledger stroke:#8e44ad,stroke-width:2px,fill:#id:7e071fd9b023ed8f;
   class CL,DEP,CMD,WI,OB auth;
   class SJ,NJ,RM proj;
   class LED ledger;
@@ -375,7 +375,7 @@ Rationale against alternatives:
   lazily per selected run. Mirrors today's proven rows/logs split.
 - **Why a separate `ledger/` (D21 — owner = this doc)?** Doc 09's write-safety layer files one
   immutable receipt per real HR mutation. It is partitioned per-**system**+day so
-  `grep 10001497 .tracker-rebuild/ledger/ucpath-*.jsonl` answers "what did we file for this person,
+  `grep id:5f40ed01d583a15c .tracker-rebuild/ledger/ucpath-*.jsonl` answers "what did we file for this person,
   across time." It is ordered, actor-attributed, and **never pruned**. Doc 09 owns
   the entry *shape* (`LedgerEntry`, §6 there); this doc owns that the dir lives in the layout and is
   exempt from `clean-tracker`.

@@ -1,3 +1,4 @@
+import { privateValue } from "../../private-data.js";
 import {
   DASHBOARD_INPUT_RUN_WORKFLOWS,
   DASHBOARD_UPLOAD_RUN_WORKFLOWS,
@@ -157,7 +158,7 @@ export function parseCommaSeparated(
  * Semicolon-separated single-string-field parser. Use when the value
  * itself may contain commas — e.g. person-lookup takes `"Last, First"` name
  * strings, so the top-level separator must be `;`. Trims whitespace
- * around the semicolons (so `"Smith, John ; Person 905"` is fine) and
+ * around the semicolons (so `"Smith, John ; name:17a6fb0c3906628f"` is fine) and
  * drops empties.
  */
 export function parseSemicolonSeparated(fieldName: string) {
@@ -277,7 +278,7 @@ export function parseCrmDocDownloadInputs(raw: string): InputRunParseResult {
   return { ok: true, inputs };
 }
 
-const ONBOARDING_PLACEHOLDER = "Enter emails, comma-separated (e.g. person@example.edu, person@example.edu)";
+const ONBOARDING_PLACEHOLDER = "Enter emails, comma-separated (e.g. " + privateValue("ucsd:9e895cc9310c8df0") + ", " + privateValue("ucsd:66246b85383e70e7") + ")";
 // Comma-separated emails → a `pool` batch (onboarding declares
 // `batch: { mode: "pool" }`). The regex catches obviously-malformed input
 // before enqueue; the workflow's Zod `z.string().email()` is the
@@ -336,7 +337,7 @@ export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfi
     runEmptyAction: { modalWorkflow: "oath-signature" },
   },
   "crm-doc-download": {
-    placeholder: "Enter EIDs or emails, comma-separated (e.g. 10873611, person@example.edu)",
+    placeholder: "Enter EIDs or emails, comma-separated (e.g. 10873611, " + privateValue("ucsd:9e895cc9310c8df0") + ")",
     parseInput: parseCrmDocDownloadInputs,
   },
   onboarding: {

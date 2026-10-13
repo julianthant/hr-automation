@@ -33,8 +33,8 @@ const SOURCE_LABEL: Record<ProcessEidNameSource, string> = {
  * roster's names.
  *
  * BOTH roster names are compared and the best tier wins, because a roster row
- * legitimately carries two spellings of one person (`Person 1734` / `Person 756`,
- * `Person 420` / `Person 439`) and UCPath holds exactly one of them.
+ * legitimately carries two spellings of one person (`name:d8041f5d6adea3e2` / `name:48ad2576a56f8612`,
+ * `name:427f21ff3767dd07` / `name:0027d8c4c07cafa4`) and UCPath holds exactly one of them.
  * `similar` counts as proof — `Stone` vs `Stoney` is one edit — but it is
  * reported, so a run says which name matched and how closely.
  *

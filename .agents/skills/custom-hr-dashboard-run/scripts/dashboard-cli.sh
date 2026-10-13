@@ -46,7 +46,7 @@ except Exception as e:
 
 cmd_enqueue() {
   local wf="${1:?Workflow required (e.g. onboarding, separations, crm-doc-download)}"
-  local raw_inputs="${2:?Inputs JSON array required (e.g. '[{\"email\":\"person@example.edu\"}]')}"
+  local raw_inputs="${2:?Inputs JSON array required (e.g. '[{\"email\":\"ucsd:c47b7844302f33f6\"}]')}"
   local parallel="${3:-}"
   local dry_run="${4:-false}"
 
@@ -274,9 +274,9 @@ Commands:
 
 Examples:
   $0 status onboarding
-  $0 enqueue onboarding '[{"email":"person@example.edu","mode":"new-hire"}]'
+  $0 enqueue onboarding '[{"email":"ucsd:c47b7844302f33f6","mode":"new-hire"}]'
   $0 enqueue separations '[{"docId":"4694"},{"docId":"4693"}]'
-  $0 not-this-person onboarding person@example.edu 10001731
+  $0 not-this-person onboarding ucsd:dce028a1adc7ebc1 id:81ee737a082e24b0
   $0 monitor separations
 EOF
 }

@@ -106,7 +106,7 @@ export async function runUcpathTransaction(
     // Pre-submit existence check — match by EID (Person ID column) +
     // effective date + "Terminatn" action. Names are unreliable
     // (Kuali-vs-UCPath nickname/spelling/column-order variants cause
-    // real dupes — EID 10001780 Person 53, 2026-04-24); EID is
+    // real dupes — EID id:dc6ad4b4ae480116 name:7b13d9ad18e4a191, 2026-04-24); EID is
     // deterministic. If a row already exists, reuse its txn# and skip
     // the submit.
     const lookupResult = await findExistingTerminationTransaction(

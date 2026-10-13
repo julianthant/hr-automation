@@ -76,7 +76,7 @@ export async function waitForTransactionOutcome(
 // the confirmation dialog when the hire's name/DOB/SSN resembles an existing
 // person. Until 2026-08-20 the automation had no signal for it: the submit
 // "timed out with no error banner and no confirmation OK dialog" (live runs
-// 99d5012c Person 780 — 10 same-surname candidates; ebd5d59e Person 631 — one
+// 99d5012c name:11e6f33fffe74fc2 — 10 same-surname candidates; ebd5d59e name:861193e55b0576b2 — one
 // namesake with a different SSN + DOB). Nothing is persisted on that page, so
 // the hire simply never filed.
 //
@@ -130,7 +130,7 @@ export function normalizeDobMonthDay(raw: string | null | undefined): string {
   return `${month}/${day}`;
 }
 
-/** Last 4 digits of an SSN in any punctuation (`000-00-0000` → `6789`); "" when absent. */
+/** Last 4 digits of an SSN in any punctuation (`ssn:01a54629efb95228` → `6789`); "" when absent. */
 export function ssnLast4(raw: string | null | undefined): string {
   const digits = (raw ?? "").replace(/\D/g, "");
   return digits.length >= 4 ? digits.slice(-4) : "";
@@ -526,7 +526,7 @@ export async function selectReasonCode(
  * person NAME PeopleSoft resolves for it (`#PERSON_NAME_NAME_DISPLAY`).
  *
  * The readback is load-bearing: a mistyped/bogus EID resolves to SOME real
- * person (live 2026-08-21: `10000910` → an unrelated employee), and Continue
+ * person (live 2026-08-21: `id:dfa73f9264a72c07` → an unrelated employee), and Continue
  * then files the transaction against THAT person. The caller MUST compare the
  * returned name with the expected person before continuing. Throws when no
  * name resolves (unknown EID / page never refreshed) — never returns "".
@@ -1392,7 +1392,7 @@ export async function clickSaveAndSubmit(
   // Poll named signals together: error banner, Person Match Found, Select an
   // Action (inactive Employee Instances), then confirmation OK. Before
   // 2026-08-20 only error + OK were watched (Person Match timed out blind);
-  // 2026-09-17 added Select an Action (Person 1102 concurrent hire).
+  // 2026-09-17 added Select an Action (name:106e089081795808 concurrent hire).
   {
     const personMatchHeading = smartHR.personMatchFoundHeading(frame);
     const selectActionHeading = smartHR.selectAnActionHeading(frame);
@@ -1846,7 +1846,7 @@ export interface ExistingTerminationResult {
  * because upstream records can disagree with UCPath's stored display
  * name (nicknames like "Aki" vs "Akitsugu", Last/First column confusion,
  * spelling variants) — the previous name+template approach silently
- * missed duplicates and produced real dupes (EID 10001780 Person 53,
+ * missed duplicates and produced real dupes (EID id:dc6ad4b4ae480116 name:7b13d9ad18e4a191,
  * 2026-04-24).
  *
  * This is the pre-submit duplicate-termination guard, so a genuine scan
@@ -2380,7 +2380,7 @@ export function buildCommentsText(
  * existing UCPath person taking an additional Dining job). Mirrors the
  * operator's manual comment verbatim (2026-08-20, T002216750):
  *
- *   "Concurrent Hire as Dining Student Effective 09/11/2026. PCN 10005380. Job number #1169086."
+ *   "Concurrent Hire as Dining Student Effective 09/11/2026. PCN id:976a53d9563a961f. Job number #1169086."
  *
  * PCN = the position number being filled; Job number = the CRM recruitment number.
  * No SSN clause — the person record (and its National ID) already exists.

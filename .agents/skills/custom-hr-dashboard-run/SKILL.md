@@ -34,7 +34,7 @@ CLI=".agents/skills/custom-hr-dashboard-run/scripts/dashboard-cli.sh"
 $CLI status
 
 # 2. Enqueue an onboarding run
-$CLI enqueue onboarding '[{"email":"person@example.edu","mode":"new-hire"}]'
+$CLI enqueue onboarding '[{"email":"ucsd:c47b7844302f33f6","mode":"new-hire"}]'
 
 # 3. Enqueue separations (task 1 / all)
 $CLI enqueue separations '[{"docId":"4694"},{"docId":"4693"}]'
@@ -52,7 +52,7 @@ TOKEN=$(curl -s http://localhost:3838/api/operator/session | python3 -c 'import 
 curl -s -X POST http://localhost:3838/api/enqueue \
   -H "content-type: application/json" \
   -H "x-hr-auto-operator-token: $TOKEN" \
-  -d '{"workflow":"onboarding","inputs":[{"email":"person@example.edu","mode":"new-hire"}]}'
+  -d '{"workflow":"onboarding","inputs":[{"email":"ucsd:a8fdc4f74d983d16","mode":"new-hire"}]}'
 ```
 
 ---
@@ -74,9 +74,9 @@ All input-run workflows map to `src/dashboard/lib/input-run-registry.ts`. The pa
 
 | Workflow | Input Item Shape | Example / Options | Notes |
 |---|---|---|---|
-| **`onboarding`** | `{"email": string, "mode"?: "new-hire"\|"rehire", "dryRun"?: boolean, "rosterPath"?: string}` | `[{"email":"person@example.edu","mode":"new-hire"}]` | Resolves Legal vs Lived names from newest roster in `data/rosters/`. `dryRun: true` skips I-9 submit and Smart HR final submit. |
+| **`onboarding`** | `{"email": string, "mode"?: "new-hire"\|"rehire", "dryRun"?: boolean, "rosterPath"?: string}` | `[{"email":"ucsd:9e895cc9310c8df0","mode":"new-hire"}]` | Resolves Legal vs Lived names from newest roster in `data/rosters/`. `dryRun: true` skips I-9 submit and Smart HR final submit. |
 | **`separations`** | `{"docId": string, "dryRun"?: boolean}` | `[{"docId":"4694"},{"docId":"4693"}]` | `docId` is Kuali document ID. `dryRun: true` skips Smart HR submit and Kuali final save. |
-| **`crm-doc-download`** | `{"email": string}` OR `{"emplId": string}` | `[{"email":"person@example.edu"},{"emplId":"10873611"}]` | Downloads offer letters/iDocs into `data/onboarding/Onboarding Docs <date> <hash>.zip`. Uses Legal vs Lived naming from onboarding roster. |
+| **`crm-doc-download`** | `{"email": string}` OR `{"emplId": string}` | `[{"email":"ucsd:9e895cc9310c8df0"},{"emplId":"10873611"}]` | Downloads offer letters/iDocs into `data/onboarding/Onboarding Docs <date> <hash>.zip`. Uses Legal vs Lived naming from onboarding roster. |
 | **`person-lookup`** | **Search**: `{"emplId": string}` OR `{"name": "Last, First"}`<br>**Match**: `{"lastName": string, "firstName": string, "dob"?: string, "ssn"?: string}` | `[{"name":"Smith, John"}]`<br>Match: `[{"lastName":"Smith","firstName":"John","dob":"01/01/2000"}]` | `crmCheck: true` is supported on Search mode. |
 | **`process-eid`** | `{"source": "roster-sheet", "sheet": string}` OR `{"source": "roster-sheet", "rosterPath": string}` | `[{"source":"roster-sheet","sheet":"Onboarding"}]` | Reads roster sheet or path and processes EIDs. |
 | **`oath-signature`** | `{"emplId": string}` | `[{"emplId":"10873611"}]` | Signs oath in UCPath for existing employee ID. |
@@ -149,16 +149,16 @@ Always differentiate expected business outcomes from unexpected execution failur
 When `onboarding` or `separations` matches a person in UCPath who has a different name (e.g. fuzzy DOB match on a common name) or multiple ambiguous matches, the workflow pauses at `person-search` for operator identity review.
 
 ### Option A: "Not This Person" (Mark false match & continue as New Hire)
-In `onboarding`, if UCPath matched someone else (e.g. Mcilwain when hiring Person 199):
+In `onboarding`, if UCPath matched someone else (e.g. Mcilwain when hiring name:909b9a332cfd253a):
 ```bash
 curl -s -X POST http://localhost:3838/api/eid-approval/not-this-person \
   -H "content-type: application/json" \
   -H "x-hr-auto-operator-token: $TOKEN" \
   -d '{
     "workflow": "onboarding",
-    "id": "person136@example.com",
+    "id": "email:70df538c7a57856d",
     "runId": "<runId-from-tracker-if-known>",
-    "eid": "10001731"
+    "eid": "id:81ee737a082e24b0"
   }'
 ```
 This automatically re-queues the person with the false EID excluded and proceeds as a New Hire!
@@ -171,7 +171,7 @@ curl -s -X POST http://localhost:3838/api/eid-approval/approve \
   -H "x-hr-auto-operator-token: $TOKEN" \
   -d '{
     "workflow": "onboarding",
-    "id": "person@example.edu",
+    "id": "ucsd:eb518a347b2d7be8",
     "approvedEid": "10873400"
   }'
 ```

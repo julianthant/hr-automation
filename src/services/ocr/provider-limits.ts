@@ -116,7 +116,7 @@ const GROQ_MODELS: ModelSpec[] = [
 const MISTRAL_MODELS: ModelSpec[] = [
   // DEMOTED to tier 2 on 2026-07-14. Same benchmark: it reproduced the exact
   // real-world misreads that started this ("Miralik" for "Mihalik", "Kim" for
-  // "Kimi", 000-00-0000 for 000-00-0000, 000-00-0000 for 000-00-0000), it
+  // "Kimi", ssn:875b0393b1cf7118 for ssn:d8244a992de0296b, ssn:2d95961e64b290fc for ssn:c7cb982fea5d0e63), it
   // fabricated a DOB on the illegible page, and it even corrupted the SECTION 2
   // cross-check number itself — poisoning the very oracle we use to catch bad
   // reads. Handwritten boxed digits are its weak spot (0/6, 9/4, 8/9).

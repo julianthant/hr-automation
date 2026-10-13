@@ -9,7 +9,7 @@
  *
  * Usage:
  *   tsx --env-file=.env src/scripts/ops/sanity-check-record.ts record.json [--workflow onboarding]
- *   echo '{"name":"Person 905","workEmail":"jane@ucsd","employeeId":"123"}' \
+ *   echo '{"name":"name:17a6fb0c3906628f","workEmail":"jane@ucsd","employeeId":"123"}' \
  *     | tsx --env-file=.env src/scripts/ops/sanity-check-record.ts --workflow onboarding
  *   # rules only (no LLM / no API keys needed): add --no-llm
  */

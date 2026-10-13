@@ -5,6 +5,7 @@
  * Replaces schemas + match logic that lived in `preview-schema.ts` + `prepare.ts`
  * (both deleted in Task 25).
  */
+import { privateValue } from "../../../private-data.js";
 import { z } from "zod/v4";
 import { log } from "../../../utils/log.js";
 import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
@@ -238,7 +239,8 @@ export type PreviewRecord = z.infer<typeof PreviewRecordSchema>;
 
 // ─── Prompt + constants ────────────────────────────────────
 
-const EC_OCR_PROMPT = `You are an OCR system. Extract structured data from the attached PDF.
+function emergencyContactOcrPrompt(): string {
+  return `You are an OCR system. Extract structured data from the attached PDF.
 
 The PDF is a stack of UCSD R&R Emergency Contact Information forms. BEFORE extracting fields, classify each page:
 - "emergency-contact" — UCSD R&R Emergency Contact Information form
@@ -261,8 +263,8 @@ OUTPUT SHAPE (CRITICAL — must be a FLAT JSON ARRAY at the top level):
     "formKind": "emergency-contact",
     "sourcePage": 1,
     "employee": {
-      "name": "Person 905",
-      "employeeId": "10002230",
+      "name": "${privateValue("name:17a6fb0c3906628f")}",
+      "employeeId": "${privateValue("id:bcd23a9c2a43b1d6")}",
       "homeAddress": { "street": "123 Main St", "city": "La Jolla", "state": "CA", "zip": "92093", "country": "US" },
       "cellPhone": "(858) 555-0100"
     },
@@ -287,8 +289,8 @@ Field-level rules — extract EVERY filled field on emergency-contact pages:
 - One record per page. For handwritten text, transcribe your best reading; if genuinely illegible set null and add to originallyMissing.
 
 Employee ID (CRITICAL — digit accuracy):
-- UCPath Employee IDs are exactly 8 digits starting with "10" (e.g. "10002230", "10002238").
-- Read the Employee ID# box digit-by-digit. Do NOT transpose adjacent digits — especially 8↔9 and 3↔8 (live misreads: "10843962" when the form says "10002230"; "10983978" when the form says "10002232").
+- UCPath Employee IDs are exactly 8 digits starting with "10" (e.g. "${privateValue("id:bcd23a9c2a43b1d6")}", "${privateValue("id:aa9d0dcadcdb2257")}").
+- Read the Employee ID# box digit-by-digit. Do NOT transpose adjacent digits — especially 8↔9 and 3↔8 (live misreads: "10843962" when the form says "${privateValue("id:bcd23a9c2a43b1d6")}"; "10983978" when the form says "${privateValue("id:4de5904cd57366c7")}").
 - Copy ALL digits exactly. Ignore stray marks or crossed-out characters in the box; read the final intended digits.
 - Return null ONLY when the Employee ID field is genuinely blank on the paper.
 
@@ -319,6 +321,7 @@ Phone numbers:
 
 Do not invent data. If a field is blank on the paper, return null and list in originallyMissing.
 Output ONLY valid JSON matching the schema. No commentary.`;
+}
 
 const ROSTER_AUTO_ACCEPT = 0.85;
 
@@ -372,7 +375,7 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
   label: "Emergency contact",
   description: "UCSD R&R Emergency Contact forms. Approves into the emergency-contact daemon.",
 
-  prompt: EC_OCR_PROMPT,
+  prompt: "",
   ocrRecordSchema: PermissiveRecordSchema,
   ocrArraySchema: OcrOutputSchema,
   schemaName: "emergency-contact-batch",
@@ -656,3 +659,8 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
   // OCR-hub EC preps grep-collide with real emergency-contact operations; only
   // an operation run derives `ec` (`operationTraceCode("emergency-contact")`).
 };
+Object.defineProperty(emergencyContactOcrFormSpec, "prompt", {
+  enumerable: false,
+  configurable: true,
+  get: emergencyContactOcrPrompt,
+});

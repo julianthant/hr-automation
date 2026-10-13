@@ -1,3 +1,4 @@
+import { privateValue } from "../../../private-data.js";
 import { useState } from "react";
 import {
   Sparkles,
@@ -254,7 +255,7 @@ export function AiAssistSection(): React.ReactElement {
         {tool === "sanity" && (
           <>
             <Field id="sanity-record" label="Record (JSON)">
-              <textarea id="sanity-record" rows={6} className={cn(inputClass, "font-mono text-xs")} placeholder={'{"name":"Person 905","workEmail":"jane@ucsd","employeeId":"123"}'} value={sanityRecord} onChange={(e) => setSanityRecord(e.target.value)} />
+              <textarea id="sanity-record" rows={6} className={cn(inputClass, "font-mono text-xs")} placeholder={'{"name":"' + privateValue("name:17a6fb0c3906628f") + '","workEmail":"jane@ucsd","employeeId":"123"}'} value={sanityRecord} onChange={(e) => setSanityRecord(e.target.value)} />
             </Field>
             <Field id="sanity-wf" label="Workflow"><input id="sanity-wf" className={inputClass} placeholder="onboarding" value={sanityWorkflow} onChange={(e) => setSanityWorkflow(e.target.value)} /></Field>
           </>

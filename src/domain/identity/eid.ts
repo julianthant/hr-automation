@@ -29,7 +29,7 @@ export function parseEidList(value: unknown): string[] {
   const out: string[] = [];
   for (const part of value.split(/[\s,;]+/)) {
     // Strict on purpose: the raw token must BE an EID (no stray characters
-    // stripped away), otherwise "10743545x" would silently become 10001585.
+    // stripped away), otherwise "10743545x" would silently become id:56b7368fdb060fa5.
     if (/^10\d{6}$/.test(part) && !out.includes(part)) out.push(part);
   }
   return out;

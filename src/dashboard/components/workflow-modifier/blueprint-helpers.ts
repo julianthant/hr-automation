@@ -13,6 +13,7 @@
 //     Trace), so the blueprint updates instantly and byte-identically — no
 //     debounce, no "Press Preview" round-trip.
 
+import { privateValue } from "../../../private-data.js";
 import type {
   WorkflowOverride,
   NamingPartTitle,
@@ -64,19 +65,19 @@ export function isDelegatingWorkflow(name: string): boolean {
 }
 
 // ── Sample data ───────────────────────────────────────────────────────────────
-// Matches the server preview record (Person 905 / 10012345) so the blueprint reads
+// Matches the server preview record (name:01332c876518a793 / 10012345) so the blueprint reads
 // the same as a real row would.
 export function buildSampleVars(label: string): Record<string, string> {
   return {
-    name: "Person 905",
-    employeeName: "Person 905",
-    searchName: "Person 905",
-    __name: "Person 905",
-    __subject: "Person 905",
+    name: privateValue("name:01332c876518a793"),
+    employeeName: privateValue("name:01332c876518a793"),
+    searchName: privateValue("name:01332c876518a793"),
+    __name: privateValue("name:01332c876518a793"),
+    __subject: privateValue("name:01332c876518a793"),
     emplId: "10012345",
     employeeId: "10012345",
     eid: "10012345",
-    email: "person@example.edu",
+    email: privateValue("ucsd:69324e501216292c"),
     pdfOriginalName: "Onboarding_Packet.pdf",
     label,
     code: "oa",
@@ -100,7 +101,7 @@ export function buildSecondMemberVars(label: string): Record<string, string> {
     emplId: "10067890",
     employeeId: "10067890",
     eid: "10067890",
-    email: "person@example.edu",
+    email: privateValue("ucsd:00dc0c4a5acb9723"),
     runId4: "b7d2",
     traceId: "oa-143012-b7d2",
     __traceId: "oa-143012-b7d2",

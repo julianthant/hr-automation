@@ -14,6 +14,7 @@
  * → watchChildRuns → patch records from outcomes (twice — once for
  * person-lookup, once for i9-lookup).
  */
+import { privateValue } from "../../../private-data.js";
 import { z } from "zod/v4";
 import { log } from "../../../utils/log.js";
 import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
@@ -171,7 +172,8 @@ export type VerifyPreviewRecord = z.infer<typeof VerifyPreviewRecordSchema>;
 
 // ─── Prompt ─────────────────────────────────────────────────
 
-const VERIFY_OCR_PROMPT = `You are an OCR system. Extract structured data from the attached PDF.
+function verifyOcrPrompt(): string {
+  return `You are an OCR system. Extract structured data from the attached PDF.
 
 The PDF is a MIXED stack of scanned forms — each page is either:
 - "oath" — a UC loyalty oath / patent acknowledgment form (UPAY585, UPAY586, or a multi-row oath sign-in sheet).
@@ -184,7 +186,7 @@ OUTPUT SHAPE (CRITICAL — must be a FLAT JSON ARRAY at the top level):
 
 \`\`\`json
 [
-  { "formKind": "oath", "sourcePage": 1, "printedName": "Person 905 A", "employeeId": "10000910", "paperEmploymentDate": "4-1-26", "paperDateSigned": "4-23-26", "employeeSigned": true, "officerSigned": true, "paperOfficialName": "Smith, John", "documentType": "expected", "originallyMissing": [], "notes": [] },
+  { "formKind": "oath", "sourcePage": 1, "printedName": "${privateValue("name:17a6fb0c3906628f")} A", "employeeId": "${privateValue("id:dfa73f9264a72c07")}", "paperEmploymentDate": "4-1-26", "paperDateSigned": "4-23-26", "employeeSigned": true, "officerSigned": true, "paperOfficialName": "Smith, John", "documentType": "expected", "originallyMissing": [], "notes": [] },
   { "formKind": "emergency-contact", "sourcePage": 2, "printedName": "Roe, Sam", "employeeId": null, "documentType": "expected", "originallyMissing": ["employeeId"], "notes": [] }
 ]
 \`\`\`
@@ -216,6 +218,7 @@ TWO DISTINCT signature lines near the bottom; do NOT confuse them:
 For emergency-contact records, only printedName + employeeId are needed (plus the universal fields).
 
 Output ONLY the valid JSON array. No commentary, no markdown fences, no wrapper object.`;
+}
 
 // ─── Pure helpers (exported, unit-tested) ───────────────────
 
@@ -447,7 +450,9 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
   description:
     "Mixed oath + emergency-contact PDFs. Reads each form and looks up what's missing (CRM dates, active status, I-9 signer). Read-only — no UCPath writes.",
 
-  prompt: VERIFY_OCR_PROMPT,
+  get prompt(): string {
+    return verifyOcrPrompt();
+  },
   ocrRecordSchema: VerifyOcrRecordSchema,
   ocrArraySchema: VerifyOcrOutputSchema,
   schemaName: "verify-batch",

@@ -1044,7 +1044,7 @@
         "search",
         "i9"
       ],
-      "note": "SSN must include dashes (format: 000-00-0000) for I9 search, unlike UCPath person search which uses 9 digits no dashes",
+      "note": "SSN must include dashes (format: ssn:01a54629efb95228) for I9 search, unlike UCPath person search which uses 9 digits no dashes",
       "sourceRef": "src/systems/i9/search.ts"
     },
     {

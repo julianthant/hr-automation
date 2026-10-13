@@ -236,7 +236,7 @@ above before starting.
    before declaring the phase passed.
 
 **Start from the dashboard UI:** select **Onboarding** in the rail → the
-`InputRunPanel` at the bottom → type email **`person347@example.com`** → click
+`InputRunPanel` at the bottom → type email **`email:4c81ba1de69a6e48`** → click
 the **settings gear (Settings2 icon)** beside Run → flip the **Dry run** switch
 ON → click **Run** (Play). A daemon spawns if none is alive.
 
@@ -279,7 +279,7 @@ failure.
 
 **Caveats the driver MUST know:**
 
-1. **CRM record prerequisite.** `person347@example.com` must exist as a CRM
+1. **CRM record prerequisite.** `email:4c81ba1de69a6e48` must exist as a CRM
    recruitment/onboarding record, or `crm-search` throws `No search results
    found` and the run fails pre-guard (before reaching any UCPath step). This is
    a data prerequisite, not a product bug — confirm the record exists before

@@ -126,8 +126,8 @@ export function mergeNotMatchEids(prior: unknown, eid: string): string {
  * second review on a later run accumulates rather than replaces) and stamps the
  * paused row dismissed. Dismiss alone would only stamp the row — the DOB-keyed
  * fuzzy Search/Match recurs deterministically, so a plain re-run re-pauses on
- * the same false match (live 2026-08-20: Person 1500→Mia McKrell, Juliana
- * Romano→Julian Davey, Person 1396→Mariana Herrera).
+ * the same false match (live 2026-08-20: name:dbf5bad7f89e2e71→Mia McKrell, Juliana
+ * Romano→Julian Davey, name:a86b7a7db2195c6d→Mariana Herrera).
  */
 export function buildNotThisPersonHandler(dir: string) {
   return async (req: NotThisPersonRequest): Promise<EidApprovalResult> => {

@@ -301,7 +301,7 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
   // the typed-shape mirror of the deduped entry's `data` and `formatTrackerValue`
   // checks it first. Leaving the primary's typedData in place would mask the
   // per-run `data` we just substituted (e.g. showing "Not found" from
-  // 10002195's last run while the operator is viewing Langley's earlier
+  // id:89f8b837bef2baed's last run while the operator is viewing Langley's earlier
   // successful run).
   // FAIL LOUD: `resolveDetailEntry` returns `null` when the historical run
   // recorded no data — never fall back to the live entry here, that would

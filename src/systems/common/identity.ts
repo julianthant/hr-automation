@@ -22,7 +22,7 @@ import { errorMessage } from "../../utils/errors.js";
  * - `word-boundary` (default): `\bexpected\b` appears somewhere in the displayed
  *   text — for a header/blob where the id sits among other content (e.g. the
  *   New Kronos People `.empName` header "KentHodge, Michele L 10604376", or the
- *   Emergency Contact "Person ID 10877384 Person 905" row).
+ *   Emergency Contact "Person ID 10877384 name:01332c876518a793" row).
  * - `exact`: the displayed text, trimmed, EQUALS `expected` — for a single
  *   field's read-back value (e.g. the OnBase "UCPath ID" keyword input value).
  */

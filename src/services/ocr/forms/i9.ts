@@ -19,6 +19,7 @@
  * answer (the orchestrator's eid-lookup fan-out is suppressed by
  * `needsLookup` always returning null).
  */
+import { privateValue } from "../../../private-data.js";
 import { z } from "zod/v4";
 import { log } from "../../../utils/log.js";
 import {
@@ -107,7 +108,7 @@ export const I9OcrRecordSchema = z.object({
    * This is the field that stops a fabricated value: a scan too degraded to
    * read used to produce a confident-looking SSN/DOB anyway (live 2026-07-13,
    * page 51 — the paper is illegible and the model emitted `02/28/1972` +
-   * `000-00-0000`), which then searched UCPath and returned a false "not
+   * `ssn:f2354c2d63cc7a9a`), which then searched UCPath and returned a false "not
    * found". Now the value comes back null and the field is named here.
    */
   illegible: z.array(z.string()).default([]),
@@ -205,7 +206,8 @@ export type I9PreviewRecord = z.infer<typeof I9PreviewRecordSchema>;
 
 // ─── Prompt ─────────────────────────────────────────────────
 
-const I9_OCR_PROMPT = `You are an OCR system. Extract structured data from the attached PDF.
+function i9OcrPrompt(): string {
+  return `You are an OCR system. Extract structured data from the attached PDF.
 
 The PDF is a stack of scanned USCIS Form I-9 (Employment Eligibility Verification) documents. Classify each page as exactly one of:
 - "i9 section 1" — a Form I-9 page whose SECTION 1 (Employee Information and Attestation) is visible: it carries the employee's last name, first name, middle initial, date of birth, and U.S. Social Security Number.
@@ -219,8 +221,8 @@ OUTPUT SHAPE (CRITICAL — must be a FLAT JSON ARRAY at the top level):
 
 \`\`\`json
 [
-  { "formKind": "i9 section 1", "sourcePage": 1, "lastName": "Doe", "firstName": "Jane", "middleInitial": "A", "dateOfBirth": "04/01/1998", "ssn": "000-00-0000", "hireDate": null, "documentType": "expected", "originallyMissing": [], "illegible": [], "notes": [] },
-  { "formKind": "i9 section 2", "sourcePage": 2, "lastName": "Doe", "firstName": "Jane", "middleInitial": "A", "dateOfBirth": null, "ssn": "000-00-0000", "hireDate": "04/17/2018", "documentType": "expected", "originallyMissing": [], "illegible": [], "notes": [] },
+  { "formKind": "i9 section 1", "sourcePage": 1, "lastName": "Doe", "firstName": "Jane", "middleInitial": "A", "dateOfBirth": "04/01/1998", "ssn": "${privateValue("ssn:01a54629efb95228")}", "hireDate": null, "documentType": "expected", "originallyMissing": [], "illegible": [], "notes": [] },
+  { "formKind": "i9 section 2", "sourcePage": 2, "lastName": "Doe", "firstName": "Jane", "middleInitial": "A", "dateOfBirth": null, "ssn": "${privateValue("ssn:01a54629efb95228")}", "hireDate": "04/17/2018", "documentType": "expected", "originallyMissing": [], "illegible": [], "notes": [] },
   { "formKind": "unknown", "sourcePage": 3, "lastName": null, "firstName": null, "middleInitial": null, "dateOfBirth": null, "ssn": null, "hireDate": null, "documentType": "unknown", "originallyMissing": [], "illegible": [], "notes": [] }
 ]
 \`\`\`
@@ -259,6 +261,7 @@ For EVERY record:
 - notes: free-form observations, or [].
 
 Output ONLY the valid JSON array. No commentary, no markdown fences, no wrapper object.`;
+}
 
 // ─── Pure helpers (exported, unit-tested) ───────────────────
 
@@ -304,7 +307,7 @@ export function normalizeI9Dob(v: unknown): string | null {
 /**
  * Display name ("Last, First M") from the Section 1 name fields, normalized to
  * the standard title-cased display convention via `displayPersonName` — I-9s
- * are frequently hand-printed ALL-CAPS ("Person 2080" → "Person 2080"), and
+ * are frequently hand-printed ALL-CAPS ("name:18f37248e6218d8c" → "name:153632e983eae72a"), and
  * this name rides everywhere: the review pane, the member row title, and the
  * retention-tracker spreadsheet. Comparison paths are unaffected (they all
  * lowercase via `normalizePersonNameForCompare` / `nameTokens`).
@@ -366,7 +369,7 @@ function tokenSimilarity(a: string, b: string): number {
  * still separating two DIFFERENT people who happen to share a token.
  *
  * That last part is why a boolean "share any token" test is not enough:
- * `Person 1611` and `Person 1612` both contain "nien", so the first
+ * `name:ac86ab60949bf81a` and `name:74e3ab11f18adfaf` both contain "nien", so the first
  * one scanned would claim the other's sheet (live 2026-07-16 — Weng's Section 1
  * was paired to Tsai's sheet, producing a phantom last-name dispute, while
  * Weng's real sheet on page 50 was reported as an orphan). A SCORE lets the
@@ -792,7 +795,9 @@ export const i9OcrFormSpec: OcrFormSpec<I9OcrRecord, I9PreviewRecord> = {
   description:
     "Scanned Form I-9 packets. Reads each person's Section 1 + Section 2 pages, matches the Action History roster by name, then fans out one separations i9-check task per person to search UCPath and fill the retention tracker. Read-only — no UCPath writes.",
 
-  prompt: I9_OCR_PROMPT,
+  get prompt(): string {
+    return i9OcrPrompt();
+  },
   ocrRecordSchema: I9OcrRecordSchema,
   ocrArraySchema: I9OcrOutputSchema,
   schemaName: "i9-batch",

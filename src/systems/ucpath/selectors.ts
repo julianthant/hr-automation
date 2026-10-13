@@ -102,7 +102,7 @@ export const smartHR = {
    * "Enter Transaction Details" page (EID-bearing templates — UC_CONC_HIRE,
    * UC_VOL_TERM, …): the person NAME PeopleSoft resolves next to the Empl ID
    * field once an EID is entered. Load-bearing wrong-person guard — a bogus
-   * EID resolves to SOME real person (10000910 → a different employee), so
+   * EID resolves to SOME real person (id:dfa73f9264a72c07 → a different employee), so
    * the caller must compare this against the expected name before Continue.
    * verified 2026-08-21 (live probe; id `PERSON_NAME_NAME_DISPLAY`)
    * @tags empl, id, name, readback, transaction-details, smart-hr
@@ -207,7 +207,7 @@ export const smartHR = {
    * "Select an Action" page heading — Save and Submit can land here when the
    * person already has one or more inactive Employee Instances and UCPath
    * requires an explicit hire-action choice before filing. Live 2026-09-17
-   * (Person 1102 concurrent hire: warning "inactive Employee Instances",
+   * (name:106e089081795808 concurrent hire: warning "inactive Employee Instances",
    * Hire option already selected, Save and Submit again to proceed). Without
    * this signal the submit poll timed out blind.
    * verified 2026-09-17
@@ -742,7 +742,7 @@ export const jobSummary = {
    * matching row. The Fluid row itself drills in via `onclick`; some live
    * renderings also include a nested "Drill in" anchor. `.first()` keeps that
    * valid overlap strict-mode safe while preserving the legacy anchor/EMPLID
-   * fallbacks. verified 2026-08-25 (EID 10001363, active STDT 4 row)
+   * fallbacks. verified 2026-08-25 (EID id:2f730725e6ff5a53, active STDT 4 row)
    * @tags multi-row, drill-in, select, row, fluid, job-summary
    */
   rowDrillInLink: (row: Locator): Locator =>
@@ -1100,7 +1100,7 @@ export const personOrgSummary = {
    * the header EID as `PERSON_NPC_VW_EMPLID` (no grid suffix); older
    * deployments / variant code paths also expose `PER_INST_EMP_VW_OPRID$0`
    * and `PER_INST_EMP_VW_EMPLID$0`. verified 2026-07-08 (live probe,
-   * EID 10001318 — primary arm matched)
+   * EID id:1621cce709266a29 — primary arm matched)
    * @tags person-id, emplid, detail, person-org-summary
    */
   personIdValue: (f: FrameLocator): Locator =>
@@ -1113,7 +1113,7 @@ export const personOrgSummary = {
   /**
    * Employee display name on the detail page header. Primary anchor is
    * `#PERSON_NAME_NAME` (the bold PABOLD11TEXT header span) — a live DOM
-   * probe of a real detail page (EID 10001318) found NO element for any
+   * probe of a real detail page (EID id:1621cce709266a29) found NO element for any
    * `PERSON_NPC_VW_*NAME*` variant while `#PERSON_NAME_NAME` held the name,
    * i.e. the old chain missed entirely and the body-scan heuristic in
    * person-org-summary.ts was silently carrying production. The NPC arms
@@ -1541,7 +1541,7 @@ export const ssSmartHRTransactions = {
 
   /**
    * Clear search criteria button. verified 2026-09-16
-   * (live leftover T001075636 after Person 780 Return to Search)
+   * (live leftover T001075636 after name:11e6f33fffe74fc2 Return to Search)
    * @tags clear, button, ss-smart-hr
    */
   clearButton: (f: FrameLocator): Locator =>
@@ -1550,7 +1550,7 @@ export const ssSmartHRTransactions = {
   /**
    * Result rows on the SS Smart HR Find-an-Existing-Value grid. Each row's
    * `onclick` drills into Transaction Details. verified 2026-09-16
-   * (live Person 780 grid after Return to Search)
+   * (live name:11e6f33fffe74fc2 grid after Return to Search)
    * @tags result, row, grid, ss-smart-hr
    */
   searchResultRows: (f: FrameLocator): Locator =>
@@ -1649,7 +1649,7 @@ export const ssSmartHRTransactions = {
    * `span#NAME$span$0` wrapper is deliberately NOT matched (an `[id^="NAME$"]`
    * probe returns both nodes per row) — the attribute selector avoids escaping
    * the `$` a CSS id selector would need.
-   * verified 2026-09-16 (live T002236430 → `a#NAME$0` = "Person 1728")
+   * verified 2026-09-16 (live T002236430 → `a#NAME$0` = "name:77130188dc6f12ca")
    * @tags transaction, detail, hire, name, grid, anchor, ss-smart-hr
    */
   transactionDetailHireNames: (root: Page | FrameLocator): Locator =>
@@ -1657,11 +1657,11 @@ export const ssSmartHRTransactions = {
 
   /**
    * Transaction DETAIL page — routing strip for one exact transaction, e.g.
-   * `Transaction: T002235451, ID: 10002345, Effdt: 2026-09-28, Unit: SDCMP`.
+   * `Transaction: T002235451, ID: id:bf5c81799e6f558c, Effdt: 2026-09-28, Unit: SDCMP`.
    * This is the authoritative assigned-EID read for Process EID. The anchored
    * text excludes the larger ancestor cell whose text starts with
    * "Transaction Details".
-   * verified 2026-09-16 (live Person 831 / T002235451)
+   * verified 2026-09-16 (live name:6168ff06af447daa / T002235451)
    * @tags transaction, eid, employee-id, routing, detail, ss-smart-hr
    */
   transactionDetailRoutingStrip: (
@@ -1928,7 +1928,7 @@ export const emergencyContact = {
   // View All mode and anchors every field to the PeopleSoft `RECORD_FIELD$row`
   // id, so a postback re-render can never silently retarget a write. Attribute
   // form (`[id="..."]`) is used because `#` CSS ids would need `$` escaping.
-  // All ids live-verified 2026-08-05 on EID 10002264.
+  // All ids live-verified 2026-08-05 on EID id:cab69bfce01aeff8.
 
   /**
    * "View All" toggle link on the contact scroll. Reads "View All" in paged
@@ -2078,8 +2078,8 @@ export const emergencyContact = {
    * Employee ID VALUE in the editor header ("Person ID <emplId>"). The `.or()`
    * arm is PeopleSoft's wrapper div around the same span; both were read live
    * and both return the bare EID. verified 2026-08-05 (live probe, EID
-   * 10002253 — span `#PERSON_NPC_VW_EMPLID` and div
-   * `#win0divPERSON_NPC_VW_EMPLID` each returned "10002253")
+   * id:508aeb1492e6b884 — span `#PERSON_NPC_VW_EMPLID` and div
+   * `#win0divPERSON_NPC_VW_EMPLID` each returned "id:508aeb1492e6b884")
    * @tags person, id, emplid, value, header, emergency-contact
    */
   personIdValue: (page: Page): Locator =>
@@ -2088,9 +2088,9 @@ export const emergencyContact = {
   /**
    * Employee NAME VALUE in the editor header. Note the record differs from the
    * EID's (`PERSON_NAME` vs `PERSON_NPC_VW`) — do not derive one id from the
-   * other. verified 2026-08-05 (live probe, EID 10002253 — span
+   * other. verified 2026-08-05 (live probe, EID id:508aeb1492e6b884 — span
    * `#PERSON_NAME_NAME` and div `#win0divPERSON_NAME_NAME` each returned
-   * "Person 1480"; `PERSON_NPC_VW_NAME` does NOT exist)
+   * "name:b4f1406fca69c25f"; `PERSON_NPC_VW_NAME` does NOT exist)
    * @tags person, name, value, header, emergency-contact
    */
   personNameValue: (page: Page): Locator =>
@@ -2168,7 +2168,7 @@ export const oathSignature = {
    * old `getByRole("textbox", { name: "Oath Signature Date" })` matched
    * nothing — the editable `EFFDT` input is the real anchor (only the oath
    * row is in add-mode during this flow, so it's the sole editable EFFDT).
-   * Role selector kept as a rename-proof fallback. verified 2026-07-01 (EID 10001318)
+   * Role selector kept as a rename-proof fallback. verified 2026-07-01 (EID id:1621cce709266a29)
    * @tags oath, signature, date, textbox, person-profile, effdt
    */
   oathDateInput: (f: FrameLocator): Locator =>
@@ -2214,7 +2214,7 @@ export const oathSignature = {
    * is `span#PERSON_NAME_NAME_DISPLAY` (class `PABOLD11TEXT`); the previous
    * `UC_JPM_PRS_I_PERSON_NAME` / `PSXLATITEM_XLATLONGNAME` anchors matched
    * NOTHING, so the employee name was never recorded. Kept as trailing
-   * fallbacks. verified 2026-07-01 (EID 10001318 → "Person 1331")
+   * fallbacks. verified 2026-07-01 (EID id:1621cce709266a29 → "name:b932ada6df526d88")
    * @tags employee, name, display, person-profile
    */
   employeeNameDisplay: (f: FrameLocator): Locator =>
@@ -2231,7 +2231,7 @@ export const oathSignature = {
    * on the Add-New sub-form): before Add is clicked, only this display span
    * exists. Read on the skip-existing path so the tracker records the signature
    * date even when someone else entered the oath (dashboard showed "—" before).
-   * verified 2026-07-02 (EID 10002226 → "07/02/2026")
+   * verified 2026-07-02 (EID id:c361d9a7dcf0cafc → "07/02/2026")
    * @tags existing, oath, signature, date, display, person-profile, effdt
    */
   existingOathDate: (f: FrameLocator): Locator =>
@@ -2244,7 +2244,7 @@ export const oathSignature = {
    * loaded profile (probed live). Read by the pre-add identity gate
    * (`assertDisplayedIdentity`) to confirm the profile belongs to the searched
    * EID before add+save. Do NOT use `LASTUPDOPRID$…` (last-updated-by column —
-   * a different person's EID). verified 2026-07-08 (EID 10001318)
+   * a different person's EID). verified 2026-07-08 (EID id:1621cce709266a29)
    * @tags empl-id, display, person-profile, identity, gate
    */
   emplIdDisplay: (f: FrameLocator): Locator =>

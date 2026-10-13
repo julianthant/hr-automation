@@ -14,7 +14,7 @@ export function maskSsn(ssn: string | undefined | null): string {
  *    Security Number which is not having 900-999 in 1 to 3 Positions"
  *
  * That range is the ITIN space, and CRM also stores the all-9s placeholder
- * `000-00-0000` to mean "no SSN on file yet". Either way the value cannot be
+ * `ssn:1438887c12c566c8` to mean "no SSN on file yet". Either way the value cannot be
  * entered into the Smart HR National ID field: the error opens a BLOCKING modal
  * that swallows every later click, so the transaction dies ~25s later at an
  * unrelated step (live 2026-08-18: the Job Data tab never rendered and the

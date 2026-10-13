@@ -20,6 +20,7 @@
  *   playwright-cli -s=i9 open "http://localhost:3944/?wf=ocr&id=i9-fixture"
  *   (open the Preview tab — available whenever `data.mode === "prepare"`.)
  */
+import { privateValue } from "../src/private-data.js";
 import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { buildTraceId } from "../src/domain/queue-trace-id.js";
@@ -44,11 +45,11 @@ function makeRecord(overrides: Partial<I9PreviewRecord>): I9PreviewRecord {
     firstName: "Jane",
     middleInitial: "A",
     dateOfBirth: "04/01/1998",
-    ssn: "000-00-0000",
+    ssn: privateValue("ssn:01a54629efb95228"),
     documentType: "expected",
     originallyMissing: [],
     notes: [],
-    name: "Person 905 A",
+    name: privateValue("name:17a6fb0c3906628f") + " A",
     matchState: "resolved",
     selected: true,
     warnings: [],
@@ -63,7 +64,7 @@ const found = makeRecord({ sourcePage: 1, personMatchStatus: "completed" });
 applyPersonMatchToI9Record(found, {
   found: "true",
   matchedEmplId: "10874100",
-  matchedName: "Person 905",
+  matchedName: privateValue("name:01332c876518a793"),
 });
 found.checks = buildI9Checks(found);
 
@@ -74,7 +75,7 @@ const notFound = makeRecord({
   middleInitial: null,
   name: "Roe, Sam",
   dateOfBirth: "09/12/2001",
-  ssn: "000-00-0000",
+  ssn: privateValue("ssn:ecdbc061a36dd649"),
   personMatchStatus: "completed",
 });
 applyPersonMatchToI9Record(notFound, { found: "false" });

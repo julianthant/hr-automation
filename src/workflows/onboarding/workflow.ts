@@ -145,7 +145,7 @@ export const onboardingWorkflow = defineWorkflow({
   // Matches pre-subsystem-D WF_CONFIG["onboarding"].detailFields. Dept/Position/
   // Wage/I9-profile are populated after extraction; email is populated from the
   // input schema. firstName+lastName drive getName so the dashboard shows
-  // "Person 905" instead of the raw email.
+  // "name:01332c876518a793" instead of the raw email.
   detailFields: [
     { key: "email", label: "Email" },
     { key: "departmentNumber", label: "Dept #" },
@@ -208,7 +208,7 @@ export const onboardingWorkflow = defineWorkflow({
     // reviewed and rejected proceeds as a NEW hire instead of re-pausing
     // (Search/Match keys on DOB with fuzzy first names and ignores the surname,
     // so the same false match recurs on every plain re-run — 2026-08-20: Mia
-    // Perez→Mia McKrell, Person 1089→Julian Davey, Person 1396→Mariana
+    // Perez→Mia McKrell, name:caddd6c4c4d199ca→Julian Davey, name:a86b7a7db2195c6d→Mariana
     // Herrera); (2) the submit-time "Person Match Found" page — a candidate the
     // operator reviewed is excluded alongside hard-identifier mismatches (see
     // `decidePersonMatchContinue`). An EID NOT in the list never gets a pass.
@@ -374,7 +374,7 @@ export const onboardingWorkflow = defineWorkflow({
     // Folder names use the onboarding-roster Legal vs Lived columns — the same
     // mapping as crm-doc-download (`folderSubjectFromLegalLived`). CRM First
     // Name is often the lived name, so naming from extraction produced
-    // `Person 450 EID` instead of `Person 686 (Cici) EID`.
+    // `name:4292eda6c774857e EID` instead of `name:ad568a5c6559e385 (Cici) EID`.
 
     let rosterPerson: Awaited<ReturnType<typeof resolveOnboardingRosterPerson>> | null = null;
     const getRosterPerson = async () => {

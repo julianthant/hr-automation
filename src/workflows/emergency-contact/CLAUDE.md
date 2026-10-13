@@ -59,7 +59,7 @@ Optional but recommended before enqueuing. Two standalone scripts handle ad-hoc 
 
 `verifyBatchAgainstRoster` checks:
 - Finds `Employee ID` column and `Name` column (or `First Name` + `Last Name`) in row 1 headers
-- For each batch record: checks EID exists + name words intersect (case-insensitive, tolerates "Person 905" vs "Person 905")
+- For each batch record: checks EID exists + name words intersect (case-insensitive, tolerates "name:17a6fb0c3906628f" vs "name:01332c876518a793")
 
 Roster checks also run in the dashboard OCR approval path before records are enqueued.
 

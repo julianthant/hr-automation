@@ -127,7 +127,7 @@ export function resolveSearchPresence(
  * WFD shows that sentinel as the panel's resting/empty state BEFORE the search
  * round-trip completes, so a single-poll "sentinel visible + no result yet" is
  * NOT a verdict — it is the pre-search state. Live 2026-08-21 (separations doc
- * 4546, EID 10001903 "Person 1563", HDH): NOT FOUND was resolved ~200ms after
+ * 4546, EID id:ea6e83d95fe7d057 "name:eaaf7afd54541baa", HDH): NOT FOUND was resolved ~200ms after
  * the Search click, the timecard was never opened, and the Kuali Last Day
  * Worked (08/08/2026) was used instead of the real last punch (08/16/2026) — a
  * wrong-dated termination was filed. Two seconds comfortably outlasts the
@@ -378,7 +378,7 @@ export async function selectEmployeeResult(page: Page): Promise<boolean> {
   // The checkbox renders ASYNCHRONOUSLY after the search returns, so POLL for it
   // rather than probing `count()` once — a single probe raced the render and, on
   // a miss, fell straight through to the row-click fallback below (2026-07-31,
-  // live: EID 10002056 logged "Employee row clicked", Go To stayed disabled, and
+  // live: EID id:dbb033be454bc584 logged "Employee row clicked", Go To stayed disabled, and
   // the whole timecard read was lost). Same class as the 2026-06-24 Go To
   // dropdown race: condition-based waiting, not a one-shot check.
   const contexts: SearchRoot[] = [searchFrame(page), page];
@@ -585,10 +585,10 @@ export async function clickGoToTimecard(page: Page, eid: string): Promise<boolea
 /**
  * Confirm the OPEN timecard belongs to the searched employee.
  *
- * The WFD timecard header shows the selected employee's EID (e.g. "10001853"
+ * The WFD timecard header shows the selected employee's EID (e.g. "id:977c722166570ccb"
  * next to the name dropdown). When Go To → Timecard doesn't actually switch
  * employees, the PREVIOUS employee's timecard stays on screen — the live bug
- * where a search for 10603110 (Lua-Sandoval) left Yang / 10001853 displayed
+ * where a search for 10603110 (Lua-Sandoval) left Yang / id:977c722166570ccb displayed
  * (2026-06-24). Reading that stale grid would attribute the wrong person's
  * punches/sick/holiday to this separation.
  *

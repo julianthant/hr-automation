@@ -1,3 +1,4 @@
+import { privateValue } from "../../private-data.js";
 import { normalizeEid } from "../matching/index.js";
 import { log } from "../../utils/log.js";
 import { readGeminiKeys, callGeminiJsonText, parseJsonLoose } from "./env-keys.js";
@@ -22,7 +23,7 @@ ${input.recordJson}
 Return 2-3 plausible lookup candidates. Use name when the name is recoverable. Use emplId when an employee ID appears recoverable. Prefer high-precision guesses and do not invent unrelated people.
 
 Respond with ONLY JSON:
-{"suggestions":[{"name":"Possible Name","confidence":0.0},{"emplId":"10000910","confidence":0.0}]}
+{"suggestions":[{"name":"Possible Name","confidence":0.0},{"emplId":"${privateValue("id:dfa73f9264a72c07")}","confidence":0.0}]}
 
 If nothing is plausible, return {"suggestions":[]}.`;
 }

@@ -571,7 +571,7 @@
       "summary": "verifyTimecardEmployee polls timecard page text for the searched EID; THROWS when timecard shows a different employee (stale Go To left previous employee's timecard)",
       "inputVar": "{eid}",
       "sourceRef": "src/workflows/separations/steps/kronos-search.ts",
-      "note": "Live bug 2026-06-24: search 10603110 → Yang/10001853 still displayed. Throw is non-fatal in settled parallel block (logged + fallback to Kuali dates)"
+      "note": "Live bug 2026-06-24: search 10603110 → Yang/id:977c722166570ccb still displayed. Throw is non-fatal in settled parallel block (logged + fallback to Kuali dates)"
     },
     {
       "id": "new-kronos.timecardGrid.holidayDates#scrape",

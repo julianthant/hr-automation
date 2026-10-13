@@ -170,7 +170,7 @@ export const onboardingHistory = {
    * `Date | Created By | Field (ProcessStageText) | Old Value | New Value`.
    * The reader (`history.ts`) scopes to the 5-direct-cell rows and matches the
    * New Value column, so this locator can safely span the header/wrapper rows.
-   * verified 2026-07-02 (EID 10002223 / 10002226)
+   * verified 2026-07-02 (EID id:3422bc02e5ea8c7b / id:c361d9a7dcf0cafc)
    * @tags onboarding, history, rows, table, detaillist, crm
    */
   historyRows: (page: Page): Locator => page.locator("table.detailList tr"),

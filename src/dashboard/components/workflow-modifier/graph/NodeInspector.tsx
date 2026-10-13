@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../private-data.js";
 import type { JSX } from "react";
 import {
   ArrowDownToLine,
@@ -982,7 +983,7 @@ function CustomIntentFields({
           value={exampleText}
           aria-label="Example data"
           rows={3}
-          placeholder={"name=Person 905\neid=10012345"}
+          placeholder={"name=" + privateValue("name:01332c876518a793") + "\neid=10012345"}
           onChange={(e) => {
             const out: Record<string, string> = {};
             for (const line of e.target.value.split("\n")) {

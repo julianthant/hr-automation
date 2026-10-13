@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../private-data.js";
 import type { Hono } from "hono";
 
 import { getAll, getByName } from "../../../../core/kernel/registry.js";
@@ -13,9 +14,9 @@ import { jsonResponse } from "../responses.js";
 /** A representative person-kind row used to render a preview title/subtitle. */
 const SAMPLE_DATA: Record<string, string> = {
   queueRowKind: "person",
-  name: "Person 905",
+  name: privateValue("name:01332c876518a793"),
   emplId: "10012345",
-  email: "person@example.edu",
+  email: privateValue("ucsd:9e895cc9310c8df0"),
   pdfOriginalName: "oath-of-allegiance.pdf",
   label: "Onboarding Roster",
   __traceId: "ob-143012-a3f1",

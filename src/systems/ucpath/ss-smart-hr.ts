@@ -272,12 +272,12 @@ export function decideHireDuplicateSkip(
 
 /**
  * Build the PeopleSoft "Name" search key for the SS Smart HR Transactions
- * search page: the DISPLAY name, `First Last` (e.g. `Person 89`).
+ * search page: the DISPLAY name, `First Last` (e.g. `name:8096aac1c5592ba3`).
  *
- * LIVE-VERIFIED 2026-08-20: `Person 89` → 1 of 1 (auto-opened its detail
- * page, T002214646 Approved); `Person 780` → 1-2 of 2 (grid: T002216675 HIR
- * **Pending** + an older TER for a different Person 780); `Person 1288` /
- * `Person 892` → 1 of 1. Every `Last,First` / `LAST,FIRST` / `Last`-only
+ * LIVE-VERIFIED 2026-08-20: `name:8096aac1c5592ba3` → 1 of 1 (auto-opened its detail
+ * page, T002214646 Approved); `name:11e6f33fffe74fc2` → 1-2 of 2 (grid: T002216675 HIR
+ * **Pending** + an older TER for a different name:11e6f33fffe74fc2); `name:81f3956c01ccd7bd` /
+ * `name:f0bc55a2e05e6d27` → 1 of 1. Every `Last,First` / `LAST,FIRST` / `Last`-only
  * variant returned "No matching values were found" — so from 2026-07-01 to
  * 2026-08-20 the hire probe ALWAYS fell open (never found anything) and the
  * "SS Smart HR cannot see an unprocessed hire" belief was an artefact of the
@@ -423,7 +423,7 @@ async function returnToSsSmartHrSearchForm(page: Page): Promise<void> {
 
 /**
  * Auto-opened Transaction Details + Return to Search restores the opened
- * record's Transaction ID (live Person 780 T001075636, 2026-09-16), not the
+ * record's Transaction ID (live name:11e6f33fffe74fc2 T001075636, 2026-09-16), not the
  * Name that was searched. Filling the next person's Name on top of that
  * leftover T-id AND-filters the search. Clear before every reused lookup.
  */
@@ -682,8 +682,8 @@ export async function findTerminationTransactionStatus(
 /**
  * What the SS Smart HR Name search landed on. PeopleSoft's Find-an-Existing-Value
  * opens the single match's Transaction Details page DIRECTLY (no grid) when
- * exactly one row matches — live 2026-08-20: `Person 89` / `Person 1288` /
- * `Person 892` each auto-opened their detail page, `Person 780` (2 matches)
+ * exactly one row matches — live 2026-08-20: `name:8096aac1c5592ba3` / `name:81f3956c01ccd7bd` /
+ * `name:f0bc55a2e05e6d27` each auto-opened their detail page, `name:11e6f33fffe74fc2` (2 matches)
  * rendered the results grid. The detail page carries the Transaction ID and
  * Approval Status spans plus the routing strip's `Effdt: YYYY-MM-DD`, and its
  * "Hire Details" grid shows the action (`HIR`).

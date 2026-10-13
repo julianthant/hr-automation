@@ -98,9 +98,9 @@ flowchart TD
 
   G -.->|"D81: every count reads<br/>this one projection"| H
 
-  classDef spine stroke:#2980b9,stroke-width:2px,fill:#10000000;
-  classDef tail stroke:#7f8c8d,stroke-dasharray:4 3,fill:#10000000;
-  classDef gate stroke:#27ae60,stroke-width:2px,fill:#10000000;
+  classDef spine stroke:#2980b9,stroke-width:2px,fill:#id:7e071fd9b023ed8f;
+  classDef tail stroke:#7f8c8d,stroke-dasharray:4 3,fill:#id:7e071fd9b023ed8f;
+  classDef gate stroke:#27ae60,stroke-width:2px,fill:#id:7e071fd9b023ed8f;
   class A,B,C,D,E,F,G,H spine;
   class T1,T2,T3,T4 tail;
   class EXIT,TX gate;

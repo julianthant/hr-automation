@@ -23,6 +23,7 @@
  *    would consume the value.
  */
 
+import { privateValue } from "../../../../private-data.js";
 import { agoSeconds, at, DEMO_NOW_MS, DEMO_OPERATOR, fmtElapsed, plusSeconds, secondsSince } from "./demo-wire";
 import type { DemoDataPoint, DemoRow } from "./demo-data";
 import { effectiveStatus } from "./demo-data";
@@ -298,7 +299,7 @@ export const SEARCH_EXAMPLES: { label: string; query: string; note: string }[] =
   { label: "onbase", query: "onbase", note: "a workflow, across days" },
   { label: "TXN-0884019", query: "TXN-0884019", note: "a confirmation number" },
   { label: "zzz", query: "zzz", note: "zero hits — a real answer" },
-  { label: "person@example.edu", query: "person@example.edu", note: "an email — the lookup itself fails" },
+  { label: privateValue("ucsd:b406c8717726d833"), query: privateValue("ucsd:b406c8717726d833"), note: "an email — the lookup itself fails" },
 ];
 
 interface SearchField {

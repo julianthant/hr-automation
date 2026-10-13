@@ -38,7 +38,7 @@ Running the `/e2e-test` skill (scope **A**: full stub matrix THEN live lanes) ag
 - [x] Phase 6 — Resilience: reload rehydration, counts triangle (oath-sig rail 4≡4), row-lifecycle 625 rows/0 stuck-retry, 0 invalid-line spam
 - [ ] **Solo fixes in a subagent — USR-001 (delegated-runs log-panel tab) + USR-002 (daemon_phase log spam)** ← resume here
 - [ ] Update `e2e-test/SKILL.md` with the 5 standing rules above
-- [ ] Live lane A — Onboarding dry-run (email `person347@example.com`, Dry run ON, 8 steps, NO Smart-HR submit). Duo auto.
+- [ ] Live lane A — Onboarding dry-run (email `email:4c81ba1de69a6e48`, Dry run ON, 8 steps, NO Smart-HR submit). Duo auto.
 - [ ] Live lane B — **Separations 8-worker dry-run** (doc ids `4131,4130,4129,4128,4127,4126,4125,4124,3917`, parallelWorkers=8, Dry run ON). Verify: all 8 daemons spawn + run in parallel; **separation date correct**; Kronos date flow + right data scraped; NO UCPath submit + NO Kuali finalization; regression guards (auth/idle-refresh, modal-mask, short-EID delegation, worker-utilization bucket, Kuali 3-slice / Kronos viewport audit screenshots). Duo auto.
 - [ ] Phase 7 — Verifier subagents (queue/preview/sessions/logs + dataflow auditor) over all evidence
 - [ ] Phase 8 — Fix all 7 findings (USR-001…004 + OBS-002/003; OBS-001 is doc-only) each with a `/test-writer` red→green regression pin + before/after; review-code; ui-ux-pro-max for USR-001; docs LAST
@@ -46,9 +46,9 @@ Running the `/e2e-test` skill (scope **A**: full stub matrix THEN live lanes) ag
 
 ## Findings ledger (`generated/.e2e/runs/20260618-0243/issues.jsonl`)
 
-- **USR-004 (HIGH)** — same `single-oath.pdf` → different EIDs across runs (correct `10000910`=Barahona Martell vs off-roster `19803556` from a "Barbara" misread). Roster-REQUIRED oath accepted an OFF-ROSTER person-lookup EID for a Gemini name-misread. Fix dir: roster-required forms must require a roster match (reject off-roster EID) and/or trigger second-opinion re-OCR on roster-MISS even when person-lookup returns an EID. **Wrong-person risk.**
+- **USR-004 (HIGH)** — same `single-oath.pdf` → different EIDs across runs (correct `id:dfa73f9264a72c07`=Barahona Martell vs off-roster `19803556` from a "Barbara" misread). Roster-REQUIRED oath accepted an OFF-ROSTER person-lookup EID for a Gemini name-misread. Fix dir: roster-required forms must require a roster match (reject off-roster EID) and/or trigger second-opinion re-OCR on roster-MISS even when person-lookup returns an EID. **Wrong-person risk.**
 - **USR-002 (med)** — `daemon_phase` events flood the per-run log stream (102 in session file vs 67 item_start). Drop from merged 'all'/Logs stream (like `step_change` in `LogStream.tsx mergeDisplayItems`) and/or cut emit cadence in `tracker/session-events`.
-- **USR-003 (med)** — names inconsistent: `RAMIREZ ROSAS, Juan, A.` all-caps vs `Person 1174` title-case. Normalize person display name at presentation (`src/domain/queue-row-presentation.ts`).
+- **USR-003 (med)** — names inconsistent: `RAMIREZ ROSAS, Juan, A.` all-caps vs `name:cf02bccea67f196d` title-case. Normalize person display name at presentation (`src/domain/queue-row-presentation.ts`).
 - **USR-001 (low/feature)** — add a "Delegated" tab/surface in the log panel beside Logs/Screenshots/Preview to view delegated runs with detail (move the "DELEGATED RUNS (N)" section there). `LogStream.tsx`.
 - **OBS-002 (med)** — approve fan-out pending/started `operation-member` rows lack the composed `__traceId` (shows None/'' until... corroborated at session-event layer: Oath Signature 2/3 `item_start` traceId=''). Trace-rides-every-row contract gap on the fan-out pre-emit/start path.
 - **OBS-003 (med)** — operation-coordinator "Retry this run" retried a DONE member (r3) instead of the FAILED member (r0). Member-level retry works; coordinator-level mis-targets.
@@ -73,7 +73,7 @@ git status
 # Restart backend WITHOUT stubs, KEEP isolated tracker. Duo auto-approves (hands-off).
 # kill the stub dashboard first, then:
 HRAUTO_TRACKER_DIR="$(pwd)/generated/.e2e/tracker" npm run dashboard > generated/.e2e/runs/20260618-0243/dashboard-live.log 2>&1 &
-# Onboarding: rail Onboarding → InputRunPanel → email person347@example.com → gear → Dry run ON → Run
+# Onboarding: rail Onboarding → InputRunPanel → email email:4c81ba1de69a6e48 → gear → Dry run ON → Run
 # Separations: rail Separations → InputRunPanel → "4131, 4130, 4129, 4128, 4127, 4126, 4125, 4124, 3917" → gear → workers=8 + Dry run ON → Run
 ```
 

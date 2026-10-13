@@ -36,6 +36,7 @@
  *     it.
  */
 
+import { privateValue } from "../../../../private-data.js";
 import type { ProposedStatus } from "./demo-status";
 import type { DemoCommandResultState } from "./demo-commands";
 import {
@@ -220,7 +221,7 @@ const KIND_MATCH: Record<StartValueKind, (value: string) => boolean> = {
 const KIND_RULE: Record<StartValueKind, { code: EntryProblemCode; rule: string }> = {
   eid: { code: "not-an-eid", rule: "a UCPath EID is 8 digits" },
   docId: { code: "not-a-doc-id", rule: "a Kuali document ID is 3 to 6 digits" },
-  email: { code: "not-an-email", rule: "a campus email looks like person@example.edu" },
+  email: { code: "not-an-email", rule: "a campus email looks like " + privateValue("ucsd:74d5b83d60ed28be") },
   name: { code: "not-a-name", rule: "a name needs a first and a last part" },
   personMatch: {
     code: "not-a-name",
@@ -311,9 +312,9 @@ export const RESOLVED_SUBJECTS: Record<string, { name: string; eid: string }> = 
   "10601188": { name: "Priya Natarajan", eid: "10601188" },
   "3930": { name: "Dana Whitmore", eid: "10233470" },
   "3928": { name: "Nathan Cole", eid: "10233912" },
-  "person@example.edu": { name: "Maria Delgado", eid: "10084412" },
-  "person@example.edu": { name: "Rosa Iglesias", eid: "10091755" },
-  "person@example.edu": { name: "Samuel Ortiz", eid: "10517722" },
+  [privateValue("ucsd:b54bd62b932c6bbc")]: { name: "Maria Delgado", eid: "10084412" },
+  [privateValue("ucsd:fd0748f20091f770")]: { name: "Rosa Iglesias", eid: "10091755" },
+  [privateValue("ucsd:264d6100e98c4256")]: { name: "Samuel Ortiz", eid: "10517722" },
   "battistessa, johnnie": { name: "Johnnie Battistessa", eid: "10873698" },
 };
 

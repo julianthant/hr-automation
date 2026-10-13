@@ -275,7 +275,7 @@ Attempt N waits `backoffMs * (N-1)` ms before retrying (default 0, 1s, 2s). On e
 #### `ctx.updateData(patch)` — push fields into the dashboard row
 
 ```ts
-ctx.updateData({ emplId: "1234567", name: "Person 905", wage: "$25.00" });
+ctx.updateData({ emplId: "1234567", name: "name:01332c876518a793", wage: "$25.00" });
 ```
 
 This is what makes the dashboard's per-row detail grid populate. Every key you list in `detailFields` (on `defineWorkflow`) should be populated by at least one `ctx.updateData({ key: ... })` call — a runtime `log.warn` fires at workflow end if any declared field was never populated.
@@ -889,7 +889,7 @@ The fuzzy search is a pure in-repo scorer (no Fuse.js, no embeddings, no new dep
 
 ## 10. End-to-end: one input run, step by step
 
-Let's trace a dashboard input run for `person@example.edu` from `/api/enqueue` to completed transaction.
+Let's trace a dashboard input run for `ucsd:d584e8c08670091b` from `/api/enqueue` to completed transaction.
 
 ```mermaid
 sequenceDiagram
@@ -908,9 +908,9 @@ sequenceDiagram
     Q->>K: daemon claims item
     K->>K: runWorkflow(onboardingWorkflow, { email })
     K->>K: schema.parse({ email }) ✓
-    K->>K: itemId = "person@example.edu"
+    K->>K: itemId = "ucsd:d584e8c08670091b"
     K->>T: withLogContext + withTrackedWorkflow<br/>pending
-    T-->>D: row appears: "person@example.edu — pending"
+    T-->>D: row appears: "ucsd:d584e8c08670091b — pending"
     K->>SES: Session.launch([crm, ucpath, i9])
     SES->>SES: 3 browsers launch in parallel
     SES->>SES: CDP tile windows

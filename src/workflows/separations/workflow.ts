@@ -189,7 +189,7 @@ export type SeparationEidResolution =
  *
  *   1. Job Summary FOUND the EID but the detail-page name is VERY DIFFERENT from
  *      the Kuali name (`classifyNameSimilarity` → "different") → the EID may
- *      point at the wrong person (the valid-format-but-wrong Perez `10001497`
+ *      point at the wrong person (the valid-format-but-wrong Perez `id:5f40ed01d583a15c`
  *      case) → look the intended person up BY NAME.
  *   2. Job Summary did NOT find the EID AND the typed EID is short (< 8 digits,
  *      incomplete) → the operator mistyped/truncated it → resolve BY NAME.

@@ -102,7 +102,7 @@ async function readPersonNameFromDetail(frame: FrameLocator): Promise<string | n
   // "selector fallback triggered" anchor the dashboard Selector Health Panel
   // aggregates on, so a registry-selector miss is visible and drives a real
   // selector fix instead of quietly living behind this fallback forever.
-  // LIVE-VERIFIED 2026-07-08 (EID 10001318): the old NPC-id chain missed on
+  // LIVE-VERIFIED 2026-07-08 (EID id:1621cce709266a29): the old NPC-id chain missed on
   // the real detail page — the name lives at `#PERSON_NAME_NAME`, now the
   // registry selector's primary arm. With that fix the registry hits and
   // this heuristic is a genuine last-resort for unseen legacy renderings.

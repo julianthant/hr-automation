@@ -237,7 +237,7 @@ export function classifyPersonSearchSignal(
  * Bday + NID" / "Legal First Name + DOB"). A record with NEITHER a National ID
  * (SSN) NOR a Date of Birth satisfies none of them, so the Search button stays
  * DISABLED and any click just times out. Pure predicate so the "can we even
- * search?" gate is unit-pinned. (Live: person@example.edu — no SSN + no DOB → Search
+ * search?" gate is unit-pinned. (Live: ucsd:e0e0806f6b0cafbd — no SSN + no DOB → Search
  * greyed out; the click timed out 10s ×2 before this guard existed.)
  */
 export function personSearchCriteriaSufficient(ssn: string, dob: string): boolean {
@@ -352,7 +352,7 @@ export async function searchPerson(
   // person search needs an SSN or a DOB (see personSearchCriteriaSufficient); a
   // name-only record leaves the Search button DISABLED, so clicking it just
   // times out 10s ×2 and the run fails with an opaque "Timed out" error. Bail
-  // early with a message the operator can act on (live: person@example.edu).
+  // early with a message the operator can act on (live: ucsd:e0e0806f6b0cafbd).
   if (!personSearchCriteriaSufficient(ssn, dob)) {
     await debugScreenshot(page, "debug-ps-insufficient-criteria", { fullPage: true });
     throw new Error(

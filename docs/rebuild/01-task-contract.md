@@ -457,7 +457,7 @@ export interface TaskCtxCommon<Codes extends readonly string[]> {
    * and the offending value:
    *   ctx.fail("eid-not-found", `no Person Org row for EID ${input.emplId}`,
    *            { subject: input.emplId })
-   * → "[ucpath/search-person-org] eid-not-found: no Person Org row for EID 10001497"
+   * → "[ucpath/search-person-org] eid-not-found: no Person Org row for EID id:5f40ed01d583a15c"
    */
   fail(code: Codes[number], message: string,
        opts?: { subject?: string; transient?: boolean; cause?: unknown }): never;

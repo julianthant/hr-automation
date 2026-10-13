@@ -12,7 +12,7 @@
 // the sidecar and the produced .xlsx stay LOCAL; only this generator is
 // committed. Sidecar shape:
 //
-//   [{ "eid": "10000910", "name": "Person 905",
+//   [{ "eid": "id:dfa73f9264a72c07", "name": "name:17a6fb0c3906628f",
 //      "street": "123 E2E Way", "city": "San Diego", "state": "CA", "zip": "92093" }, …]
 //
 // Identities must match the names the OCR pass extracts from the three fixture

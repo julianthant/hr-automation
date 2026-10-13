@@ -383,7 +383,7 @@
           "label": "Fill SSN with dashes in I9 search",
           "selectorFqn": "i9.search.ssnInput",
           "inputVar": "{ssn}",
-          "note": "SSN must include dashes (format: 000-00-0000) for I9 search, unlike UCPath person search which uses 9 digits no dashes"
+          "note": "SSN must include dashes (format: ssn:01a54629efb95228) for I9 search, unlike UCPath person search which uses 9 digits no dashes"
         },
         {
           "id": "i9.search.submitButton#click",
@@ -876,7 +876,7 @@
     "Rehire short-circuit: if person-search finds an existing UCPath record (searchResult.found=true), the handler stamps rehire:Yes + existingEmplIds and returns before i9-creation and transaction steps.",
     "Pool/batch mode: archetype='batch', batch.mode='pool', poolSize=4. Each worker claims one email at a time from the shared SQLite tasks queue. The handler runs per-email with 3 browsers (CRM, UCPath, I9) and 2 Duo MFA challenges per worker (I9 SSO has no Duo).",
     "PDF download (pdf-download step) is non-fatal: failure is caught, logged, and stamped as pdfDownload:'Failed:...' without interrupting UCPath/I9 phases.",
-    "SSN format inconsistency across systems: UCPath person-search and UCPath personalData.nationalId both expect 9 digits no dashes; I9 search expects dashes (000-00-0000); I9 profile create also expects 9 digits no dashes.",
+    "SSN format inconsistency across systems: UCPath person-search and UCPath personalData.nationalId both expect 9 digits no dashes; I9 search expects dashes (ssn:01a54629efb95228); I9 profile create also expects 9 digits no dashes.",
     "Retry idempotency gap: the transaction step's Smart HR submit has no duplicate-guard probe (unlike separations' findExistingTerminationTransaction). Operators retrying onboarding must manually confirm no pending hire exists in UCPath before clicking Retry."
   ]
 }

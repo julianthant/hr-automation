@@ -28,7 +28,7 @@ Example intents for `npm run selector:search`: [`common-intents.txt`](./common-i
 ## SSN Format Inconsistency
 
 - **Create** (`I9EmployeeInput.ssn`): 9 digits, NO dashes — `"123456789"`
-- **Search** (`I9SearchCriteria.ssn`): WITH dashes — `"000-00-0000"`
+- **Search** (`I9SearchCriteria.ssn`): WITH dashes — `"ssn:01a54629efb95228"`
 
 ## Gotchas
 

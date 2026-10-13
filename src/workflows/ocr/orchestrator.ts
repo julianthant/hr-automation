@@ -181,7 +181,7 @@ function isEcSecondOpinionSuspect(rec: unknown): boolean {
   };
   if (r.formKind !== "emergency-contact") return false;
 
-  // Form EID present but absent from roster — often a transposed digit (10843962 vs 10002230).
+  // Form EID present but absent from roster — often a transposed digit (10843962 vs id:bcd23a9c2a43b1d6).
   if (
     r.matchState === "lookup-pending" &&
     r.matchSource === "form" &&

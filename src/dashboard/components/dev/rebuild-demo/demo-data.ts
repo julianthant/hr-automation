@@ -15,6 +15,7 @@
  * would have computed.
  */
 
+import { privateValue } from "../../../../private-data.js";
 import { PROPOSED_STATUS, type ProposedStatus } from "./demo-status";
 import {
   agoSeconds,
@@ -1302,15 +1303,15 @@ const cdSamuel: DemoRowSpec = {
         status: "failed",
         startedAt: at("13:12:02"),
         endedAt: at("13:12:50"),
-        summary: "CRM search returned 0 records for person@example.edu",
+        summary: "CRM search returned 0 records for " + privateValue("ucsd:264d6100e98c4256"),
       },
     ],
     diff: [
       {
         kind: "input",
         label: "Email searched",
-        prior: "person@example.edu",
-        current: "person@example.edu",
+        prior: privateValue("ucsd:264d6100e98c4256"),
+        current: privateValue("ucsd:264d6100e98c4256"),
         note: "unchanged — attempt 2 replayed the same input, which is why it failed differently rather than better",
       },
       {
@@ -1331,19 +1332,19 @@ const cdSamuel: DemoRowSpec = {
   },
   failShots: 3,
   facts: [
-    { label: "query", value: "person@example.edu" },
+    { label: "query", value: privateValue("ucsd:264d6100e98c4256") },
     { label: "results", value: "0 records", warn: true },
   ],
-  error: "CRM search returned no record for person@example.edu — download step never reached",
-  outcome: { tone: "destructive", text: "CRM search returned no record for person@example.edu" },
+  error: "CRM search returned no record for " + privateValue("ucsd:264d6100e98c4256") + " — download step never reached",
+  outcome: { tone: "destructive", text: "CRM search returned no record for " + privateValue("ucsd:264d6100e98c4256") },
   steps: [
     { label: "CRM auth", state: "done", system: "crm", durationSec: 19 },
-    { label: "Search record", state: "failed", system: "crm", durationSec: 29, attempts: 2, keyLines: ["no record for person@example.edu", "attempt 1 (12:58) timed out"] },
+    { label: "Search record", state: "failed", system: "crm", durationSec: 29, attempts: 2, keyLines: ["no record for " + privateValue("ucsd:264d6100e98c4256"), "attempt 1 (12:58) timed out"] },
     { label: "Download", state: "pending", system: "crm" },
     { label: "Archive", state: "pending" },
   ],
   lines: [
-    { ts: "1:12:21", kind: "search", system: "crm", text: "Searching onboarding records: person@example.edu", attempt: 2, step: "Search record" },
+    { ts: "1:12:21", kind: "search", system: "crm", text: "Searching onboarding records: " + privateValue("ucsd:264d6100e98c4256"), attempt: 2, step: "Search record" },
     { ts: "1:12:50", kind: "error", system: "crm", text: "0 results — no CRM record for this email", card: "failure", step: "Search record" },
   ],
   data: [],
@@ -1352,7 +1353,7 @@ const cdSamuel: DemoRowSpec = {
     headline: "No receipt — failed before any download",
     lines: [
       { label: "Failed at", value: "Search record · attempt 2" },
-      { label: "Error", value: "no CRM record for person@example.edu" },
+      { label: "Error", value: "no CRM record for " + privateValue("ucsd:264d6100e98c4256") },
       { label: "Prior attempt", value: "12:58 PM — timeout" },
     ],
     note: "Nothing was written anywhere. Check the email on the input roster — this address may be mistyped.",
@@ -1362,7 +1363,7 @@ const cdSamuel: DemoRowSpec = {
     { label: "CRM auth", kind: "step" },
     { label: "Query as typed", kind: "error" },
   ],
-  failCard: { title: "Run failed — no CRM record", meta: "Searched person@example.edu in onboarding records: 0 results. Likely a mistyped email on the roster." },
+  failCard: { title: "Run failed — no CRM record", meta: "Searched " + privateValue("ucsd:264d6100e98c4256") + " in onboarding records: 0 results. Likely a mistyped email on the roster." },
 };
 
 const wsPriya: DemoRowSpec = {
@@ -3960,7 +3961,7 @@ const thinCoverageRuns: DemoRowSpec[] = [
   compactRun({
     id: "cd-none",
     workflowId: "crm-doc-download",
-    title: "person@example.edu",
+    title: privateValue("ucsd:c9a88f523f4396bc"),
     runId4: "87a7",
     status: "verifiedDone",
     clock: "08:17:02",
@@ -3970,7 +3971,7 @@ const thinCoverageRuns: DemoRowSpec[] = [
     receipt: "Done · no record found",
     facts: [{ label: "result", value: "No CRM record" }],
   }),
-  compactRun({ id: "cd-failed", workflowId: "crm-doc-download", title: "person@example.edu", runId4: "88a8", status: "failed", clock: "08:18:02", step: "Download", system: "crm", outcome: "Document download failed · retry available", receipt: "Failed · no file archived", error: "CRM attachment stream ended before the PDF checksum could be verified." }),
+  compactRun({ id: "cd-failed", workflowId: "crm-doc-download", title: privateValue("ucsd:be6f8698d85e85f0"), runId4: "88a8", status: "failed", clock: "08:18:02", step: "Download", system: "crm", outcome: "Document download failed · retry available", receipt: "Failed · no file archived", error: "CRM attachment stream ended before the PDF checksum could be verified." }),
   compactRun({ id: "kr-cancelled", workflowId: "old-kronos-reports", title: "Cancelled report set", runId4: "89a9", status: "cancelled", clock: "08:19:02", step: "Report run", system: "kronos", outcome: "Cancelled while reports were still queued", receipt: "Cancelled · no archive written" }),
   compactRun({
     id: "kr-vnext",

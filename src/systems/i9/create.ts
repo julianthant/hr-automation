@@ -178,7 +178,7 @@ export async function createI9Employee(
     const duplicateDialog = profile.duplicateDialog(page);
 
     // Poll for a NAMED post-save outcome rather than two one-shot visibility
-    // checks (5 s OK + 2 s duplicate). Live 2026-08-20 (Person 1396):
+    // checks (5 s OK + 2 s duplicate). Live 2026-08-20 (name:a86b7a7db2195c6d):
     // the OK confirmation rendered late, the run reported "No confirmation
     // dialog found" and FAILED — yet the profile HAD been saved (the retry's SSN
     // search found it, 2209408). The save is a remote mutation; a late

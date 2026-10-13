@@ -5,6 +5,7 @@
  * Replaces the schemas + match phase that lived in `preview-schema.ts` +
  * `prepare.ts` (both deleted in Task 25 of this plan).
  */
+import { privateValue } from "../../../private-data.js";
 import { z } from "zod/v4";
 import { matchAgainstRoster } from "../../matching/index.js";
 import { log } from "../../../utils/log.js";
@@ -117,7 +118,8 @@ export type OathPreviewRecord = z.infer<typeof OathPreviewRecordSchema>;
 
 // ─── Prompt + match logic ───────────────────────────────────
 
-const OATH_OCR_PROMPT = `You are an OCR system. Extract structured data from the attached PDF page.
+function oathOcrPrompt(): string {
+  return `You are an OCR system. Extract structured data from the attached PDF page.
 
 The PDF is a stack of paper oath signature documents. BEFORE extracting fields, classify each page:
 - "oath"              — UC loyalty oath / patent acknowledgment (signin sheet, UPAY585, or UPAY586)
@@ -128,7 +130,7 @@ OUTPUT SHAPE (CRITICAL — must be a FLAT JSON ARRAY at the top level):
 
 \`\`\`json
 [
-  { "formKind": "oath", "rowIndex": 0, "printedName": "Person 905, A", "employeeId": "10000910", "dateSigned": "4-23-26", "employeeSigned": true, "officerSigned": true, "documentType": "expected", "originallyMissing": [] }
+  { "formKind": "oath", "rowIndex": 0, "printedName": "${privateValue("name:17a6fb0c3906628f")}, A", "employeeId": "${privateValue("id:dfa73f9264a72c07")}", "dateSigned": "4-23-26", "employeeSigned": true, "officerSigned": true, "documentType": "expected", "originallyMissing": [] }
 ]
 \`\`\`
 
@@ -146,6 +148,7 @@ For each record extract these fields:
 - originallyMissing: array of field names that were genuinely BLANK on the paper (not just hard to read). Use [] when nothing was missing.
 
 Output ONLY the valid JSON array. No commentary, no markdown fences, no wrapper object.`;
+}
 
 const NAME_AUTO_ACCEPT_GAP = 0.10;
 const NAME_DISAMBIG_FLOOR = 0.40;
@@ -163,7 +166,9 @@ export const oathOcrFormSpec: OcrFormSpec<
   label: "Oath signature",
   description: "Paper oath rosters / UPAY585 / UPAY586. Approves into the oath-signature daemon.",
 
-  prompt: OATH_OCR_PROMPT,
+  get prompt(): string {
+    return oathOcrPrompt();
+  },
   ocrRecordSchema: OathRosterOcrRecordSchema,
   ocrArraySchema: OathOcrOutputSchema,
   schemaName: "oath-roster-batch",

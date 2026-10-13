@@ -124,7 +124,7 @@ export function applyPersonLookupNameToOcrRecord(
 ): string | undefined {
   // Prefer a real resolved name. Falling back to searchName is fine for a
   // name-keyed lookup, but an EID-keyed verify passes the EID as searchName —
-  // stamping that into first/last/name is what put "10001701" in First Name.
+  // stamping that into first/last/name is what put "id:c575d6853c4675f4" in First Name.
   const resolvedName = nonEmpty(data?.resolvedName);
   const searchName = nonEmpty(data?.searchName);
   const nameSource =

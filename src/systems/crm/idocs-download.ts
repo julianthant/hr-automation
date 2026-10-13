@@ -117,8 +117,8 @@ export interface CrmIdocsViewerInfo {
  * "EID" is a literal trailing token.
  */
 export function buildCrmDocumentFolderName(subject: CrmDocumentDownloadSubject): string {
-  // CRM stores some records fully capitalised ("Person 89") and others in
-  // ordinary case ("Person 892"), so the raw values produce inconsistent
+  // CRM stores some records fully capitalised ("name:947cd5cdd5afc9fd") and others in
+  // ordinary case ("name:f0bc55a2e05e6d27"), so the raw values produce inconsistent
   // folder names. Title-case every name component so the output is uniform.
   const tc = (value: string): string =>
     value.trim().split(/\s+/).filter(Boolean).map(titleCasePersonToken).join(" ");
@@ -172,7 +172,7 @@ export function onboardingDateFolder(date: Date = new Date()): string {
 /**
  * Absolute path to the per-person onboarding folder:
  * `PATHS.onboardingDocsDir/<YYYY-MM-DD>/<Last, First Middle EID>`
- * (`data/onboarding/2026-08-20/Person 631 EID` by default).
+ * (`data/onboarding/2026-08-20/name:56b5e68ebf06edd5 EID` by default).
  *
  * Documents stay as a plain FOLDER of PDFs inside the day's folder — they are
  * no longer packed into a sibling `.zip` (operator decision 2026-08-20, which
@@ -372,7 +372,7 @@ function looksLikeHtml(body: Buffer): boolean {
  * decision 2026-08-20) and no longer calls this. Kept for callers that still
  * want an archive.
  *
- * The archive is named after the folder (`Person 89 Anwar EID.zip`) and
+ * The archive is named after the folder (`name:4def3e680f7b6f79 Anwar EID.zip`) and
  * stores the documents at the archive ROOT — unzipping yields the PDFs
  * directly, not a nested folder.
  *

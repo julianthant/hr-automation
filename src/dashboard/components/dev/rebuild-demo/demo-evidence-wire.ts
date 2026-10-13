@@ -33,6 +33,7 @@
  *     fabricated screenshot of a live system.
  */
 
+import { privateValue } from "../../../../private-data.js";
 import { DEMO_ROWS, type DemoRecord, type DemoRow, type SystemKey } from "./demo-data";
 import { effectiveStatus } from "./demo-data";
 import type { ProposedStatus } from "./demo-status";
@@ -763,7 +764,7 @@ const FAILURE_SPECS: Record<string, DemoFailureSpec> = {
     transient: false,
     occurredAt: at("13:12:50"),
     subject: {
-      expected: "person@example.edu — roster row 41",
+      expected: privateValue("ucsd:264d6100e98c4256") + " — roster row 41",
       observed: "no CRM record with that address (0 results, no near matches offered)",
       note: "The search itself succeeded. Zero results is a real answer, not a broken page — which is why this is permanent and not transient.",
     },

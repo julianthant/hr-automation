@@ -573,7 +573,7 @@
     "accessibleName": "Social Security Number",
     "verified": "2026-03-16",
     "tags": ["ssn", "social-security", "textbox", "search", "i9"],
-    "note": "Search uses dashes format (\"000-00-0000\"), unlike the profile form which uses 9 digits no dashes.",
+    "note": "Search uses dashes format (\"ssn:01a54629efb95228\"), unlike the profile form which uses 9 digits no dashes.",
     "sourceRef": "src/systems/i9/selectors.ts:262"
   },
   {

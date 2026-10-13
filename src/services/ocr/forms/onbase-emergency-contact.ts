@@ -51,6 +51,9 @@ export const onbaseEmergencyContactOcrFormSpec: OcrFormSpec<
   OnbaseInput
 > = {
   ...emergencyContactOcrFormSpec,
+  get prompt(): string {
+    return emergencyContactOcrFormSpec.prompt;
+  },
   formType: "onbase-emergency-contact",
   label: "OnBase Emergency Contact",
   description:

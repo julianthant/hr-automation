@@ -23,6 +23,7 @@
  *     surface needs is a field here first.
  */
 
+import { privateValue } from "../../../../private-data.js";
 import type { ProposedStatus } from "./demo-status";
 import type { DemoRow, DemoRowSpec } from "./demo-data";
 
@@ -1095,12 +1096,12 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
           label: "Campus emails",
           accepts: ["email"],
           separator: "comma",
-          placeholder: "person@example.edu, person@example.edu",
+          placeholder: privateValue("ucsd:b54bd62b932c6bbc") + ", " + privateValue("ucsd:fd0748f20091f770"),
           parserLabel: "Campus email addresses, comma-separated — the CRM record is found by email",
           note: "The hire's name comes from CRM, so the row is titled with the address until CRM resolves it.",
           examples: [
-            { key: "two", label: "Two hires", values: ["person@example.edu", "person@example.edu"], note: "titles stay as typed until CRM resolves them" },
-            { key: "bad", label: "With a bad address", values: ["person@example.edu", "riglesias@ucsd"], note: "a malformed address is refused per line" },
+            { key: "two", label: "Two hires", values: [privateValue("ucsd:b54bd62b932c6bbc"), privateValue("ucsd:fd0748f20091f770")], note: "titles stay as typed until CRM resolves them" },
+            { key: "bad", label: "With a bad address", values: [privateValue("ucsd:b54bd62b932c6bbc"), "riglesias@ucsd"], note: "a malformed address is refused per line" },
           ],
         },
       ],
@@ -1668,11 +1669,11 @@ export const DEMO_WORKFLOWS: Record<DemoWorkflowId, DemoWorkflowRef> = {
           label: "EIDs or emails",
           accepts: ["eid", "email"],
           separator: "comma",
-          placeholder: "10084412, person@example.edu",
+          placeholder: "10084412, " + privateValue("ucsd:264d6100e98c4256"),
           parserLabel: "EIDs or campus emails, comma-separated — each value is read on its own",
           note: "The same box takes both: all digits is an EID, anything with an @ is an email.",
           examples: [
-            { key: "mixed", label: "An EID and an email", values: ["10084412", "person@example.edu"], note: "per-token discrimination — nothing had to be typed twice" },
+            { key: "mixed", label: "An EID and an email", values: ["10084412", privateValue("ucsd:264d6100e98c4256")], note: "per-token discrimination — nothing had to be typed twice" },
           ],
         },
       ],

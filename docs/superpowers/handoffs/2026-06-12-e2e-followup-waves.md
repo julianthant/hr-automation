@@ -72,7 +72,7 @@ Other sessions' fix batch (verify live in Wave 1, don't reimplement):
   - **Merge with the older live checklist** in `docs/superpowers/handoffs/2026-06-11-remaining-backlog.md` (8 items: running-OCR cancel ~1s, enrichment-cancel cascade, second-opinion name self-correction, re-run paths after fanOutAndWatch rewrite, EC deferred auth + blank-EID not fannable, per-record lookup evidence, sleep-purge lanes, RunModal reopen/duplicate/render fixes) — one dashboard session covers both lists.
 - [ ] 3. **Probe the unledgered tail** during the same session (ledger each with evidence; fix one-liners on the spot):
   - T1 operation-row elapsed timer wrong ("0m 16s" on an 84-min-old row, oath-signature panel)
-  - T2 member title formatting inconsistent in batch-anchor previews ("Nguyen, Ricky, V (10001951)" vs "Person 1174" + separate EID)
+  - T2 member title formatting inconsistent in batch-anchor previews ("Nguyen, Ricky, V (id:caaf5ad86610f11f)" vs "name:cf02bccea67f196d" + separate EID)
   - T4 `[OcrReviewPane] oath-signature renderer received non-oath record` — verify-mixed pushes EC records through the oath renderer
   - T5 `detailField 'terminationDate' declared but never populated` kernel warn on person-lookup (declared-but-never-populated IS a finding per row-details lens)
   - T6 duplicate-PDF check never fired on identical re-uploads despite oath-upload declaring `duplicateCheck` — one deliberate dup probe (NOTE: backlog handoff says a multi-file duplicate banner was since added — verify it covers the same-file-again case)

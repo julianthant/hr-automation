@@ -97,9 +97,9 @@ export function resolveEntryName(
  *
  * Two paths to a match:
  *
- *   1. Name → EID: a name-based check (entry.id = "Person 1290") is
+ *   1. Name → EID: a name-based check (entry.id = "name:ae9356f8331b6e26") is
  *      cancelled, and an EID-based done/running check resolves to
- *      data.name = "Person 1290". coveredIds picks up the name; the
+ *      data.name = "name:ae9356f8331b6e26". coveredIds picks up the name; the
  *      cancelled entry's id is in there → suppress.
  *
  *   2. EID via history: the cancelled name-based entry's latest tracker row

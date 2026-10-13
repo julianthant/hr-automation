@@ -88,7 +88,7 @@ Continue button after reason code selection.
 
 ## `smartHR.transactionDetailsPersonName()` — verified 2026-08-21
 
-"Enter Transaction Details" page (EID-bearing templates — UC_CONC_HIRE, UC_VOL_TERM, …): the person NAME PeopleSoft resolves next to the Empl ID field once an EID is entered. Load-bearing wrong-person guard — a bogus EID resolves to SOME real person (10000910 → a different employee), so the caller must compare this against the expected name before Continue.
+"Enter Transaction Details" page (EID-bearing templates — UC_CONC_HIRE, UC_VOL_TERM, …): the person NAME PeopleSoft resolves next to the Empl ID field once an EID is entered. Load-bearing wrong-person guard — a bogus EID resolves to SOME real person (id:dfa73f9264a72c07 → a different employee), so the caller must compare this against the expected name before Continue.
 
 **Tags:** empl, id, name, readback, transaction-details, smart-hr
 
@@ -176,7 +176,7 @@ Error/alert region inside the transaction iframe.
 
 ## `smartHR.selectAnActionHeading()` — verified 2026-09-17
 
-"Select an Action" page heading — Save and Submit can land here when the person already has one or more inactive Employee Instances and UCPath requires an explicit hire-action choice before filing. Live 2026-09-17 (Person 1102 concurrent hire: warning "inactive Employee Instances", Hire option already selected, Save and Submit again to proceed). Without this signal the submit poll timed out blind.
+"Select an Action" page heading — Save and Submit can land here when the person already has one or more inactive Employee Instances and UCPath requires an explicit hire-action choice before filing. Live 2026-09-17 (name:106e089081795808 concurrent hire: warning "inactive Employee Instances", Hire option already selected, Save and Submit again to proceed). Without this signal the submit poll timed out blind.
 
 **Tags:** select-action, inactive-instance, heading, submit, smart-hr
 
@@ -928,7 +928,7 @@ Person ID value on the single-result detail page. PeopleSoft renders the header 
 
 ## `personOrgSummary.personNameValue()` — verified 2026-07-08
 
-Employee display name on the detail page header. Primary anchor is `#PERSON_NAME_NAME` (the bold PABOLD11TEXT header span) — a live DOM probe of a real detail page (EID 10001318) found NO element for any `PERSON_NPC_VW_*NAME*` variant while `#PERSON_NAME_NAME` held the name, i.e. the old chain missed entirely and the body-scan heuristic in person-org-summary.ts was silently carrying production. The NPC arms are kept only as legacy fallbacks for older renderings.
+Employee display name on the detail page header. Primary anchor is `#PERSON_NAME_NAME` (the bold PABOLD11TEXT header span) — a live DOM probe of a real detail page (EID id:1621cce709266a29) found NO element for any `PERSON_NPC_VW_*NAME*` variant while `#PERSON_NAME_NAME` held the name, i.e. the old chain missed entirely and the body-scan heuristic in person-org-summary.ts was silently carrying production. The NPC arms are kept only as legacy fallbacks for older renderings.
 
 **Tags:** name, display, header, detail, person-org-summary
 
@@ -1384,7 +1384,7 @@ Transaction DETAIL page — the Hire Details grid's Name anchor(s). This is the 
 
 ## `ssSmartHRTransactions.transactionDetailRoutingStrip()` — verified 2026-09-16
 
-Transaction DETAIL page — routing strip for one exact transaction, e.g. `Transaction: T002235451, ID: 10002345, Effdt: 2026-09-28, Unit: SDCMP`. This is the authoritative assigned-EID read for Process EID. The anchored text excludes the larger ancestor cell whose text starts with "Transaction Details".
+Transaction DETAIL page — routing strip for one exact transaction, e.g. `Transaction: T002235451, ID: id:bf5c81799e6f558c, Effdt: 2026-09-28, Unit: SDCMP`. This is the authoritative assigned-EID read for Process EID. The anchored text excludes the larger ancestor cell whose text starts with "Transaction Details".
 
 **Tags:** transaction, eid, employee-id, routing, detail, ss-smart-hr
 

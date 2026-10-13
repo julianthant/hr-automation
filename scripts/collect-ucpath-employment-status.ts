@@ -117,8 +117,8 @@ async function checkPerson(
     try {
       const match = await searchPerson(page, "", person.firstName, person.lastName, person.dob);
       // Search/Match's selective rules key on DOB with FUZZY first names and
-      // IGNORE the last name entirely (proven live 2026-08-06: "Person 355"
-      // → Cameron CLARK; "Person 1051" → Joshua ARCIA). A returned match only
+      // IGNORE the last name entirely (proven live 2026-08-06: "name:0400776a43051632"
+      // → Cameron CLARK; "name:139228d13df7b5ea" → Joshua ARCIA). A returned match only
       // counts when its surname actually matches the person we searched.
       const surname = person.lastName.trim().toLowerCase();
       searchMatchEmplIds = (match.matches ?? [])

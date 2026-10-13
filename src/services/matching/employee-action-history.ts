@@ -64,7 +64,7 @@ interface NameParts {
 /**
  * Split "Last, First Middle" (the shape BOTH the roster and the I-9 name line
  * use) into parts. A multi-word surname before the comma is preserved whole
- * ("Person 572" → last "torres perez").
+ * ("name:cdd7f5e8e8e5dc8c" → last "torres perez").
  *
  * Without a comma the last/first boundary is genuinely ambiguous, so we assume
  * the "Last First Middle" order our own fallback builder emits. Callers that

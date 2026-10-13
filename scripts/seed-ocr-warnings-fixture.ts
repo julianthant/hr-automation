@@ -21,6 +21,7 @@
  *   (click the "Preview" tab — the OCR row's Preview tab is available
  *   whenever `data.mode === "prepare"`, independent of `?id=`.)
  */
+import { privateValue } from "../src/private-data.js";
 import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { buildTraceId } from "../src/domain/queue-trace-id.js";
@@ -47,19 +48,19 @@ function oathRow(): void {
     formKind: "oath",
     sourcePage: 1,
     rowIndex: 0,
-    printedName: "Person 905",
+    printedName: privateValue("name:17a6fb0c3906628f"),
     firstName: "Jane",
     lastName: "Doe",
     employeeSigned: true,
     officerSigned: true,
     dateSigned: "07/01/2026",
     notes: [],
-    employeeId: "10000910",
+    employeeId: privateValue("id:dfa73f9264a72c07"),
     matchState: "lookup-pending",
     matchSource: "llm",
     matchConfidence: 0.4,
     selected: true,
-    warnings: ["LLM picked EID 10000910 but low confidence (0.40) — review"],
+    warnings: ["LLM picked EID " + privateValue("id:dfa73f9264a72c07") + " but low confidence (0.40) — review"],
   };
   const data: StampedData = {
     archetype: "preview",

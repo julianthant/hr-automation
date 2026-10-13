@@ -359,8 +359,8 @@ flowchart TD
   REC -->|"absent, but only after the<br/>propagation window + repeated<br/>consistent observations (D64/D69)"| RETRY["new intent generation<br/>eligible to retry"]
   REC -->|"single / early absence<br/>· ambiguous · unknown"| PARK
 
-  classDef bad fill:#10000000,stroke:#c0392b,stroke-width:1px;
-  classDef good fill:#10000000,stroke:#27ae60,stroke-width:1px;
+  classDef bad fill:#id:7e071fd9b023ed8f,stroke:#c0392b,stroke-width:1px;
+  classDef good fill:#id:7e071fd9b023ed8f,stroke:#27ae60,stroke-width:1px;
   class PARK,NOFENCE,DISCARD,REL bad;
   class DONE,AP good;
 ```
@@ -601,7 +601,7 @@ export interface LedgerEntry {
 code uses its inferred type. There is no unchecked cast from the generic canonical proof envelope.
 
 - **Location:** `.tracker-rebuild/ledger/<system>-<YYYY-MM-DD>.jsonl` (doc 03 §2.1). JSONL so the
-  operator greps it; per-system+day partition so `grep 10001497 .tracker-rebuild/ledger/ucpath-*.jsonl`
+  operator greps it; per-system+day partition so `grep id:5f40ed01d583a15c .tracker-rebuild/ledger/ucpath-*.jsonl`
   answers "what did we file for this person?" across time.
 - **Never pruned (retention floor):** rebuild cleanup (which prunes `spans/` and `notes/` at
   30d—D86) skips `ledger/` unconditionally—a ratchet guard fails
@@ -822,18 +822,18 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
 
 ## 12. Worked example — a separations termination, with a crash
 
-Input `{ emplId:"10001497", action:"termination", effectiveDate:"08/01/2026" }`, dry-run **off**,
+Input `{ emplId:"id:5f40ed01d583a15c", action:"termination", effectiveDate:"08/01/2026" }`, dry-run **off**,
 `instance:"prod"`. Composed nodes: cleanup transaction → termination transaction whose prepare arm
 is `ucpath/fill-termination`, commit arm is `ucpath/submit-termination`, and probe policy is always.
 
 **Happy path (seven beats):**
 ```
-bind stable commit input + key="10001497|termination|08/01/2026"
+bind stable commit input + key="id:5f40ed01d583a15c|termination|08/01/2026"
 ① durable lookup → unseen; separate read lease runs find-existing-termination →
    { state:"absent", evidence:{idempotencyKeyDigest,source,sourceState,observedAt,queryDigest,evidenceRef} }
    release read lease; record monotonic probe completion
 ② acquire exclusive transaction lease; fill-termination stages the form
-③ driver observes ucpath.smart-hr.subject-eid="10001497" on the staged page;
+③ driver observes ucpath.smart-hr.subject-eid="id:5f40ed01d583a15c" on the staged page;
    kernel matches expected EID and constructs WriteBindingProof{kind:"subject-match",leaseId,
      pageStateId,observedAt,digest}
 ④ probe/subject age < probeToFenceMaxMs; fence
@@ -845,7 +845,7 @@ bind stable commit input + key="10001497|termination|08/01/2026"
 ⑦ atomic DB commit: typed TransactionOutcome{disposition:"committed",proofSource:"normal-output"}
                         checkpoint + write_intents{status:"committed",
                            proof_json, output_json, binding_proof_json}
-         + ledger/span outboxes { system:"ucpath", idempotencyKey:"10001497|termination|08/01/2026",
+         + ledger/span outboxes { system:"ucpath", idempotencyKey:"id:5f40ed01d583a15c|termination|08/01/2026",
                            proof:{transactionNumber:"T002173999"}, operator, instance:"prod",
                            dryRun:false, proofSource:"normal-output", bindingProofDigest,
                            fencedAt, confirmedAt:clock.now() }
@@ -856,8 +856,8 @@ bind stable commit input + key="10001497|termination|08/01/2026"
 **Crash AFTER the click (⑤) but BEFORE capture (⑥).** The executor dies; the Save landed in PeopleSoft
 but no receipt was recorded. Lease expiry re-enqueues the run; recovery (§4) runs FIRST:
 ```
-scan write_intents (separations, 10001497-item, ucpath-submit) → status:"attempting", no committed
-re-run ucpath/find-existing-termination key="10001497|termination|08/01/2026"
+scan write_intents (separations, id:5f40ed01d583a15c-item, ucpath-submit) → status:"attempting", no committed
+re-run ucpath/find-existing-termination key="id:5f40ed01d583a15c|termination|08/01/2026"
   → { state:"present", proof:{transactionNumber:"T002173999"} }   // the row PeopleSoft now shows
 ⇒ BACKFILL in one DB transaction: committed proof + ledger/span outboxes + done
 ⇒ NO second Save. The permanent fence and typed positive proof establish convergence without a
@@ -868,16 +868,16 @@ The kernel would requeue without occupying a worker, take its first qualifying o
 30s after the fence, then require a second same-key/same-state absence at least 5s
 later before marking the intent retryable. An early, malformed, or disagreeing absence would park.
 Had it returned `ambiguous` (two "Terminatn" rows for that EID+date) or
-`unknown` (grid didn't render) → `PARKED(needs-operator)`: *"termination for EID 10001497 effdt
+`unknown` (grid didn't render) → `PARKED(needs-operator)`: *"termination for EID id:5f40ed01d583a15c effdt
 08/01/2026: probe found 2 matches / probe indeterminate — verify in UCPath, then retry or mark
 done."* Had the present proof failed `proofSchema` → `PARKED`, never `done`.
 Never a guess, never a duplicate `T…`.
 
 **Two runs, same key (D18).** Suppose a second run for the same
-`{10001497, termination, 08/01/2026}` starts while the first is mid-submit. Its beat ① consults
+`{id:5f40ed01d583a15c, termination, 08/01/2026}` starts while the first is mid-submit. Its beat ① consults
 `write_intents` FIRST, finds the first run's `attempting` row on
-`idempotency_key="10001497|termination|08/01/2026"`, and **fails loud without fencing or clicking** —
-*"another run is mid-submit for key 10001497|termination|08/01/2026 — refusing to double-fence."*
+`idempotency_key="id:5f40ed01d583a15c|termination|08/01/2026"`, and **fails loud without fencing or clicking** —
+*"another run is mid-submit for key id:5f40ed01d583a15c|termination|08/01/2026 — refusing to double-fence."*
 Even if two starters race, one permanent-key INSERT/CAS wins. After commit, any future run finds and
 reuses the proof. Concurrent and sequential duplicates are both blocked.
 

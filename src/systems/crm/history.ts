@@ -11,8 +11,8 @@ import { onboardingHistory } from "./selectors.js";
  * `"Witness Ceremony Oath New Hire Signed"`; that row's Date cell
  * (`M/D/YYYY H:MM AM/PM`) is the authoritative signature timestamp.
  *
- * Live-verified 2026-07-02 on EID 10002223 (Person 639) and 10002226
- * (Person 91).
+ * Live-verified 2026-07-02 on EID id:3422bc02e5ea8c7b (name:3578085bd76580e9) and id:c361d9a7dcf0cafc
+ * (name:e9071fc4ba6f2983).
  */
 
 /**

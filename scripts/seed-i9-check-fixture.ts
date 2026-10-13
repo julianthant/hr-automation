@@ -15,6 +15,7 @@
  *
  *   npx tsx scripts/seed-i9-check-fixture.ts generated/.dashboard-preview/tracker
  */
+import { privateValue } from "../src/private-data.js";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -61,7 +62,7 @@ function rec(over: Partial<I9PreviewRecord>): I9PreviewRecord {
     firstName: "Jane",
     middleInitial: null,
     dateOfBirth: "04/01/1998",
-    ssn: "000-00-0000",
+    ssn: privateValue("ssn:01a54629efb95228"),
     documentType: "expected",
     originallyMissing: [],
     illegible: [],
@@ -69,7 +70,7 @@ function rec(over: Partial<I9PreviewRecord>): I9PreviewRecord {
     disputedFields: [],
     orphanSection2: false,
     notes: [],
-    name: "Person 905",
+    name: privateValue("name:17a6fb0c3906628f"),
     matchState: "resolved",
     selected: true,
     warnings: [],
@@ -82,7 +83,7 @@ const records: I9PreviewRecord[] = [
   // The real packet shape: Sanchez's Section 2 is page 1, his Section 1 page 9
   // — the preview must render BOTH (non-adjacent) pages in one section.
   rec({
-    name: "Person 706",
+    name: privateValue("name:9c12f2d590ae3a2c"),
     lastName: "Sanchez",
     firstName: "Gabriel",
     dateOfBirth: "10/08/1986",
@@ -97,7 +98,7 @@ const records: I9PreviewRecord[] = [
   }),
   // Adjacent pairing (S2 page 3, S1 page 4), no roster name match.
   rec({
-    name: "Person 1059",
+    name: privateValue("name:287220114a395683"),
     lastName: "Mihalik",
     firstName: "Joshua",
     middleInitial: "A",
@@ -109,7 +110,7 @@ const records: I9PreviewRecord[] = [
   }),
   // Name-only searchable (no usable identifiers), roster name-match hit.
   rec({
-    name: "Person 2044",
+    name: privateValue("name:923317d9e73ef19d"),
     lastName: "Michels",
     firstName: "Veronika",
     middleInitial: "A",
@@ -127,7 +128,7 @@ const records: I9PreviewRecord[] = [
   // (fixture repurposes the page-7 sheet as an orphan).
   rec({
     formKind: "i9 section 2",
-    name: "Person 603",
+    name: privateValue("name:6326f4e7d8d9fb7d"),
     lastName: "Menon",
     firstName: "Elizabeth",
     middleInitial: "C",
@@ -137,7 +138,7 @@ const records: I9PreviewRecord[] = [
     hireDate: "02/18/2016",
     orphanSection2: true,
     warnings: [
-      'Section 2 for "Person 603" is in the packet but its Section 1 page is NOT — this person could not be checked against UCPath. Locate the missing Section 1 page.',
+      'Section 2 for "' + privateValue("name:6326f4e7d8d9fb7d") + '" is in the packet but its Section 1 page is NOT — this person could not be checked against UCPath. Locate the missing Section 1 page.',
     ],
   }),
   // An unreadable Section 1 — becomes a display-only failed row.
@@ -273,13 +274,13 @@ function emitVerdict(
 }
 
 emitVerdict(0, {
-  name: "Person 706",
-  __subject: "Person 706",
+  name: privateValue("name:9c12f2d590ae3a2c"),
+  __subject: privateValue("name:9c12f2d590ae3a2c"),
   __subjectKind: "person",
   ucpathFound: "true",
   ucpathFoundLabel: "Yes",
   eid: "10366615",
-  matchedName: "Person 706",
+  matchedName: privateValue("name:ac8c051b0ec90614"),
   ppsEid: "42529",
   separationDate: "2/20/2020",
   i9HireDate: "04/25/2016",
@@ -288,8 +289,8 @@ emitVerdict(0, {
   i9RetentionAction: "Shred",
 });
 emitVerdict(1, {
-  name: "Person 1059",
-  __subject: "Person 1059",
+  name: privateValue("name:287220114a395683"),
+  __subject: privateValue("name:287220114a395683"),
   __subjectKind: "person",
   ucpathFound: "false",
   ucpathFoundLabel: "Not found in UCPath",
