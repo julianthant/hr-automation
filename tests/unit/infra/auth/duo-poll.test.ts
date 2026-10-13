@@ -1,4 +1,4 @@
-import { describe, it } from "vitest";
+import { describe, it, vi } from "vitest";
 import assert from "node:assert/strict";
 import {
   DUO_POLL_INTERVAL_MS,
@@ -266,4 +266,51 @@ describe("Duo verification code helpers", () => {
       /stop requested during Duo|aborted/i,
     );
   });
+});
+
+
+describe("post-Duo training reminder", () => {
+  for (const scenario of [
+    { url: "https://a5.ucsd.edu/tritON/profile/SAML2/POST/SSO", heading: true, continues: true },
+    { url: "https://a5.ucsd.edu/tritON/profile/SAML2/POST/SSO", heading: false, continues: false },
+    { url: "https://other.example/tritON/", heading: true, continues: false },
+  ]) {
+    it(`continues=${scenario.continues} with heading=${scenario.heading} on ${scenario.url}`, async (t) => {
+      vi.stubEnv("HR_AUTOMATION_DUO_WEBAUTHN", "0");
+      t.onTestFinished(() => { vi.unstubAllEnvs(); });
+      let url = scenario.url;
+      let clicks = 0;
+      const empty = {
+        count: async () => 0,
+        first() { return this; },
+        or() { return this; },
+        innerText: async () => "",
+      };
+      const page = {
+        url: () => url,
+        locator: () => empty,
+        getByText: () => empty,
+        getByRole: (role: string, options: { name: string | RegExp; exact?: boolean }) => {
+          if (role === "heading" && options.name === "Required Training Reminder") {
+            assert.equal(options.exact, true);
+            return { count: async () => Number(scenario.heading) };
+          }
+          if (role === "button" && options.name === "Continue Log In") {
+            assert.equal(options.exact, true);
+            return { click: async () => { clicks++; url = "https://act-crm.my.site.com/hr"; } };
+          }
+          return empty;
+        },
+      } as unknown as import("playwright").Page;
+      const approved = await pollDuoApproval(page, {
+        successUrlMatch: "act-crm.my.site.com",
+        timeoutSeconds: 0.01,
+        preCheckMs: 0,
+        initialCodeWaitMs: 0,
+        pollIntervalMs: 1,
+      });
+      assert.equal(approved, scenario.continues);
+      assert.equal(clicks, Number(scenario.continues));
+    });
+  }
 });

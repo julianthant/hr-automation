@@ -133,6 +133,15 @@ export const DUO_WEBAUTHN_GRACE_MS = 25_000;
  */
 export const DUO_WEBAUTHN_FALLBACK_MANUAL_SECONDS = 30;
 
+async function continuePastTrainingReminder(page: Page): Promise<void> {
+  if (!page.url().startsWith("https://a5.ucsd.edu/tritON/")) return;
+  // verified 2026-10-13: post-Duo reminder, not a training-completion action.
+  const heading = page.getByRole("heading", { name: "Required Training Reminder", exact: true });
+  if (await heading.count() !== 1) return;
+  await page.getByRole("button", { name: "Continue Log In", exact: true }).click({ timeout: 5_000 });
+  log.step("SSO: continued past required training reminder");
+}
+
 /**
  * Bounded approval wait used by the WebAuthn path: each tick clicks the
  * "Yes, this is my device" trust button if present, then checks the success
@@ -154,6 +163,7 @@ async function waitForApproval(
   while (Date.now() < deadline) {
     opts.abortSignal?.throwIfAborted();
     try {
+      await continuePastTrainingReminder(page);
       const trust = page.getByText("Yes, this is my device");
       if ((await trust.count()) > 0) {
         await trust.click({ timeout: 5_000 }).catch(() => {});
@@ -542,6 +552,7 @@ export async function pollDuoApproval(
   for (let elapsed = 0; elapsed < effectiveTimeoutSeconds; elapsed += pollIntervalSec) {
     options.abortSignal?.throwIfAborted();
     try {
+      await continuePastTrainingReminder(page);
       // Run optional recovery callback to handle mid-auth errors (e.g., SAML redirects)
       if (recovery) {
         log.step("Duo: running mid-auth recovery check...");

@@ -113,6 +113,10 @@ All UCSD SSO forms use 3-level fallback selectors:
 
 Submit button: always `button[name="_eventId_proceed"]` (avoids collision with "Enroll in Two-Step Login" nav link).
 
+## Post-Duo training reminder
+
+UCSD SSO may pause after Duo on "Required Training Reminder". Both approval waits click the exact "Continue Log In" button only on `https://a5.ucsd.edu/tritON/` with that exact heading, then still require the system's authenticated URL and success check. This acknowledges the reminder; it does not mark training complete. Live-verified against CRM 2026-10-13.
+
 ## Gotchas
 
 - **Duo MFA is manual** — automation pauses and polls for user phone approval
