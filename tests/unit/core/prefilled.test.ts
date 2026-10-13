@@ -4,6 +4,7 @@
  *   - ctx.data — live getter on Ctx returning a fresh shallow copy
  *   - ctx.skipStep — emits a `skipped` row via Stepper's emitSkipped hook
  */
+import { privateValue } from "../../../src/private-data.js";
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { splitPrefilled } from '../../../src/core/kernel/workflow.js'
@@ -19,18 +20,18 @@ test('splitPrefilled: returns input untouched + null prefilled when no channel',
 })
 
 test('splitPrefilled: extracts prefilledData and removes it from cleaned', () => {
-  const input = { docId: '3930', prefilledData: { name: 'Person 905', eid: '12345' } }
+  const input = { docId: '3930', prefilledData: { name: privateValue("name:01332c876518a793"), eid: '12345' } }
   const { cleaned, prefilled } = splitPrefilled(input)
   assert.deepEqual(cleaned, { docId: '3930' })
-  assert.deepEqual(prefilled, { name: 'Person 905', eid: '12345' })
+  assert.deepEqual(prefilled, { name: privateValue("name:01332c876518a793"), eid: '12345' })
 })
 
 test('splitPrefilled: does NOT mutate the input', () => {
-  const input = { docId: '3930', prefilledData: { name: 'Person 905' } }
+  const input = { docId: '3930', prefilledData: { name: privateValue("name:01332c876518a793") } }
   splitPrefilled(input)
   // prefilledData is still there on the original — destructuring made a new
   // object but the kernel's promise is not to mutate the input the user passed.
-  assert.deepEqual(input, { docId: '3930', prefilledData: { name: 'Person 905' } })
+  assert.deepEqual(input, { docId: '3930', prefilledData: { name: privateValue("name:01332c876518a793") } })
 })
 
 test('splitPrefilled: ignores prefilledData when not an object', () => {

@@ -8,6 +8,7 @@
  *   - preferTraceIdSubtitle flag for batch/preview anchors
  *   - returns undefined for unmigrated rows (no queueRowKind stamped)
  */
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { resolveQueueRowPresentation, resolvePersonNameFromData } from "../../../src/domain/queue-row-presentation.js";
@@ -33,10 +34,10 @@ describe("resolveQueueRowPresentation — person kind, resolved name", () => {
   it("uses data.name as title when present", () => {
     const result = resolveQueueRowPresentation({
       id: "item-1",
-      data: { queueRowKind: "person", name: "Person 905", emplId: "11111", __traceId: "ws-120000-ab12" },
+      data: { queueRowKind: "person", name: privateValue("name:01332c876518a793"), emplId: "11111", __traceId: "ws-120000-ab12" },
     });
     assert.ok(result);
-    assert.equal(result.title, "Person 905");
+    assert.equal(result.title, privateValue("name:01332c876518a793"));
   });
 
   it("uses data.employeeName as title fallback when name is absent", () => {
@@ -64,7 +65,7 @@ describe("resolveQueueRowPresentation — person kind, subtitle rule (EID else t
       id: "item-1",
       data: {
         queueRowKind: "person",
-        name: "Person 905",
+        name: privateValue("name:01332c876518a793"),
         emplId: "12345",
         __traceId: "ws-120000-ab12",
       },
@@ -78,7 +79,7 @@ describe("resolveQueueRowPresentation — person kind, subtitle rule (EID else t
       id: "item-1",
       data: {
         queueRowKind: "person",
-        name: "Person 905",
+        name: privateValue("name:01332c876518a793"),
         __traceId: "ws-130000-cd34",
       },
     });
@@ -94,13 +95,13 @@ describe("resolveQueueRowPresentation — person kind, subtitle rule (EID else t
       id: "item-1",
       data: {
         queueRowKind: "person",
-        name: "Person 1717",
-        ucpathId: "10001516",
+        name: privateValue("name:952c7413af9733c9"),
+        ucpathId: privateValue("id:699c7799ff18032d"),
         __traceId: "ob-004859-61b0",
       },
     });
     assert.ok(result);
-    assert.equal(result.subtitle, "10001516");
+    assert.equal(result.subtitle, privateValue("id:699c7799ff18032d"));
   });
 
   it("accepts data.eid as the EID field", () => {
@@ -136,7 +137,7 @@ describe("resolveQueueRowPresentation — person kind, subtitle rule (EID else t
       id: "item-1",
       data: {
         queueRowKind: "person",
-        name: "Person 905",
+        name: privateValue("name:01332c876518a793"),
         emplId: "Not found",
         __traceId: "pl-160000-ab12",
       },
@@ -150,7 +151,7 @@ describe("resolveQueueRowPresentation — person kind, subtitle rule (EID else t
       id: "item-1",
       data: {
         queueRowKind: "person",
-        name: "Person 905",
+        name: privateValue("name:01332c876518a793"),
         emplId: "Error",
         __traceId: "pl-170000-cd34",
       },
@@ -164,7 +165,7 @@ describe("resolveQueueRowPresentation — person kind, subtitle rule (EID else t
       id: "item-1",
       data: {
         queueRowKind: "person",
-        name: "Person 905",
+        name: privateValue("name:01332c876518a793"),
         eid: "pending",
         __traceId: "pl-180000-ef56",
       },
@@ -398,7 +399,7 @@ describe("resolveQueueRowPresentation — trace subtitle run suffix", () => {
       runOrdinal: 3,
       data: {
         queueRowKind: "person",
-        name: "Person 905",
+        name: privateValue("name:01332c876518a793"),
         emplId: "12345",
         __traceId: "ws-120000-ab12",
       },
@@ -414,7 +415,7 @@ describe("resolveQueueRowPresentation — trace subtitle run suffix", () => {
         runOrdinal: 1,
         data: {
           queueRowKind: "person",
-          name: "Person 905",
+          name: privateValue("name:01332c876518a793"),
           __traceId: "ws-130000-cd34",
         },
       },
@@ -428,13 +429,13 @@ describe("resolveQueueRowPresentation — trace subtitle run suffix", () => {
 describe("resolvePersonNameFromData", () => {
   it("reads employeeName and nested employee JSON name", () => {
     assert.equal(
-      resolvePersonNameFromData({ employeeName: "Maria Garcia", emplId: "10002241" }),
+      resolvePersonNameFromData({ employeeName: "Maria Garcia", emplId: privateValue("id:17f5934d6070e132") }),
       "Maria Garcia",
     );
     assert.equal(
       resolvePersonNameFromData({
-        employee: JSON.stringify({ name: "Akitsugu Uchida", employeeId: "10001780" }),
-        emplId: "10001780",
+        employee: JSON.stringify({ name: "Akitsugu Uchida", employeeId: privateValue("id:dc6ad4b4ae480116") }),
+        emplId: privateValue("id:dc6ad4b4ae480116"),
       }),
       "Akitsugu Uchida",
     );

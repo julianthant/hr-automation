@@ -1,14 +1,12 @@
+import { privateFile, privateValue } from "../../../src/private-data.js";
 import { describe, it, expect, afterEach, beforeAll } from "vitest";
-import { resolve, join } from "path";
+import { join } from "path";
 import { writeFileSync, mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { lookupEmployee, clearCache } from "../../../src/workflows/kronos-pay-rule/csv-lookup.js";
 import { determinePayRuleAction } from "../../../src/workflows/kronos-pay-rule/election-logic.js";
 
-const FIXTURE_CSV = resolve(
-  import.meta.dirname,
-  "../../fixtures/kronos-pay-rule/elections-tracker.csv",
-);
+const FIXTURE_CSV = privateFile("tests/fixtures/kronos-pay-rule/elections-tracker.csv");
 
 describe("Kronos Pay Rule - CSV lookup", () => {
   beforeAll(() => {
@@ -50,15 +48,15 @@ describe("Kronos Pay Rule - CSV lookup", () => {
       [
         // "Pay Rule In UKG if applicable" renamed; "Currect Election" typo "fixed".
         'Employee Name,Employee ID,Union Code,UKG Pay Rule,Correct Election,"Election eff. 7/1/2026","Timekeeping System updated eff. 7/1/26"',
-        "Test Person,10000910,SX,SX-8Hol-8-CT-30,Comp Time,,",
+        "Test Person," + privateValue("id:dfa73f9264a72c07") + ",SX,SX-8Hol-8-CT-30,Comp Time,,",
       ].join("\n"),
     );
     const prior = process.env.HRAUTO_ELECTIONS_CSV;
     process.env.HRAUTO_ELECTIONS_CSV = badCsv;
     clearCache();
     try {
-      expect(() => lookupEmployee("10000910")).toThrow(/missing required column/);
-      expect(() => lookupEmployee("10000910")).toThrow(/Pay Rule In UKG if applicable/);
+      expect(() => lookupEmployee(privateValue("id:dfa73f9264a72c07"))).toThrow(/missing required column/);
+      expect(() => lookupEmployee(privateValue("id:dfa73f9264a72c07"))).toThrow(/Pay Rule In UKG if applicable/);
     } finally {
       process.env.HRAUTO_ELECTIONS_CSV = prior;
       clearCache();

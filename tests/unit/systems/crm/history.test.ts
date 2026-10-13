@@ -10,7 +10,7 @@ import {
  * Pure-logic tests for the ACT CRM onboarding-history reader. The live scrape
  * (`readOnboardingOathHistory`) needs a real page, but the two functions that
  * decide the outcome — timestamp parsing and the transition scan — are pure and
- * pinned here against the live-observed grid shapes (EID 10002223 / 10002226,
+ * pinned here against the live-observed grid shapes (EID id:3422bc02e5ea8c7b / id:c361d9a7dcf0cafc,
  * 2026-07-02).
  */
 
@@ -60,7 +60,7 @@ describe("parseCrmHistoryTimestamp", () => {
 });
 
 describe("findOathSignedTransition", () => {
-  // The live grid (Person 91, EID 10002226): the row transitioning TO
+  // The live grid (name:e9071fc4ba6f2983, EID id:c361d9a7dcf0cafc): the row transitioning TO
   // "New Hire Signed" is the sign event; the SAME string appears as the OLD value
   // of the next (Counter-Signed) row.
   const liveRows: string[][] = [

@@ -2,6 +2,7 @@
  * Employee Action History loader + I-9 cross-ref — pure match helpers + a
  * fixture xlsx built in-memory so the live Action History file is not required.
  */
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it, test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -28,7 +29,7 @@ import { PATHS } from "../../../../src/config.js";
 
 function row(over: Partial<ActionHistoryRow>): ActionHistoryRow {
   return {
-    name: "Person 905",
+    name: privateValue("name:17a6fb0c3906628f"),
     ucpathEmplId: "10458971",
     ppsEid: "000039549",
     jobStartDate: "4/17/2018",
@@ -272,25 +273,25 @@ describe("crossRefI9Record — name pass tolerates I-9 middle initials", () => {
 
   // Never coin-flip a PPS ID onto a real HR record.
   it("REFUSES to guess when last+first is ambiguous across two Empl IDs", () => {
-    const a = row({ name: "Person 1400", ucpathEmplId: "10000910", ppsEid: "000000011" });
-    const b = row({ name: "Person 1400", ucpathEmplId: "10000002", ppsEid: "000000022" });
+    const a = row({ name: privateValue("name:7aa544769aa9f906"), ucpathEmplId: privateValue("id:dfa73f9264a72c07"), ppsEid: "000000011" });
+    const b = row({ name: privateValue("name:7aa544769aa9f906"), ucpathEmplId: "10000002", ppsEid: "000000022" });
     const ambiguous = emptyIndex({
       byLastFirst: new Map([["sanchez|maria", [a, b]]]),
     });
-    assert.deepEqual(crossRefI9Record({ name: "Person 1400 J" }, ambiguous), {});
+    assert.deepEqual(crossRefI9Record({ name: privateValue("name:7aa544769aa9f906") + " J" }, ambiguous), {});
   });
 
   it("still resolves an ambiguous last+first when the middle initial separates them", () => {
-    const a = row({ name: "Person 1400 Jose", ucpathEmplId: "10000910", ppsEid: "000000011" });
-    const b = row({ name: "Person 1400 Elena", ucpathEmplId: "10000002", ppsEid: "000000022" });
+    const a = row({ name: privateValue("name:7aa544769aa9f906") + " Jose", ucpathEmplId: privateValue("id:dfa73f9264a72c07"), ppsEid: "000000011" });
+    const b = row({ name: privateValue("name:7aa544769aa9f906") + " Elena", ucpathEmplId: "10000002", ppsEid: "000000022" });
     const separable = emptyIndex({
       byLastFirst: new Map([["sanchez|maria", [a, b]]]),
     });
-    assert.equal(crossRefI9Record({ name: "Person 1400 E" }, separable).ppsEid, "22");
+    assert.equal(crossRefI9Record({ name: privateValue("name:7aa544769aa9f906") + " E" }, separable).ppsEid, "22");
   });
 
   it("a multi-word surname stays whole", () => {
-    const parts = splitPersonNameParts("Person 572");
+    const parts = splitPersonNameParts(privateValue("name:cdd7f5e8e8e5dc8c"));
     assert.deepEqual(parts, { last: "torres perez", first: "edgar", middle: "i" });
   });
 

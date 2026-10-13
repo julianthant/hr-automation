@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -21,7 +22,7 @@ test("patchOcrRecordFromEidLookupOutcome resolves a name lookup with EID and ver
     runId: "child-1",
     status: "done",
     data: {
-      emplId: "10000910",
+      emplId: privateValue("id:dfa73f9264a72c07"),
       hrStatus: "Active",
       department: "Housing Dining Hospitality",
       personOrgScreenshot: "person.png",
@@ -29,7 +30,7 @@ test("patchOcrRecordFromEidLookupOutcome resolves a name lookup with EID and ver
   }, "name");
 
   const rec = records[0] as Record<string, unknown>;
-  assert.equal(rec.employeeId, "10000910");
+  assert.equal(rec.employeeId, privateValue("id:dfa73f9264a72c07"));
   assert.equal(rec.matchState, "resolved");
   assert.equal(rec.matchSource, "eid-lookup");
   assert.deepEqual((rec.verification as { state: string }).state, "verified");
@@ -37,7 +38,7 @@ test("patchOcrRecordFromEidLookupOutcome resolves a name lookup with EID and ver
 });
 
 test("patchOcrRecordFromEidLookupOutcome keeps inactive records selected (submittable — operator decision 2026-07-27)", () => {
-  const records: unknown[] = [{ employeeId: "10000910", selected: true }];
+  const records: unknown[] = [{ employeeId: privateValue("id:dfa73f9264a72c07"), selected: true }];
 
   patchOcrRecordFromEidLookupOutcome(records, 0, {
     workflow: "eid-lookup",
@@ -45,7 +46,7 @@ test("patchOcrRecordFromEidLookupOutcome keeps inactive records selected (submit
     runId: "child-1",
     status: "done",
     data: {
-      emplId: "10000910",
+      emplId: privateValue("id:dfa73f9264a72c07"),
       hrStatus: "Inactive",
       department: "HDH",
     },
@@ -206,7 +207,7 @@ test("patchOcrRecordFromEidLookupOutcome uses isActive stamps when hrStatus is s
 });
 
 test("patchOcrRecordFromActiveCheckOutcome verifies active HDH child results", () => {
-  const records: unknown[] = [{ employeeId: "10000910", selected: true, warnings: [] }];
+  const records: unknown[] = [{ employeeId: privateValue("id:dfa73f9264a72c07"), selected: true, warnings: [] }];
 
   patchOcrRecordFromActiveCheckOutcome(records, 0, {
     workflow: "active-check",
@@ -214,7 +215,7 @@ test("patchOcrRecordFromActiveCheckOutcome verifies active HDH child results", (
     runId: "child-active-1",
     status: "done",
     data: {
-      emplId: "10000910",
+      emplId: privateValue("id:dfa73f9264a72c07"),
       activeStatus: "active",
       isActive: "true",
       isHdhAccepted: "true",
@@ -230,7 +231,7 @@ test("patchOcrRecordFromActiveCheckOutcome verifies active HDH child results", (
 });
 
 test("patchOcrRecordFromActiveCheckOutcome deselects inactive active-check results", () => {
-  const records: unknown[] = [{ employeeId: "10000910", selected: true, warnings: [] }];
+  const records: unknown[] = [{ employeeId: privateValue("id:dfa73f9264a72c07"), selected: true, warnings: [] }];
 
   patchOcrRecordFromActiveCheckOutcome(records, 0, {
     workflow: "active-check",
@@ -238,7 +239,7 @@ test("patchOcrRecordFromActiveCheckOutcome deselects inactive active-check resul
     runId: "child-active-1",
     status: "done",
     data: {
-      emplId: "10000910",
+      emplId: privateValue("id:dfa73f9264a72c07"),
       activeStatus: "inactive",
       isActive: "false",
       isHdhAccepted: "true",

@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -158,22 +159,22 @@ test("Hono /api/runs uses SQLite projection when ready", async () => {
     trackEventForDate({
       workflow: "onboarding",
       timestamp: "2026-05-04T12:00:00.000Z",
-      id: "person@example.edu",
+      id: privateValue("ucsd:d584e8c08670091b"),
       runId: "jane-run-1",
       status: "pending",
-      data: { email: "person@example.edu" },
+      data: { email: privateValue("ucsd:d584e8c08670091b") },
     }, date, dir);
     trackEventForDate({
       workflow: "onboarding",
       timestamp: "2026-05-04T12:01:00.000Z",
-      id: "person@example.edu",
+      id: privateValue("ucsd:d584e8c08670091b"),
       runId: "jane-run-1",
       status: "done",
       step: "transaction",
-      data: { email: "person@example.edu" },
+      data: { email: privateValue("ucsd:d584e8c08670091b") },
     }, date, dir);
     const app = createDashboardHonoApp({ dir, stateDb: db, workflow: "onboarding", projectionReady: true });
-    const res = await app.request(`/api/runs?workflow=onboarding&id=${encodeURIComponent("person@example.edu")}&date=${date}`);
+    const res = await app.request(`/api/runs?workflow=onboarding&id=${encodeURIComponent(privateValue("ucsd:d584e8c08670091b"))}&date=${date}`);
     assert.equal(res.status, 200);
     const body = await res.json() as Array<{ runId: string; status: string; step?: string; runOrdinal?: number }>;
     assert.deepEqual(body.map((run) => ({
@@ -198,29 +199,29 @@ test("Hono /api/runs falls back to JSONL when projection is not ready", async ()
       JSON.stringify({
         workflow: "onboarding",
         timestamp: "2026-05-04T12:00:00.000Z",
-        id: "person@example.edu",
-        runId: "person@example.edu#1",
+        id: privateValue("ucsd:d584e8c08670091b"),
+        runId: privateValue("ucsd:d584e8c08670091b") + "#1",
         status: "running",
         step: "extraction",
-        data: { email: "person@example.edu" },
+        data: { email: privateValue("ucsd:d584e8c08670091b") },
       }),
       JSON.stringify({
         workflow: "onboarding",
         timestamp: "2026-05-04T12:02:00.000Z",
-        id: "person@example.edu",
-        runId: "person@example.edu#1",
+        id: privateValue("ucsd:d584e8c08670091b"),
+        runId: privateValue("ucsd:d584e8c08670091b") + "#1",
         status: "done",
         step: "transaction",
-        data: { email: "person@example.edu" },
+        data: { email: privateValue("ucsd:d584e8c08670091b") },
       }),
       "",
     ].join("\n"));
     const app = createDashboardHonoApp({ dir, stateDb: db, workflow: "onboarding", projectionReady: false });
-    const res = await app.request(`/api/runs?workflow=onboarding&id=${encodeURIComponent("person@example.edu")}&date=${date}`);
+    const res = await app.request(`/api/runs?workflow=onboarding&id=${encodeURIComponent(privateValue("ucsd:d584e8c08670091b"))}&date=${date}`);
     assert.equal(res.status, 200);
     const body = await res.json() as Array<{ runId: string; status: string; step?: string; stepDurations?: Record<string, number> }>;
     assert.equal(body.length, 1);
-    assert.equal(body[0].runId, "person@example.edu#1");
+    assert.equal(body[0].runId, privateValue("ucsd:d584e8c08670091b") + "#1");
     assert.equal(body[0].status, "done");
     assert.equal(body[0].step, "transaction");
     assert.ok(body[0].stepDurations);
@@ -243,17 +244,17 @@ test("Hono /api/search returns JSONL search results", async () => {
     writeFileSync(rowFilePath("onboarding", date, dir), JSON.stringify({
       workflow: "onboarding",
       timestamp: new Date().toISOString(),
-      id: "person@example.edu",
-      runId: "person@example.edu#1",
+      id: privateValue("ucsd:d584e8c08670091b"),
+      runId: privateValue("ucsd:d584e8c08670091b") + "#1",
       status: "done",
-      data: { firstName: "Jane", lastName: "Smith", email: "person@example.edu" },
+      data: { firstName: "Jane", lastName: "Smith", email: privateValue("ucsd:d584e8c08670091b") },
     }) + "\n");
     const app = createDashboardHonoApp({ dir, stateDb: db });
     const res = await app.request("/api/search?q=Jane&workflow=onboarding&limit=5&days=30");
     assert.equal(res.status, 200);
     const body = await res.json() as Array<{ workflow: string; id: string }>;
     assert.deepEqual(body.map((row) => ({ workflow: row.workflow, id: row.id })), [
-      { workflow: "onboarding", id: "person@example.edu" },
+      { workflow: "onboarding", id: privateValue("ucsd:d584e8c08670091b") },
     ]);
   } finally {
     closeStateDbForTests(dir);

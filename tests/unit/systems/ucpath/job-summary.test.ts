@@ -19,6 +19,7 @@
  * with the fix.
  */
 
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import type { Page } from "playwright";
@@ -425,8 +426,8 @@ describe("navigateToWorkforceJobSummary (re-navigation wiring)", () => {
 // ─── Frozen-column grid pairing (live dumps, 2026-08-20) ─────────────────────
 //
 // Fixtures transcribed from the LIVE Workforce Job Summary grids of the two
-// separations docs that exposed the bug (4540 Person 1028 10001769 — 17 rows;
-// 4541 Person 1297 10001644 — 16 rows). PeopleSoft renders the grid as two
+// separations docs that exposed the bug (4540 name:69ae505a693a4ae9 id:8e2c7e378e4ae96f — 17 rows;
+// 4541 name:1251f6de5cdba04c id:bf087d7081cc705c — 16 rows). PeopleSoft renders the grid as two
 // row-aligned tables: `tdgblWF_JOB_SUMM$0` (Org Rel · Empl Rec · Effective Date
 // · Seq) and `tdgbrWF_JOB_SUMM$0` (the tab's columns). On Job Information the
 // right row's ONLY date is "Expected Job End Date" — the old "first date cell in
@@ -448,7 +449,7 @@ function wlRight(pos: string, desc: string, deptId: string, dept: string): strin
   return [pos, desc, "UCS", deptId, dept, "6840-1", "SDCMP", "Panicha Aguilar", ""];
 }
 
-// 4540 — Person 1028. Effective dates (left) and Job Information rows (right), in
+// 4540 — name:e7f9068711b741bb. Effective dates (left) and Job Information rows (right), in
 // grid order. Promotion to STDT 3 took effect 03/29/2026; separation 06/16/2026.
 const KIM_DATES = [
   "01/31/2025", "02/15/2025", "02/15/2025", "03/01/2025", "03/01/2025", "06/20/2025",
@@ -469,7 +470,7 @@ const KIM_JOB_INFO: FrozenGridDump = {
   }],
 };
 
-// 4541 — Person 1297. STDT 3 from 09/15/2025; separation 06/16/2026.
+// 4541 — name:87735146d11476e8. STDT 3 from 09/15/2025; separation 06/16/2026.
 const ZERMENO_DATES = [
   "10/11/2024", "10/11/2024", "12/22/2024", "02/15/2025", "02/15/2025", "06/20/2025",
   "08/03/2025", "09/14/2025", "09/15/2025", "09/15/2025", "10/12/2025", "11/25/2025",
@@ -492,7 +493,7 @@ const ZERMENO_WORK_LOCATION: FrozenGridDump = {
   right: [{
     id: RIGHT_ID,
     rows: [
-      ...Array.from({ length: 8 }, () => wlRight("10005212", "STDT 2", "000412", "HOUSING/DINING/HOSPITALITY")),
+      ...Array.from({ length: 8 }, () => wlRight(privateValue("id:f2e1219da7658b45"), "STDT 2", "000412", "HOUSING/DINING/HOSPITALITY")),
       ...Array.from({ length: 8 }, () => wlRight("40700768", "STDT 3", "000412", "HOUSING/DINING/HOSPITALITY")),
     ],
   }],
@@ -606,7 +607,7 @@ describe("workLocationRowsFromGrid (Work Location tab on the same frozen grid)",
     assert.equal(rows.length, 16);
     assert.deepEqual(
       [rows[0].effectiveDate, rows[0].positionNumber, rows[0].deptId, rows[0].departmentDescription],
-      ["10/11/2024", "10005212", "000412", "HOUSING/DINING/HOSPITALITY"],
+      ["10/11/2024", privateValue("id:f2e1219da7658b45"), "000412", "HOUSING/DINING/HOSPITALITY"],
     );
     const picked = pickWorkLocationRow(rows, "06/16/2026");
     assert.ok(picked);

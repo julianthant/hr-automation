@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { z } from "zod";
@@ -40,9 +41,9 @@ test("buildHttpPendingData preserves workflow queue title metadata", () => {
     handler: async () => {},
   });
 
-  const data = buildHttpPendingData(wf, { name: "Person 905" });
+  const data = buildHttpPendingData(wf, { name: privateValue("name:17a6fb0c3906628f") });
 
-  assert.equal(data.__queueTitle, "Person 905");
+  assert.equal(data.__queueTitle, privateValue("name:17a6fb0c3906628f"));
   assert.equal(data.__queueTitleKind, "single");
 });
 
@@ -60,11 +61,11 @@ test("buildHttpPendingData stamps a single separation enqueue as a single row", 
 test("buildHttpPendingData honors direct input-run batch row-shape hint", () => {
   const data = buildHttpPendingData(
     personLookupWorkflow,
-    { name: "Person 905", __runtimeOptions: { rowShape: "operation-member" } },
+    { name: privateValue("name:17a6fb0c3906628f"), __runtimeOptions: { rowShape: "operation-member" } },
     "input-run-batch-1",
   );
 
-  assert.equal(data.searchName, "Person 905");
+  assert.equal(data.searchName, privateValue("name:17a6fb0c3906628f"));
   assert.equal(data.archetype, "operation-member");
 });
 
@@ -73,7 +74,7 @@ test("buildHttpPendingData: emergency-contact OCR fan-out seeds employeeName for
     sourcePage: 2,
     employee: {
       name: "Akitsugu Uchida",
-      employeeId: "10001780",
+      employeeId: privateValue("id:dc6ad4b4ae480116"),
     },
     emergencyContact: {
       name: "Sara Garcia",
@@ -85,7 +86,7 @@ test("buildHttpPendingData: emergency-contact OCR fan-out seeds employeeName for
   });
 
   assert.equal(data.employeeName, "Akitsugu Uchida");
-  assert.equal(data.emplId, "10001780");
+  assert.equal(data.emplId, privateValue("id:dc6ad4b4ae480116"));
   assert.equal(data.__name, "Akitsugu Uchida");
   assert.equal(data.contactName, "Sara Garcia");
 });

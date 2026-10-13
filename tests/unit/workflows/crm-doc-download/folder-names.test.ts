@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -16,43 +17,43 @@ import { buildCrmDocumentFolderName } from "../../../../src/systems/crm/idocs-do
 
 describe("folderSubjectFromLegalLived", () => {
   test("uses legal first/last and omits lived when the first names match", () => {
-    const subject = folderSubjectFromLegalLived("Person 831", "Person 831");
+    const subject = folderSubjectFromLegalLived(privateValue("name:6168ff06af447daa"), privateValue("name:6168ff06af447daa"));
     assert.deepEqual(subject, {
       firstName: "Ineza",
       lastName: "Marekani",
     });
-    assert.equal(buildCrmDocumentFolderName(subject), "Person 831 EID");
+    assert.equal(buildCrmDocumentFolderName(subject), privateValue("name:f74ff45ebc16a356") + " EID");
   });
 
   test("keeps legal first and adds lived first when they differ", () => {
-    const subject = folderSubjectFromLegalLived("Person 597", "Person 593");
+    const subject = folderSubjectFromLegalLived(privateValue("name:07b70263ba91e14d"), privateValue("name:fd6f43e30607c9b0"));
     assert.deepEqual(subject, {
       firstName: "Elijah",
       lastName: "Breuer",
       livedName: "Eli",
     });
-    assert.equal(buildCrmDocumentFolderName(subject), "Person 597 (Eli) EID");
+    assert.equal(buildCrmDocumentFolderName(subject), privateValue("name:ce8a4c92791c9837") + " (Eli) EID");
   });
 
   test("treats middle tokens of Legal Name as the middle initial source", () => {
-    const subject = folderSubjectFromLegalLived("Person 1005", "Person 1005");
+    const subject = folderSubjectFromLegalLived(privateValue("name:f49b5924cc2d3f1d"), privateValue("name:f49b5924cc2d3f1d"));
     assert.deepEqual(subject, {
       firstName: "Joanna",
       lastName: "Bustillo",
       middleName: "Ruiz",
     });
-    assert.equal(buildCrmDocumentFolderName(subject), "Person 1004 R. EID");
+    assert.equal(buildCrmDocumentFolderName(subject), privateValue("name:6cd8db152049272d") + " R. EID");
   });
 
   test("combines a differing lived first name with a legal middle name", () => {
-    const subject = folderSubjectFromLegalLived("Person 2056", "Person 1322");
+    const subject = folderSubjectFromLegalLived(privateValue("name:7f1fca2db867064b"), privateValue("name:68d9acf368143e55"));
     assert.deepEqual(subject, {
       firstName: "Victoria",
       lastName: "Yin",
       middleName: "Ziling",
       livedName: "Linda",
     });
-    assert.equal(buildCrmDocumentFolderName(subject), "Person 2055 (Linda) Z. EID");
+    assert.equal(buildCrmDocumentFolderName(subject), privateValue("name:40dd44ffef62fd97") + " (Linda) Z. EID");
   });
 });
 
@@ -61,15 +62,15 @@ describe("parseOnboardingLegalLivedCsv", () => {
     const csv = [
       ",,,,,",
       "Email,Legal Name,Lived Name",
-      "person378@example.com,Person 597,Person 593",
-      "person875@example.com,Person 831,Person 831",
+      privateValue("email:7b43427814742d74") + "," + privateValue("name:07b70263ba91e14d") + "," + privateValue("name:fd6f43e30607c9b0"),
+      privateValue("email:6901c1a3302e3006") + "," + privateValue("name:6168ff06af447daa") + "," + privateValue("name:6168ff06af447daa"),
     ].join("\n");
     const entries = parseOnboardingLegalLivedCsv(csv);
     assert.equal(entries.length, 2);
     assert.deepEqual(entries[0], {
-      email: "person378@example.com",
-      legalName: "Person 597",
-      livedName: "Person 593",
+      email: privateValue("email:7b43427814742d74"),
+      legalName: privateValue("name:07b70263ba91e14d"),
+      livedName: privateValue("name:fd6f43e30607c9b0"),
     });
   });
 });
@@ -77,22 +78,22 @@ describe("parseOnboardingLegalLivedCsv", () => {
 describe("lookupLegalLivedEntry", () => {
   test("matches email case-insensitively", () => {
     const found = lookupLegalLivedEntry(
-      [{ email: "person378@example.com", legalName: "Person 597", livedName: "Person 593" }],
-      "person378@example.com",
+      [{ email: privateValue("email:2543bb0ea3fa42b3"), legalName: privateValue("name:07b70263ba91e14d"), livedName: privateValue("name:fd6f43e30607c9b0") }],
+      privateValue("email:7b43427814742d74"),
     );
-    assert.equal(found?.legalName, "Person 597");
+    assert.equal(found?.legalName, privateValue("name:07b70263ba91e14d"));
   });
 });
 
 describe("resolveCrmDocDownloadNameFields", () => {
   const roster = [
-    { email: "person378@example.com", legalName: "Person 597", livedName: "Person 593" },
-    { email: "person875@example.com", legalName: "Person 831", livedName: "Person 831" },
+    { email: privateValue("email:7b43427814742d74"), legalName: privateValue("name:07b70263ba91e14d"), livedName: privateValue("name:fd6f43e30607c9b0") },
+    { email: privateValue("email:6901c1a3302e3006"), legalName: privateValue("name:6168ff06af447daa"), livedName: privateValue("name:6168ff06af447daa") },
   ];
 
   test("keeps explicit first/last on the input (operator override)", () => {
     const named = resolveCrmDocDownloadNameFields(
-      { email: "person378@example.com", firstName: "Elijah", lastName: "Breuer", livedName: "Eli" },
+      { email: privateValue("email:7b43427814742d74"), firstName: "Elijah", lastName: "Breuer", livedName: "Eli" },
       roster,
     );
     assert.deepEqual(named, {
@@ -103,7 +104,7 @@ describe("resolveCrmDocDownloadNameFields", () => {
   });
 
   test("fills legal vs lived from the roster when the dashboard run has only email", () => {
-    const named = resolveCrmDocDownloadNameFields({ email: "person378@example.com" }, roster);
+    const named = resolveCrmDocDownloadNameFields({ email: privateValue("email:7b43427814742d74") }, roster);
     assert.deepEqual(named, {
       firstName: "Elijah",
       lastName: "Breuer",
@@ -113,8 +114,8 @@ describe("resolveCrmDocDownloadNameFields", () => {
 
   test("throws when the email is not on the roster rather than falling back to CRM", () => {
     assert.throws(
-      () => resolveCrmDocDownloadNameFields({ email: "person@example.edu" }, roster),
-      /person@example.edu.*onboarding roster/i,
+      () => resolveCrmDocDownloadNameFields({ email: privateValue("ucsd:7a9fd24f1f91d1c6") }, roster),
+      new RegExp(privateValue("ucsd:7a9fd24f1f91d1c6") + ".*onboarding roster", "i"),
     );
   });
 
@@ -128,12 +129,12 @@ describe("resolveCrmDocDownloadNameFields", () => {
 
 describe("resolveFolderSubjectFromRecordEmails", () => {
   const roster = [
-    { email: "person378@example.com", legalName: "Person 597", livedName: "Person 593" },
+    { email: privateValue("email:7b43427814742d74"), legalName: privateValue("name:07b70263ba91e14d"), livedName: privateValue("name:fd6f43e30607c9b0") },
   ];
 
   test("matches the personal email on the CRM record to the roster", () => {
     const subject = resolveFolderSubjectFromRecordEmails(
-      [null, "person378@example.com"],
+      [null, privateValue("email:7b43427814742d74")],
       roster,
       "10873698",
     );
@@ -142,8 +143,8 @@ describe("resolveFolderSubjectFromRecordEmails", () => {
 
   test("throws when none of the record emails are on the roster", () => {
     assert.throws(
-      () => resolveFolderSubjectFromRecordEmails(["person@example.edu"], roster, "10873698"),
-      /EID 10873698.*person@example.edu/i,
+      () => resolveFolderSubjectFromRecordEmails([privateValue("ucsd:e667452e4d8f6226")], roster, "10873698"),
+      new RegExp("EID 10873698.*" + privateValue("ucsd:e667452e4d8f6226"), "i"),
     );
   });
 });
@@ -153,10 +154,10 @@ describe("loadOnboardingLegalLivedEntries", () => {
     const dir = await mkdtemp(join(tmpdir(), "crm-doc-roster-"));
     const path = join(dir, "onboarding-roster.csv");
     try {
-      const body = "Email,Legal Name,Lived Name\r\nelikb06@gmail.com,Person 597,Person 593\r\n";
+      const body = "Email,Legal Name,Lived Name\r\nelikb06@gmail.com," + privateValue("name:07b70263ba91e14d") + "," + privateValue("name:fd6f43e30607c9b0") + "\r\n";
       await writeFile(path, Buffer.from(body + "\xa0", "latin1"));
       const entries = await loadOnboardingLegalLivedEntries(path);
-      assert.equal(entries[0]?.legalName, "Person 597");
+      assert.equal(entries[0]?.legalName, privateValue("name:07b70263ba91e14d"));
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

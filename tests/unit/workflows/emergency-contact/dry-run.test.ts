@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -37,7 +38,7 @@ describe("buildEmergencyContactPendingData", () => {
           sourcePage: 3,
           dryRun: true,
           employee: {
-            name: "Person 905",
+            name: privateValue("name:01332c876518a793"),
             employeeId: "10873698",
           },
           emergencyContact: {
@@ -54,7 +55,7 @@ describe("buildEmergencyContactPendingData", () => {
         batchName: "May batch",
         sourcePage: "3",
         emplId: "10873698",
-        employeeName: "Person 905",
+        employeeName: privateValue("name:01332c876518a793"),
         contactName: "Pat Doe",
         relationship: "Parent",
         dryRun: "true",

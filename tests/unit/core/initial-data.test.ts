@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, readdirSync } from 'node:fs'
@@ -86,8 +87,8 @@ test('buildInitialTrackerData stamps single queue titles from operator subject',
     handler: async () => {},
   })
 
-  const data = buildInitialTrackerData(wf, { name: 'Person 905' })
+  const data = buildInitialTrackerData(wf, { name: privateValue("name:17a6fb0c3906628f") })
 
-  assert.equal(data.__queueTitle, 'Person 905')
+  assert.equal(data.__queueTitle, privateValue("name:17a6fb0c3906628f"))
   assert.equal(data.__queueTitleKind, 'single')
 })

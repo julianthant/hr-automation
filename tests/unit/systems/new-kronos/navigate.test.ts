@@ -10,6 +10,7 @@
  * `log.warn`, not a throw.
  */
 
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it, vi } from "vitest";
 import assert from "node:assert/strict";
 import type { Page } from "playwright";
@@ -222,7 +223,7 @@ describe("resolveSearchResult", () => {
     const result = await resolveSearchResult(
       Promise.resolve(), // checkbox visible
       new Promise(() => {}), // no-results sentinel never appears
-      "10000910",
+      privateValue("id:dfa73f9264a72c07"),
     );
     assert.equal(result, true);
   });
@@ -358,7 +359,7 @@ describe("parseCalendarHeaderOrdinal", () => {
 });
 
 describe("createSearchOutcomeSettler", () => {
-  // 2026-08-21 (doc 4546, EID 10001903): the no-results sentinel is ALSO the
+  // 2026-08-21 (doc 4546, EID id:ea6e83d95fe7d057): the no-results sentinel is ALSO the
   // search panel's pre-search resting state, so a single poll of
   // "sentinel visible + no result yet" must NOT resolve not-found.
   it("stays pending while the sentinel has not held for the stable window", () => {

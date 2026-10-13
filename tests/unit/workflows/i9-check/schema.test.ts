@@ -5,6 +5,7 @@
  * only here and can NEVER parse into the separations termination schema (a
  * legacy replay against separations must fail loud, not terminate someone).
  */
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
@@ -19,7 +20,7 @@ function i9Input(over: Partial<I9CheckMemberInput> = {}): I9CheckMemberInput {
   return {
     mode: "i9-check",
     person: {
-      name: "Person 706",
+      name: privateValue("name:9c12f2d590ae3a2c"),
       lastName: "Sanchez",
       firstName: "Gabriel",
       ssn: "558937070",
@@ -39,7 +40,7 @@ function i9Input(over: Partial<I9CheckMemberInput> = {}): I9CheckMemberInput {
 describe("I9CheckMemberInputSchema", () => {
   it("is the i9-check workflow's schema and parses a full input intact", () => {
     const parsed = i9CheckWorkflow.config.schema.parse(i9Input());
-    assert.equal(parsed.person.name, "Person 706");
+    assert.equal(parsed.person.name, privateValue("name:9c12f2d590ae3a2c"));
     assert.equal(parsed.roster?.ppsEidPadded, "000728527");
     assert.equal(parsed.mode, "i9-check");
   });

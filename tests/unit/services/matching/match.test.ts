@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -18,7 +19,7 @@ describe("scoreNameMatch", () => {
     assert.equal(scoreNameMatch("John Doe", "JOHN  DOE").score, 1.0);
   });
   it("scores 0.85+ for first/last swap with comma", () => {
-    const r = scoreNameMatch("Person 905", "Person 905");
+    const r = scoreNameMatch(privateValue("name:17a6fb0c3906628f"), privateValue("name:01332c876518a793"));
     assert.ok(r.score >= 0.85, `expected >= 0.85, got ${r.score}`);
   });
   it("scores 0.9 when middle name is in one but not the other (token intersect)", () => {
@@ -118,9 +119,9 @@ describe("compareUsAddresses", () => {
 
 describe("matchAgainstRoster", () => {
   const roster: RosterRow[] = [
-    { eid: "10001", name: "Person 905", street: "123 Main", city: "Denver", state: "CO", zip: "80201" },
+    { eid: "10001", name: privateValue("name:01332c876518a793"), street: "123 Main", city: "Denver", state: "CO", zip: "80201" },
     { eid: "10002", name: "Bob Smith", street: "456 Elm", city: "Boulder", state: "CO", zip: "80302" },
-    { eid: "10003", name: "Person 905", street: "999 Diff", zip: "99999" },
+    { eid: "10003", name: privateValue("name:17a6fb0c3906628f"), street: "999 Diff", zip: "99999" },
   ];
 
   it("returns the unique match with score 1.0 when target is in the roster", () => {
@@ -131,7 +132,7 @@ describe("matchAgainstRoster", () => {
   });
 
   it("returns multiple candidates when name is ambiguous (e.g. comma-formatted dup)", () => {
-    const r = matchAgainstRoster(roster, "Person 905");
+    const r = matchAgainstRoster(roster, privateValue("name:01332c876518a793"));
     assert.ok(r.candidates.length >= 2);
   });
 
@@ -142,7 +143,7 @@ describe("matchAgainstRoster", () => {
   });
 
   it("orders candidates by score DESC", () => {
-    const r = matchAgainstRoster(roster, "Person 905");
+    const r = matchAgainstRoster(roster, privateValue("name:01332c876518a793"));
     for (let i = 1; i < r.candidates.length; i++) {
       assert.ok(r.candidates[i - 1].score >= r.candidates[i].score);
     }
@@ -174,8 +175,8 @@ describe("classifyNameSimilarity", () => {
   });
 
   it("'same' when the longer side only adds a middle name (all shared tokens exact)", () => {
-    assert.equal(classifyNameSimilarity("Person 1445", "Matthew James Mendoza"), "same");
-    assert.equal(classifyNameSimilarity("Person 1445 James", "Person 1445"), "same");
+    assert.equal(classifyNameSimilarity(privateValue("name:e675750f859d1b38"), "Matthew James Mendoza"), "same");
+    assert.equal(classifyNameSimilarity(privateValue("name:e675750f859d1b38") + " James", privateValue("name:548ee9298bea5631")), "same");
   });
 
   it("'similar' for a one-letter first-name spelling variant (the Jaden/Jayden case)", () => {
@@ -196,8 +197,8 @@ describe("classifyNameSimilarity", () => {
   });
 
   it("'different' when either side is empty (no name to compare)", () => {
-    assert.equal(classifyNameSimilarity("Person 1445", ""), "different");
-    assert.equal(classifyNameSimilarity("", "Person 1445"), "different");
+    assert.equal(classifyNameSimilarity(privateValue("name:e675750f859d1b38"), ""), "different");
+    assert.equal(classifyNameSimilarity("", privateValue("name:548ee9298bea5631")), "different");
   });
 });
 

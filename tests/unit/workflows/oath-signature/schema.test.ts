@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { OathSignatureInputSchema } from "../../../../src/workflows/oath-signature/schema.js";
@@ -8,7 +9,7 @@ import {
 
 describe("OathSignatureInputSchema", () => {
   it("accepts dryRun", () => {
-    const parsed = OathSignatureInputSchema.parse({ emplId: "10001516", dryRun: true });
+    const parsed = OathSignatureInputSchema.parse({ emplId: privateValue("id:699c7799ff18032d"), dryRun: true });
     assert.equal(parsed.dryRun, true);
   });
 });
@@ -16,21 +17,21 @@ describe("OathSignatureInputSchema", () => {
 describe("shouldCommitOathSignature", () => {
   it("does not commit during dry run", () => {
     assert.equal(
-      shouldCommitOathSignature({ emplId: "10001516", dryRun: true }, { alreadyHasOath: false }),
+      shouldCommitOathSignature({ emplId: privateValue("id:699c7799ff18032d"), dryRun: true }, { alreadyHasOath: false }),
       false,
     );
   });
 
   it("does not commit when an oath already exists", () => {
     assert.equal(
-      shouldCommitOathSignature({ emplId: "10001516" }, { alreadyHasOath: true }),
+      shouldCommitOathSignature({ emplId: privateValue("id:699c7799ff18032d") }, { alreadyHasOath: true }),
       false,
     );
   });
 
   it("commits only for a real run that needs a new oath", () => {
     assert.equal(
-      shouldCommitOathSignature({ emplId: "10001516" }, { alreadyHasOath: false }),
+      shouldCommitOathSignature({ emplId: privateValue("id:699c7799ff18032d") }, { alreadyHasOath: false }),
       true,
     );
   });

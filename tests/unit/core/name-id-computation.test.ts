@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { existsSync, rmSync, readFileSync, mkdtempSync } from 'node:fs'
@@ -57,7 +58,7 @@ test('getName: stamped as data.__name on every emit', async (t) => {
   // Find the running entry for the 'only' step (auth:x may fire first without data yet).
   const running = entries.find((e) => e.status === 'running' && e.step === 'only')
   const d = running?.data as Record<string, string> | undefined
-  assert.equal(d?.__name, 'Person 905')
+  assert.equal(d?.__name, privateValue("name:01332c876518a793"))
 })
 
 test('getId: stamped as data.__id on every emit', async (t) => {

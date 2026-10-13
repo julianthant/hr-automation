@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -44,7 +45,7 @@ test("runOcrRetryPage replaces records for the retried page and clears it from f
         { sourcePage: 1, rowIndex: 0, printedName: "Alice",
           employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
           notes: [], documentType: "expected", originallyMissing: [],
-          employeeId: "10000910", matchState: "resolved", selected: true, warnings: [],
+          employeeId: privateValue("id:dfa73f9264a72c07"), matchState: "resolved", selected: true, warnings: [],
           verification: { state: "verified", hrStatus: "Active", department: "HDH", screenshotFilename: "a.png", checkedAt: "2026-05-01T00:00:00Z" },
         },
       ]),

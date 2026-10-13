@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, appendFileSync, readFileSync } from "node:fs";
@@ -39,7 +40,7 @@ function oathRecord(opts: {
     formKind: "oath",
     sourcePage: 1,
     rowIndex: 0,
-    printedName: opts.printedName ?? "Person 905",
+    printedName: opts.printedName ?? privateValue("name:713ff080c8d97bc2"),
     employeeId: opts.employeeId,
     employeeSigned: opts.employeeSigned ?? true,
     dateSigned: opts.dateSigned ?? "4/23/26",
@@ -111,7 +112,7 @@ test("oath approve fans out BOTH targets: oath-signature signers + one oath-uplo
       sessionId: "sess-oath",
       runId: "ocr-run-oath",
       records: [
-        oathRecord({ employeeId: "10000910", printedName: "Person 905" }),
+        oathRecord({ employeeId: privateValue("id:dfa73f9264a72c07"), printedName: privateValue("name:713ff080c8d97bc2") }),
         oathRecord({ employeeId: "10000002", printedName: "ROE, RICHARD" }),
       ],
     });
@@ -133,7 +134,7 @@ test("oath approve fans out BOTH targets: oath-signature signers + one oath-uplo
     // Per-record: two signer inputs with the right EIDs + itemIds.
     assert.equal(sigCall!.inputs.length, 2);
     const sigInputs = sigCall!.inputs as Array<{ emplId: string }>;
-    assert.deepEqual(sigInputs.map((i) => i.emplId).sort(), ["10000910", "10000002"]);
+    assert.deepEqual(sigInputs.map((i) => i.emplId).sort(), [privateValue("id:dfa73f9264a72c07"), "10000002"]);
     assert.deepEqual(sigCall!.itemIds, [
       "ocr-oath-ocr-run-oath-r0",
       "ocr-oath-ocr-run-oath-r1",
@@ -190,7 +191,7 @@ test("approval rejects a run whose exact latest row is no longer awaiting approv
     const result = await handler({
       sessionId: "sess-stale",
       runId: "ocr-run-stale",
-      records: [oathRecord({ employeeId: "10000910" })],
+      records: [oathRecord({ employeeId: privateValue("id:dfa73f9264a72c07") })],
     });
     assert.equal(result.status, 409);
     assert.equal((result.body as { state?: string }).state, "conflict");
@@ -227,7 +228,7 @@ test("concurrent identical approval replays dispatch one stable child-run manife
     const request = {
       sessionId: "sess-idempotent",
       runId: "ocr-run-idempotent",
-      records: [oathRecord({ employeeId: "10000910" })],
+      records: [oathRecord({ employeeId: privateValue("id:dfa73f9264a72c07") })],
     };
 
     const first = await handler(request);
@@ -267,7 +268,7 @@ test("oath approve: selected-but-EID-less records are NOT enqueued and NOT waite
       sessionId: "sess-skip",
       runId: "ocr-run-skip",
       records: [
-        oathRecord({ employeeId: "10000910" }),
+        oathRecord({ employeeId: privateValue("id:dfa73f9264a72c07") }),
         // selected but no valid EID → must be skipped (canFanOut === false)
         oathRecord({ employeeId: "", printedName: "NO EID PERSON" }),
       ],
@@ -312,7 +313,7 @@ test("oath approve applies the saved worker count as { parallel: N } to the sign
       sessionId: "sess-w",
       runId: "ocr-run-w",
       records: [
-        oathRecord({ employeeId: "10000910", printedName: "Person 905" }),
+        oathRecord({ employeeId: privateValue("id:dfa73f9264a72c07"), printedName: privateValue("name:713ff080c8d97bc2") }),
         oathRecord({ employeeId: "10000002", printedName: "ROE, RICHARD" }),
       ],
     });
@@ -348,7 +349,7 @@ test("oath approve passes no worker flags when the OCR row has no parallelWorker
     const res = await handler({
       sessionId: "sess-auto",
       runId: "ocr-run-auto",
-      records: [oathRecord({ employeeId: "10000910", printedName: "Person 905" })],
+      records: [oathRecord({ employeeId: privateValue("id:dfa73f9264a72c07"), printedName: privateValue("name:713ff080c8d97bc2") })],
     });
     assert.equal(res.status, 200);
     await new Promise((r) => setTimeout(r, 300));
@@ -388,7 +389,7 @@ test("oath approve stamps the OCR root's trace PREFIX as rootTracePrefix on BOTH
       sessionId: "sess-rt",
       runId: "ocr-run-rt",
       records: [
-        oathRecord({ employeeId: "10000910", printedName: "Person 905" }),
+        oathRecord({ employeeId: privateValue("id:dfa73f9264a72c07"), printedName: privateValue("name:713ff080c8d97bc2") }),
         oathRecord({ employeeId: "10000002", printedName: "ROE, RICHARD" }),
       ],
     });
@@ -441,7 +442,7 @@ test("oath approve: an operation-member pre-emit row carries a composed __traceI
     const res = await handler({
       sessionId: "sess-tr",
       runId: "ocr-run-tr",
-      records: [oathRecord({ employeeId: "10000910", printedName: "Person 905" })],
+      records: [oathRecord({ employeeId: privateValue("id:dfa73f9264a72c07"), printedName: privateValue("name:713ff080c8d97bc2") })],
     });
     assert.equal(res.status, 200);
     await new Promise((r) => setTimeout(r, 300));
@@ -471,9 +472,9 @@ test("buildFanOutItemIdResolver resolves cleaned structural clones to their own 
     "../../../../src/tracker/dashboard/ocr/approve.js"
   );
   const logicalInputs = [
-    { employee: { name: "Person 1717", employeeId: "10001516" }, parentSubject: "EC · 4234" },
-    { employee: { name: "Person 632", employeeId: "10001378" }, parentSubject: "EC · 4234" },
-    { employee: { name: "Person 1379", employeeId: "10002187" }, parentSubject: "EC · 4234" },
+    { employee: { name: privateValue("name:952c7413af9733c9"), employeeId: privateValue("id:699c7799ff18032d") }, parentSubject: "EC · 4234" },
+    { employee: { name: privateValue("name:1d687c5dbb4fd883"), employeeId: privateValue("id:5d8d7fa6772ddff4") }, parentSubject: "EC · 4234" },
+    { employee: { name: privateValue("name:dcdfaff8c201fd1d"), employeeId: privateValue("id:a970cb8c2efb55e5") }, parentSubject: "EC · 4234" },
   ];
   const itemIds = ["ocr-ec-run1-r0", "ocr-ec-run1-r1", "ocr-ec-run1-r2"];
   const resolve = buildFanOutItemIdResolver(logicalInputs, itemIds, "emergency-contact");
@@ -490,7 +491,7 @@ test("buildFanOutItemIdResolver hands duplicate logical inputs their own itemIds
   const { buildFanOutItemIdResolver } = await import(
     "../../../../src/tracker/dashboard/ocr/approve.js"
   );
-  const twin = { emplId: "10000910", parentSubject: "Oath · 5a15" };
+  const twin = { emplId: privateValue("id:dfa73f9264a72c07"), parentSubject: "Oath · 5a15" };
   const resolve = buildFanOutItemIdResolver(
     [twin, { ...twin }],
     ["ocr-oath-run1-r0", "ocr-oath-run1-r1"],
@@ -505,12 +506,12 @@ test("buildFanOutItemIdResolver fails loud on a shape mismatch instead of return
     "../../../../src/tracker/dashboard/ocr/approve.js"
   );
   const resolve = buildFanOutItemIdResolver(
-    [{ emplId: "10000910" }],
+    [{ emplId: privateValue("id:dfa73f9264a72c07") }],
     ["ocr-oath-run1-r0"],
     "oath-signature",
   );
   assert.throws(
-    () => resolve({ emplId: "10000910", __runtimeOptions: { rowShape: "operation-member" } }),
+    () => resolve({ emplId: privateValue("id:dfa73f9264a72c07"), __runtimeOptions: { rowShape: "operation-member" } }),
     /deriveItemId lookup missed/,
   );
 });

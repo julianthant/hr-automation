@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -12,8 +13,8 @@ function entry(partial: Partial<TrackerEntry>): TrackerEntry {
   return {
     workflow: "onboarding",
     timestamp: "2026-04-15T10:00:00.000Z",
-    id: "person@example.edu",
-    runId: "person@example.edu#1",
+    id: privateValue("ucsd:5fd131901ffd97e3"),
+    runId: privateValue("ucsd:5fd131901ffd97e3") + "#1",
     status: "done",
     data: {},
     ...partial,
@@ -47,13 +48,13 @@ describe("buildSearchHandler", () => {
       onboarding: {
         "2026-04-15": [
           entry({
-            id: "person@example.edu",
-            data: { firstName: "Jane", lastName: "Smith", email: "person@example.edu" },
+            id: privateValue("ucsd:d584e8c08670091b"),
+            data: { firstName: "Jane", lastName: "Smith", email: privateValue("ucsd:d584e8c08670091b") },
           }),
         ],
         "2026-04-14": [
           entry({
-            id: "person@example.edu",
+            id: privateValue("ucsd:16cce0623cf46eb5"),
             timestamp: "2026-04-14T10:00:00.000Z",
             data: { emplId: "EMP-99887", firstName: "Bob" },
           }),
@@ -75,13 +76,13 @@ describe("buildSearchHandler", () => {
     // Name match across workflows
     const smithResults = handler("smith", { days: 365 });
     assert.equal(smithResults.length, 2);
-    assert.ok(smithResults.some((r) => r.id === "person@example.edu"));
+    assert.ok(smithResults.some((r) => r.id === privateValue("ucsd:d584e8c08670091b")));
     assert.ok(smithResults.some((r) => r.id === "DOC-123"));
 
     // emplId match
     const empResults = handler("EMP-998", { days: 365 });
     assert.equal(empResults.length, 1);
-    assert.equal(empResults[0].id, "person@example.edu");
+    assert.equal(empResults[0].id, privateValue("ucsd:16cce0623cf46eb5"));
 
     // docId match
     const docResults = handler("doc-123", { days: 365 });
@@ -91,24 +92,24 @@ describe("buildSearchHandler", () => {
     // id (email) match — case-insensitive
     const emailResults = handler("JANE@UCSD", { days: 365 });
     assert.equal(emailResults.length, 1);
-    assert.equal(emailResults[0].id, "person@example.edu");
+    assert.equal(emailResults[0].id, privateValue("ucsd:d584e8c08670091b"));
   });
 
   it("sorts results by lastTs desc", () => {
     const bucket = {
       onboarding: {
         "2026-04-15": [
-          entry({ id: "person@example.edu", timestamp: "2026-04-15T09:00:00.000Z", data: { name: "Alice" } }),
-          entry({ id: "person@example.edu", timestamp: "2026-04-15T12:00:00.000Z", data: { name: "Alice" } }),
-          entry({ id: "person@example.edu", timestamp: "2026-04-15T10:30:00.000Z", data: { name: "Alice" } }),
+          entry({ id: privateValue("ucsd:7aec6ca531790983"), timestamp: "2026-04-15T09:00:00.000Z", data: { name: "Alice" } }),
+          entry({ id: privateValue("ucsd:015f4314eca6250d"), timestamp: "2026-04-15T12:00:00.000Z", data: { name: "Alice" } }),
+          entry({ id: privateValue("ucsd:12a61ab58f3a1f38"), timestamp: "2026-04-15T10:30:00.000Z", data: { name: "Alice" } }),
         ],
       },
     };
     const rows = buildSearchHandler(makeDeps(bucket))("alice", { days: 365 });
     assert.equal(rows.length, 3);
-    assert.equal(rows[0].id, "person@example.edu"); // 12:00
-    assert.equal(rows[1].id, "person@example.edu"); // 10:30
-    assert.equal(rows[2].id, "person@example.edu"); // 09:00
+    assert.equal(rows[0].id, privateValue("ucsd:015f4314eca6250d")); // 12:00
+    assert.equal(rows[1].id, privateValue("ucsd:12a61ab58f3a1f38")); // 10:30
+    assert.equal(rows[2].id, privateValue("ucsd:7aec6ca531790983")); // 09:00
   });
 
   it("respects the limit parameter", () => {
@@ -123,13 +124,13 @@ describe("buildSearchHandler", () => {
     const rows = handler("alice", { limit: 5, days: 365 });
     assert.equal(rows.length, 5);
     // Newest-first ordering
-    assert.equal(rows[0].id, "person@example.edu");
+    assert.equal(rows[0].id, privateValue("ucsd:645072f908b7ff2e"));
   });
 
   it("filters to a single workflow when workflow= is passed", () => {
     const bucket = {
       onboarding: {
-        "2026-04-15": [entry({ id: "person@example.edu", data: { name: "Shared" } })],
+        "2026-04-15": [entry({ id: privateValue("ucsd:7aec6ca531790983"), data: { name: "Shared" } })],
       },
       separations: {
         "2026-04-15": [entry({ workflow: "separations", id: "DOC-1", data: { name: "Shared" } })],
@@ -148,9 +149,9 @@ describe("buildSearchHandler", () => {
     const bucket = {
       onboarding: {
         "2026-04-15": [
-          entry({ id: "person@example.edu", status: "pending", timestamp: "2026-04-15T09:00:00.000Z", data: { name: "Jane" } }),
-          entry({ id: "person@example.edu", status: "running", timestamp: "2026-04-15T09:01:00.000Z", data: { name: "Jane" } }),
-          entry({ id: "person@example.edu", status: "done", timestamp: "2026-04-15T09:02:00.000Z", data: { name: "Jane" } }),
+          entry({ id: privateValue("ucsd:d584e8c08670091b"), status: "pending", timestamp: "2026-04-15T09:00:00.000Z", data: { name: "Jane" } }),
+          entry({ id: privateValue("ucsd:d584e8c08670091b"), status: "running", timestamp: "2026-04-15T09:01:00.000Z", data: { name: "Jane" } }),
+          entry({ id: privateValue("ucsd:d584e8c08670091b"), status: "done", timestamp: "2026-04-15T09:02:00.000Z", data: { name: "Jane" } }),
         ],
       },
     };
@@ -167,14 +168,14 @@ describe("buildSearchHandler", () => {
     const bucket = {
       onboarding: {
         "2026-04-15": [
-          entry({ id: "person@example.edu", runId: "person@example.edu#1", status: "failed", timestamp: "2026-04-15T09:00:00.000Z", data: { name: "Jane" } }),
-          entry({ id: "person@example.edu", runId: "person@example.edu#2", status: "done", timestamp: "2026-04-15T09:30:00.000Z", data: { name: "Jane" } }),
+          entry({ id: privateValue("ucsd:d584e8c08670091b"), runId: privateValue("ucsd:d584e8c08670091b") + "#1", status: "failed", timestamp: "2026-04-15T09:00:00.000Z", data: { name: "Jane" } }),
+          entry({ id: privateValue("ucsd:d584e8c08670091b"), runId: privateValue("ucsd:d584e8c08670091b") + "#2", status: "done", timestamp: "2026-04-15T09:30:00.000Z", data: { name: "Jane" } }),
         ],
       },
     };
     const rows = buildSearchHandler(makeDeps(bucket))("jane", { days: 365 });
     assert.equal(rows.length, 1);
-    assert.equal(rows[0].runId, "person@example.edu#2");
+    assert.equal(rows[0].runId, privateValue("ucsd:d584e8c08670091b") + "#2");
     assert.equal(rows[0].status, "done");
     assert.equal(rows[0].lastTs, "2026-04-15T09:30:00.000Z");
   });
@@ -195,21 +196,21 @@ describe("buildSearchHandler", () => {
     const bucket = {
       onboarding: {
         [toDate(today)]: [
-          entry({ id: "person@example.edu", timestamp: toIso(today), data: { name: "Shared" } }),
+          entry({ id: privateValue("ucsd:eb3a0f337e858a08"), timestamp: toIso(today), data: { name: "Shared" } }),
         ],
         [toDate(recent)]: [
-          entry({ id: "person@example.edu", timestamp: toIso(recent), data: { name: "Shared" } }),
+          entry({ id: privateValue("ucsd:24c004c78b74ab9d"), timestamp: toIso(recent), data: { name: "Shared" } }),
         ],
         [toDate(older)]: [
-          entry({ id: "person@example.edu", timestamp: toIso(older), data: { name: "Shared" } }),
+          entry({ id: privateValue("ucsd:53d79de1f729b1cf"), timestamp: toIso(older), data: { name: "Shared" } }),
         ],
       },
     };
     const rows = buildSearchHandler(makeDeps(bucket))("shared", { days: 30 });
     const ids = rows.map((r) => r.id);
-    assert.ok(ids.includes("person@example.edu"));
-    assert.ok(ids.includes("person@example.edu"));
-    assert.ok(!ids.includes("person@example.edu"));
+    assert.ok(ids.includes(privateValue("ucsd:eb3a0f337e858a08")));
+    assert.ok(ids.includes(privateValue("ucsd:24c004c78b74ab9d")));
+    assert.ok(!ids.includes(privateValue("ucsd:53d79de1f729b1cf")));
   });
 
   it("includes displayStatus for queue/search pills", () => {
@@ -233,7 +234,7 @@ describe("buildSearchHandler", () => {
   it("includes the date field so the UI can deep-link to that day's tracker", () => {
     const bucket = {
       onboarding: {
-        "2026-04-15": [entry({ id: "person@example.edu", data: { name: "Jane" } })],
+        "2026-04-15": [entry({ id: privateValue("ucsd:d584e8c08670091b"), data: { name: "Jane" } })],
       },
     };
     const rows = buildSearchHandler(makeDeps(bucket))("jane", { days: 365 });
@@ -248,7 +249,7 @@ describe("buildSearchSummary", () => {
       buildSearchSummary({
         workflow: "onboarding",
         timestamp: "",
-        id: "person@example.edu",
+        id: privateValue("ucsd:d584e8c08670091b"),
         status: "done",
         data: { __name: "Jane Smith", firstName: "Jane" },
       }),
@@ -258,7 +259,7 @@ describe("buildSearchSummary", () => {
       buildSearchSummary({
         workflow: "onboarding",
         timestamp: "",
-        id: "person@example.edu",
+        id: privateValue("ucsd:d584e8c08670091b"),
         status: "done",
         data: { name: "Jane Smith" },
       }),
@@ -268,7 +269,7 @@ describe("buildSearchSummary", () => {
       buildSearchSummary({
         workflow: "onboarding",
         timestamp: "",
-        id: "person@example.edu",
+        id: privateValue("ucsd:d584e8c08670091b"),
         status: "done",
         data: { firstName: "Jane", lastName: "Smith" },
       }),
@@ -293,9 +294,9 @@ describe("buildSearchSummary", () => {
         timestamp: "",
         id: "abc",
         status: "done",
-        data: { email: "person@example.edu" },
+        data: { email: privateValue("ucsd:d584e8c08670091b") },
       }),
-      "person@example.edu",
+      privateValue("ucsd:d584e8c08670091b"),
     );
     assert.equal(
       buildSearchSummary({

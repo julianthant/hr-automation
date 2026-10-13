@@ -2,6 +2,7 @@
  * runI9CheckMember — person-match → optional hire-dated person-lookup →
  * roster rematch. Every IO seam stubbed.
  */
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
@@ -20,7 +21,7 @@ function input(over: Partial<I9CheckMemberInput> = {}): I9CheckMemberInput {
   return {
     mode: "i9-check",
     person: {
-      name: "Person 706",
+      name: privateValue("name:9c12f2d590ae3a2c"),
       lastName: "Sanchez",
       firstName: "Gabriel",
       ssn: "558937070",
@@ -38,7 +39,7 @@ function input(over: Partial<I9CheckMemberInput> = {}): I9CheckMemberInput {
 
 function rosterRow(over: Partial<ActionHistoryRow>): ActionHistoryRow {
   return {
-    name: "Person 706",
+    name: privateValue("name:9c12f2d590ae3a2c"),
     ucpathEmplId: "10411099",
     ppsEid: "000728527",
     jobStartDate: "10/12/2018",
@@ -159,7 +160,7 @@ describe("runI9CheckMember", () => {
 
     assert.equal(appended.length, 1);
     const row = appended[0];
-    assert.equal(row.employeeName, "Person 706");
+    assert.equal(row.employeeName, privateValue("name:9c12f2d590ae3a2c"));
     assert.equal(row.ppsEid, "000728527", "spreadsheet gets the PADDED PPS ID");
     assert.equal(row.ucpathEmplId, "10411099");
     assert.equal(row.hireDate, "04/25/2016");
@@ -176,7 +177,7 @@ describe("runI9CheckMember", () => {
     const { deps, appended, calls } = harness({
       search: { found: false },
       lookupResults: [
-        { emplId: "10411099", name: "Person 706", startDate: "04/25/2016" },
+        { emplId: "10411099", name: privateValue("name:9c12f2d590ae3a2c"), startDate: "04/25/2016" },
       ],
       rows: [rosterRow({})],
     });
@@ -198,7 +199,7 @@ describe("runI9CheckMember", () => {
     const { deps, appended } = harness({
       search: { found: false },
       lookupResults: [
-        { emplId: "10411099", name: "Person 706", startDate: "01/01/2010" },
+        { emplId: "10411099", name: privateValue("name:9c12f2d590ae3a2c"), startDate: "01/01/2010" },
       ],
     });
 
@@ -267,7 +268,7 @@ describe("runI9CheckMember", () => {
     const { deps, appended } = harness({
       search: { found: false },
       lookupResults: [
-        { emplId: "10411099", name: "Person 706", startDate: "01/01/2010" },
+        { emplId: "10411099", name: privateValue("name:9c12f2d590ae3a2c"), startDate: "01/01/2010" },
       ],
     });
 
@@ -282,7 +283,7 @@ describe("runI9CheckMember", () => {
     const { deps, appended } = harness({
       search: { found: false },
       lookupResults: [
-        { emplId: "10000910", name: "Sanchez, A", startDate: "04/25/2016" },
+        { emplId: privateValue("id:dfa73f9264a72c07"), name: "Sanchez, A", startDate: "04/25/2016" },
         { emplId: "10000002", name: "Sanchez, B", startDate: "04/26/2016" },
       ],
     });

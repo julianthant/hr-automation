@@ -6,6 +6,7 @@
  * Covers the pure planner (`buildI9CheckMemberPlan`), the enqueue path
  * (`enqueueI9CheckMemberTasks`, override seam), and the prepare-route wiring.
  */
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, appendFileSync, readFileSync, existsSync } from "node:fs";
@@ -61,7 +62,7 @@ function rec(over: Partial<I9PreviewRecord> = {}): I9PreviewRecord {
     firstName: "Jane",
     middleInitial: null,
     dateOfBirth: "04/01/1998",
-    ssn: "000-00-0000",
+    ssn: privateValue("ssn:01a54629efb95228"),
     documentType: "expected",
     originallyMissing: [],
     illegible: [],
@@ -69,7 +70,7 @@ function rec(over: Partial<I9PreviewRecord> = {}): I9PreviewRecord {
     disputedFields: [],
     orphanSection2: false,
     notes: [],
-    name: "Person 905",
+    name: privateValue("name:17a6fb0c3906628f"),
     matchState: "resolved",
     selected: true,
     warnings: [],
@@ -91,7 +92,7 @@ test("plan: a searchable Section 1 becomes a REAL member task with normalized SS
   assert.deepEqual(task.input, {
     mode: "i9-check",
     person: {
-      name: "Person 905",
+      name: privateValue("name:17a6fb0c3906628f"),
       lastName: "Doe",
       firstName: "Jane",
       ssn: "123456789",
@@ -105,7 +106,7 @@ test("plan: a searchable Section 1 becomes a REAL member task with normalized SS
     recordIndex: 0,
   });
   assert.equal(task.seedData.i9Check, "true");
-  assert.equal(task.seedData.name, "Person 905");
+  assert.equal(task.seedData.name, privateValue("name:17a6fb0c3906628f"));
   assert.equal(task.seedData.section1Present, "Yes — page 1");
   assert.equal(task.seedData.section2Present, "Yes — page 9");
 });
@@ -124,7 +125,7 @@ test("plan: a name with NO usable identifiers still becomes a task (name-only lo
   assert.equal(plan.tasks.length, 1);
   assert.equal(plan.tasks[0].input.person.ssn, undefined);
   assert.equal(plan.tasks[0].input.person.dob, undefined);
-  assert.equal(plan.tasks[0].input.person.name, "Person 905");
+  assert.equal(plan.tasks[0].input.person.name, privateValue("name:17a6fb0c3906628f"));
 });
 
 test("plan: the roster NAME-match seed rides the task input for the daemon + spreadsheet", () => {
@@ -169,7 +170,7 @@ test("plan: an orphan Section 2 with a readable name gets a REAL name-only task"
         formKind: "i9 section 2",
         lastName: null,
         firstName: null,
-        name: "Person 244",
+        name: privateValue("name:9a4defa05743dc99"),
         sourcePage: 24,
         hireDate: "4/18/2016",
         orphanSection2: true,
@@ -180,7 +181,7 @@ test("plan: an orphan Section 2 with a readable name gets a REAL name-only task"
   assert.equal(plan.displayFailures.length, 0);
   assert.equal(plan.tasks.length, 1);
   const { person } = plan.tasks[0].input;
-  assert.equal(person.name, "Person 244");
+  assert.equal(person.name, privateValue("name:9a4defa05743dc99"));
   assert.equal(person.orphanSection2, true);
   assert.equal(person.hireDate, "04/18/2016");
   assert.equal(person.section2Page, 24);
@@ -226,7 +227,7 @@ test("plan: the SSN NEVER appears in seedData or log lines", () => {
   const seedBlob = JSON.stringify(plan.tasks[0].seedData);
   const logBlob = plan.tasks[0].logs.map((l) => l.message).join(" | ");
   for (const blob of [seedBlob, logBlob]) {
-    assert.ok(!blob.includes("000-00-0000") && !blob.includes("123456789"), "no SSN anywhere");
+    assert.ok(!blob.includes(privateValue("ssn:01a54629efb95228")) && !blob.includes("123456789"), "no SSN anywhere");
   }
   assert.ok(logBlob.includes("SSN supplied"), "the log says an SSN will be searched with");
   assert.ok(logBlob.includes("04/01/1998"), "and states the DOB");
@@ -347,7 +348,7 @@ test("enqueue: one REAL member task per person — retryable rows, no displayOnl
     assert.equal(row.input, undefined, "no input block — SQLite original_input_json is the replay authority");
     assert.match(row.data?.__traceId ?? "", /^ic-143012-/, "members compose the coordinator's trace prefix");
     const blob = JSON.stringify(row);
-    assert.ok(!blob.includes("000-00-0000") && !blob.includes("123456789"), "no SSN on the JSONL row");
+    assert.ok(!blob.includes(privateValue("ssn:01a54629efb95228")) && !blob.includes("123456789"), "no SSN on the JSONL row");
   }
 
   // Each pending member row carries its OCR-provenance logs under its own runId.
@@ -533,7 +534,7 @@ test("plan inputs parse through the i9-check workflow schema — and NEVER throu
   const plan = buildI9CheckMemberPlan([rec({})], CTX);
   const parsed = i9CheckWorkflow.config.schema.parse(plan.tasks[0].input) as I9CheckMemberInput;
   assert.equal(parsed.mode, "i9-check");
-  assert.equal(parsed.person.name, "Person 905");
+  assert.equal(parsed.person.name, privateValue("name:17a6fb0c3906628f"));
   // Post-split safety: the separations (termination) schema must REJECT an
   // i9-check payload outright — a replay can never become a termination.
   assert.throws(() => separationsWorkflow.config.schema.parse(plan.tasks[0].input));

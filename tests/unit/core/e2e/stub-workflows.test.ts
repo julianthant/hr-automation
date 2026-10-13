@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
@@ -36,7 +37,7 @@ function makeFakeCtx(trackerDir: string) {
   const ctx = {
     signal: ac.signal,
     trackerDir,
-    runId: "10000000-0000-4000-8000-000000000000",
+    runId: privateValue("id:7e071fd9b023ed8f") + "-0000-4000-8000-000000000000",
     updateData: (patch: Record<string, string>) => {
       Object.assign(data, patch);
       calls.push({ kind: "data", patch });
@@ -84,13 +85,13 @@ test("scripted handler walks the real steps and stamps operator data from the in
     const { ctx, calls, data } = makeFakeCtx(dir);
     await stub.config.handler(
       ctx as never,
-      { emplId: "10000910", name: "Person 905", date: "06/11/2026", dryRun: true } as never,
+      { emplId: privateValue("id:dfa73f9264a72c07"), name: privateValue("name:17a6fb0c3906628f"), date: "06/11/2026", dryRun: true },
     );
     const steps = calls.filter((c) => c.kind === "step").map((c) => c.step);
     assert.deepEqual(steps, ["crm-verify", "ucpath-auth", "transaction"]);
     assert.equal(data.e2eStub, "true");
-    assert.equal(data.emplId, "10000910");
-    assert.equal(data.name, "Person 905");
+    assert.equal(data.emplId, privateValue("id:dfa73f9264a72c07"));
+    assert.equal(data.name, privateValue("name:17a6fb0c3906628f"));
     assert.equal(data.date, "06/11/2026");
     assert.equal(data.status, "Dry Run Complete");
   } finally {
@@ -179,7 +180,7 @@ test("person-lookup EID-only stub echoes a resolved name so the row title is not
   // RED pin: an EID-only person-lookup row finishes `done` but, in stub mode,
   // never gets a resolved name echoed onto its data — so `data.name` is unset
   // and `data.searchName` stays the bare EID. The person-kind title resolver
-  // then falls through to that EID, titling the row "10001140" instead of a
+  // then falls through to that EID, titling the row "id:39b15d04d9aabc41" instead of a
   // person name. The REAL handler stamps `searchName = result.name` (the
   // UCPath-resolved name), so the stub is the layer that must echo a name.
   const dir = mkdtempSync(join(tmpdir(), "e2e-stub-pl-eid-"));
@@ -189,7 +190,7 @@ test("person-lookup EID-only stub echoes a resolved name so the row title is not
       personLookupWorkflow as unknown as AnyRegisteredWorkflow,
     );
     const { ctx, data } = makeFakeCtx(dir);
-    await stub.config.handler(ctx as never, { emplId: "10001140" } as never);
+    await stub.config.handler(ctx as never, { emplId: privateValue("id:39b15d04d9aabc41") });
 
     // Project the finished row's data through the single title/subtitle resolver
     // as a person-kind row (what an EID person-lookup row renders as).
@@ -200,7 +201,7 @@ test("person-lookup EID-only stub echoes a resolved name so the row title is not
     assert.ok(presentation, "person-kind row should resolve a presentation");
     assert.notEqual(
       presentation.title,
-      "10001140",
+      privateValue("id:39b15d04d9aabc41"),
       "an EID-only person-lookup row must title on a resolved name, not the bare EID",
     );
   } finally {

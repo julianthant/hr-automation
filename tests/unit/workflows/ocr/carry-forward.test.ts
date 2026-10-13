@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert";
 import { applyCarryForward } from "../../../../src/workflows/ocr/carry-forward.js";
@@ -15,7 +16,7 @@ const v1Records = [
     printedName: "Liam Kustenbauder",
     employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
     notes: [], documentType: "expected" as const, originallyMissing: [],
-    employeeId: "10000910",
+    employeeId: privateValue("id:dfa73f9264a72c07"),
     matchState: "resolved" as const,
     matchSource: "eid-lookup" as const,
     selected: true,
@@ -44,7 +45,7 @@ test("v2 record matching v1 by name inherits resolved fields", () => {
 
   const result = applyCarryForward({ v2Records: v2Records as unknown[], v1Records: v1Records as unknown[], spec });
   const r0 = result[0] as Record<string, unknown>;
-  assert.equal(r0.employeeId, "10000910");
+  assert.equal(r0.employeeId, privateValue("id:dfa73f9264a72c07"));
   assert.equal(r0.matchState, "resolved");
 });
 
@@ -99,5 +100,5 @@ test("Levenshtein ≤ 2 still matches (single-character difference)", () => {
 
   const result = applyCarryForward({ v2Records: v2Records as unknown[], v1Records: v1Records as unknown[], spec });
   const r0 = result[0] as Record<string, unknown>;
-  assert.equal(r0.employeeId, "10000910");
+  assert.equal(r0.employeeId, privateValue("id:dfa73f9264a72c07"));
 });

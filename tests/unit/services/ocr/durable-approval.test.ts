@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,14 +41,14 @@ function manifest(suffix: string, sessionId = "session", runId = "run"): OcrAppr
     records: [],
     reviewData: {},
     children: [
-      { kind: "record", workflow: "oath-signature", itemId: "signer-1", runId: `run-${suffix}`, input: { emplId: "10000910" } },
+      { kind: "record", workflow: "oath-signature", itemId: "signer-1", runId: `run-${suffix}`, input: { emplId: privateValue("id:dfa73f9264a72c07") } },
     ],
   };
 }
 
 test("approval claim is atomic and identical concurrent requests reuse the first manifest", () => {
   const control = setup();
-  const requestHash = hashOcrApprovalRequest({ records: [{ selected: true, employeeId: "10000910" }] });
+  const requestHash = hashOcrApprovalRequest({ records: [{ selected: true, employeeId: privateValue("id:dfa73f9264a72c07") }] });
   const first = beginOcrApproval(control, {
     sessionId: "session-1",
     runId: "ocr-run-1",

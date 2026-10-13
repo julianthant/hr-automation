@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -62,11 +63,11 @@ test("buildJsonlEventsPayload returns only the oath-upload root row (no children
     trackEventForDate({
       workflow: "oath-signature",
       timestamp: "2026-05-20T10:02:00.000Z",
-      id: "10000910",
+      id: privateValue("id:dfa73f9264a72c07"),
       runId: "signature-run",
       parentRunId: "synthesized-oath-signature-run",
       status: "pending",
-      data: { archetype: "single", name: "Person 905", emplId: "10000910" },
+      data: { archetype: "single", name: privateValue("name:01332c876518a793"), emplId: privateValue("id:dfa73f9264a72c07") },
     }, date, dir);
 
     const payload = buildJsonlEventsPayload("oath-upload", date, "2026-05-21", dir);

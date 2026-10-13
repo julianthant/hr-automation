@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -57,7 +58,7 @@ test('idempotent enqueue reuses an exact terminal task without resurrecting it',
   try {
     const request = {
       workflow: 'oath-signature',
-      inputs: [{ emplId: '10000910' }],
+      inputs: [{ emplId: privateValue("id:dfa73f9264a72c07") }],
       deriveItemId: () => 'signer-1',
       runIds: ['stable-child-run'],
       parentRunId: 'approval-parent',

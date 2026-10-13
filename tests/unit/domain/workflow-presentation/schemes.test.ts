@@ -1,15 +1,16 @@
 // tests/unit/domain/workflow-presentation/schemes.test.ts
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it, expect } from "vitest";
 import { SCHEME_LIBRARY, resolveTitle, resolveSubtitle } from "../../../../src/domain/workflow-presentation/schemes.js";
 
-const vars = { name: "Person 905", emplId: "10012345", pdfOriginalName: "oath.pdf", traceId: "ou-143012-a3f1", label: "Onboarding Roster" };
+const vars = { name: privateValue("name:01332c876518a793"), emplId: "10012345", pdfOriginalName: "oath.pdf", traceId: "ou-143012-a3f1", label: "Onboarding Roster" };
 
 describe("resolveTitle", () => {
-  it("person-name → name", () => expect(resolveTitle(vars, { scheme: "person-name" })).toBe("Person 905"));
+  it("person-name → name", () => expect(resolveTitle(vars, { scheme: "person-name" })).toBe(privateValue("name:01332c876518a793")));
   it("pdf-filename → pdf name", () => expect(resolveTitle(vars, { scheme: "pdf-filename" })).toBe("oath.pdf"));
   it("catalog-label → label", () => expect(resolveTitle(vars, { scheme: "catalog-label" })).toBe("Onboarding Roster"));
   it("operation-anchor → empty (count badge identifies it)", () => expect(resolveTitle(vars, { scheme: "operation-anchor" })).toBe(""));
-  it("custom-template renders", () => expect(resolveTitle(vars, { scheme: "custom-template", template: "{name} #{emplId}" })).toBe("Person 905 #10012345"));
+  it("custom-template renders", () => expect(resolveTitle(vars, { scheme: "custom-template", template: "{name} #{emplId}" })).toBe(privateValue("name:01332c876518a793") + " #10012345"));
 });
 
 describe("resolveSubtitle", () => {

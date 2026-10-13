@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -62,8 +63,8 @@ describe("normalizeName", () => {
 
 describe("PersonLookupItemSchema", () => {
   it("PersonLookupNameInputSchema accepts a name string", () => {
-    const parsed = PersonLookupNameInputSchema.parse({ name: "Person 1717" });
-    assert.equal(parsed.name, "Person 1717");
+    const parsed = PersonLookupNameInputSchema.parse({ name: privateValue("name:952c7413af9733c9") });
+    assert.equal(parsed.name, privateValue("name:952c7413af9733c9"));
   });
 
   it("PersonLookupNameInputSchema rejects empty name", () => {
@@ -71,8 +72,8 @@ describe("PersonLookupItemSchema", () => {
   });
 
   it("PersonLookupEidInputSchema accepts a UCPath EID", () => {
-    const parsed = PersonLookupEidInputSchema.parse({ emplId: "10001516" });
-    assert.equal(parsed.emplId, "10001516");
+    const parsed = PersonLookupEidInputSchema.parse({ emplId: privateValue("id:699c7799ff18032d") });
+    assert.equal(parsed.emplId, privateValue("id:699c7799ff18032d"));
   });
 
   it("PersonLookupEidInputSchema rejects non-numeric Empl ID", () => {
@@ -96,12 +97,12 @@ describe("PersonLookupItemSchema", () => {
 
   it("isEidInput discriminates the union", () => {
     assert.equal(isEidInput(PersonLookupItemSchema.parse({ name: "Smith, Bob" })), false);
-    assert.equal(isEidInput(PersonLookupItemSchema.parse({ emplId: "10001516" })), true);
+    assert.equal(isEidInput(PersonLookupItemSchema.parse({ emplId: privateValue("id:699c7799ff18032d") })), true);
   });
 
   it("defaults mode to search for legacy name and EID callers", () => {
     assert.equal(PersonLookupItemSchema.parse({ name: "Smith, Bob" }).mode, "search");
-    assert.equal(PersonLookupItemSchema.parse({ emplId: "10001516" }).mode, "search");
+    assert.equal(PersonLookupItemSchema.parse({ emplId: privateValue("id:699c7799ff18032d") }).mode, "search");
   });
 
   it("defaults CRM on for search and off for match, with explicit overrides", () => {
@@ -130,11 +131,11 @@ describe("PersonLookupItemSchema", () => {
 
   it("keepNonHdh flag carries through both shapes", () => {
     const n = PersonLookupNameInputSchema.parse({
-      name: "Person 1717",
+      name: privateValue("name:952c7413af9733c9"),
       keepNonHdh: true,
     });
     const e = PersonLookupEidInputSchema.parse({
-      emplId: "10001516",
+      emplId: privateValue("id:699c7799ff18032d"),
       keepNonHdh: true,
     });
     assert.equal(n.keepNonHdh, true);
@@ -142,15 +143,15 @@ describe("PersonLookupItemSchema", () => {
   });
 
   it("includeCrmDates is optional — omitting it still parses both shapes", () => {
-    const n = PersonLookupNameInputSchema.parse({ name: "Person 1717" });
-    const e = PersonLookupEidInputSchema.parse({ emplId: "10001516" });
+    const n = PersonLookupNameInputSchema.parse({ name: privateValue("name:952c7413af9733c9") });
+    const e = PersonLookupEidInputSchema.parse({ emplId: privateValue("id:699c7799ff18032d") });
     assert.equal(n.includeCrmDates, undefined);
     assert.equal(e.includeCrmDates, undefined);
   });
 
   it("includeCrmDates: true is accepted on name input", () => {
     const n = PersonLookupNameInputSchema.parse({
-      name: "Person 1717",
+      name: privateValue("name:952c7413af9733c9"),
       includeCrmDates: true,
     });
     assert.equal(n.includeCrmDates, true);
@@ -158,7 +159,7 @@ describe("PersonLookupItemSchema", () => {
 
   it("includeCrmDates: true is accepted on EID input", () => {
     const e = PersonLookupEidInputSchema.parse({
-      emplId: "10001516",
+      emplId: privateValue("id:699c7799ff18032d"),
       includeCrmDates: true,
     });
     assert.equal(e.includeCrmDates, true);
@@ -166,11 +167,11 @@ describe("PersonLookupItemSchema", () => {
 
   it("includeCrmDates: false is accepted on both shapes", () => {
     const n = PersonLookupNameInputSchema.parse({
-      name: "Person 1717",
+      name: privateValue("name:952c7413af9733c9"),
       includeCrmDates: false,
     });
     const e = PersonLookupEidInputSchema.parse({
-      emplId: "10001516",
+      emplId: privateValue("id:699c7799ff18032d"),
       includeCrmDates: false,
     });
     assert.equal(n.includeCrmDates, false);
@@ -282,7 +283,7 @@ describe("parsePersonLookupMatchLine", () => {
 
 describe("derivePersonLookupItemId", () => {
   it("uses the EID as the stable item id for EID inputs", () => {
-    assert.equal(derivePersonLookupItemId({ emplId: "10001516" }), "10001516");
+    assert.equal(derivePersonLookupItemId({ emplId: privateValue("id:699c7799ff18032d") }), privateValue("id:699c7799ff18032d"));
   });
 
   it("uses the display name as the stable item id for name inputs", () => {
@@ -304,7 +305,7 @@ describe("derivePersonLookupItemId", () => {
 
 describe("buildPersonLookupCliInput", () => {
   it("routes digit-only queries through EID validation only when they normalize to a UCPath EID", () => {
-    assert.deepEqual(buildPersonLookupCliInput("10001516"), { emplId: "10001516" });
+    assert.deepEqual(buildPersonLookupCliInput(privateValue("id:699c7799ff18032d")), { emplId: privateValue("id:699c7799ff18032d") });
     assert.deepEqual(buildPersonLookupCliInput("10-706431"), { emplId: "10-706431" });
     assert.deepEqual(buildPersonLookupCliInput(" 10870001 "), { emplId: " 10870001 " });
   });

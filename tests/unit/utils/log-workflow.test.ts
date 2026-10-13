@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it } from "vitest";
 import { strict as assert } from "node:assert";
 import { withLogContext, getLogWorkflow } from "../../../src/utils/log.js";
@@ -8,7 +9,7 @@ describe("getLogWorkflow", () => {
   });
 
   it("returns the workflow name set by withLogContext", async () => {
-    await withLogContext("oath-signature", "10002077", async () => {
+    await withLogContext("oath-signature", privateValue("id:adbfae7777393943"), async () => {
       assert.equal(getLogWorkflow(), "oath-signature");
     });
   });
@@ -16,7 +17,7 @@ describe("getLogWorkflow", () => {
   it("nested context restores the outer workflow on return", async () => {
     await withLogContext("emergency-contact", "p01-12345", async () => {
       assert.equal(getLogWorkflow(), "emergency-contact");
-      await withLogContext("oath-signature", "10002077", async () => {
+      await withLogContext("oath-signature", privateValue("id:adbfae7777393943"), async () => {
         assert.equal(getLogWorkflow(), "oath-signature");
       });
       assert.equal(getLogWorkflow(), "emergency-contact");

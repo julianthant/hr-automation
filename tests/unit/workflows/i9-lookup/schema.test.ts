@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { I9LookupInputSchema } from "../../../../src/workflows/i9-lookup/schema.js";
@@ -15,9 +16,9 @@ describe("I9LookupInputSchema", () => {
     const parsed = I9LookupInputSchema.parse({
       lastName: "Doe",
       firstName: "John",
-      ssn: "000-00-0000",
+      ssn: privateValue("ssn:01a54629efb95228"),
     });
-    assert.equal(parsed.ssn, "000-00-0000");
+    assert.equal(parsed.ssn, privateValue("ssn:01a54629efb95228"));
   });
 
   it("accepts optional parentSubject", () => {

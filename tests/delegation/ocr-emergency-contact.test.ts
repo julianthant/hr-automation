@@ -1,3 +1,4 @@
+import { privateValue } from "../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync } from "node:fs";
@@ -90,7 +91,7 @@ const emergencyContactStub: GatedWorkflowSpec = {
 const STUB_RECORDS: StubEcOcrRecord[] = [
   {
     sourcePage: 1,
-    employee: { name: "Person 905", employeeId: "10000910" },
+    employee: { name: privateValue("name:01332c876518a793"), employeeId: privateValue("id:dfa73f9264a72c07") },
     emergencyContact: {
       name: "John Doe",
       relationship: "Spouse",
@@ -253,7 +254,7 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
   // Every EC child: batch-member archetype, parentRunId === the delegating run, person
   // title (resolved employee name), EID subtitle (name→person, flat-row footer).
   const byEid: Record<string, { name: string }> = {
-    "10000910": { name: "Person 905" },
+    [privateValue("id:dfa73f9264a72c07")]: { name: privateValue("name:01332c876518a793") },
     "10000002": { name: "Richard Roe" },
     "10000003": { name: "Sam Stone" },
   };

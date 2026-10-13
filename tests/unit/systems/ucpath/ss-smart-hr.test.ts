@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -138,15 +139,15 @@ describe("pickHireRow", () => {
 
 describe("buildHireSearchName", () => {
   // LIVE-VERIFIED 2026-08-20: the SS Smart HR "Name" box matches the DISPLAY
-  // name ("Person 89" → 1 of 1; "Person 780" → 2 incl. the Pending hire);
+  // name ("name:8096aac1c5592ba3" → 1 of 1; "name:11e6f33fffe74fc2" → 2 incl. the Pending hire);
   // every Last,First / LAST,FIRST / Last-only variant returned no rows.
   it("builds the PeopleSoft display-name key (First Last)", () => {
-    assert.equal(buildHireSearchName("Jane", "Doe"), "Person 905");
-    assert.equal(buildHireSearchName("Ali", "Alnasser"), "Person 89");
+    assert.equal(buildHireSearchName("Jane", "Doe"), privateValue("name:01332c876518a793"));
+    assert.equal(buildHireSearchName("Ali", "Alnasser"), privateValue("name:8096aac1c5592ba3"));
   });
 
   it("trims surrounding whitespace on each part", () => {
-    assert.equal(buildHireSearchName("  Jane ", " Doe  "), "Person 905");
+    assert.equal(buildHireSearchName("  Jane ", " Doe  "), privateValue("name:01332c876518a793"));
   });
 
   it("falls back to the last name alone when first is missing", () => {
@@ -436,10 +437,10 @@ describe("receiptMatchesRequestedTransaction", () => {
 
 
 describe("SS Smart HR auto-opened detail page readers (live page text, 2026-08-20)", () => {
-  // Person 89's detail page (single match): routing strip + Hire Details grid.
+  // name:8096aac1c5592ba3's detail page (single match): routing strip + Hire Details grid.
   const ALI = "Transaction Details Transaction Status Approved Transaction ID T002214646 Hire Details "
-    + "Name Type of Hire Start Date Action Country 1 Person 89 Employee 09/11/2026 HIR USA "
-    + "HIRE Expand Transaction: T002214646, ID: 10002297, Effdt: 2026-09-11, Unit: SDCMP : Approved";
+    + "Name Type of Hire Start Date Action Country 1 " + privateValue("name:947cd5cdd5afc9fd") + " Employee 09/11/2026 HIR USA "
+    + "HIRE Expand Transaction: T002214646, ID: " + privateValue("id:20e342654ecc133d") + ", Effdt: 2026-09-11, Unit: SDCMP : Approved";
   it("reads the hire action from the Hire Details grid / routing strip", () => {
     assert.equal(detailPageHireAction(ALI), "HIR");
     assert.equal(detailPageHireAction("Termination Details ... TER ... TERMINATION Expand Transaction"), "");
@@ -456,12 +457,12 @@ describe("parseTransactionRoutingStrip", () => {
   it("extracts the assigned EID from the exact transaction routing strip", () => {
     assert.deepEqual(
       parseTransactionRoutingStrip(
-        "Transaction: T002235451, ID: 10002345, Effdt: 2026-09-28, Unit: SDCMP",
+        "Transaction: T002235451, ID: " + privateValue("id:bf5c81799e6f558c") + ", Effdt: 2026-09-28, Unit: SDCMP",
         "T002235451",
       ),
       {
         transactionId: "T002235451",
-        eid: "10002345",
+        eid: privateValue("id:bf5c81799e6f558c"),
         effectiveDate: "2026-09-28",
       },
     );
@@ -484,7 +485,7 @@ describe("parseTransactionRoutingStrip", () => {
   it("does not accept a different transaction's routing strip", () => {
     assert.equal(
       parseTransactionRoutingStrip(
-        "Transaction: T002235452, ID: 10002345, Effdt: 2026-09-28, Unit: SDCMP",
+        "Transaction: T002235452, ID: " + privateValue("id:bf5c81799e6f558c") + ", Effdt: 2026-09-28, Unit: SDCMP",
         "T002235451",
       ),
       null,

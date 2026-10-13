@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../../src/private-data.js";
 import { describe, it, vi } from "vitest";
 import assert from "node:assert/strict";
 
@@ -57,11 +58,11 @@ vi.mock("../../../../../src/tracker/delegation/watch-child-runs.js", () => ({
             runId: "pl-run-1111",
             status: "done" as const,
             data: {
-              emplId: "10000910",
+              emplId: privateValue("id:dfa73f9264a72c07"),
               activeStatus: "active",
               employmentDate: "2026-04-01",
               oathDate: "2026-04-23",
-              searchName: "Person 905",
+              searchName: privateValue("name:17a6fb0c3906628f"),
             },
             terminalEntry: { data: { __traceId: "vf-101010-pl11" } },
           };
@@ -82,7 +83,7 @@ describe("verifyOcrFormSpec.enrichRecords progress", () => {
       {
         formKind: "oath",
         sourcePage: 1,
-        printedName: "Person 905",
+        printedName: privateValue("name:17a6fb0c3906628f"),
         employeeId: "",
         paperEmploymentDate: null,
         paperDateSigned: null,
@@ -92,7 +93,7 @@ describe("verifyOcrFormSpec.enrichRecords progress", () => {
         documentType: "expected",
         originallyMissing: [],
         notes: [],
-        name: "Person 905",
+        name: privateValue("name:17a6fb0c3906628f"),
         matchState: "extracted",
         selected: true,
         warnings: [],
@@ -160,7 +161,7 @@ describe("verifyOcrFormSpec.enrichRecords progress", () => {
         } =
           opts.workflow === "i9-lookup"
             ? { workflow: "i9-lookup", itemId, runId: "i9-err", status: "done", data: { i9Status: "error" }, terminalEntry: { data: { __traceId: "vf-101010-i9er" } } }
-            : { workflow: "person-lookup", itemId, runId: "pl-ok", status: "done", data: { emplId: "10000910", activeStatus: "active" }, terminalEntry: { data: { __traceId: "vf-101010-plok" } } };
+            : { workflow: "person-lookup", itemId, runId: "pl-ok", status: "done", data: { emplId: privateValue("id:dfa73f9264a72c07"), activeStatus: "active" }, terminalEntry: { data: { __traceId: "vf-101010-plok" } } };
         opts.onProgress?.(outcome, 0);
         return [outcome];
       }),
@@ -171,9 +172,9 @@ describe("verifyOcrFormSpec.enrichRecords progress", () => {
 
     const records: any[] = [
       {
-        formKind: "oath", sourcePage: 1, printedName: "Person 905", employeeId: "",
+        formKind: "oath", sourcePage: 1, printedName: privateValue("name:17a6fb0c3906628f"), employeeId: "",
         employeeSigned: true, officerSigned: false, documentType: "expected",
-        originallyMissing: [], notes: [], name: "Person 905", matchState: "extracted",
+        originallyMissing: [], notes: [], name: privateValue("name:17a6fb0c3906628f"), matchState: "extracted",
         selected: true, warnings: [], checks: [],
       },
     ];

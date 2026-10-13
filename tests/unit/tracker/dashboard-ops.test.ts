@@ -6,6 +6,7 @@
  * daemons; the underlying file readers (queueFilePath, daemonsDir) are
  * already covered by tests in tests/unit/core/daemon-*.test.ts.
  */
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "http";
@@ -395,7 +396,7 @@ describe("buildSaveDataHandler", () => {
         id: "3930",
         runId: "run-1",
         status: "done",
-        data: { transactionNumber: "T002109055", eid: "10000910" },
+        data: { transactionNumber: "T002109055", eid: privateValue("id:dfa73f9264a72c07") },
       },
       "2026-05-15",
       tmp,
@@ -413,9 +414,9 @@ describe("buildSaveDataHandler", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    const latest = entries.at(-1);
+    const latest = entries.at(-1) as { data: { transactionNumber: string; eid: string } };
     assert.equal(latest.data.transactionNumber, "");
-    assert.equal(latest.data.eid, "10000910");
+    assert.equal(latest.data.eid, privateValue("id:dfa73f9264a72c07"));
   });
 
   it("saves edits to the selected tracker date instead of today", async () => {
@@ -503,7 +504,7 @@ describe("buildDeleteEntryHandler", () => {
     });
     const [child] = store.enqueueTasks({
       workflow: "eid-lookup",
-      inputs: [{ searchName: "Person 905" }],
+      inputs: [{ searchName: privateValue("name:17a6fb0c3906628f") }],
       deriveItemId: () => "ocr-session-1-r0",
       runIds: ["eid-run-1"],
       parentRunId: "ocr-run-1",

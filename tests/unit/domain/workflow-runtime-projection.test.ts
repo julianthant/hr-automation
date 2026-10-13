@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
@@ -60,17 +61,17 @@ describe("workflow runtime projection adapters", () => {
   it("projects a normal row as a normal surface", () => {
     const row = entry({
       workflow: "work-study",
-      id: "Person 905",
+      id: privateValue("name:17a6fb0c3906628f"),
       runId: "work-study-run-1",
       status: "pending",
-      data: { __queueTitle: "Person 905", __queueTitleKind: "single" },
+      data: { __queueTitle: privateValue("name:17a6fb0c3906628f"), __queueTitleKind: "single" },
     });
 
     const projection = buildWorkflowRunProjection(row, {});
 
     assert.equal(projection.runId, "work-study-run-1");
     assert.equal(projection.workflowId, "work-study");
-    assert.equal(projection.title, "Person 905");
+    assert.equal(projection.title, privateValue("name:17a6fb0c3906628f"));
     assert.equal(projection.surfaceType, "single");
   });
 
@@ -142,7 +143,7 @@ describe("workflow runtime projection adapters", () => {
       status: "pending",
       data: {
         archetype: "single",
-        __queueTitle: "Person 905",
+        __queueTitle: privateValue("name:17a6fb0c3906628f"),
         __queueTitleKind: "single",
       },
     });
@@ -365,7 +366,7 @@ describe("workflow runtime projection adapters", () => {
       status: "pending",
       data: {
         archetype: "single",
-        searchName: "Person 905",
+        searchName: privateValue("name:17a6fb0c3906628f"),
       },
     });
     const active = entry({
@@ -376,7 +377,7 @@ describe("workflow runtime projection adapters", () => {
       status: "pending",
       data: {
         archetype: "single",
-        emplId: "10000910",
+        emplId: privateValue("id:dfa73f9264a72c07"),
       },
     });
 
@@ -401,8 +402,8 @@ describe("workflow runtime projection adapters", () => {
       status: "pending",
       data: {
         archetype: "single",
-        name: "Person 905",
-        emplId: "10000910",
+        name: privateValue("name:01332c876518a793"),
+        emplId: privateValue("id:dfa73f9264a72c07"),
         __queueTitle: "Oath · 9876",
         __queueTitleKind: "operation",
       },
@@ -413,7 +414,7 @@ describe("workflow runtime projection adapters", () => {
     });
 
     assert.equal(projection.surfaceType, "single");
-    assert.equal(projection.title, "Person 905");
+    assert.equal(projection.title, privateValue("name:01332c876518a793"));
     assert.equal(projection.actions.find((action) => action.kind === "cancel")?.scope, "row");
   });
 
@@ -492,15 +493,15 @@ describe("workflow runtime projection adapters", () => {
     // member share the `ou-101010` prefix yet differ in the final 4.
     const signer = entry({
       workflow: "oath-signature",
-      id: "10000910",
+      id: privateValue("id:dfa73f9264a72c07"),
       runId: "signer-run-1",
       parentRunId: "op-run-1",
       status: "running",
       data: {
         archetype: "operation-member",
         queueRowKind: "person",
-        name: "Person 905",
-        emplId: "10000910",
+        name: privateValue("name:01332c876518a793"),
+        emplId: privateValue("id:dfa73f9264a72c07"),
         __traceId: "ou-101010-s1nr",
       },
     });
@@ -566,9 +567,9 @@ describe("workflow runtime projection adapters", () => {
 describe("workflow runtime projection — phase 5 standard workflows", () => {
   it("projects direct utility and single workflows with default row actions", () => {
     for (const [workflowId, label] of [
-      ["work-study", "Person 905"],
+      ["work-study", privateValue("name:17a6fb0c3906628f")],
       ["separations", "3927"],
-      ["crm-doc-download", "person@example.edu"],
+      ["crm-doc-download", privateValue("ucsd:d584e8c08670091b")],
       ["kronos-reports", "10873698"],
     ] as const) {
       const row = entry({
@@ -600,8 +601,8 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
   it("gates row actions by status — running cancels, terminal retries+deletes", () => {
     const base = {
       workflow: "work-study",
-      id: "Person 905",
-      data: { __queueTitle: "Person 905", __queueTitleKind: "single" },
+      id: privateValue("name:17a6fb0c3906628f"),
+      data: { __queueTitle: privateValue("name:17a6fb0c3906628f"), __queueTitleKind: "single" },
     } as const;
     const enabledKinds = (status: "pending" | "running" | "done" | "failed") => {
       const projection = buildWorkflowRunProjection(
@@ -619,16 +620,16 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
   it("projects a direct person-lookup row as a normal utility surface", () => {
     const row = entry({
       workflow: "person-lookup",
-      id: "Person 905",
+      id: privateValue("name:17a6fb0c3906628f"),
       runId: "lookup-direct-run",
       status: "pending",
-      data: { searchName: "Person 905", __queueTitle: "Person 905", __queueTitleKind: "single" },
+      data: { searchName: privateValue("name:17a6fb0c3906628f"), __queueTitle: privateValue("name:17a6fb0c3906628f"), __queueTitleKind: "single" },
     });
     const projection = buildWorkflowRunProjection(row, {
       runtimePolicies: phase5Policies,
     });
     assert.equal(projection.surfaceType, "single");
-    assert.equal(projection.title, "Person 905");
+    assert.equal(projection.title, privateValue("name:17a6fb0c3906628f"));
   });
 
   it("titles OCR person-lookup children by resolved person name instead of technical ids", () => {
@@ -640,15 +641,15 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       status: "done",
       data: {
         archetype: "single",
-        searchName: "Person 905",
-        emplId: "10000910",
+        searchName: privateValue("name:01332c876518a793"),
+        emplId: privateValue("id:dfa73f9264a72c07"),
       },
     });
     const projection = buildWorkflowRunProjection(child, {
       runtimePolicies: phase5Policies,
     });
     assert.equal(projection.surfaceType, "single");
-    assert.equal(projection.title, "Person 905");
+    assert.equal(projection.title, privateValue("name:01332c876518a793"));
   });
 
   it("projects a lone OCR person-lookup utility child as a one-member batch", () => {
@@ -660,8 +661,8 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       status: "pending",
       data: {
         archetype: "single",
-        searchName: "Person 905",
-        emplId: "10000910",
+        searchName: privateValue("name:01332c876518a793"),
+        emplId: privateValue("id:dfa73f9264a72c07"),
       },
     });
     const surfaces = buildTrackerQueueSurfaces({
@@ -768,8 +769,8 @@ describe("workflow runtime projection — resolvePresentation (Task 4.5)", () =>
       data: {
         archetype: "single",
         queueRowKind: "person",
-        name: "Person 905",
-        emplId: "10000910",
+        name: privateValue("name:17a6fb0c3906628f"),
+        emplId: privateValue("id:dfa73f9264a72c07"),
         __traceId: "os-120000-abcd",
       },
     });
@@ -786,13 +787,13 @@ describe("workflow runtime projection — resolvePresentation (Task 4.5)", () =>
       }),
     });
 
-    // person-name → "Person 905" (same as without since default also resolves name)
-    assert.equal(withResolver.title, "Person 905");
+    // person-name → "name:17a6fb0c3906628f" (same as without since default also resolves name)
+    assert.equal(withResolver.title, privateValue("name:17a6fb0c3906628f"));
     // trace-only → the trace id, not EID (default for person member is eid-else-trace → EID)
     assert.equal(withResolver.subtitle, "os-120000-abcd");
-    // Confirm the resolver changed the subtitle (default eid-else-trace would return EID "10000910")
+    // Confirm the resolver changed the subtitle (default eid-else-trace would return EID "id:dfa73f9264a72c07")
     assert.notEqual(withResolver.subtitle, withoutResolver.subtitle);
-    assert.equal(withoutResolver.subtitle, "10000910");
+    assert.equal(withoutResolver.subtitle, privateValue("id:dfa73f9264a72c07"));
   });
 
   it("prep prepTitle lit: resolvePresentation prepTitle applied to OCR prep row", () => {
@@ -845,7 +846,7 @@ describe("workflow runtime projection — resolvePresentation (Task 4.5)", () =>
       data: {
         archetype: "single",
         queueRowKind: "person",
-        name: "Person 905",
+        name: privateValue("name:17a6fb0c3906628f"),
         emplId: "20001234",
         __traceId: "ws-100000-a1b2",
       },

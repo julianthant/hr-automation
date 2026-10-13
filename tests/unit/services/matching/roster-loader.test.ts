@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync, utimesSync } from "node:fs";
@@ -88,7 +89,7 @@ describe("findLatestRoster / listRosters", () => {
     const c = join(tmp, "elections.csv");
     const y = join(tmp, "ignore.txt");
     await writeFakeRoster(x, [{ eid: "1", first: "A", last: "B" }]);
-    writeFileSync(c, "Employee Name,Employee ID\n\"Person 905\",10001\n");
+    writeFileSync(c, "Employee Name,Employee ID\n\"" + privateValue("name:17a6fb0c3906628f") + "\",10001\n");
     writeFileSync(y, "noise");
     utimesSync(x, new Date("2026-01-02"), new Date("2026-01-02"));
     utimesSync(c, new Date("2026-01-01"), new Date("2026-01-01"));
@@ -115,7 +116,7 @@ describe("loadRoster", () => {
     const rows = await loadRoster(p);
     assert.equal(rows.length, 2);
     assert.equal(rows[0].eid, "10001");
-    assert.equal(rows[0].name, "Person 905");
+    assert.equal(rows[0].name, privateValue("name:01332c876518a793"));
     assert.equal(rows[0].street, "123 Main");
     assert.equal(rows[0].zip, "80201");
     assert.equal(rows[1].name, "Bob Smith");
@@ -127,12 +128,12 @@ describe("loadRoster", () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Sheet1");
     ws.addRow(["Name", "Street"]);
-    ws.addRow(["Person 905", "123 Main"]);
+    ws.addRow([privateValue("name:01332c876518a793"), "123 Main"]);
     await wb.xlsx.writeFile(p);
     const rows = await loadRoster(p);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].eid, "");
-    assert.equal(rows[0].name, "Person 905");
+    assert.equal(rows[0].name, privateValue("name:01332c876518a793"));
     assert.equal(rows[0].street, "123 Main");
   });
 
@@ -141,10 +142,10 @@ describe("loadRoster", () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Sheet1");
     ws.addRow(["Employee ID", "Name", "Street"]);
-    ws.addRow(["10001", "Person 905", "123 Main"]);
+    ws.addRow(["10001", privateValue("name:01332c876518a793"), "123 Main"]);
     await wb.xlsx.writeFile(p);
     const rows = await loadRoster(p);
-    assert.equal(rows[0].name, "Person 905");
+    assert.equal(rows[0].name, privateValue("name:01332c876518a793"));
   });
 
   it("keeps rows with empty EID and skips rows with empty name", async () => {
@@ -160,7 +161,7 @@ describe("loadRoster", () => {
     assert.equal(rows.length, 2);
     assert.equal(rows[0].eid, "");
     assert.equal(rows[0].name, "Skip EmptyEid");
-    assert.equal(rows[1].name, "Person 905");
+    assert.equal(rows[1].name, privateValue("name:01332c876518a793"));
   });
 
   it("recognizes an 'Employee Name' column (xlsx)", async () => {
@@ -168,11 +169,11 @@ describe("loadRoster", () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Sheet1");
     ws.addRow(["Employee Name", "Employee ID"]);
-    ws.addRow(["Person 905", "10001"]);
+    ws.addRow([privateValue("name:17a6fb0c3906628f"), "10001"]);
     await wb.xlsx.writeFile(p);
     const rows = await loadRoster(p);
     assert.equal(rows.length, 1);
-    assert.equal(rows[0].name, "Person 905");
+    assert.equal(rows[0].name, privateValue("name:17a6fb0c3906628f"));
     assert.equal(rows[0].eid, "10001");
   });
 
@@ -200,14 +201,14 @@ describe("loadRoster", () => {
     writeFileSync(
       p,
       "﻿Employee Name,Employee ID,Employee Status,Union Code\n" +
-        '"Person 905",10001,Active,CX\n' +
+        '"' + privateValue("name:17a6fb0c3906628f") + '",10001,Active,CX\n' +
         '"Smith, Bob",10002,Active,CX\n' +
         ",99999,Active,CX\n", // no name → skipped
       "utf-8",
     );
     const rows = await loadRoster(p);
     assert.equal(rows.length, 2);
-    assert.equal(rows[0].name, "Person 905");
+    assert.equal(rows[0].name, privateValue("name:17a6fb0c3906628f"));
     assert.equal(rows[0].eid, "10001");
     assert.equal(rows[1].name, "Smith, Bob");
     assert.equal(rows[1].eid, "10002");
@@ -225,7 +226,7 @@ describe("loadRoster", () => {
     );
     const rows = await loadRoster(p);
     assert.equal(rows.length, 1);
-    assert.equal(rows[0].name, "Person 905");
+    assert.equal(rows[0].name, privateValue("name:01332c876518a793"));
     assert.equal(rows[0].street, "123 Main");
     assert.equal(rows[0].zip, "92101");
   });

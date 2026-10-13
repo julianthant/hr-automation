@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { afterEach, beforeEach, test } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -89,7 +90,7 @@ test("Hono /api/cancel-queued honors explicit tree scope for descendants", async
     });
     const [child] = taskStore.enqueueTasks({
       workflow: "oath-signature",
-      inputs: [{ emplId: "10000910" }],
+      inputs: [{ emplId: privateValue("id:dfa73f9264a72c07") }],
       deriveItemId: (input) => input.emplId,
       runIds: ["signature-child-run"],
       parentRunId: "oath-parent-run",
@@ -105,7 +106,7 @@ test("Hono /api/cancel-queued honors explicit tree scope for descendants", async
     trackEventForDate({
       workflow: "oath-signature",
       timestamp: "2026-05-20T10:01:00.000Z",
-      id: "10000910",
+      id: privateValue("id:dfa73f9264a72c07"),
       runId: "signature-child-run",
       parentRunId: "oath-parent-run",
       status: "pending",

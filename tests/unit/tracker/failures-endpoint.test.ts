@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -45,7 +46,7 @@ describe("buildFailuresHandler", () => {
         "2026-04-28": [
           entry({
             workflow: "onboarding",
-            id: "person@example.edu",
+            id: privateValue("ucsd:5fd131901ffd97e3"),
             status: "failed",
             error: "Duo timeout",
             timestamp: "2026-04-28T11:00:00Z",

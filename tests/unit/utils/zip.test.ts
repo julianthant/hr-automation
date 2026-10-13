@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test, describe } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync } from "node:fs";
@@ -42,7 +43,7 @@ describe("zipFolderInto", () => {
   test("appends a second folder into the same archive", async (t) => {
     const root = tmp();
     t.onTestFinished(() => { execFileSync("rm", ["-rf", root]); });
-    const a = join(root, "Person 905 EID");
+    const a = join(root, privateValue("name:17a6fb0c3906628f") + " EID");
     const b = join(root, "Roe, Rick EID");
     for (const f of [a, b]) {
       mkdirSync(f, { recursive: true });
@@ -54,7 +55,7 @@ describe("zipFolderInto", () => {
     await zipFolderInto(archive, b);
 
     const entries = listArchive(archive);
-    assert.ok(entries.some((e) => e.startsWith("Person 905 EID/")));
+    assert.ok(entries.some((e) => e.startsWith(privateValue("name:17a6fb0c3906628f") + " EID/")));
     assert.ok(entries.some((e) => e.startsWith("Roe, Rick EID/")));
   });
 });

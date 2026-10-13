@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -71,7 +72,7 @@ test("scheduler marks child dependency satisfied from projected child run", asyn
           runId: "child-run-0",
           status: "done",
           step: "cross-verification",
-          data: { emplId: "10000910", hrStatus: "Active", department: "Housing Dining Hospitality" },
+          data: { emplId: privateValue("id:dfa73f9264a72c07"), hrStatus: "Active", department: "Housing Dining Hospitality" },
           timestamp: "2026-05-04T12:00:30.000Z",
         }),
         getLatestParentRun: async () => ({
@@ -195,7 +196,7 @@ test("scheduler applies active-check continuation from projected child run", asy
           status: "done",
           step: "checking",
           data: {
-            emplId: "10000910",
+            emplId: privateValue("id:dfa73f9264a72c07"),
             activeStatus: "active",
             isActive: "true",
             isHdhAccepted: "true",
@@ -211,7 +212,7 @@ test("scheduler applies active-check continuation from projected child run", asy
           status: "running",
           step: "awaiting-approval",
           data: {
-            records: JSON.stringify([{ printedName: "Liam", employeeId: "10000910", matchState: "matched", selected: true }]),
+            records: JSON.stringify([{ printedName: "Liam", employeeId: privateValue("id:dfa73f9264a72c07"), matchState: "matched", selected: true }]),
           },
           timestamp: "2026-05-05T12:00:00.000Z",
         }),
@@ -263,7 +264,7 @@ test("scheduler leaves OCR dependency pending when the parent projection is not 
           id: "ocr-oath-ocr-run-1-r0",
           runId: "child-run-0",
           status: "done",
-          data: { emplId: "10000910" },
+          data: { emplId: privateValue("id:dfa73f9264a72c07") },
           timestamp: "2026-05-04T12:00:30.000Z",
         }),
         getLatestParentRun: async () => null,
@@ -295,7 +296,7 @@ test("scheduler marks dependency terminal after already-applied OCR continuation
           id: "ocr-oath-ocr-run-1-r0",
           runId: "child-run-0",
           status: "done",
-          data: { emplId: "10000910", hrStatus: "Active", department: "Housing Dining Hospitality" },
+          data: { emplId: privateValue("id:dfa73f9264a72c07"), hrStatus: "Active", department: "Housing Dining Hospitality" },
           timestamp: "2026-05-04T12:00:30.000Z",
         }),
         getLatestParentRun: async () => ({
@@ -307,7 +308,7 @@ test("scheduler marks dependency terminal after already-applied OCR continuation
           data: {
             records: JSON.stringify([{
               printedName: "Liam",
-              employeeId: "10000910",
+              employeeId: privateValue("id:dfa73f9264a72c07"),
               matchState: "resolved",
               matchSource: "eid-lookup",
               selected: true,
@@ -394,7 +395,7 @@ test("scheduler resolves only terminal child while another dependency remains pe
               id: "ocr-oath-ocr-run-1-r0",
               runId: "child-run-0",
               status: "done",
-              data: { emplId: "10000910", hrStatus: "Active", department: "Housing Dining Hospitality" },
+              data: { emplId: privateValue("id:dfa73f9264a72c07"), hrStatus: "Active", department: "Housing Dining Hospitality" },
               timestamp: "2026-05-04T12:00:30.000Z",
             };
           }

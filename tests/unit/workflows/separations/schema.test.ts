@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -60,7 +61,7 @@ describe("computeSeparationDate", () => {
   });
 
   it("moves forward to the latest sick date when sick leave extends past the last punch", () => {
-    // Person 1355 (#3949): lastPunch 04/23, sick 04/27→04/30 → Sep 04/30.
+    // name:8218b64c3f8811d1 (#3949): lastPunch 04/23, sick 04/27→04/30 → Sep 04/30.
     assert.equal(
       computeSeparationDate("04/23/2026", ["04/27/2026", "04/28/2026", "04/30/2026"], []),
       "04/30/2026",
@@ -111,7 +112,7 @@ describe("buildSeparationDateChangeComment", () => {
 
 describe("buildTerminationComments", () => {
   // ─── Worked reference cases (live separations, pinned as exact strings) ───
-  it("Person 1355 (#3949): multi-sick → only the LATEST sick date (no range)", () => {
+  it(privateValue("name:8218b64c3f8811d1") + " (#3949): multi-sick → only the LATEST sick date (no range)", () => {
     // New Kronos: lastPunch 04/23, sick ["04/27","04/28","04/30"], Kuali Sep 04/30.
     // → LDW 04/23 (unchanged), Sep 04/30, TermEff 05/01.
     const result = buildTerminationComments(
@@ -264,7 +265,7 @@ describe("buildTerminationComments", () => {
   });
 
   it("omits holiday clause when holiday pay is strictly before the separation date (#4709 case)", () => {
-    // Person 172 (#4709): LDW 09/12/2026, Sep 09/12/2026, TermEff 09/13/2026, holiday 09/07/2026.
+    // name:bc7722e737081a28 (#4709): LDW 09/12/2026, Sep 09/12/2026, TermEff 09/13/2026, holiday 09/07/2026.
     // Holiday pay was 5 days before separation date — does NOT determine/extend separation, so omitted.
     const result = buildTerminationComments(
       "09/13/2026",

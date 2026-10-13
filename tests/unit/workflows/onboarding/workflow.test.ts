@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, rmSync } from "node:fs";
@@ -220,9 +221,9 @@ test("runWorkflowBatch (pool): onboarding-shaped onPreEmitPending paired with ru
   const result = await runWorkflowBatch(
     wf,
     [
-      { email: "person@example.edu" },
-      { email: "person@example.edu" },
-      { email: "person@example.edu" },
+      { email: privateValue("ucsd:7aec6ca531790983") },
+      { email: privateValue("ucsd:015f4314eca6250d") },
+      { email: privateValue("ucsd:12a61ab58f3a1f38") },
     ],
     {
       launchFn: () => Promise.resolve(fakeSlot()),
@@ -245,7 +246,7 @@ test("runWorkflowBatch (pool): onboarding-shaped onPreEmitPending paired with ru
   // email in input order (pre-emit is synchronous before workers start).
   assert.deepEqual(
     pendingEmissions.map((e) => e.email),
-    ["person@example.edu", "person@example.edu", "person@example.edu"],
+    [privateValue("ucsd:7aec6ca531790983"), privateValue("ucsd:015f4314eca6250d"), privateValue("ucsd:12a61ab58f3a1f38")],
   );
   const uniqueRunIds = new Set(pendingEmissions.map((e) => e.runId));
   assert.equal(
@@ -273,10 +274,10 @@ test("runWorkflowBatch (pool): poolSize override with 4 emails → N launches", 
   });
 
   const items = [
-    { email: "person@example.edu" },
-    { email: "person@example.edu" },
-    { email: "person@example.edu" },
-    { email: "person@example.edu" },
+    { email: privateValue("ucsd:ba82b0b97f8d9121") },
+    { email: privateValue("ucsd:1c6c2a8d3f655001") },
+    { email: privateValue("ucsd:47e7c1ed3dd6c39d") },
+    { email: privateValue("ucsd:a2944edea46ebd46") },
   ];
 
   const result = await runWorkflowBatch(wf, items, {

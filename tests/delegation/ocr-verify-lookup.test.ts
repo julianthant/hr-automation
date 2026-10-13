@@ -1,3 +1,4 @@
+import { privateValue } from "../../src/private-data.js";
 import { test } from "vitest";
 import { z } from "zod";
 import assert from "node:assert/strict";
@@ -141,7 +142,7 @@ function makeI9Stub(): RegisteredWorkflow<z.infer<typeof I9InputSchema>, readonl
  * EIDs are blank on paper (verify looks them up via person-lookup).
  */
 const VERIFY_RECORDS: StubVerifyOcrRecord[] = [
-  { formKind: "oath", sourcePage: 1, printedName: "Person 905 A", employeeId: null, officerSigned: false },
+  { formKind: "oath", sourcePage: 1, printedName: privateValue("name:17a6fb0c3906628f") + " A", employeeId: null, officerSigned: false },
   { formKind: "oath", sourcePage: 2, printedName: "Roe, Richard", employeeId: null, officerSigned: true },
   { formKind: "emergency-contact", sourcePage: 3, printedName: "Stone, Sam", employeeId: null },
 ];
@@ -247,7 +248,7 @@ test(
 
     // ─── person-lookup children (name → person kind) ─────────────────────────
     const plTitleByItemId: Record<string, string> = {
-      [`ocr-verify-${ocr.runId}-r0`]: "Person 905 A",
+      [`ocr-verify-${ocr.runId}-r0`]: privateValue("name:17a6fb0c3906628f") + " A",
       [`ocr-verify-${ocr.runId}-r1`]: "Roe, Richard",
       [`ocr-verify-${ocr.runId}-r2`]: "Stone, Sam",
     };
@@ -269,8 +270,8 @@ test(
     assert.equal(i9Row.parentRunId, ocr.runId, "i9 child parentRunId === OCR runId");
     assert.equal(i9Row.archetype, "single", "i9 child keeps its natural single archetype");
     assert.equal(i9Row.data.queueRowKind, "person", "i9 child is person-kind (name input)");
-    // verify parses "Person 905 A" → lastName=Doe, first=Jane → title "Person 905".
-    assert.equal(i9Row.title, "Person 905", "i9 child title is the parsed last, first name");
+    // verify parses "name:17a6fb0c3906628f A" → lastName=Doe, first=Jane → title "name:17a6fb0c3906628f".
+    assert.equal(i9Row.title, privateValue("name:17a6fb0c3906628f"), "i9 child title is the parsed last, first name");
     assert.equal(i9Row.subtitle, "<traceId>", "i9 child subtitle is the trace id");
     assert.equal(i9Row.data.__traceId, "<traceId>", "i9 child carries a (scrubbed) trace id");
     assert.equal(i9Row.status, "done", "i9 child completed done");
@@ -368,7 +369,7 @@ test(
     coordinator.holdAll("person-lookup", "searching");
 
     const cancelRecords: StubVerifyOcrRecord[] = [
-      { formKind: "oath", sourcePage: 1, printedName: "Person 905 A", employeeId: null, officerSigned: false },
+      { formKind: "oath", sourcePage: 1, printedName: privateValue("name:17a6fb0c3906628f") + " A", employeeId: null, officerSigned: false },
       { formKind: "emergency-contact", sourcePage: 2, printedName: "Stone, Sam", employeeId: null },
     ];
     rt.stubOcr(cancelRecords.map(rawVerifyRecordFromStub), []);

@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it, beforeEach } from "vitest";
 import assert from "node:assert/strict";
 import { appendFileSync, existsSync, rmSync, mkdtempSync, writeFileSync, utimesSync, mkdirSync } from "fs";
@@ -175,7 +176,7 @@ describe("readRunsForId data carry-over (LogPanel detail-grid fix)", () => {
 
 describe("serializeValue PII pass-through (redaction disabled)", () => {
   it("passes ssn values through unchanged when the key is 'ssn'", () => {
-    assert.equal(serializeValue("000-00-0000", "ssn"), "000-00-0000");
+    assert.equal(serializeValue(privateValue("ssn:01a54629efb95228"), "ssn"), privateValue("ssn:01a54629efb95228"));
     assert.equal(serializeValue("123456789", "ssn"), "123456789");
   });
 
@@ -198,7 +199,7 @@ describe("serializeValue PII pass-through (redaction disabled)", () => {
   });
 
   it("is a no-op when no key is provided (legacy calls)", () => {
-    assert.equal(serializeValue("000-00-0000"), "000-00-0000");
+    assert.equal(serializeValue(privateValue("ssn:01a54629efb95228")), privateValue("ssn:01a54629efb95228"));
   });
 
   it("passes a Date under a DOB key through as its ISO date", () => {
@@ -218,14 +219,14 @@ describe("appendLogEntry PII pass-through (redaction disabled)", () => {
         workflow: "scrub",
         itemId: "x",
         level: "error",
-        message: "failed: SSN 000-00-0000 not found",
+        message: "failed: SSN " + privateValue("ssn:01a54629efb95228") + " not found",
         ts: new Date().toISOString(),
       },
       TEST_DIR
     );
     const got = readLogEntries("scrub", undefined, TEST_DIR);
     assert.equal(got.length, 1);
-    assert.equal(got[0].message, "failed: SSN 000-00-0000 not found");
+    assert.equal(got[0].message, "failed: SSN " + privateValue("ssn:01a54629efb95228") + " not found");
   });
 
   it("preserves DOB-shaped substrings in log messages", () => {
@@ -290,14 +291,14 @@ describe("withTrackedWorkflow preserves PII via updateData (redaction disabled)"
       "pii-flow",
       "emp-007",
       async (_setStep: (s: string) => void, updateData: (d: Record<string, unknown>) => void) => {
-        updateData({ ssn: "000-00-0000", dob: "01/15/1992", name: "Jane" });
+        updateData({ ssn: privateValue("ssn:01a54629efb95228"), dob: "01/15/1992", name: "Jane" });
       },
       { dir: TEST_DIR }
     );
     const entries = readEntries("pii-flow", TEST_DIR);
     // last entry is the "done" emit with merged data
     const last = entries[entries.length - 1];
-    assert.equal(last.data?.ssn, "000-00-0000");
+    assert.equal(last.data?.ssn, privateValue("ssn:01a54629efb95228"));
     assert.equal(last.data?.dob, "01/15/1992");
     assert.equal(last.data?.name, "Jane");
   });

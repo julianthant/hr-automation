@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 
@@ -50,7 +51,7 @@ describe("Person Lookup Match mode", () => {
       firstName: "Jane",
       ssn: "123456789",
     });
-    assert.deepEqual(subject, { kind: "person", label: "Person 905" });
+    assert.deepEqual(subject, { kind: "person", label: privateValue("name:17a6fb0c3906628f") });
   });
 
   it("stamps the first UCPath match and captures the result page", async () => {
@@ -80,7 +81,7 @@ describe("Person Lookup Match mode", () => {
 
     assert.deepEqual(seen, [["123456789", "Jane", "Doe", "04/01/1998"]]);
     assert.deepEqual(updates, [
-      { found: "true", matchedEmplId: "10874100", matchedName: "Person 905" },
+      { found: "true", matchedEmplId: "10874100", matchedName: privateValue("name:01332c876518a793") },
     ]);
     assert.deepEqual(screenshots, [
       { kind: "form", label: "person-lookup-match-result", systems: ["ucpath"] },

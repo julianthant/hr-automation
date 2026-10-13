@@ -1,9 +1,10 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it, expect } from "vitest";
 import { resolveQueueRowPresentation } from "../../../src/domain/queue-row-presentation.js";
 
 const personEntry = {
   id: "run-1",
-  data: { queueRowKind: "person", name: "Person 905", emplId: "10012345", __traceId: "ws-143012-a3f1" },
+  data: { queueRowKind: "person", name: privateValue("name:01332c876518a793"), emplId: "10012345", __traceId: "ws-143012-a3f1" },
 };
 
 describe("resolveQueueRowPresentation with naming", () => {
@@ -11,13 +12,13 @@ describe("resolveQueueRowPresentation with naming", () => {
     const r = resolveQueueRowPresentation(personEntry, {
       naming: { title: { scheme: "custom-template", template: "{name} [{emplId}]" }, subtitle: { scheme: "trace-only" } },
     });
-    expect(r?.title).toBe("Person 905 [10012345]");
+    expect(r?.title).toBe(privateValue("name:01332c876518a793") + " [10012345]");
     expect(r?.subtitle).toBe("ws-143012-a3f1");
   });
 
   it("without naming, legacy person behavior is unchanged (EID subtitle)", () => {
     const r = resolveQueueRowPresentation(personEntry, {});
-    expect(r?.title).toBe("Person 905");
+    expect(r?.title).toBe(privateValue("name:01332c876518a793"));
     expect(r?.subtitle).toBe("10012345");
   });
 });

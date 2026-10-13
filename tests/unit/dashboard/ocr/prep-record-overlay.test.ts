@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
@@ -77,8 +78,8 @@ describe("overlayServerOwnedPrepFields", () => {
       formKind: "oath",
       sourcePage: 1,
       rowIndex: 0,
-      printedName: "Person 905",
-      employeeId: "10000910",
+      printedName: privateValue("name:17a6fb0c3906628f"),
+      employeeId: privateValue("id:dfa73f9264a72c07"),
       employeeSigned: true,
       officerSigned: true,
       dateSigned: "06/01/2026",
@@ -91,7 +92,7 @@ describe("overlayServerOwnedPrepFields", () => {
     };
     const local: OathPreviewRecord = {
       ...base,
-      printedName: "Person 905 Edited",
+      printedName: privateValue("name:17a6fb0c3906628f") + " Edited",
       matchState: "lookup-running",
       matchSource: "manual",
       verification: undefined,
@@ -100,7 +101,7 @@ describe("overlayServerOwnedPrepFields", () => {
 
     const merged = overlayServerOwnedPrepFields(base, local) as OathPreviewRecord;
 
-    assert.equal(merged.printedName, "Person 905 Edited");
+    assert.equal(merged.printedName, privateValue("name:17a6fb0c3906628f") + " Edited");
     assert.equal(merged.matchState, "resolved");
     assert.equal(merged.matchSource, "form-eid");
     assert.deepEqual(merged.warnings, ["server warning"]);

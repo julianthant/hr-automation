@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -19,11 +20,11 @@ test("trackEvent appends JSONL and applies the same tracker event to SQLite", ()
     trackEvent({
       workflow: "onboarding",
       timestamp: "2026-05-04T20:00:00.000Z",
-      id: "person@example.edu",
+      id: privateValue("ucsd:d584e8c08670091b"),
       runId: "run-1",
       status: "running",
       step: "extraction",
-      data: { employeeName: "Person 905" },
+      data: { employeeName: privateValue("name:01332c876518a793") },
     }, dir);
 
     const row = db.prepare("SELECT workflow, item_id, run_id, latest_status, latest_step FROM runs").get() as {
@@ -35,7 +36,7 @@ test("trackEvent appends JSONL and applies the same tracker event to SQLite", ()
     };
     assert.deepEqual({ ...row }, {
       workflow: "onboarding",
-      item_id: "person@example.edu",
+      item_id: privateValue("ucsd:d584e8c08670091b"),
       run_id: "run-1",
       latest_status: "running",
       latest_step: "extraction",
@@ -53,13 +54,13 @@ test("appendLogEntry applies log rows and updates run log summary", () => {
     trackEvent({
       workflow: "onboarding",
       timestamp: "2026-05-04T20:00:00.000Z",
-      id: "person@example.edu",
+      id: privateValue("ucsd:d584e8c08670091b"),
       runId: "run-1",
       status: "running",
     }, dir);
     appendLogEntry({
       workflow: "onboarding",
-      itemId: "person@example.edu",
+      itemId: privateValue("ucsd:d584e8c08670091b"),
       runId: "run-1",
       level: "step",
       message: "Extracting CRM data",

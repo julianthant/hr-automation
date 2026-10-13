@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test, vi } from "vitest";
 import assert from "node:assert";
 import { mkdirSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
@@ -29,7 +30,7 @@ test("resolves when all expected itemIds reach terminal status", async () => {
   // Pre-write one terminal entry
   writeEntry(file, {
     workflow: "eid-lookup", id: "test-r0", runId: "r0",
-    status: "done", data: { emplId: "10000910" }, timestamp: new Date().toISOString(),
+    status: "done", data: { emplId: privateValue("id:dfa73f9264a72c07") }, timestamp: new Date().toISOString(),
   });
 
   const promise = watchChildRuns({
@@ -52,7 +53,7 @@ test("resolves when all expected itemIds reach terminal status", async () => {
   assert.equal(outcomes.length, 2);
   const r0 = outcomes.find((o) => o.itemId === "test-r0");
   const r1 = outcomes.find((o) => o.itemId === "test-r1");
-  assert.ok(r0); assert.equal(r0.status, "done"); assert.equal(r0.data?.emplId, "10000910");
+  assert.ok(r0); assert.equal(r0.status, "done"); assert.equal(r0.data?.emplId, privateValue("id:dfa73f9264a72c07"));
   assert.ok(r1); assert.equal(r1.status, "failed"); assert.equal(r1.error, "no result");
   rmSync(dir, { recursive: true, force: true });
 });
@@ -62,14 +63,14 @@ test("uses SQLite task rows when all expected child tasks exist", async () => {
   const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));
   const [a, b] = taskStore.enqueueTasks({
     workflow: "oath-signature",
-    inputs: [{ emplId: "10000910" }, { emplId: "10000002" }],
+    inputs: [{ emplId: privateValue("id:dfa73f9264a72c07") }, { emplId: "10000002" }],
     deriveItemId: (input) => input.emplId,
     runIds: ["sig-run-a", "sig-run-b"],
   });
 
   const promise = watchChildRuns({
     workflow: "oath-signature",
-    expectedItemIds: ["10000910", "10000002"],
+    expectedItemIds: [privateValue("id:dfa73f9264a72c07"), "10000002"],
     trackerDir: dir,
     timeoutMs: 5000,
   });
@@ -81,7 +82,7 @@ test("uses SQLite task rows when all expected child tasks exist", async () => {
 
   const outcomes = await promise;
   assert.equal(outcomes.length, 2);
-  assert.equal(outcomes.find((o) => o.itemId === "10000910")?.status, "done");
+  assert.equal(outcomes.find((o) => o.itemId === privateValue("id:dfa73f9264a72c07"))?.status, "done");
   assert.equal(outcomes.find((o) => o.itemId === "10000002")?.status, "failed");
   taskStore.close();
   rmSync(dir, { recursive: true, force: true });

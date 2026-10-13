@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { resolveSeparationEid } from "../../../../src/workflows/separations/workflow.js";
@@ -34,7 +35,7 @@ import { personLookupWorkflow } from "../../../../src/workflows/person-lookup/in
 
 function makeKualiData(overrides: Partial<KualiSeparationData> = {}): KualiSeparationData {
   return {
-    employeeName: "Person 1445",
+    employeeName: privateValue("name:e675750f859d1b38"),
     eid: "1061029", // 7 digits — incomplete UCPath EID
     lastDayWorked: "03/20/2026",
     separationDate: "03/21/2026",
@@ -66,7 +67,7 @@ function makeStubCtx(delegateResult: {
 
 describe("resolveSeparationEid (conditional)", () => {
   it("(1) FOUND + name mismatch + different resolved EID → needs-approval (no silent override)", async () => {
-    // The Perez case: 10001497 is a valid-FORMAT EID Job Summary FOUND, but its
+    // The Perez case: id:5f40ed01d583a15c is a valid-FORMAT EID Job Summary FOUND, but its
     // detail-page name didn't match — so the handler calls us with found:true.
     // person-lookup returns the proposed person's name/department/payrollTitle.
     const { ctx, calls } = makeStubCtx({
@@ -78,7 +79,7 @@ describe("resolveSeparationEid (conditional)", () => {
         payrollTitle: "BLDG MAINT WORKER SR",
       },
     });
-    const kualiData = makeKualiData({ eid: "10001497", employeeName: "Perez, Jason" });
+    const kualiData = makeKualiData({ eid: privateValue("id:5f40ed01d583a15c"), employeeName: "Perez, Jason" });
 
     const result = await resolveSeparationEid(ctx, kualiData, {
       found: true,
@@ -97,7 +98,7 @@ describe("resolveSeparationEid (conditional)", () => {
 
   it("(2) FOUND + name mismatch but resolved EID matches Kuali → verified", async () => {
     const { ctx, calls } = makeStubCtx({ status: "done", data: { emplId: "10772489" } });
-    const kualiData = makeKualiData({ eid: "10772489", employeeName: "Person 1445" });
+    const kualiData = makeKualiData({ eid: "10772489", employeeName: privateValue("name:e675750f859d1b38") });
 
     const result = await resolveSeparationEid(ctx, kualiData, { found: true, name: "M. Mendoza" });
 
@@ -108,23 +109,23 @@ describe("resolveSeparationEid (conditional)", () => {
 
   it("(3) NOT found + short EID → needs-approval with the resolved 8-digit EID", async () => {
     const { ctx, calls } = makeStubCtx({ status: "done", data: { emplId: "10610290" } });
-    const kualiData = makeKualiData({ eid: "1061029", employeeName: "Person 1445" });
+    const kualiData = makeKualiData({ eid: "1061029", employeeName: privateValue("name:e675750f859d1b38") });
 
     const result = await resolveSeparationEid(ctx, kualiData, { found: false, name: "" });
 
     assert.equal(result.status, "needs-approval", "a new EID resolved by name pauses for approval");
     assert.equal(result.status === "needs-approval" && result.proposedEid, "10610290");
-    assert.deepEqual(calls[0].input, { name: "Person 1445" }, "delegated BY NAME (no bad EID passed)");
+    assert.deepEqual(calls[0].input, { name: privateValue("name:e675750f859d1b38") }, "delegated BY NAME (no bad EID passed)");
   });
 
   it("(4) NOT found + a COMPLETE 8-digit EID → fails loud with NO delegation", async () => {
     const { ctx, calls } = makeStubCtx({ status: "done", data: { emplId: "10999999" } });
-    const kualiData = makeKualiData({ eid: "10772489", employeeName: "Person 1445" });
+    const kualiData = makeKualiData({ eid: "10772489", employeeName: privateValue("name:e675750f859d1b38") });
 
     await assert.rejects(
       () => resolveSeparationEid(ctx, kualiData, { found: false, name: "" }),
       (err: Error) => {
-        assert.match(err.message, /found no record for "Person 1445"/);
+        assert.match(err.message, new RegExp("found no record for \"" + privateValue("name:e675750f859d1b38") + "\""));
         assert.match(err.message, /complete 8 digits/);
         assert.match(err.message, /Fix the EID\/name in the Kuali form and retry\./);
         return true;
@@ -135,12 +136,12 @@ describe("resolveSeparationEid (conditional)", () => {
 
   it("(5) fails loud when person-lookup returns a FAILED run", async () => {
     const { ctx } = makeStubCtx({ status: "failed", error: { message: "no match in UCPath" } });
-    const kualiData = makeKualiData({ eid: "1061029", employeeName: "Person 1445" });
+    const kualiData = makeKualiData({ eid: "1061029", employeeName: privateValue("name:e675750f859d1b38") });
 
     await assert.rejects(
       () => resolveSeparationEid(ctx, kualiData, { found: false, name: "" }),
       (err: Error) => {
-        assert.match(err.message, /Could not verify the EID for "Person 1445"/);
+        assert.match(err.message, new RegExp("Could not verify the EID for \"" + privateValue("name:e675750f859d1b38") + "\""));
         assert.match(err.message, /person-lookup resolved no UCPath EID by name/);
         return true;
       },

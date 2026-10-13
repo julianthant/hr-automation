@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { beforeAll, beforeEach, describe, it, vi } from "vitest";
 import assert from "node:assert/strict";
 import type { Page } from "playwright";
@@ -29,13 +30,13 @@ vi.mock("../../../../src/systems/ucpath/selectors.js", async (original) => {
   ];
   const body = () => ({
     evaluate: async () => grid(),
-    innerText: async () => `Effective Date: ${state.receiptEffectiveDate} Employee ID: 10001231 Employee Record: ${state.current === "T000000001" ? "0 (STDT 3)" : "1 (STDT 4)"}`,
+    innerText: async () => `Effective Date: ${state.receiptEffectiveDate} Employee ID: ${privateValue("id:d8411d15d4399415")} Employee Record: ${state.current === "T000000001" ? "0 (STDT 3)" : "1 (STDT 4)"}`,
   });
   return {
     ...real,
     getContentFrame: () => ({ locator: body }),
     hrTasks: { ...real.hrTasks, smartHRTemplatesLink: idle, ssSmartHRTransactionsLink: idle },
-    jobData: { ...real.jobData, positionNumberInput: () => ({ count: async () => 1, inputValue: async () => state.current === "T000000001" ? "10005858" : "41079142" }) },
+    jobData: { ...real.jobData, positionNumberInput: () => ({ count: async () => 1, inputValue: async () => state.current === "T000000001" ? privateValue("id:4dce293f69e3e795") : "41079142" }) },
     smartHR: {
       ...real.smartHR,
       transactionBody: body,
@@ -73,7 +74,7 @@ beforeAll(async () => {
   ({ findExistingTerminationTransaction } = await import("../../../../src/systems/ucpath/transaction.js"));
 });
 const page = { waitForTimeout: async () => {}, waitForLoadState: async () => {} } as unknown as Page;
-const job = { emplRecord: "0", positionNumber: "10005858", jobCode: "004920" };
+const job = { emplRecord: "0", positionNumber: privateValue("id:4dce293f69e3e795"), jobCode: "004920" };
 const options = { job, effectiveDate: "09/02/2026", expectedComments: "canonical" };
 beforeEach(() => {
   Object.assign(state, {
@@ -85,7 +86,7 @@ beforeEach(() => {
 
 describe("job-scoped SS receipt reuse", () => {
   it("restores the matching receipt after inspecting a different concurrent job", async () => {
-    const result = await findTerminationTransactionStatus(page, "10001231", options);
+    const result = await findTerminationTransactionStatus(page, privateValue("id:d8411d15d4399415"), options);
     assert.equal(result.transactionId, "T000000001");
     assert.equal(state.current, result.transactionId);
     assert.deepEqual(state.opened, ["T000000001", "T000000002", "T000000001"]);
@@ -93,7 +94,7 @@ describe("job-scoped SS receipt reuse", () => {
   for (const field of ["comments", "initiator"] as const) {
     it(`rejects extra narrative in ${field}`, async () => {
       state[field] = "canonical Extra job/source narrative";
-      await assert.rejects(() => findTerminationTransactionStatus(page, "10001231", options), /incorrect Comments or Initiator/);
+      await assert.rejects(() => findTerminationTransactionStatus(page, privateValue("id:d8411d15d4399415"), options), /incorrect Comments or Initiator/);
     });
   }
   it("reuses an Approved receipt when comments differ (manual initiator)", async () => {
@@ -101,7 +102,7 @@ describe("job-scoped SS receipt reuse", () => {
     state.comments = "Student Separation effective 6/13/2026 Reason: Look for another job";
     state.initiator = "Student Separation effective 6/13/2026 Reason: Look for another job";
     // Only one grid row so restore-path is not exercised
-    const result = await findTerminationTransactionStatus(page, "10001231", {
+    const result = await findTerminationTransactionStatus(page, privateValue("id:d8411d15d4399415"), {
       ...options,
       expectedComments: "Termination eff 09/02/2026. Last Day Worked 09/01/2026. Kuali form #4671.",
     });
@@ -112,7 +113,7 @@ describe("job-scoped SS receipt reuse", () => {
   it("reuses an Approved receipt when job-form drill-in raises a UCPath system dialog", async () => {
     state.approvalStatus = "Approved";
     state.dialogText = "An error occurred. Please consult your system log for details.";
-    const result = await findTerminationTransactionStatus(page, "10001231", options);
+    const result = await findTerminationTransactionStatus(page, privateValue("id:d8411d15d4399415"), options);
     assert.equal(result.found, true);
     assert.equal(result.transactionId, "T000000001");
     assert.equal(result.approvalStatus, "Approved");
@@ -120,31 +121,31 @@ describe("job-scoped SS receipt reuse", () => {
   it("still fails Pending receipts on a UCPath system dialog", async () => {
     state.dialogText = "An error occurred. Please consult your system log for details.";
     await assert.rejects(
-      () => findTerminationTransactionStatus(page, "10001231", options),
+      () => findTerminationTransactionStatus(page, privateValue("id:d8411d15d4399415"), options),
       /UCPath dialog on receipt/,
     );
   });
   it("rejects a receipt number that changed during navigation", async () => {
     state.wrongId = true;
-    await assert.rejects(() => findTerminationTransactionStatus(page, "10001231", options), /Cannot verify termination receipt/);
+    await assert.rejects(() => findTerminationTransactionStatus(page, privateValue("id:d8411d15d4399415"), options), /Cannot verify termination receipt/);
   });
   it("reads a single-record receipt whose employee drill-in opens the job form directly", async () => {
     state.directJobForm = true;
-    const result = await findTerminationTransactionStatus(page, "10001231", options);
+    const result = await findTerminationTransactionStatus(page, privateValue("id:d8411d15d4399415"), options);
     assert.equal(result.transactionId, "T000000001");
     assert.equal(state.continueClicks, 0);
   });
   it("skips a prior receipt by effective date before requiring a job form", async () => {
     state.receiptEffectiveDate = "08/31/2026";
     state.directJobForm = true;
-    const result = await findTerminationTransactionStatus(page, "10001231", options);
+    const result = await findTerminationTransactionStatus(page, privateValue("id:d8411d15d4399415"), options);
     assert.equal(result.found, false);
     assert.equal(state.continueClicks, 0);
   });
   it("permits duplicate Kuali request document reference in comments", async () => {
     state.comments = "Termination eff 09/02/2026. Last Day Worked 09/01/2026. Kuali form #4653.";
     state.initiator = "Termination eff 09/02/2026. Last Day Worked 09/01/2026. Kuali form #4653.";
-    const result = await findTerminationTransactionStatus(page, "10001231", {
+    const result = await findTerminationTransactionStatus(page, privateValue("id:d8411d15d4399415"), {
       ...options,
       expectedComments: "Termination eff 09/02/2026. Last Day Worked 09/01/2026. Kuali form #4652.",
     });
@@ -154,7 +155,7 @@ describe("job-scoped SS receipt reuse", () => {
     state.comments = "Termination eff 09/02/2026. Last Day Worked 08/30/2026. Kuali form #4653.";
     state.initiator = "Termination eff 09/02/2026. Last Day Worked 08/30/2026. Kuali form #4653.";
     await assert.rejects(
-      () => findTerminationTransactionStatus(page, "10001231", {
+      () => findTerminationTransactionStatus(page, privateValue("id:d8411d15d4399415"), {
         ...options,
         expectedComments: "Termination eff 09/02/2026. Last Day Worked 09/01/2026. Kuali form #4652.",
       }),
@@ -162,8 +163,8 @@ describe("job-scoped SS receipt reuse", () => {
     );
   });
   it("requires canonical expected comments before either lookup navigates", async () => {
-    await assert.rejects(() => findTerminationTransactionStatus(page, "10001231", { job, effectiveDate: "09/02/2026" }), /requires canonical comments/);
-    await assert.rejects(() => findExistingTerminationTransaction(page, "10001231", "09/02/2026", job), /requires canonical comments/);
+    await assert.rejects(() => findTerminationTransactionStatus(page, privateValue("id:d8411d15d4399415"), { job, effectiveDate: "09/02/2026" }), /requires canonical comments/);
+    await assert.rejects(() => findExistingTerminationTransaction(page, privateValue("id:d8411d15d4399415"), "09/02/2026", job), /requires canonical comments/);
     assert.deepEqual(state.opened, []);
   });
 });

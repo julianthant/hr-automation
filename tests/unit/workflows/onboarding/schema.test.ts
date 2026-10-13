@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -11,7 +12,7 @@ const VALID_DATA: Record<string, string> = {
   positionNumber: "40695231",
   firstName: "Jane",
   lastName: "Doe",
-  ssn: "000-00-0000",
+  ssn: privateValue("ssn:01a54629efb95228"),
   address: "9500 Gilman Dr",
   city: "La Jolla",
   state: "CA",
@@ -27,7 +28,7 @@ describe("EmployeeDataSchema", () => {
     assert.equal(result.positionNumber, "40695231");
     assert.equal(result.firstName, "Jane");
     assert.equal(result.lastName, "Doe");
-    assert.equal(result.ssn, "000-00-0000");
+    assert.equal(result.ssn, privateValue("ssn:01a54629efb95228"));
     assert.equal(result.address, "9500 Gilman Dr");
     assert.equal(result.city, "La Jolla");
     assert.equal(result.state, "CA");
@@ -234,23 +235,23 @@ describe("EmployeeDataSchema", () => {
 
 describe("OnboardingInputSchema", () => {
   it("accepts a bare email (dryRun is optional)", () => {
-    const result = OnboardingInputSchema.parse({ email: "person347@example.com" });
-    assert.equal(result.email, "person347@example.com");
+    const result = OnboardingInputSchema.parse({ email: privateValue("email:4c81ba1de69a6e48") });
+    assert.equal(result.email, privateValue("email:4c81ba1de69a6e48"));
     assert.equal(result.dryRun, undefined);
   });
 
   it("accepts { email, dryRun: true }", () => {
     const result = OnboardingInputSchema.parse({
-      email: "person347@example.com",
+      email: privateValue("email:4c81ba1de69a6e48"),
       dryRun: true,
     });
-    assert.equal(result.email, "person347@example.com");
+    assert.equal(result.email, privateValue("email:4c81ba1de69a6e48"));
     assert.equal(result.dryRun, true);
   });
 
   it("accepts { email, dryRun: false }", () => {
     const result = OnboardingInputSchema.parse({
-      email: "person347@example.com",
+      email: privateValue("email:4c81ba1de69a6e48"),
       dryRun: false,
     });
     assert.equal(result.dryRun, false);
@@ -258,7 +259,7 @@ describe("OnboardingInputSchema", () => {
 
   it("rejects a non-boolean dryRun", () => {
     const result = OnboardingInputSchema.safeParse({
-      email: "person347@example.com",
+      email: privateValue("email:4c81ba1de69a6e48"),
       dryRun: "true",
     });
     assert.equal(result.success, false);

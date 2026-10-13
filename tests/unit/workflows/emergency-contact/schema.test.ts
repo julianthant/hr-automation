@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { AddressSchema, EmployeeSchema, EmergencyContactSchema, RecordSchema } from "../../../../src/workflows/emergency-contact/schema.js";
@@ -14,8 +15,8 @@ describe("AddressSchema — null street tolerance (ISS-004)", () => {
   it("EmployeeSchema accepts a record whose homeAddress has a null street", () => {
     assert.equal(
       EmployeeSchema.safeParse({
-        name: "Person 1717",
-        employeeId: "10001516",
+        name: privateValue("name:90e2a9a138da09ef"),
+        employeeId: privateValue("id:699c7799ff18032d"),
         homeAddress: { street: null, city: "UCSD", state: null, zip: "ERC" },
       }).success,
       true,
@@ -25,7 +26,7 @@ describe("AddressSchema — null street tolerance (ISS-004)", () => {
     assert.equal(
       RecordSchema.safeParse({
         sourcePage: 1,
-        employee: { name: "Person 1717", employeeId: "10001516", homeAddress: { street: null, city: "UCSD", state: null, zip: "ERC" } },
+        employee: { name: privateValue("name:90e2a9a138da09ef"), employeeId: privateValue("id:699c7799ff18032d"), homeAddress: { street: null, city: "UCSD", state: null, zip: "ERC" } },
         emergencyContact: { name: "Rod Coleman", relationship: "Dad", primary: true, sameAddressAsEmployee: false, address: { street: "3449 Invictus Way", city: "San Jose", state: "CA", zip: "95118" }, cellPhone: "(408) 759-7353" },
         notes: [],
       }).success,
@@ -52,7 +53,7 @@ describe("AddressSchema — null street tolerance (ISS-004)", () => {
 describe("EmergencyContactSchema — same-address-when-null transform", () => {
   it("rewrites sameAddressAsEmployee=false + address=null to sameAddressAsEmployee=true", () => {
     const parsed = EmergencyContactSchema.parse({
-      name: "Person 905",
+      name: privateValue("name:01332c876518a793"),
       relationship: "Mother",
       primary: true,
       sameAddressAsEmployee: false,
@@ -67,7 +68,7 @@ describe("EmergencyContactSchema — same-address-when-null transform", () => {
 
   it("rewrites sameAddressAsEmployee=false + address omitted to sameAddressAsEmployee=true", () => {
     const parsed = EmergencyContactSchema.parse({
-      name: "Person 905",
+      name: privateValue("name:01332c876518a793"),
       relationship: "Mother",
       primary: true,
       sameAddressAsEmployee: false,
@@ -80,7 +81,7 @@ describe("EmergencyContactSchema — same-address-when-null transform", () => {
 
   it("leaves sameAddressAsEmployee=false alone when address is present", () => {
     const parsed = EmergencyContactSchema.parse({
-      name: "Person 905",
+      name: privateValue("name:01332c876518a793"),
       relationship: "Mother",
       primary: true,
       sameAddressAsEmployee: false,
@@ -95,7 +96,7 @@ describe("EmergencyContactSchema — same-address-when-null transform", () => {
 
   it("leaves sameAddressAsEmployee=true alone (with null address)", () => {
     const parsed = EmergencyContactSchema.parse({
-      name: "Person 905",
+      name: privateValue("name:01332c876518a793"),
       relationship: "Mother",
       primary: true,
       sameAddressAsEmployee: true,

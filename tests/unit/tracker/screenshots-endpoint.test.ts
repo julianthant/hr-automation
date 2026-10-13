@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -29,33 +30,33 @@ describe("buildScreenshotsHandler", () => {
   it("returns [] when directory does not exist", () => {
     const missing = ".screenshots-missing-" + Date.now();
     const handler = buildScreenshotsHandler(missing);
-    assert.deepEqual(handler("onboarding", "person@example.edu"), []);
+    assert.deepEqual(handler("onboarding", privateValue("ucsd:d584e8c08670091b")), []);
   });
 
   it("returns only files matching the <workflow>-<itemId>- prefix", () => {
     // Matching files
-    writeFakePng("person@example.edu-transaction-ucpath-1713370000000.png", 100);
-    writeFakePng("person@example.edu-transaction-crm-1713370001000.png", 110);
+    writeFakePng(privateValue("ucsd:8bc2cae83dec4dbb") + "-transaction-ucpath-1713370000000.png", 100);
+    writeFakePng(privateValue("ucsd:8bc2cae83dec4dbb") + "-transaction-crm-1713370001000.png", 110);
     // Non-matching: different workflow
     writeFakePng("separations-12345-kuali-ucpath-1713370000000.png", 50);
     // Non-matching: different itemId
-    writeFakePng("person@example.edu-transaction-ucpath-1713370000000.png", 60);
+    writeFakePng(privateValue("ucsd:6d734fb41e05e4b3") + "-transaction-ucpath-1713370000000.png", 60);
     // Non-matching: wrong extension
-    writeFakePng("person@example.edu-notes.txt", 10);
+    writeFakePng(privateValue("ucsd:8bc2cae83dec4dbb") + "-notes.txt", 10);
 
     const handler = buildScreenshotsHandler(TEST_DIR);
-    const list = handler("onboarding", "person@example.edu");
+    const list = handler("onboarding", privateValue("ucsd:d584e8c08670091b"));
     assert.equal(list.length, 2);
     // Newest first — 1713370001000 > 1713370000000
     assert.equal(
       list[0].filename,
-      "person@example.edu-transaction-crm-1713370001000.png",
+      privateValue("ucsd:8bc2cae83dec4dbb") + "-transaction-crm-1713370001000.png",
     );
     assert.equal(list[0].step, "transaction");
     assert.equal(list[0].sizeBytes, 110);
     assert.equal(
       list[1].filename,
-      "person@example.edu-transaction-ucpath-1713370000000.png",
+      privateValue("ucsd:8bc2cae83dec4dbb") + "-transaction-ucpath-1713370000000.png",
     );
   });
 

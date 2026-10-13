@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Page } from "playwright";
 
@@ -129,7 +130,7 @@ describe("lookupEmployeeViaKeyset", () => {
   it("returns 'no-match' and dismisses the dialog when no employee matches", async () => {
     state.noMatch = true; // "No matching records were found"
     const lookup = await loadLookup();
-    const result = await lookup(fakePage(), "10002223", 2_000);
+    const result = await lookup(fakePage(), privateValue("id:3422bc02e5ea8c7b"), 2_000);
     expect(result).toBe("no-match");
     expect(state.selectClicks).toBe(0);
     expect(state.okClicked).toBe(true); // dismissed the no-match alert

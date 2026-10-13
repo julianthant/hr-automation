@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -56,7 +57,7 @@ describe("buildIdentityApprovalPauseData", () => {
   it("blanks the original name when the original EID did NOT resolve a record", () => {
     // Onboarding's case: a new-hire CRM record has no UCPath EID / never resolves.
     const data = buildIdentityApprovalPauseData({
-      original: { eid: "", name: "Person 905", found: false },
+      original: { eid: "", name: privateValue("name:01332c876518a793"), found: false },
       proposed: { eid: "10401814", name: "Jane Roe" },
     });
 
@@ -74,7 +75,7 @@ describe("buildIdentityApprovalPauseData", () => {
 
   it("honors a custom status label", () => {
     const data = buildIdentityApprovalPauseData({
-      original: { eid: "10000910", name: "A", found: true },
+      original: { eid: privateValue("id:dfa73f9264a72c07"), name: "A", found: true },
       proposed: { eid: "10000002", name: "B" },
       statusLabel: "Needs identity review",
     });
@@ -83,7 +84,7 @@ describe("buildIdentityApprovalPauseData", () => {
 
   it("returns only string values (survives the stringified tracker channel)", () => {
     const data = buildIdentityApprovalPauseData({
-      original: { eid: "10000910", name: "A", found: true },
+      original: { eid: privateValue("id:dfa73f9264a72c07"), name: "A", found: true },
       proposed: { eid: "10000002", name: "B" },
     });
     for (const [k, v] of Object.entries(data)) {

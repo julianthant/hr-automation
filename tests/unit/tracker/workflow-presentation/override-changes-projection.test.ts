@@ -15,6 +15,7 @@
  *     NON-member, NON-prep stamped row — the surface that was SHADOWED until
  *     Task 6.3 wired effective top-level naming into the projection.
  */
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -75,16 +76,16 @@ describe("override-changes-projection (Task 6.2)", () => {
         data: {
           archetype: "single",
           queueRowKind: "person",
-          name: "Person 905",
-          emplId: "10000910",
+          name: privateValue("name:17a6fb0c3906628f"),
+          emplId: privateValue("id:dfa73f9264a72c07"),
           __traceId: "os-120000-abcd",
         },
       });
 
       // ─── BASELINE (no override) ───────────────────────────────────────────
       const baseline = buildWorkflowRunProjection(member, {});
-      assert.equal(baseline.title, "Person 905", "baseline title = person name");
-      assert.equal(baseline.subtitle, "10000910", "baseline subtitle = EID (eid-else-trace default)");
+      assert.equal(baseline.title, privateValue("name:17a6fb0c3906628f"), "baseline title = person name");
+      assert.equal(baseline.subtitle, privateValue("id:dfa73f9264a72c07"), "baseline subtitle = EID (eid-else-trace default)");
 
       // ─── WRITE OVERRIDE ───────────────────────────────────────────────────
       // memberTitle: custom-template exercises the template engine end-to-end
@@ -117,10 +118,10 @@ describe("override-changes-projection (Task 6.2)", () => {
         resolvePresentation: () => eff.presentation,
       });
 
-      // Custom-template rendered: "{name} — Signer" with name="Person 905"
+      // Custom-template rendered: "{name} — Signer" with name="name:17a6fb0c3906628f"
       assert.equal(
         overridden.title,
-        "Person 905 — Signer",
+        privateValue("name:17a6fb0c3906628f") + " — Signer",
         "overridden title = template rendered",
       );
       // trace-only subtitle = the __traceId value
@@ -259,7 +260,7 @@ describe("override-changes-projection (Task 6.2)", () => {
         data: {
           archetype: "single",
           queueRowKind: "person",
-          name: "Person 905",
+          name: privateValue("name:17a6fb0c3906628f"),
           emplId: "20001234",
           __traceId: "ws-140000-9f3a",
         },
@@ -268,12 +269,12 @@ describe("override-changes-projection (Task 6.2)", () => {
       // ─── BASELINE (no override) ───────────────────────────────────────────
       // Default person kind: title = name, subtitle = EID (eid-else-trace).
       const baseline = buildWorkflowRunProjection(row, {});
-      assert.equal(baseline.title, "Person 905", "baseline title = person name");
+      assert.equal(baseline.title, privateValue("name:17a6fb0c3906628f"), "baseline title = person name");
       assert.equal(baseline.subtitle, "20001234", "baseline subtitle = EID (eid-else-trace default)");
 
       // ─── WRITE OVERRIDE ───────────────────────────────────────────────────
       // naming.title: custom-template → a value ONLY reachable via the naming
-      //   path (default person-name yields the bare "Person 905").
+      //   path (default person-name yields the bare "name:17a6fb0c3906628f").
       // naming.subtitle: trace-only → swaps the subtitle off the EID to the
       //   trace id — also ONLY reachable via the naming path (default is
       //   eid-else-trace, which returns the EID here).
@@ -304,13 +305,13 @@ describe("override-changes-projection (Task 6.2)", () => {
         resolvePresentation: () => eff.presentation,
       });
 
-      // Custom-template rendered: "{name} · Work-Study" with name="Person 905".
+      // Custom-template rendered: "{name} · Work-Study" with name="name:17a6fb0c3906628f".
       // This value is reachable ONLY through the top-level naming path — no
       // other precedence term (delegationTitle/resolveEntryTitle/presentation/
       // fallback) can produce it for this row.
       assert.equal(
         overridden.title,
-        "Person 905 · Work-Study",
+        privateValue("name:17a6fb0c3906628f") + " · Work-Study",
         "overridden title = top-level custom template rendered",
       );
       // trace-only subtitle = the __traceId value, NOT the EID — only the naming

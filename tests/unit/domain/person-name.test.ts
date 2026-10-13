@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -65,7 +66,7 @@ describe("person-name identity helpers", () => {
 
 describe("toLastFirstName", () => {
   it("converts \"First Last\" + lastName anchor to \"Last, First\"", () => {
-    assert.equal(toLastFirstName("Person 1290", "Langley"), "Person 1290");
+    assert.equal(toLastFirstName(privateValue("name:aeb6ceeb566a2e65"), "Langley"), privateValue("name:ae9356f8331b6e26"));
   });
 
   it("preserves middle name(s) when splitting at the trailing last-name anchor", () => {
@@ -73,20 +74,20 @@ describe("toLastFirstName", () => {
   });
 
   it("is idempotent on already-comma-formatted input", () => {
-    assert.equal(toLastFirstName("Person 1290", "Langley"), "Person 1290");
+    assert.equal(toLastFirstName(privateValue("name:ae9356f8331b6e26"), "Langley"), privateValue("name:ae9356f8331b6e26"));
   });
 
   it("matches the trailing last name case-insensitively and normalizes display casing", () => {
-    assert.equal(toLastFirstName("Person 1290", "langley"), "Person 1290");
+    assert.equal(toLastFirstName(privateValue("name:ef3a02ec56bdcabd"), "langley"), privateValue("name:ae9356f8331b6e26"));
   });
 
   it("falls back to displayPersonName(fullName) when the lastName does not match the trailing tokens", () => {
-    assert.equal(toLastFirstName("Person 1290", "Smith"), "Person 1290");
+    assert.equal(toLastFirstName(privateValue("name:aeb6ceeb566a2e65"), "Smith"), privateValue("name:aeb6ceeb566a2e65"));
   });
 
   it("falls back to displayPersonName(fullName) when the lastName is missing", () => {
-    assert.equal(toLastFirstName("Person 1290", ""), "Person 1290");
-    assert.equal(toLastFirstName("Person 1290", null), "Person 1290");
+    assert.equal(toLastFirstName(privateValue("name:aeb6ceeb566a2e65"), ""), privateValue("name:aeb6ceeb566a2e65"));
+    assert.equal(toLastFirstName(privateValue("name:aeb6ceeb566a2e65"), null), privateValue("name:aeb6ceeb566a2e65"));
   });
 
   it("returns empty string for empty fullName regardless of lastName", () => {

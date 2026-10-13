@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,7 +38,7 @@ beforeEach(async () => {
 });
 
 test("enqueueFromHttp keeps a single input-run item unparented so it renders as one row", async () => {
-  const result = await enqueueFromHttp("person-lookup", [{ name: "Person 905" }], {
+  const result = await enqueueFromHttp("person-lookup", [{ name: privateValue("name:17a6fb0c3906628f") }], {
     trackerDir: tempTrackerDir(),
   });
 
@@ -53,7 +54,7 @@ test("enqueueFromHttp keeps a single input-run item unparented so it renders as 
 });
 
 test("enqueueFromHttp forwards an explicit worker count as { parallel: N } daemon flags", async () => {
-  const result = await enqueueFromHttp("person-lookup", [{ name: "Person 905" }], {
+  const result = await enqueueFromHttp("person-lookup", [{ name: privateValue("name:17a6fb0c3906628f") }], {
     trackerDir: tempTrackerDir(),
     runOptions: { parallelWorkers: 4 },
   });
@@ -66,7 +67,7 @@ test("enqueueFromHttp forwards an explicit worker count as { parallel: N } daemo
 });
 
 test("enqueueFromHttp passes {} flags for Auto (no runOptions) and for an explicit 1", async () => {
-  await enqueueFromHttp("person-lookup", [{ name: "Person 905" }], { trackerDir: tempTrackerDir() });
+  await enqueueFromHttp("person-lookup", [{ name: privateValue("name:17a6fb0c3906628f") }], { trackerDir: tempTrackerDir() });
   await enqueueFromHttp("person-lookup", [{ name: "Roe, Ann" }], {
     trackerDir: tempTrackerDir(),
     runOptions: { parallelWorkers: 1 },
@@ -83,7 +84,7 @@ test("enqueueFromHttp marks multi-value input-run batches as normal batch member
   const result = await enqueueFromHttp(
     "person-lookup",
     [
-      { name: "Person 905", __runtimeOptions: { preset: "lookup-only" } },
+      { name: privateValue("name:17a6fb0c3906628f"), __runtimeOptions: { preset: "lookup-only" } },
       { name: "Smith, John" },
     ],
     { trackerDir: tempTrackerDir() },
@@ -109,9 +110,9 @@ test("enqueueFromHttp expands one Process EID worksheet request into roster memb
   const worksheet = workbook.addWorksheet("September 14");
   worksheet.addRows([
     ["Lived Name", "Transaction Number", "EID"],
-    ["Person 831", "T002235451", ""],
-    ["Person 780", "T002235452", "Pending"],
-    ["Already Complete", "T002235453", "10002345"],
+    [privateValue("name:6168ff06af447daa"), "T002235451", ""],
+    [privateValue("name:11e6f33fffe74fc2"), "T002235452", "Pending"],
+    ["Already Complete", "T002235453", privateValue("id:bf5c81799e6f558c")],
   ]);
   await workbook.xlsx.writeFile(rosterPath);
 
@@ -143,14 +144,14 @@ test("enqueueFromHttp expands one Process EID worksheet request into roster memb
     [
       {
         source: "person",
-        livedName: "Person 831",
+        livedName: privateValue("name:6168ff06af447daa"),
         transactionId: "T002235451",
         sheet: "September 14",
         rosterRow: 2,
       },
       {
         source: "person",
-        livedName: "Person 780",
+        livedName: privateValue("name:11e6f33fffe74fc2"),
         transactionId: "T002235452",
         sheet: "September 14",
         rosterRow: 3,
@@ -174,7 +175,7 @@ test("enqueueFromHttp rejects conflicting runtime options before expanding input
     [
       {
         source: "person",
-        livedName: "Person 831",
+        livedName: privateValue("name:6168ff06af447daa"),
         transactionId: "T002235451",
         sheet: "September 14",
         rosterRow: 2,
@@ -182,7 +183,7 @@ test("enqueueFromHttp rejects conflicting runtime options before expanding input
       },
       {
         source: "person",
-        livedName: "Person 780",
+        livedName: privateValue("name:11e6f33fffe74fc2"),
         transactionId: "T002235452",
         sheet: "September 14",
         rosterRow: 3,
@@ -202,8 +203,8 @@ test("enqueueFromHttp pre-emits person-lookup input-run batches as batch members
   const result = await enqueueFromHttp(
     "person-lookup",
     [
-      { emplId: "10000910" },
-      { name: "Person 905" },
+      { emplId: privateValue("id:dfa73f9264a72c07") },
+      { name: privateValue("name:17a6fb0c3906628f") },
     ],
     { trackerDir },
   );
@@ -227,8 +228,8 @@ test("enqueueFromHttp pre-emits person-lookup input-run batches as batch members
   ];
 
   assert.equal(typeof opts.parentRunId, "string");
-  opts.onPreEmitPending(queuedInputs[0], "run-1", opts.parentRunId, "10000910");
-  opts.onPreEmitPending(queuedInputs[1], "run-2", opts.parentRunId, "Person 905");
+  opts.onPreEmitPending(queuedInputs[0], "run-1", opts.parentRunId, privateValue("id:dfa73f9264a72c07"));
+  opts.onPreEmitPending(queuedInputs[1], "run-2", opts.parentRunId, privateValue("name:17a6fb0c3906628f"));
 
   const rows = readRows(trackerDir, "person-lookup");
   assert.equal(rows.length, 3, "coordinator + 2 members");
@@ -245,7 +246,7 @@ test("enqueueFromHttp batches a SINGLE oath-signature EID input run (alwaysOpera
   // one-member batch (delegation.alwaysOperationInputRun). person-lookup (the first
   // test) intentionally stays unparented for a single input.
   const trackerDir = tempTrackerDir();
-  const result = await enqueueFromHttp("oath-signature", [{ emplId: "10000910" }], { trackerDir });
+  const result = await enqueueFromHttp("oath-signature", [{ emplId: privateValue("id:dfa73f9264a72c07") }], { trackerDir });
 
   assert.equal(result.ok, true);
 
@@ -271,7 +272,7 @@ test("enqueueFromHttp batches a SINGLE oath-signature EID input run (alwaysOpera
     (queuedInputs[0] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.rowShape,
     "operation-member",
   );
-  opts.onPreEmitPending(queuedInputs[0], "run-1", opts.parentRunId, "10000910");
+  opts.onPreEmitPending(queuedInputs[0], "run-1", opts.parentRunId, privateValue("id:dfa73f9264a72c07"));
   const rows = readRows(trackerDir, "oath-signature");
   assert.equal(rows.length, 2, "coordinator + 1 member");
   assert.ok(rows.some((row) => row.data?.archetype === "operation"));
@@ -284,7 +285,7 @@ test("enqueueFromHttp pre-emits oath-signature multi-EID input runs as batch mem
   const result = await enqueueFromHttp(
     "oath-signature",
     [
-      { emplId: "10000910" },
+      { emplId: privateValue("id:dfa73f9264a72c07") },
       { emplId: "10000002" },
     ],
     { trackerDir },
@@ -309,7 +310,7 @@ test("enqueueFromHttp pre-emits oath-signature multi-EID input runs as batch mem
   ];
 
   assert.equal(typeof opts.parentRunId, "string");
-  opts.onPreEmitPending(queuedInputs[0], "run-1", opts.parentRunId, "10000910");
+  opts.onPreEmitPending(queuedInputs[0], "run-1", opts.parentRunId, privateValue("id:dfa73f9264a72c07"));
   opts.onPreEmitPending(queuedInputs[1], "run-2", opts.parentRunId, "10000002");
 
   const rows = readRows(trackerDir, "oath-signature");

@@ -1,6 +1,7 @@
 /**
  * Pure hire-date corroboration for the i9-check person-lookup path.
  */
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
@@ -17,7 +18,7 @@ describe("selectPersonLookupByHireDate", () => {
 
   it("missing I-9 hire date → ambiguous (never accept a name-only hit)", () => {
     const out = selectPersonLookupByHireDate(undefined, [
-      { emplId: "10411099", name: "Person 706", startDate: "04/25/2016" },
+      { emplId: "10411099", name: privateValue("name:9c12f2d590ae3a2c"), startDate: "04/25/2016" },
     ]);
     assert.equal(out.status, "ambiguous");
     if (out.status === "ambiguous") {
@@ -28,20 +29,20 @@ describe("selectPersonLookupByHireDate", () => {
 
   it("exactly one Last Hire within ±7 days → found", () => {
     const out = selectPersonLookupByHireDate("04/25/2016", [
-      { emplId: "10411099", name: "Person 706", startDate: "04/20/2016" },
+      { emplId: "10411099", name: privateValue("name:9c12f2d590ae3a2c"), startDate: "04/20/2016" },
       { emplId: "10999999", name: "Other, Person", startDate: "01/01/2010" },
     ]);
     assert.deepEqual(out, {
       status: "found",
       emplId: "10411099",
-      matchedName: "Person 706",
+      matchedName: privateValue("name:9c12f2d590ae3a2c"),
       startDate: "04/20/2016",
     });
   });
 
   it("uses assignment EFFDT when Last Hire is blank", () => {
     const out = selectPersonLookupByHireDate("04/25/2016", [
-      { emplId: "10411099", name: "Person 706", effectiveDate: "04/25/2016" },
+      { emplId: "10411099", name: privateValue("name:9c12f2d590ae3a2c"), effectiveDate: "04/25/2016" },
     ]);
     assert.equal(out.status, "found");
     if (out.status === "found") {
@@ -52,7 +53,7 @@ describe("selectPersonLookupByHireDate", () => {
 
   it("zero candidates within tolerance → not-found (candidateCount = unique name hits)", () => {
     const out = selectPersonLookupByHireDate("04/25/2016", [
-      { emplId: "10411099", name: "Person 706", startDate: "01/01/2010" },
+      { emplId: "10411099", name: privateValue("name:9c12f2d590ae3a2c"), startDate: "01/01/2010" },
     ]);
     assert.deepEqual(out, { status: "not-found", candidateCount: 1 });
   });
@@ -71,8 +72,8 @@ describe("selectPersonLookupByHireDate", () => {
 
   it("dedupes the same Empl ID appearing twice", () => {
     const out = selectPersonLookupByHireDate("04/25/2016", [
-      { emplId: "10411099", name: "Person 706", startDate: "04/25/2016" },
-      { emplId: "10411099", name: "Person 706", startDate: "04/25/2016" },
+      { emplId: "10411099", name: privateValue("name:9c12f2d590ae3a2c"), startDate: "04/25/2016" },
+      { emplId: "10411099", name: privateValue("name:9c12f2d590ae3a2c"), startDate: "04/25/2016" },
     ]);
     assert.equal(out.status, "found");
     if (out.status === "found") assert.equal(out.emplId, "10411099");

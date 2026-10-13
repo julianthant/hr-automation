@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
@@ -27,7 +28,7 @@ function makeRecord(overrides: Partial<I9PreviewRecord> = {}): I9PreviewRecord {
     firstName: "Jane",
     middleInitial: "A",
     dateOfBirth: "04/01/1998",
-    ssn: "000-00-0000",
+    ssn: privateValue("ssn:01a54629efb95228"),
     documentType: "expected",
     originallyMissing: [],
     illegible: [],
@@ -35,7 +36,7 @@ function makeRecord(overrides: Partial<I9PreviewRecord> = {}): I9PreviewRecord {
     disputedFields: [],
     orphanSection2: false,
     notes: [],
-    name: "Person 905 A",
+    name: privateValue("name:17a6fb0c3906628f") + " A",
     matchState: "extracted",
     selected: true,
     warnings: [],
@@ -53,11 +54,11 @@ describe("I9OcrRecordSchema", () => {
       firstName: "Jane",
       middleInitial: "A",
       dateOfBirth: "04/01/1998",
-      ssn: "000-00-0000",
+      ssn: privateValue("ssn:01a54629efb95228"),
       documentType: "expected",
     });
     assert.equal(parsed.formKind, "i9 section 1");
-    assert.equal(parsed.ssn, "000-00-0000");
+    assert.equal(parsed.ssn, privateValue("ssn:01a54629efb95228"));
   });
 
   it("parses a Section 2 sheet with the UNIFORM fields (name/ssn/hireDate on the sheet itself)", () => {
@@ -68,7 +69,7 @@ describe("I9OcrRecordSchema", () => {
       firstName: "Jane",
       middleInitial: "A",
       dateOfBirth: null,
-      ssn: "000-00-0000",
+      ssn: privateValue("ssn:01a54629efb95228"),
       hireDate: "04/17/2018",
       documentType: "expected",
     });
@@ -109,7 +110,7 @@ describe("I9OcrRecordSchema", () => {
 
 describe("normalizeI9Ssn", () => {
   it("strips dashes/spaces to 9 bare digits", () => {
-    assert.equal(normalizeI9Ssn("000-00-0000"), "123456789");
+    assert.equal(normalizeI9Ssn(privateValue("ssn:01a54629efb95228")), "123456789");
     assert.equal(normalizeI9Ssn("123 45 6789"), "123456789");
   });
 
@@ -142,9 +143,9 @@ describe("buildI9DisplayName", () => {
   it("builds Last, First M", () => {
     assert.equal(
       buildI9DisplayName({ lastName: "Doe", firstName: "Jane", middleInitial: "A" }),
-      "Person 905 A",
+      privateValue("name:17a6fb0c3906628f") + " A",
     );
-    assert.equal(buildI9DisplayName({ lastName: "Doe", firstName: "Jane" }), "Person 905");
+    assert.equal(buildI9DisplayName({ lastName: "Doe", firstName: "Jane" }), privateValue("name:17a6fb0c3906628f"));
     assert.equal(buildI9DisplayName({ lastName: "Doe" }), "Doe");
     assert.equal(buildI9DisplayName({}), "");
   });
@@ -154,7 +155,7 @@ describe("buildI9PersonMatchInput", () => {
   it("builds a full input with normalized ssn + dob", () => {
     assert.deepEqual(
       buildI9PersonMatchInput(
-        { lastName: "Doe", firstName: "Jane", ssn: "000-00-0000", dateOfBirth: "4/1/1998" },
+        { lastName: "Doe", firstName: "Jane", ssn: privateValue("ssn:01a54629efb95228"), dateOfBirth: "4/1/1998" },
         { parentSubject: "I9.pdf" },
       ),
       {
@@ -180,7 +181,7 @@ describe("buildI9PersonMatchInput", () => {
   it("returns null when the name or BOTH identifiers are missing", () => {
     assert.equal(
       buildI9PersonMatchInput(
-        { lastName: null, firstName: "Jane", ssn: "000-00-0000", dateOfBirth: null },
+        { lastName: null, firstName: "Jane", ssn: privateValue("ssn:01a54629efb95228"), dateOfBirth: null },
         {},
       ),
       null,
@@ -201,11 +202,11 @@ describe("applyPersonMatchToI9Record", () => {
     applyPersonMatchToI9Record(rec, {
       found: "true",
       matchedEmplId: "10874100",
-      matchedName: "Person 905",
+      matchedName: privateValue("name:01332c876518a793"),
     });
     assert.equal(rec.ucpathFound, true);
     assert.equal(rec.matchedEmplId, "10874100");
-    assert.equal(rec.matchedName, "Person 905");
+    assert.equal(rec.matchedName, privateValue("name:01332c876518a793"));
   });
 
   it("stamps found=false and leaves match fields absent", () => {
@@ -307,11 +308,11 @@ describe("i9OcrFormSpec", () => {
         firstName: "Jane",
         middleInitial: "A",
         dateOfBirth: "04/01/1998",
-        ssn: "000-00-0000",
+        ssn: privateValue("ssn:01a54629efb95228"),
       }),
       roster: [],
     });
-    assert.equal(rec.name, "Person 905 A");
+    assert.equal(rec.name, privateValue("name:17a6fb0c3906628f") + " A");
     assert.equal(rec.selected, true);
     assert.equal(rec.matchState, "extracted");
     // name/ppsEid/ucpathEmplId/hireDate/i9SeparationDate/rosterNameMatch/dob/ssn
@@ -321,16 +322,16 @@ describe("i9OcrFormSpec", () => {
 
   it("carry-forward keeps the FRESH read (enrichment re-runs the search)", () => {
     const v1 = makeRecord({ ucpathFound: true, matchedEmplId: "10874100" });
-    const v2 = makeRecord({ ssn: "000-00-0000" });
+    const v2 = makeRecord({ ssn: privateValue("ssn:ecdbc061a36dd649") });
     assert.deepEqual(i9OcrFormSpec.applyCarryForward({ v2, v1 }), v2);
   });
 
   it("placeholder fields are i9-shaped", () => {
     const fields = i9OcrFormSpec.placeholderFields?.();
     assert.ok(fields);
-    assert.equal(fields!.name, "");
-    assert.deepEqual(fields!.checks, []);
-    assert.equal(fields!.formKind, "unknown");
+    assert.equal(fields.name, "");
+    assert.deepEqual(fields.checks, []);
+    assert.equal(fields.formKind, "unknown");
   });
 });
 
@@ -374,12 +375,12 @@ describe("i9SecondOpinionRank / isI9SecondOpinionSuspect", () => {
     const so = i9OcrFormSpec.secondOpinion;
     assert.ok(so, "i9 declares spec.secondOpinion — without it the roster-gated phase never runs");
     const garbled = makeRecord({ ssn: "12-34", dateOfBirth: "4/1/98" });
-    assert.equal(so!.isSuspect(garbled), true);
-    assert.equal(so!.rank(garbled), 1);
-    assert.equal(so!.readName(garbled), "Person 905 A");
-    assert.match(so!.reason(garbled), /no usable SSN or mm\/dd\/yyyy date of birth/);
+    assert.equal(so.isSuspect(garbled), true);
+    assert.equal(so.rank(garbled), 1);
+    assert.equal(so.readName(garbled), privateValue("name:17a6fb0c3906628f") + " A");
+    assert.match(so.reason(garbled), /no usable SSN or mm\/dd\/yyyy date of birth/);
     const nameless = makeRecord({ lastName: null, name: "" });
-    assert.match(so!.reason(nameless), /name is missing or unreadable/);
+    assert.match(so.reason(nameless), /name is missing or unreadable/);
     assert.equal(so!.readName(nameless), "Jane A", "blank stamped name falls back to the Section 1 fields");
   });
 });
@@ -408,8 +409,8 @@ describe("corroborateI9Records", () => {
     });
 
   it("a Section 1 the employer's Section 2 agrees with is CONFIRMED", () => {
-    const s1 = makeRecord({ sourcePage: 4, lastName: "Werker", firstName: "Trent", name: "Person 1995", ssn: "000-00-0000" });
-    const s2 = sheet({ sourcePage: 3, name: "Person 1995", ssn: "000-00-0000", hireDate: "03/10/2019" });
+    const s1 = makeRecord({ sourcePage: 4, lastName: "Werker", firstName: "Trent", name: privateValue("name:bbafb5180f3dd10a"), ssn: privateValue("ssn:c7cb982fea5d0e63") });
+    const s2 = sheet({ sourcePage: 3, name: privateValue("name:bbafb5180f3dd10a"), ssn: privateValue("ssn:c7cb982fea5d0e63"), hireDate: "03/10/2019" });
     corroborateI9Records([s2, s1]);
     assert.equal(s1.corroboration, "confirmed");
     assert.deepEqual(s1.disputedFields, []);
@@ -418,10 +419,10 @@ describe("corroborateI9Records", () => {
   });
 
   it("REAL CASE (Werker, p55): a one-digit SSN misread is caught by Section 2 and never searched", () => {
-    // OCR read 000-00-0000; the employer's List C says 000-00-0000. UCPath
+    // OCR read ssn:2d95961e64b290fc; the employer's List C says ssn:c7cb982fea5d0e63. UCPath
     // answers "no results" for the wrong digit — a false "not in UCPath".
-    const s1 = makeRecord({ sourcePage: 55, lastName: "Werker", firstName: "Trent", name: "Person 1995", ssn: "000-00-0000" });
-    const s2 = sheet({ sourcePage: 54, name: "Person 1995", ssn: "000-00-0000" });
+    const s1 = makeRecord({ sourcePage: 55, lastName: "Werker", firstName: "Trent", name: privateValue("name:bbafb5180f3dd10a"), ssn: privateValue("ssn:2d95961e64b290fc") });
+    const s2 = sheet({ sourcePage: 54, name: privateValue("name:bbafb5180f3dd10a"), ssn: privateValue("ssn:c7cb982fea5d0e63") });
     corroborateI9Records([s2, s1]);
 
     assert.equal(s1.corroboration, "disputed");
@@ -438,20 +439,20 @@ describe("corroborateI9Records", () => {
   it("REAL CASE (Walters, p53): a truncated first name still PAIRS (shared token) and the surname dispute surfaces", () => {
     // OCR read "Kim"; the paper says "Kimi". The names still share "walters",
     // so the sheet is paired and the SSN cross-check still runs.
-    const s1 = makeRecord({ sourcePage: 53, lastName: "Walters", firstName: "Kim", name: "Walters, Kim J", ssn: "000-00-0000" });
-    const s2 = sheet({ sourcePage: 52, name: "Person 1217.", ssn: "000-00-0000" });
+    const s1 = makeRecord({ sourcePage: 53, lastName: "Walters", firstName: "Kim", name: "Walters, Kim J", ssn: privateValue("ssn:71e391652593f29a") });
+    const s2 = sheet({ sourcePage: 52, name: privateValue("name:69d1f1d06195aed0") + ".", ssn: privateValue("ssn:5facd8b31bec1d7c") });
     corroborateI9Records([s2, s1]);
     assert.equal(s1.corroboration, "disputed");
     assert.deepEqual(s1.disputedFields, ["ssn"]);
   });
 
   it("REAL CASE (Mihalik, p4): a misread SURNAME is caught even though the given name matches", () => {
-    const s1 = makeRecord({ sourcePage: 4, lastName: "Miralik", firstName: "Joshua", name: "Miralik, Joshua A", ssn: "000-00-0000" });
-    const s2 = sheet({ sourcePage: 3, name: "Person 1059", ssn: "000-00-0000" });
+    const s1 = makeRecord({ sourcePage: 4, lastName: "Miralik", firstName: "Joshua", name: "Miralik, Joshua A", ssn: privateValue("ssn:66321ce96453981e") });
+    const s2 = sheet({ sourcePage: 3, name: privateValue("name:287220114a395683"), ssn: privateValue("ssn:66321ce96453981e") });
     corroborateI9Records([s2, s1]);
     assert.equal(s1.corroboration, "disputed");
     assert.deepEqual(s1.disputedFields, ["lastName"]);
-    assert.match(s1.warnings[0], /Last name disagrees.*"Miralik".*"Person 1059"/s);
+    assert.match(s1.warnings[0], new RegExp("Last name disagrees.*\"Miralik\".*\"" + privateValue("name:287220114a395683") + "\"", "s"));
   });
 
   it("a Section 1 with no Section 2 sheet is UNAVAILABLE, not confirmed", () => {
@@ -462,8 +463,8 @@ describe("corroborateI9Records", () => {
   });
 
   it("REAL CASE (Singh, p24): a Section 2 with NO Section 1 page is flagged as an orphan", () => {
-    const s1 = makeRecord({ sourcePage: 4, lastName: "Werker", firstName: "Trent", name: "Person 1995" });
-    const orphan = sheet({ sourcePage: 24, name: "Person 244" });
+    const s1 = makeRecord({ sourcePage: 4, lastName: "Werker", firstName: "Trent", name: privateValue("name:bbafb5180f3dd10a") });
+    const orphan = sheet({ sourcePage: 24, name: privateValue("name:9a4defa05743dc99") });
     corroborateI9Records([s1, orphan]);
     assert.equal(orphan.orphanSection2, true);
     assert.match(orphan.warnings[0], /Section 1 page is NOT/);
@@ -471,8 +472,8 @@ describe("corroborateI9Records", () => {
   });
 
   it("stamps the REVERSE link: the claimed sheet points back at its Section 1 page", () => {
-    const s1 = makeRecord({ sourcePage: 9, lastName: "Sanchez", firstName: "Gabriel", name: "Person 706", ssn: "000-00-0000" });
-    const s2 = sheet({ sourcePage: 1, name: "Person 706", ssn: "000-00-0000", hireDate: "04/25/2016" });
+    const s1 = makeRecord({ sourcePage: 9, lastName: "Sanchez", firstName: "Gabriel", name: privateValue("name:9c12f2d590ae3a2c"), ssn: privateValue("ssn:bb92de7212baf668") });
+    const s2 = sheet({ sourcePage: 1, name: privateValue("name:9c12f2d590ae3a2c"), ssn: privateValue("ssn:bb92de7212baf668"), hireDate: "04/25/2016" });
     corroborateI9Records([s2, s1]);
     assert.equal(s1.section2Page, 1);
     assert.equal(s2.section1Page, 9, "the sheet records which Section 1 claimed it");
@@ -481,8 +482,8 @@ describe("corroborateI9Records", () => {
   it("an \"i9 ssn\" supplemental sheet pairs by name, stamps ssnPage, and supplies the hire date", () => {
     // The UCRS 419 case: Suh has NO Section 2 anywhere — the SSN statement is
     // his only corroborating document.
-    const s1 = makeRecord({ sourcePage: 37, lastName: "Suh", firstName: "Seung", name: "Person 1848", ssn: "000-00-0000", hireDate: null });
-    const ssnSheet = sheet({ formKind: "i9 ssn", sourcePage: 36, name: "Person 1848", ssn: "000-00-0000", hireDate: "02/25/2016" });
+    const s1 = makeRecord({ sourcePage: 37, lastName: "Suh", firstName: "Seung", name: privateValue("name:3341efc4806536db"), ssn: privateValue("ssn:c3d3f367f50641cf"), hireDate: null });
+    const ssnSheet = sheet({ formKind: "i9 ssn", sourcePage: 36, name: privateValue("name:3341efc4806536db"), ssn: privateValue("ssn:c3d3f367f50641cf"), hireDate: "02/25/2016" });
     corroborateI9Records([ssnSheet, s1]);
     assert.equal(s1.ssnPage, 36);
     assert.equal(ssnSheet.section1Page, 37);
@@ -491,8 +492,8 @@ describe("corroborateI9Records", () => {
   });
 
   it("an \"i9 ssn\" sheet contradicting the Section 1 SSN disputes it (independent oracle)", () => {
-    const s1 = makeRecord({ sourcePage: 37, lastName: "Suh", firstName: "Seung", name: "Person 1848", ssn: "000-00-0000" });
-    const ssnSheet = sheet({ formKind: "i9 ssn", sourcePage: 36, name: "Person 1848", ssn: "000-00-0000" });
+    const s1 = makeRecord({ sourcePage: 37, lastName: "Suh", firstName: "Seung", name: privateValue("name:3341efc4806536db"), ssn: privateValue("ssn:db0773aa2380b081") });
+    const ssnSheet = sheet({ formKind: "i9 ssn", sourcePage: 36, name: privateValue("name:3341efc4806536db"), ssn: privateValue("ssn:c3d3f367f50641cf") });
     corroborateI9Records([ssnSheet, s1]);
     assert.equal(s1.corroboration, "disputed");
     assert.deepEqual(s1.disputedFields, ["ssn"]);
@@ -500,9 +501,9 @@ describe("corroborateI9Records", () => {
   });
 
   it("one Section 2 sheet is claimed by only ONE Section 1 (no double-pairing)", () => {
-    const a = makeRecord({ sourcePage: 2, lastName: "Tan", firstName: "Jiayi", name: "Person 989", ssn: "000-00-0000" });
-    const b = makeRecord({ sourcePage: 4, lastName: "Tan", firstName: "Jiayi", name: "Person 989", ssn: "000-00-0000" });
-    const s2 = sheet({ sourcePage: 1, name: "Person 989", ssn: "000-00-0000" });
+    const a = makeRecord({ sourcePage: 2, lastName: "Tan", firstName: "Jiayi", name: privateValue("name:5023acb10ea73642"), ssn: privateValue("ssn:7076baa61dd741b5") });
+    const b = makeRecord({ sourcePage: 4, lastName: "Tan", firstName: "Jiayi", name: privateValue("name:5023acb10ea73642"), ssn: privateValue("ssn:7076baa61dd741b5") });
+    const s2 = sheet({ sourcePage: 1, name: privateValue("name:5023acb10ea73642"), ssn: privateValue("ssn:7076baa61dd741b5") });
     corroborateI9Records([s2, a, b]);
     assert.equal(a.corroboration, "confirmed", "the first Section 1 claims the sheet");
     assert.equal(b.corroboration, "unavailable", "the second cannot re-use it");
@@ -511,14 +512,14 @@ describe("corroborateI9Records", () => {
 
 describe("i9NamesShareToken", () => {
   it("pairs a partial misread with the true name", () => {
-    assert.equal(i9NamesShareToken("Miralik, Joshua A", "Person 1059"), true);
-    assert.equal(i9NamesShareToken("Walters, Kim J", "Person 1217."), true);
+    assert.equal(i9NamesShareToken("Miralik, Joshua A", privateValue("name:287220114a395683")), true);
+    assert.equal(i9NamesShareToken("Walters, Kim J", privateValue("name:69d1f1d06195aed0") + "."), true);
   });
   it("does not pair two different people", () => {
-    assert.equal(i9NamesShareToken("Person 989", "Person 244"), false);
+    assert.equal(i9NamesShareToken(privateValue("name:5023acb10ea73642"), privateValue("name:9a4defa05743dc99")), false);
   });
   it("ignores single-character tokens (a middle initial is not an identity)", () => {
-    assert.equal(i9NamesShareToken("Person 905 A", "Roe, Rick A"), false);
+    assert.equal(i9NamesShareToken(privateValue("name:17a6fb0c3906628f") + " A", "Roe, Rick A"), false);
   });
 });
 
@@ -556,7 +557,7 @@ describe("buildI9PersonMatchInput: a disputed field is never searched with", () 
  * Every employee has BOTH a Section 1 and a Section 2 page, filed apart in a
  * scanned packet. Pairing used to be first-fit on ANY shared name token, in
  * page order, so a coincidental token collision stole the sheet an exact match
- * needed. Live 2026-07-16: `Person 1611` and `Person 1612` both contain
+ * needed. Live 2026-07-16: `name:ac86ab60949bf81a` and `name:74e3ab11f18adfaf` both contain
  * "nien" — Weng's Section 1 was paired to Tsai's sheet (phantom last-name
  * dispute) while Weng's real sheet on page 50 was reported an orphan.
  */
@@ -588,10 +589,10 @@ describe("pairI9Section2Sheets — global best-first pairing", () => {
     });
 
   it("gives each sheet to its BEST claimant, not the first token collision", () => {
-    const tsai = s1("Person 1611", 45);
-    const weng = s1("Person 1612", 51);
-    const tsaiSheet = s2("Person 1611", 44);
-    const wengSheet = s2("Person 1612", 50);
+    const tsai = s1(privateValue("name:ac86ab60949bf81a"), 45);
+    const weng = s1(privateValue("name:74e3ab11f18adfaf"), 51);
+    const tsaiSheet = s2(privateValue("name:ac86ab60949bf81a"), 44);
+    const wengSheet = s2(privateValue("name:74e3ab11f18adfaf"), 50);
 
     const paired = pairI9Section2Sheets([tsai, weng], [tsaiSheet, wengSheet]);
     assert.equal(paired.get(tsai)?.sourcePage, 44, "Tsai keeps its own sheet");
@@ -607,28 +608,28 @@ describe("pairI9Section2Sheets — global best-first pairing", () => {
   });
 
   it("does NOT pair two genuinely different people", () => {
-    const a = s1("Person 989", 3);
-    const sheet = s2("Person 244", 4);
+    const a = s1(privateValue("name:5023acb10ea73642"), 3);
+    const sheet = s2(privateValue("name:9a4defa05743dc99"), 4);
     assert.equal(pairI9Section2Sheets([a], [sheet]).size, 0);
   });
 
   it("scores an exact name above a shared-token coincidence", () => {
-    const exact = i9NamePairScore("Person 1612", "Person 1612");
-    const coincidence = i9NamePairScore("Person 1612", "Person 1611");
+    const exact = i9NamePairScore(privateValue("name:74e3ab11f18adfaf"), privateValue("name:74e3ab11f18adfaf"));
+    const coincidence = i9NamePairScore(privateValue("name:74e3ab11f18adfaf"), privateValue("name:ac86ab60949bf81a"));
     assert.equal(exact, 1);
     assert.ok(coincidence < exact, `coincidence ${coincidence} must rank below exact ${exact}`);
   });
 
   it("corroborate: the mispairing no longer invents a last-name dispute", () => {
-    const tsai = s1("Person 1611", 45);
-    const weng = s1("Person 1612", 51);
+    const tsai = s1(privateValue("name:ac86ab60949bf81a"), 45);
+    const weng = s1(privateValue("name:74e3ab11f18adfaf"), 51);
     const out = corroborateI9Records([
       tsai,
       weng,
-      s2("Person 1611", 44),
-      s2("Person 1612", 50),
+      s2(privateValue("name:ac86ab60949bf81a"), 44),
+      s2(privateValue("name:74e3ab11f18adfaf"), 50),
     ]);
-    const wengOut = out.find((r) => r.name === "Person 1612")!;
+    const wengOut = out.find((r) => r.name === privateValue("name:74e3ab11f18adfaf"))!;
     assert.equal(wengOut.corroboration, "confirmed");
     assert.deepEqual(wengOut.disputedFields, []);
     assert.equal(wengOut.section2Page, 50, "records which page corroborated it");

@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -15,7 +16,7 @@ describe("buildOcrReviewSnapshotData", () => {
     const data = buildOcrReviewSnapshotData({
       base: { formType: "verify", pdfOriginalName: "mixed.pdf", archetype: "single" /* must lose */ },
       sessionId: "sess-1",
-      records: [{ name: "Person 905" }],
+      records: [{ name: privateValue("name:17a6fb0c3906628f") }],
       parent: { parentSubject: "mixed.pdf", parentRunId: "op-1" },
     });
     assert.equal(data.mode, "prepare");
@@ -24,7 +25,7 @@ describe("buildOcrReviewSnapshotData", () => {
     assert.equal(data.__name, "mixed.pdf");
     assert.equal(data.parentSubject, "mixed.pdf");
     assert.equal(data.formType, "verify", "base fields survive");
-    assert.deepEqual(JSON.parse(data.records), [{ name: "Person 905" }]);
+    assert.deepEqual(JSON.parse(data.records), [{ name: privateValue("name:17a6fb0c3906628f") }]);
   });
 
   it("falls back to __name=OCR when there is no parent subject", () => {

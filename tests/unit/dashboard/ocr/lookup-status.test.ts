@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
@@ -19,8 +20,8 @@ function record(overrides: Partial<TestLookupRecord> = {}): TestLookupRecord {
     formKind: "oath",
     sourcePage: 1,
     rowIndex: 0,
-    printedName: "Person 905",
-    employeeId: "10000910",
+    printedName: privateValue("name:17a6fb0c3906628f"),
+    employeeId: privateValue("id:dfa73f9264a72c07"),
     employeeSigned: true,
     officerSigned: true,
     dateSigned: "06/01/2026",

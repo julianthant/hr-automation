@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -110,7 +111,7 @@ describe("force-research patches records from eid-lookup outcomes", () => {
         timestamp: new Date().toISOString(),
         status: "done",
         step: "person-lookup",
-        data: { formType: "verify", records: JSON.stringify([{ name: "Person 905", employeeId: "10000910", paperEmployeeId: "10000910", checks: [] }]) },
+        data: { formType: "verify", records: JSON.stringify([{ name: privateValue("name:17a6fb0c3906628f"), employeeId: privateValue("id:dfa73f9264a72c07"), paperEmployeeId: privateValue("id:dfa73f9264a72c07"), checks: [] }]) },
       }) + "\n",
     );
 
@@ -192,7 +193,7 @@ describe("force-research patches records from eid-lookup outcomes", () => {
     const runId = "run-fr-2";
 
     writeOcrRow(dir, sessionId, runId, [
-      { printedName: "Person 905", employeeId: "", matchState: "unresolved", forceResearch: false },
+      { printedName: privateValue("name:17a6fb0c3906628f"), employeeId: "", matchState: "unresolved", forceResearch: false },
     ]);
 
     const failedOutcome: ChildOutcome = {

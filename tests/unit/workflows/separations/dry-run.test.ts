@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it, beforeAll, beforeEach, vi } from "vitest";
 import assert from "node:assert/strict";
 
@@ -168,7 +169,7 @@ const KRONOS_NOT_FOUND = {
 // getJobSummaryIdentity, before identity-check). The default (beforeEach) is a
 // FOUND record whose name matches KUALI_FIXTURE so identity-check skips.
 const JS_NAME_MISMATCH = { found: true, name: "Totally Different Person", data: null };
-const JS_SIMILAR = { found: true, name: "Jayden Balmaceda", data: { emplRecord: "0", positionNumber: "10005858", deptId: "", departmentDescription: "", jobCode: "004920", jobDescription: "STDT 3" } };
+const JS_SIMILAR = { found: true, name: "Jayden Balmaceda", data: { emplRecord: "0", positionNumber: privateValue("id:4dce293f69e3e795"), deptId: "", departmentDescription: "", jobCode: "004920", jobDescription: "STDT 3" } };
 
 const fakePage = { bringToFront: async () => {}, isClosed: () => false } as unknown;
 
@@ -262,7 +263,7 @@ beforeEach(() => {
   mocks.getJobSummaryIdentity.mockResolvedValue({
     found: true,
     name: "Test Employee",
-    data: { emplRecord: "0", positionNumber: "10005858", deptId: "", departmentDescription: "", jobCode: "004920", jobDescription: "STDT 3" },
+    data: { emplRecord: "0", positionNumber: privateValue("id:4dce293f69e3e795"), deptId: "", departmentDescription: "", jobCode: "004920", jobDescription: "STDT 3" },
   });
   mocks.updateEmployeeName.mockResolvedValue(undefined);
   mocks.updateLastDayWorked.mockResolvedValue(undefined);
@@ -443,8 +444,8 @@ describe("separations handler — dry-run terminal", () => {
 
 describe("separations handler — found timecard without a verified last punch", () => {
   for (const item of [
-    { docId: "4753", eid: "10001979", name: "Person 1204", positionNumber: "10005710" },
-    { docId: "4755", eid: "10002179", name: "Hu, Lawrence", positionNumber: "10005392" },
+    { docId: "4753", eid: privateValue("id:3c6648fa80011ea0"), name: privateValue("name:a526af6f78c2d193"), positionNumber: privateValue("id:86c05cda34760347") },
+    { docId: "4755", eid: privateValue("id:53d4bcaeeae1dcbc"), name: "Hu, Lawrence", positionNumber: privateValue("id:4563e2ea5867053f") },
   ]) {
     it(`rejects #${item.docId}'s empty hire-to-current window before receipt reuse or submission`, async () => {
       mocks.runKualiExtract.mockResolvedValue({
@@ -649,7 +650,7 @@ describe("separations handler — identity-check (conditional, Job-Summary-gated
     mocks.getJobSummaryIdentity.mockResolvedValueOnce({
       found: true,
       name: "Santos Hernandez",
-      data: { emplRecord: "0", positionNumber: "10005858", deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
+      data: { emplRecord: "0", positionNumber: privateValue("id:4dce293f69e3e795"), deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
     });
     const { ctx, probe } = makeFakeCtx(
       { docId: "4131" },
@@ -682,7 +683,7 @@ describe("separations handler — identity-check (conditional, Job-Summary-gated
     // the Job Summary name still mismatches (the "Keep original" choice).
     mocks.getJobSummaryIdentity.mockResolvedValueOnce({
       found: true, name: "Santos Hernandez",
-      data: { emplRecord: "0", positionNumber: "10005858", deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
+      data: { emplRecord: "0", positionNumber: privateValue("id:4dce293f69e3e795"), deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
     });
     const delegateSpy = vi.fn();
     const { ctx, probe } = makeFakeCtx({ docId: "4313", eidApproved: "10833507" });
@@ -786,7 +787,7 @@ describe("separations handler — transaction-check (existing-termination branch
       separationDate: KUALI_FIXTURE.separationDate,
       effectiveDate: "01/16/2026",
       expectedComments: "Termination eff 01/16/2026. Last Day Worked 01/15/2026. Kuali form #4131.",
-      job: { emplRecord: "0", positionNumber: "10005858", jobCode: "004920" },
+      job: { emplRecord: "0", positionNumber: privateValue("id:4dce293f69e3e795"), jobCode: "004920" },
     });
   });
 
@@ -860,7 +861,7 @@ describe("separations handler — department gate (skip Kronos for non-HDH)", ()
   const JS_FOUND = (departmentDescription: string) => ({
     found: true,
     name: "Test Employee",
-    data: { emplRecord: "0", positionNumber: "10005858", deptId: "000123", departmentDescription, jobCode: "001234", jobDescription: "Analyst" },
+    data: { emplRecord: "0", positionNumber: privateValue("id:4dce293f69e3e795"), deptId: "000123", departmentDescription, jobCode: "001234", jobDescription: "Analyst" },
   });
 
   it("SKIPS kronos-search for a non-HDH department (not timekept in New Kronos)", async () => {
@@ -1032,7 +1033,7 @@ describe("separations handler — run mode 'Skip UCPath transaction'", () => {
     mocks.getJobSummaryIdentity.mockResolvedValue({
       found: true,
       name: "Test Employee",
-      data: { emplRecord: "0", positionNumber: "10005858", deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
+      data: { emplRecord: "0", positionNumber: privateValue("id:4dce293f69e3e795"), deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
     });
     const { ctx, probe } = makeFakeCtx({ docId: "4540" }, { skipSteps: SKIP });
     await runHandler(ctx, { docId: "4540" });
@@ -1086,7 +1087,7 @@ describe("job identity and Task 1 safety", () => {
     const lookupOptions = mocks.getJobSummaryIdentity.mock.calls[0][2] as { jobCode?: string; resolveJob: boolean };
     assert.equal(lookupOptions.jobCode, undefined);
     assert.equal(lookupOptions.resolveJob, true);
-    assert.deepEqual(mocks.runUcpathTransaction.mock.calls[0][8], { emplRecord: "0", positionNumber: "10005858", jobCode: "004920" });
+    assert.deepEqual(mocks.runUcpathTransaction.mock.calls[0][8], { emplRecord: "0", positionNumber: privateValue("id:4dce293f69e3e795"), jobCode: "004920" });
     assert.equal(
       mocks.runUcpathTransaction.mock.calls[0][4],
       "Termination eff 01/16/2026. Last Day Worked 01/15/2026. Kuali form #4605.",
@@ -1136,7 +1137,7 @@ describe("separations hire-date search window", () => {
     const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
     await runHandler(ctx, { docId: "4131", dryRun: true });
     assert.equal(mocks.readSeparationHireDate.mock.calls[0][1], KUALI_FIXTURE.eid);
-    assert.deepEqual(mocks.readSeparationHireDate.mock.calls[0][2], { emplRecord: "0", positionNumber: "10005858", jobCode: "004920" });
+    assert.deepEqual(mocks.readSeparationHireDate.mock.calls[0][2], { emplRecord: "0", positionNumber: privateValue("id:4dce293f69e3e795"), jobCode: "004920" });
     assert.equal(mocks.runKronosSearch.mock.calls[0][2], "10/24/2025");
     const now = new Date();
     const today = `${String(now.getMonth() + 1).padStart(2, "0")}/${String(now.getDate()).padStart(2, "0")}/${now.getFullYear()}`;

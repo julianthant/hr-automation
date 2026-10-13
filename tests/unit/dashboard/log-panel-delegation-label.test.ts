@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 
@@ -22,7 +23,7 @@ test("shows trace id even when EID is present", () => {
     data: {
       archetype: "single",
       queueRowKind: "person",
-      eid: "10002238",
+      eid: privateValue("id:aa9d0dcadcdb2257"),
       __traceId: "ec-150044-0d3f",
     },
   });
@@ -52,6 +53,6 @@ test("shows trace id for a file row", () => {
 });
 
 test("returns empty when no trace id is stamped", () => {
-  const e = entry({ data: { archetype: "single", eid: "10002238" } });
+  const e = entry({ data: { archetype: "single", eid: privateValue("id:aa9d0dcadcdb2257") } });
   assert.equal(deriveLogPanelFooterRunLabel(e), "");
 });

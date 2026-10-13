@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, test } from "vitest";
 import assert from "node:assert/strict";
 
@@ -13,7 +14,7 @@ function lookupResult(
     eid: "",
     approvalStatus: "Pending",
     effectiveDate: "2026-09-28",
-    ucpathName: "Person 831",
+    ucpathName: privateValue("name:6168ff06af447daa"),
     ...overrides,
   };
 }
@@ -21,7 +22,7 @@ function lookupResult(
 describe("deriveProcessEidResult", () => {
   test("returns Found only when the exact transaction has an assigned EID", () => {
     assert.equal(
-      deriveProcessEidResult(lookupResult({ eid: "10002345" })),
+      deriveProcessEidResult(lookupResult({ eid: privateValue("id:bf5c81799e6f558c") })),
       "Found",
     );
   });

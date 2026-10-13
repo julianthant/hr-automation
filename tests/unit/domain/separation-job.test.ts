@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { commentsMatchTermination, matchesSeparationJob, parseKualiSeparationTask, parseSeparationJobCode, parseTerminationJobHeader } from "../../../src/domain/separation-job.js";
@@ -10,18 +11,18 @@ describe("separation job identity", () => {
     assert.throws(() => parseSeparationJobCode("STDT 3 and STDT 4", ""), /multiple/);
   });
   it("does not reuse Jayla's STDT 4 transaction for her STDT 3 form", () => {
-    const academic = { emplRecord: "0", positionNumber: "10005858", jobCode: "004920" };
+    const academic = { emplRecord: "0", positionNumber: privateValue("id:4dce293f69e3e795"), jobCode: "004920" };
     assert.equal(matchesSeparationJob({ emplRecord: "1", positionNumber: "41079142", jobCode: "004919" }, academic), false);
     assert.equal(matchesSeparationJob(academic, academic), true);
     assert.throws(() => matchesSeparationJob(academic, { ...academic, jobCode: "" }), /Incomplete/);
-    assert.equal(matchesSeparationJob({ ...academic, positionNumber: "10005859" }, academic), false);
+    assert.equal(matchesSeparationJob({ ...academic, positionNumber: privateValue("id:5dabe2ea30c2c914") }, academic), false);
     assert.throws(() => matchesSeparationJob({ ...academic, emplRecord: "" }, academic), /Incomplete/);
   });
   it("reads record zero and refuses an incomplete receipt", () => {
-    assert.deepEqual(parseTerminationJobHeader("Effective Date: 09/02/2026 Employee ID: 10001231 Employee Record: 0 (STDT 3)"), {
-      eid: "10001231", emplRecord: "0", effectiveDate: "09/02/2026",
+    assert.deepEqual(parseTerminationJobHeader("Effective Date: 09/02/2026 Employee ID: " + privateValue("id:d8411d15d4399415") + " Employee Record: 0 (STDT 3)"), {
+      eid: privateValue("id:d8411d15d4399415"), emplRecord: "0", effectiveDate: "09/02/2026",
     });
-    assert.throws(() => parseTerminationJobHeader("Employee ID: 10001231"), /Cannot verify/);
+    assert.throws(() => parseTerminationJobHeader("Employee ID: " + privateValue("id:d8411d15d4399415")), /Cannot verify/);
   });
   it("stops on Task 2 even though its form still displays the Task 1 section", () => {
     assert.equal(parseKualiSeparationTask("PLEASE REVIEW AND COMPLETE CHECKLIST - Task 2\nTimekeeper Tasks - Step 1"), 2);

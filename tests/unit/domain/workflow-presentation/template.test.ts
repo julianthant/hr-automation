@@ -1,12 +1,13 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it, expect } from "vitest";
 import { renderTemplate, extractTokens, KNOWN_TOKENS } from "../../../../src/domain/workflow-presentation/template.js";
 
 describe("renderTemplate", () => {
   it("interpolates known tokens", () => {
-    expect(renderTemplate("{name} ({emplId})", { name: "Person 905", emplId: "10012345" })).toBe("Person 905 (10012345)");
+    expect(renderTemplate("{name} ({emplId})", { name: privateValue("name:01332c876518a793"), emplId: "10012345" })).toBe(privateValue("name:01332c876518a793") + " (10012345)");
   });
   it("drops a token whose value is empty/missing, trimming dangling separators", () => {
-    expect(renderTemplate("{name} ({emplId})", { name: "Person 905", emplId: "" })).toBe("Person 905");
+    expect(renderTemplate("{name} ({emplId})", { name: privateValue("name:01332c876518a793"), emplId: "" })).toBe(privateValue("name:01332c876518a793"));
   });
   it("renders trace-style template", () => {
     expect(renderTemplate("{code}-{HHMMSS}-{runId4}", { code: "ou", HHMMSS: "143012", runId4: "a3f1" })).toBe("ou-143012-a3f1");

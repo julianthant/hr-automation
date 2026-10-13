@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 
@@ -143,21 +144,21 @@ test("crm-doc-download input run accepts EIDs separated by commas", () => {
 
   assert.ok(config);
   assert.match(config.placeholder, /EIDs/);
-  assert.deepEqual(config.parseInput("10873698, 10002191"), {
+  assert.deepEqual(config.parseInput("10873698, " + privateValue("id:77e513b80355ae3b")), {
     ok: true,
-    inputs: [{ emplId: "10873698" }, { emplId: "10002191" }],
+    inputs: [{ emplId: "10873698" }, { emplId: privateValue("id:77e513b80355ae3b") }],
   });
 });
 
 test("crm-doc-download input run accepts emails and EIDs interchangeably", () => {
   assert.deepEqual(
-    parseCrmDocDownloadInputs("10873698, person@example.edu, person@example.edu"),
+    parseCrmDocDownloadInputs("10873698, " + privateValue("ucsd:9e895cc9310c8df0") + ", " + privateValue("ucsd:66246b85383e70e7")),
     {
       ok: true,
       inputs: [
         { emplId: "10873698" },
-        { email: "person@example.edu" },
-        { email: "person@example.edu" },
+        { email: privateValue("ucsd:9e895cc9310c8df0") },
+        { email: privateValue("ucsd:66246b85383e70e7") },
       ],
     },
   );
@@ -193,9 +194,9 @@ test("onboarding input run accepts comma-separated emails and opts into dry-run"
   assert.ok(config);
   assert.match(config.placeholder, /emails/);
   assert.equal(config.supportsDryRun, true);
-  assert.deepEqual(config.parseInput("person@example.edu, person@example.edu"), {
+  assert.deepEqual(config.parseInput(privateValue("ucsd:9e895cc9310c8df0") + ", " + privateValue("ucsd:66246b85383e70e7")), {
     ok: true,
-    inputs: [{ email: "person@example.edu" }, { email: "person@example.edu" }],
+    inputs: [{ email: privateValue("ucsd:9e895cc9310c8df0") }, { email: privateValue("ucsd:66246b85383e70e7") }],
   });
 });
 

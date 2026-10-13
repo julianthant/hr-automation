@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -31,7 +32,7 @@ test("queryEntriesPayload returns /events-compatible entries and counts", () => 
       runId: "run-1",
       status: "running",
       step: "extraction",
-      data: { __name: "Person 905" },
+      data: { __name: privateValue("name:01332c876518a793") },
     }, dir);
     appendLogEntry({
       workflow: "onboarding",
@@ -69,7 +70,7 @@ test("queryEntriesPayload hides retired workflows from dashboard rail metadata",
         id: `${workflow}-row`,
         runId: `${workflow}-run`,
         status: "done",
-        data: { emplId: "10001516" },
+        data: { emplId: privateValue("id:699c7799ff18032d") },
       }, dir);
     }
     const db = openStateDb(dir);
@@ -93,10 +94,10 @@ test("queryEntriesPayload wfCounts merges same-day person-lookup items that shar
       {
         workflow: "person-lookup",
         timestamp: `${day}T18:00:00.000Z`,
-        id: "Person 905",
-        runId: "Person 905#1",
+        id: privateValue("name:17a6fb0c3906628f"),
+        runId: privateValue("name:17a6fb0c3906628f") + "#1",
         status: "done",
-        data: { emplId: "10999999", name: "Person 905" },
+        data: { emplId: "10999999", name: privateValue("name:17a6fb0c3906628f") },
       },
       dir,
     );
@@ -488,14 +489,14 @@ test("selectLogsForRun includes after-midnight log lines for a run still open on
     openStateDb(dir);
     // A run_event on D establishes the run as OPEN on its start day (the logs
     // continuation is gated on the run's day-D status, since logs carry none).
-    trackEvent({ workflow: "work-study", timestamp: "2026-05-04T12:00:00.000Z", id: "10000910", runId: "run-a", status: "running", step: "transaction" }, dir);
+    trackEvent({ workflow: "work-study", timestamp: "2026-05-04T12:00:00.000Z", id: privateValue("id:dfa73f9264a72c07"), runId: "run-a", status: "running", step: "transaction" }, dir);
     // Noon-apart on consecutive days → guaranteed-distinct local partitions in
     // any realistic runner timezone (the 23:59/00:01-UTC pair collapses to one
     // local day in negative-UTC zones and would not exercise the merge).
-    appendLogEntry({ workflow: "work-study", itemId: "10000910", runId: "run-a", level: "step", message: "Before midnight", ts: "2026-05-04T12:30:00.000Z" }, dir);
-    appendLogEntry({ workflow: "work-study", itemId: "10000910", runId: "run-a", level: "success", message: "After midnight", ts: "2026-05-05T12:00:00.000Z" }, dir);
+    appendLogEntry({ workflow: "work-study", itemId: privateValue("id:dfa73f9264a72c07"), runId: "run-a", level: "step", message: "Before midnight", ts: "2026-05-04T12:30:00.000Z" }, dir);
+    appendLogEntry({ workflow: "work-study", itemId: privateValue("id:dfa73f9264a72c07"), runId: "run-a", level: "success", message: "After midnight", ts: "2026-05-05T12:00:00.000Z" }, dir);
     const db = openStateDb(dir);
-    const rows = selectLogsForRun(db, { workflow: "work-study", trackerDate: "2026-05-04", itemId: "10000910", runId: "run-a" });
+    const rows = selectLogsForRun(db, { workflow: "work-study", trackerDate: "2026-05-04", itemId: privateValue("id:dfa73f9264a72c07"), runId: "run-a" });
     assert.deepEqual(rows.map((r) => r.message), ["Before midnight", "After midnight"], "the start-day log panel shows the whole run, not just pre-midnight lines");
   } finally {
     closeStateDbForTests(dir);
@@ -507,13 +508,13 @@ test("selectLogsForRun does not pull later logs for a run that ended on its star
   const dir = tmpTracker();
   try {
     openStateDb(dir);
-    trackEvent({ workflow: "work-study", timestamp: "2026-05-04T12:00:00.000Z", id: "10000910", runId: "run-a", status: "running", step: "transaction" }, dir);
-    trackEvent({ workflow: "work-study", timestamp: "2026-05-04T12:05:00.000Z", id: "10000910", runId: "run-a", status: "done" }, dir);
-    appendLogEntry({ workflow: "work-study", itemId: "10000910", runId: "run-a", level: "step", message: "On day D", ts: "2026-05-04T12:01:00.000Z" }, dir);
+    trackEvent({ workflow: "work-study", timestamp: "2026-05-04T12:00:00.000Z", id: privateValue("id:dfa73f9264a72c07"), runId: "run-a", status: "running", step: "transaction" }, dir);
+    trackEvent({ workflow: "work-study", timestamp: "2026-05-04T12:05:00.000Z", id: privateValue("id:dfa73f9264a72c07"), runId: "run-a", status: "done" }, dir);
+    appendLogEntry({ workflow: "work-study", itemId: privateValue("id:dfa73f9264a72c07"), runId: "run-a", level: "step", message: "On day D", ts: "2026-05-04T12:01:00.000Z" }, dir);
     // A later log under the reused run_id — must NOT bleed into the day-D panel.
-    appendLogEntry({ workflow: "work-study", itemId: "10000910", runId: "run-a", level: "step", message: "Reused later", ts: "2026-05-06T12:00:00.000Z" }, dir);
+    appendLogEntry({ workflow: "work-study", itemId: privateValue("id:dfa73f9264a72c07"), runId: "run-a", level: "step", message: "Reused later", ts: "2026-05-06T12:00:00.000Z" }, dir);
     const db = openStateDb(dir);
-    const rows = selectLogsForRun(db, { workflow: "work-study", trackerDate: "2026-05-04", itemId: "10000910", runId: "run-a" });
+    const rows = selectLogsForRun(db, { workflow: "work-study", trackerDate: "2026-05-04", itemId: privateValue("id:dfa73f9264a72c07"), runId: "run-a" });
     assert.deepEqual(rows.map((r) => r.message), ["On day D"], "a terminal day-D run pulls no later logs");
   } finally {
     closeStateDbForTests(dir);
@@ -598,7 +599,7 @@ test("queryRunsForItem returns /api/runs-compatible run summaries", () => {
     trackEvent({
       workflow: "work-study",
       timestamp: "2026-05-04T20:00:00.000Z",
-      id: "10000910",
+      id: privateValue("id:dfa73f9264a72c07"),
       runId: "run-1",
       status: "running",
       step: "transaction",
@@ -606,12 +607,12 @@ test("queryRunsForItem returns /api/runs-compatible run summaries", () => {
     trackEvent({
       workflow: "work-study",
       timestamp: "2026-05-04T20:01:00.000Z",
-      id: "10000910",
+      id: privateValue("id:dfa73f9264a72c07"),
       runId: "run-1",
       status: "done",
     }, dir);
     const db = openStateDb(dir);
-    const runs = queryRunsForItem(db, { workflow: "work-study", itemId: "10000910", date: "2026-05-04" });
+    const runs = queryRunsForItem(db, { workflow: "work-study", itemId: privateValue("id:dfa73f9264a72c07"), date: "2026-05-04" });
     assert.equal(runs.length, 1);
     assert.equal(runs[0].status, "done");
     assert.equal(runs[0].runOrdinal, 1);
@@ -634,7 +635,7 @@ test("queryRunsForItem assigns distinct run_ordinal in live-apply path (regressi
     trackEvent({
       workflow: "work-study",
       timestamp: "2026-05-04T20:00:00.000Z",
-      id: "10000910",
+      id: privateValue("id:dfa73f9264a72c07"),
       runId: "run-uuid-a",
       status: "running",
       step: "transaction",
@@ -642,7 +643,7 @@ test("queryRunsForItem assigns distinct run_ordinal in live-apply path (regressi
     trackEvent({
       workflow: "work-study",
       timestamp: "2026-05-04T20:01:00.000Z",
-      id: "10000910",
+      id: privateValue("id:dfa73f9264a72c07"),
       runId: "run-uuid-a",
       status: "done",
     }, dir);
@@ -650,13 +651,13 @@ test("queryRunsForItem assigns distinct run_ordinal in live-apply path (regressi
     trackEvent({
       workflow: "work-study",
       timestamp: "2026-05-04T20:05:00.000Z",
-      id: "10000910",
+      id: privateValue("id:dfa73f9264a72c07"),
       runId: "run-uuid-b",
       status: "running",
       step: "transaction",
     }, dir);
     const db = openStateDb(dir);
-    const runs = queryRunsForItem(db, { workflow: "work-study", itemId: "10000910", date: "2026-05-04" });
+    const runs = queryRunsForItem(db, { workflow: "work-study", itemId: privateValue("id:dfa73f9264a72c07"), date: "2026-05-04" });
     assert.equal(runs.length, 2);
     const a = runs.find((r) => r.runId === "run-uuid-a");
     const b = runs.find((r) => r.runId === "run-uuid-b");
@@ -675,7 +676,7 @@ test("selectLogsForRun filters by run identity and orders by timestamp", () => {
     openStateDb(dir);
     appendLogEntry({
       workflow: "work-study",
-      itemId: "10000910",
+      itemId: privateValue("id:dfa73f9264a72c07"),
       runId: "run-a",
       level: "success",
       message: "Second",
@@ -683,7 +684,7 @@ test("selectLogsForRun filters by run identity and orders by timestamp", () => {
     }, dir);
     appendLogEntry({
       workflow: "work-study",
-      itemId: "10000910",
+      itemId: privateValue("id:dfa73f9264a72c07"),
       runId: "run-a",
       level: "step",
       message: "First",
@@ -691,7 +692,7 @@ test("selectLogsForRun filters by run identity and orders by timestamp", () => {
     }, dir);
     appendLogEntry({
       workflow: "work-study",
-      itemId: "10000910",
+      itemId: privateValue("id:dfa73f9264a72c07"),
       runId: "run-b",
       level: "error",
       message: "Different run",
@@ -699,7 +700,7 @@ test("selectLogsForRun filters by run identity and orders by timestamp", () => {
     }, dir);
     appendLogEntry({
       workflow: "onboarding",
-      itemId: "10000910",
+      itemId: privateValue("id:dfa73f9264a72c07"),
       runId: "run-a",
       level: "step",
       message: "Different workflow",
@@ -709,7 +710,7 @@ test("selectLogsForRun filters by run identity and orders by timestamp", () => {
     const rows = selectLogsForRun(db, {
       workflow: "work-study",
       trackerDate: "2026-05-04",
-      itemId: "10000910",
+      itemId: privateValue("id:dfa73f9264a72c07"),
       runId: "run-a",
     });
     assert.deepEqual(rows.map((row) => row.message), ["First", "Second"]);
@@ -718,7 +719,7 @@ test("selectLogsForRun filters by run identity and orders by timestamp", () => {
     const limited = selectLogsForRun(db, {
       workflow: "work-study",
       trackerDate: "2026-05-04",
-      itemId: "10000910",
+      itemId: privateValue("id:dfa73f9264a72c07"),
       runId: "run-a",
       limit: 1,
     });
@@ -936,13 +937,13 @@ test("queryPriorEntriesByKey: trims whitespace in stored value — matches trimm
   try {
     openStateDb(dir);
     // Store an entry whose data value has surrounding whitespace.
-    trackEvent({ workflow: "separations", timestamp: "2026-05-04T10:00:00.000Z", id: "doc-ws", runId: "r1", status: "done", data: { name: "  Person 905  " } }, dir);
+    trackEvent({ workflow: "separations", timestamp: "2026-05-04T10:00:00.000Z", id: "doc-ws", runId: "r1", status: "done", data: { name: "  " + privateValue("name:01332c876518a793") + "  " } }, dir);
     const db = openStateDb(dir);
     // Query with the trimmed value — must match despite stored whitespace.
     const rows = queryPriorEntriesByKey(db, {
       workflow: "separations",
       keyField: "name",
-      keyValue: "Person 905",
+      keyValue: privateValue("name:01332c876518a793"),
       cutoffDate: "2026-01-01",
     });
     assert.equal(rows.length, 1);

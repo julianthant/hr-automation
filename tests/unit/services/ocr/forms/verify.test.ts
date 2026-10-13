@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -49,8 +50,8 @@ describe("VerifyOcrRecordSchema", () => {
     const parsed = VerifyOcrRecordSchema.parse({
       formKind: "oath",
       sourcePage: 1,
-      printedName: "Person 905 A",
-      employeeId: "10000910",
+      printedName: privateValue("name:17a6fb0c3906628f") + " A",
+      employeeId: privateValue("id:dfa73f9264a72c07"),
       paperEmploymentDate: "4-1-26",
       paperDateSigned: "4-23-26",
       employeeSigned: true,
@@ -58,7 +59,7 @@ describe("VerifyOcrRecordSchema", () => {
       paperOfficialName: "Smith, John",
     });
     assert.equal(parsed.formKind, "oath");
-    assert.equal(parsed.printedName, "Person 905 A");
+    assert.equal(parsed.printedName, privateValue("name:17a6fb0c3906628f") + " A");
     assert.equal(parsed.officerSigned, true);
     // defaults applied
     assert.deepEqual(parsed.originallyMissing, []);
@@ -93,12 +94,12 @@ describe("VerifyOcrRecordSchema", () => {
     const parsed = VerifyOcrRecordSchema.safeParse({
       formKind: "bogus-page-type",
       sourcePage: 4,
-      printedName: "Person 905 A",
-      employeeId: "10000910",
+      printedName: privateValue("name:17a6fb0c3906628f") + " A",
+      employeeId: privateValue("id:dfa73f9264a72c07"),
     });
     assert.ok(parsed.success, `record with an unrecognized formKind must survive validation: ${JSON.stringify(!parsed.success && parsed.error.issues)}`);
     assert.equal(parsed.data.formKind, "unknown");
-    assert.equal(parsed.data.printedName, "Person 905 A");
+    assert.equal(parsed.data.printedName, privateValue("name:17a6fb0c3906628f") + " A");
   });
 });
 
@@ -107,13 +108,13 @@ describe("VerifyPreviewRecordSchema", () => {
     const parsed = VerifyPreviewRecordSchema.parse({
       formKind: "oath",
       sourcePage: 1,
-      name: "Person 905",
-      employeeId: "10000910",
+      name: privateValue("name:01332c876518a793"),
+      employeeId: privateValue("id:dfa73f9264a72c07"),
       matchState: "resolved",
       selected: true,
       warnings: [],
     });
-    assert.equal(parsed.name, "Person 905");
+    assert.equal(parsed.name, privateValue("name:01332c876518a793"));
     assert.equal(parsed.matchState, "resolved");
     // checks defaults to []
     assert.deepEqual(parsed.checks, []);
@@ -124,9 +125,9 @@ describe("buildVerifyChecks", () => {
   it("oath record with all paper fields → all checks present except activeStatus", () => {
     const rec = makePreview({
       formKind: "oath",
-      printedName: "Person 905 A",
-      employeeId: "10000910",
-      name: "Person 905",
+      printedName: privateValue("name:17a6fb0c3906628f") + " A",
+      employeeId: privateValue("id:dfa73f9264a72c07"),
+      name: privateValue("name:01332c876518a793"),
       paperEmploymentDate: "4-1-26",
       paperDateSigned: "4-23-26",
       paperOfficialName: "Smith, John",
@@ -150,7 +151,7 @@ describe("buildVerifyChecks", () => {
       printedName: null,
       paperEmployeeId: "",
       employeeId: "10000002",
-      name: "Person 905",
+      name: privateValue("name:01332c876518a793"),
       paperEmploymentDate: null,
       paperDateSigned: null,
       paperOfficialName: null,
@@ -288,13 +289,13 @@ describe("applyPersonLookupToVerifyRecord", () => {
       activeStatus: "active",
       employmentDate: "2026-04-01",
       oathDate: "2026-04-23",
-      searchName: "Person 905",
+      searchName: privateValue("name:17a6fb0c3906628f"),
     });
     assert.equal(rec.employeeId, "10000003");
     assert.equal(rec.activeStatus, "active");
     assert.equal(rec.employmentDate, "2026-04-01");
     assert.equal(rec.oathDate, "2026-04-23");
-    assert.equal(rec.name, "Person 905");
+    assert.equal(rec.name, privateValue("name:17a6fb0c3906628f"));
   });
 
   it("falls back to printedName for name when no searchName", () => {
@@ -321,11 +322,11 @@ describe("applyPersonLookupToVerifyRecord", () => {
   });
 
   it("tolerates undefined data", () => {
-    const rec = makePreview({ formKind: "oath", name: "Person 905", employeeId: "10000005" });
+    const rec = makePreview({ formKind: "oath", name: privateValue("name:01332c876518a793"), employeeId: "10000005" });
     applyPersonLookupToVerifyRecord(rec, undefined);
     // unchanged
     assert.equal(rec.employeeId, "10000005");
-    assert.equal(rec.name, "Person 905");
+    assert.equal(rec.name, privateValue("name:01332c876518a793"));
   });
 });
 
@@ -354,34 +355,34 @@ describe("buildVerifyPersonLookupInput", () => {
   const ctx = { taskGroupId: "sess-1" };
 
   it("chooses the EID-input variant when the record has a normalized EID", () => {
-    const rec = makePreview({ name: "Person 1174", employeeId: "10001140" });
+    const rec = makePreview({ name: privateValue("name:cf02bccea67f196d"), employeeId: privateValue("id:39b15d04d9aabc41") });
     const chosen = buildVerifyPersonLookupInput(rec, ctx);
     assert.ok(chosen);
     assert.equal(chosen.kind, "eid");
     const input = chosen.input as VerifyPlEidInput;
-    assert.equal(input.emplId, "10001140");
+    assert.equal(input.emplId, privateValue("id:39b15d04d9aabc41"));
     // The OCR-printed name rides along as a CRM-search fallback.
-    assert.equal(input.name, "Person 1174");
+    assert.equal(input.name, privateValue("name:cf02bccea67f196d"));
     assert.equal(input.includeCrmDates, true);
     assert.equal(input.keepNonHdh, true);
     assert.equal(input.taskGroupId, "sess-1");
   });
 
   it("normalizes a noisy EID (spaces/dashes) before choosing the EID variant", () => {
-    const rec = makePreview({ name: "Person 905", employeeId: "10-514-074" });
+    const rec = makePreview({ name: privateValue("name:17a6fb0c3906628f"), employeeId: "10-514-074" });
     const chosen = buildVerifyPersonLookupInput(rec, ctx);
     assert.ok(chosen);
     assert.equal(chosen.kind, "eid");
-    assert.equal((chosen.input as VerifyPlEidInput).emplId, "10001140");
+    assert.equal((chosen.input as VerifyPlEidInput).emplId, privateValue("id:39b15d04d9aabc41"));
   });
 
   it("treats a malformed/short EID as no-EID and falls back to the name variant", () => {
-    const rec = makePreview({ name: "Person 905", employeeId: "999" });
+    const rec = makePreview({ name: privateValue("name:17a6fb0c3906628f"), employeeId: "999" });
     const chosen = buildVerifyPersonLookupInput(rec, ctx);
     assert.ok(chosen);
     assert.equal(chosen.kind, "name");
     const input = chosen.input as VerifyPlNameInput;
-    assert.equal(input.name, "Person 905");
+    assert.equal(input.name, privateValue("name:17a6fb0c3906628f"));
     assert.ok(!("emplId" in input));
   });
 
@@ -394,20 +395,20 @@ describe("buildVerifyPersonLookupInput", () => {
   });
 
   it("falls back to printedName when name is blank (EID variant)", () => {
-    const rec = makePreview({ name: "", printedName: "Person 1174", employeeId: "10001140" });
+    const rec = makePreview({ name: "", printedName: privateValue("name:cf02bccea67f196d"), employeeId: privateValue("id:39b15d04d9aabc41") });
     const chosen = buildVerifyPersonLookupInput(rec, ctx);
     assert.ok(chosen);
     assert.equal(chosen.kind, "eid");
-    assert.equal((chosen.input as VerifyPlEidInput).name, "Person 1174");
+    assert.equal((chosen.input as VerifyPlEidInput).name, privateValue("name:cf02bccea67f196d"));
   });
 
   it("drives by EID alone even when no name is present", () => {
-    const rec = makePreview({ name: "", printedName: null, employeeId: "10001140" });
+    const rec = makePreview({ name: "", printedName: null, employeeId: privateValue("id:39b15d04d9aabc41") });
     const chosen = buildVerifyPersonLookupInput(rec, ctx);
     assert.ok(chosen);
     assert.equal(chosen.kind, "eid");
     const input = chosen.input as VerifyPlEidInput;
-    assert.equal(input.emplId, "10001140");
+    assert.equal(input.emplId, privateValue("id:39b15d04d9aabc41"));
     // No name available — the optional CRM-fallback name is omitted.
     assert.ok(!("name" in input));
   });
@@ -418,7 +419,7 @@ describe("buildVerifyPersonLookupInput", () => {
   });
 
   it("threads parentSubject only when supplied", () => {
-    const rec = makePreview({ name: "Person 905", employeeId: "10001140" });
+    const rec = makePreview({ name: privateValue("name:17a6fb0c3906628f"), employeeId: privateValue("id:39b15d04d9aabc41") });
     const withParent = buildVerifyPersonLookupInput(rec, { taskGroupId: "s", parentSubject: "Roster" });
     assert.equal(withParent?.input.parentSubject, "Roster");
     const without = buildVerifyPersonLookupInput(rec, { taskGroupId: "s" });
@@ -442,15 +443,15 @@ describe("verifyOcrFormSpec.matchRecord", () => {
       record: VerifyOcrRecordSchema.parse({
         formKind: "oath",
         sourcePage: 1,
-        printedName: "Person 905 A",
-        employeeId: "10000910",
+        printedName: privateValue("name:17a6fb0c3906628f") + " A",
+        employeeId: privateValue("id:dfa73f9264a72c07"),
         paperDateSigned: "4-23-26",
       }),
       roster: [],
     });
-    assert.equal(preview.name, "Person 905 A");
-    assert.equal(preview.paperEmployeeId, "10000910");
-    assert.equal(preview.employeeId, "10000910");
+    assert.equal(preview.name, privateValue("name:17a6fb0c3906628f") + " A");
+    assert.equal(preview.paperEmployeeId, privateValue("id:dfa73f9264a72c07"));
+    assert.equal(preview.employeeId, privateValue("id:dfa73f9264a72c07"));
     assert.equal(preview.matchState, "extracted");
     assert.equal(preview.selected, true);
     assert.ok(preview.checks.length === 6, "oath preview has 6 checks");
@@ -493,13 +494,13 @@ describe("verifyOcrFormSpec spec fields", () => {
 
 describe("verifyOcrFormSpec.applyCarryForward", () => {
   it("carries v1 paperEmployeeId alongside the resolved employeeId (A5)", () => {
-    // v1 (prior run) resolved the person to EID 10000910 and saw paper EID
+    // v1 (prior run) resolved the person to EID id:dfa73f9264a72c07 and saw paper EID
     // 10000777. v2 (fresh re-OCR of the same page) re-read a BLANK paper EID.
     // Carrying v1's resolved employeeId but keeping v2's blank paperEmployeeId
-    // would show "found 10000910 / on paper (none)" — a paper-vs-found mismatch.
+    // would show "found id:dfa73f9264a72c07 / on paper (none)" — a paper-vs-found mismatch.
     const v1 = makePreview({
       matchState: "resolved",
-      employeeId: "10000910",
+      employeeId: privateValue("id:dfa73f9264a72c07"),
       paperEmployeeId: "10000777",
     });
     const v2 = makePreview({
@@ -508,7 +509,7 @@ describe("verifyOcrFormSpec.applyCarryForward", () => {
       paperEmployeeId: "",
     });
     const merged = verifyOcrFormSpec.applyCarryForward({ v2, v1 });
-    assert.equal(merged.employeeId, "10000910", "resolved EID carried from v1");
+    assert.equal(merged.employeeId, privateValue("id:dfa73f9264a72c07"), "resolved EID carried from v1");
     assert.equal(merged.paperEmployeeId, "10000777", "paper EID carried from v1, not v2's blank");
   });
 

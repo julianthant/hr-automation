@@ -14,6 +14,7 @@
  *   B — projection byte-identical under resolvePresentation (regression net for task 6.3)
  *   C — default presentation.steps is a no-op on applyStepDisplay
  */
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
@@ -76,11 +77,11 @@ function entryForScheme(
       data: {
         archetype: "single",
         queueRowKind: "person",
-        name: "Person 905",
+        name: privateValue("name:17a6fb0c3906628f"),
         emplId: "20001234",
         __traceId: traceId,
-        __queueTitle: "Person 905",
-        __queueRootTitle: "Person 905",
+        __queueTitle: privateValue("name:17a6fb0c3906628f"),
+        __queueRootTitle: privateValue("name:17a6fb0c3906628f"),
       },
     });
   }

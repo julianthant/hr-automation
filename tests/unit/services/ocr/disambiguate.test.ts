@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -14,23 +15,23 @@ import { __resetKeyRotationCacheForTests } from "../../../../src/services/ocr/ro
 
 test("buildDisambiguationPrompt includes query and candidate names", () => {
   const prompt = buildDisambiguationPrompt({
-    query: "Person 1717",
+    query: privateValue("name:90e2a9a138da09ef"),
     candidates: [
-      { eid: "10001516", name: "Person 1717 R", score: 0.82 },
+      { eid: privateValue("id:699c7799ff18032d"), name: privateValue("name:952c7413af9733c9") + " R", score: 0.82 },
       { eid: "10812990", name: "Cohlman, Renee", score: 0.74 },
     ],
   });
-  assert.match(prompt, /Person 1717/);
-  assert.match(prompt, /Person 1717 R/);
-  assert.match(prompt, /10001516/);
+  assert.match(prompt, new RegExp(privateValue("name:90e2a9a138da09ef")));
+  assert.match(prompt, new RegExp(privateValue("name:952c7413af9733c9") + " R"));
+  assert.match(prompt, new RegExp(privateValue("id:699c7799ff18032d")));
   assert.match(prompt, /Cohlman, Renee/);
 });
 
 test("parseDisambiguationResponse extracts EID from JSON-style response", () => {
   const result = parseDisambiguationResponse(
-    '{"eid": "10001516", "confidence": 0.95}',
+    '{"eid": "' + privateValue("id:699c7799ff18032d") + '", "confidence": 0.95}',
   );
-  assert.deepEqual(result, { eid: "10001516", confidence: 0.95 });
+  assert.deepEqual(result, { eid: privateValue("id:699c7799ff18032d"), confidence: 0.95 });
 });
 
 test("parseDisambiguationResponse returns none for `none` answer", () => {
@@ -42,9 +43,9 @@ test("parseDisambiguationResponse returns none for `none` answer", () => {
 
 test("parseDisambiguationResponse handles loose JSON (no surrounding ticks)", () => {
   const result = parseDisambiguationResponse(
-    'Sure! {"eid": "10001516", "confidence": 0.9}',
+    'Sure! {"eid": "' + privateValue("id:699c7799ff18032d") + '", "confidence": 0.9}',
   );
-  assert.equal(result.eid, "10001516");
+  assert.equal(result.eid, privateValue("id:699c7799ff18032d"));
 });
 
 test("parseDisambiguationResponse returns null EID on unparseable response", () => {
@@ -73,7 +74,7 @@ test("disambiguateMatch rotates to the next Gemini key after a rate limit", asyn
   try {
     const result = await disambiguateMatch({
       query: "Doe Jane",
-      candidates: [{ eid: "10800001", name: "Person 905", score: 0.8 }],
+      candidates: [{ eid: "10800001", name: privateValue("name:17a6fb0c3906628f"), score: 0.8 }],
     });
     assert.deepEqual(seen, ["k1", "k2"]);
     assert.deepEqual(result, { eid: "10800001", confidence: 0.91 });
@@ -116,7 +117,7 @@ test("concurrent disambiguation calls share in-memory key throttle state", async
   try {
     const callA = disambiguateMatch({
       query: "Call A",
-      candidates: [{ eid: "10800001", name: "Person 905", score: 0.8 }],
+      candidates: [{ eid: "10800001", name: privateValue("name:17a6fb0c3906628f"), score: 0.8 }],
     });
     await firstCallRateLimited.promise;
     const callB = disambiguateMatch({

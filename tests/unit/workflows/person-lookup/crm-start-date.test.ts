@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
@@ -173,7 +174,7 @@ describe("splitResolvedName", () => {
   });
 
   it("treats the final token as the last name for First Middle Last", () => {
-    assert.deepEqual(splitResolvedName("Raquel Person 2052"), {
+    assert.deepEqual(splitResolvedName("Raquel " + privateValue("name:d1d8a521c62867e0")), {
       lastName: "Sanchez",
       firstName: "Raquel",
     });
@@ -187,7 +188,7 @@ describe("splitResolvedName", () => {
 
 describe("resolveCrmSearchNameParts", () => {
   it("parses a comma-format resolvedName (as stamped by toLastFirstName) without swapping parts", () => {
-    assert.deepEqual(resolveCrmSearchNameParts("Person 1290"), {
+    assert.deepEqual(resolveCrmSearchNameParts(privateValue("name:ae9356f8331b6e26")), {
       lastName: "Langley",
       firstName: "Leo",
     });
@@ -201,11 +202,11 @@ describe("resolveCrmSearchNameParts", () => {
   });
 
   it("falls back to the whitespace split for First [Middle] Last input", () => {
-    assert.deepEqual(resolveCrmSearchNameParts("Raquel Person 2052"), {
+    assert.deepEqual(resolveCrmSearchNameParts("Raquel " + privateValue("name:d1d8a521c62867e0")), {
       lastName: "Sanchez",
       firstName: "Raquel",
     });
-    assert.deepEqual(resolveCrmSearchNameParts("Person 1290"), {
+    assert.deepEqual(resolveCrmSearchNameParts(privateValue("name:aeb6ceeb566a2e65")), {
       lastName: "Langley",
       firstName: "Leo",
     });

@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -48,7 +49,7 @@ function oathRecord(employeeId: string): Record<string, unknown> {
     formKind: "oath",
     sourcePage: 1,
     rowIndex: 0,
-    printedName: "Person 905",
+    printedName: privateValue("name:713ff080c8d97bc2"),
     employeeId,
     employeeSigned: true,
     dateSigned: "4/23/26",
@@ -266,7 +267,7 @@ test("approve for an oath-signature operation fans out signers only (no oath-upl
     const res = await handler({
       sessionId: "sess-op",
       runId: "ocr-run-op",
-      records: [oathRecord("10000910")],
+      records: [oathRecord(privateValue("id:dfa73f9264a72c07"))],
     });
     assert.equal(res.status, 200);
     const body = res.body as { ok: true; fannedOut: Array<{ workflow: string; itemId: string }> };
@@ -308,7 +309,7 @@ test("approve mirrors ocrStatus=approved onto the oath-signature operation coord
     const res = await handler({
       sessionId: "sess-op",
       runId: "ocr-run-op",
-      records: [oathRecord("10000910")],
+      records: [oathRecord(privateValue("id:dfa73f9264a72c07"))],
     });
     assert.equal(res.status, 200);
     await new Promise((r) => setTimeout(r, 300));
@@ -346,7 +347,7 @@ test("approve does NOT mirror an operation row for an oath-upload run (real task
     const res = await handler({
       sessionId: "sess-ou",
       runId: "ocr-run-ou",
-      records: [oathRecord("10000910")],
+      records: [oathRecord(privateValue("id:dfa73f9264a72c07"))],
     });
     assert.equal(res.status, 200);
     await new Promise((r) => setTimeout(r, 300));
@@ -568,7 +569,7 @@ test("approve for an oath-upload operation fans out signers only (its existing t
     const res = await handler({
       sessionId: "sess-ou",
       runId: "ocr-run-ou",
-      records: [oathRecord("10000910")],
+      records: [oathRecord(privateValue("id:dfa73f9264a72c07"))],
     });
     assert.equal(res.status, 200);
     const body = res.body as { ok: true; fannedOut: Array<{ workflow: string }> };
@@ -607,7 +608,7 @@ test("approve for a standalone oath OCR run is REJECTED (approval ≡ delegation
     const res = await handler({
       sessionId: "sess-std",
       runId: "ocr-run-std",
-      records: [oathRecord("10000910")],
+      records: [oathRecord(privateValue("id:dfa73f9264a72c07"))],
     });
     assert.equal(res.status, 400);
     const body = res.body as { ok: false; error: string };

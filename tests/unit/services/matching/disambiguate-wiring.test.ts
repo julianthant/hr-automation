@@ -1,41 +1,42 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { matchAgainstRosterAsync } from "../../../../src/services/matching/match.js";
 
 const fakeRoster = [
-  { eid: "10000910", name: "Person 1717 R" },
+  { eid: privateValue("id:dfa73f9264a72c07"), name: privateValue("name:952c7413af9733c9") + " R" },
   { eid: "10000002", name: "Cohlman, Renee" },
   { eid: "10000003", name: "Smith, Bob" },
 ];
 
 test("matchAgainstRosterAsync auto-accepts high-confidence matches without calling LLM", async () => {
   let called = false;
-  const result = await matchAgainstRosterAsync("Person 1717 R", fakeRoster, {
+  const result = await matchAgainstRosterAsync(privateValue("name:952c7413af9733c9") + " R", fakeRoster, {
     disambiguator: async () => {
       called = true;
       return { eid: "x", confidence: 1 };
     },
   });
   assert.equal(called, false, "LLM should not be called for >=0.85 matches");
-  assert.equal(result.eid, "10000910");
+  assert.equal(result.eid, privateValue("id:dfa73f9264a72c07"));
   assert.equal(result.source, "roster");
 });
 
 test("matchAgainstRosterAsync sends borderline matches to disambiguator", async () => {
   let called = false;
-  // "Person 1717" → "Person 1717 R" hits the swap tier (~0.85) which
+  // "name:90e2a9a138da09ef" → "name:952c7413af9733c9 R" hits the swap tier (~0.85) which
   // is below the 0.99 acceptThreshold, so the LLM gate fires.
-  const result = await matchAgainstRosterAsync("Person 1717", fakeRoster, {
+  const result = await matchAgainstRosterAsync(privateValue("name:90e2a9a138da09ef"), fakeRoster, {
     acceptThreshold: 0.99,
     disambiguator: async (input) => {
       called = true;
-      assert.equal(input.query, "Person 1717");
+      assert.equal(input.query, privateValue("name:90e2a9a138da09ef"));
       assert.ok(input.candidates.length > 0);
-      return { eid: "10000910", confidence: 0.91 };
+      return { eid: privateValue("id:dfa73f9264a72c07"), confidence: 0.91 };
     },
   });
   assert.equal(called, true);
-  assert.equal(result.eid, "10000910");
+  assert.equal(result.eid, privateValue("id:dfa73f9264a72c07"));
   assert.equal(result.source, "llm");
   assert.equal(result.confidence, 0.91);
 });

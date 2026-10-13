@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -69,12 +70,12 @@ test("buildCrmDocumentDownloadPath lands under data/onboarding/<YYYY-MM-DD>/ (to
   assert.equal(onboardingDateFolder(today), stamp);
   assert.equal(
     buildCrmDocumentDownloadPath({ firstName: "Jane", lastName: "Doe", middleName: "A" }),
-    join(PATHS.onboardingDocsDir, stamp, "Person 905 A. EID"),
+    join(PATHS.onboardingDocsDir, stamp, privateValue("name:17a6fb0c3906628f") + " A. EID"),
   );
   // An explicit date addresses that day's folder (no zip, plain folder).
   assert.equal(
     buildCrmDocumentDownloadPath({ firstName: "Jane", lastName: "Doe" }, { date: new Date(2026, 7, 18) }),
-    join(PATHS.onboardingDocsDir, "2026-08-18", "Person 905 EID"),
+    join(PATHS.onboardingDocsDir, "2026-08-18", privateValue("name:17a6fb0c3906628f") + " EID"),
   );
   assert.match(PATHS.onboardingDocsDir, /data[/\\]onboarding$/);
 });
@@ -82,7 +83,7 @@ test("buildCrmDocumentDownloadPath lands under data/onboarding/<YYYY-MM-DD>/ (to
 test("buildCrmDocumentFolderName: Last, First MiddleInitial. EID (no lived name)", () => {
   assert.equal(
     buildCrmDocumentFolderName({ firstName: "Jane", lastName: "Doe", middleName: "A" }),
-    "Person 905 A. EID",
+    privateValue("name:17a6fb0c3906628f") + " A. EID",
   );
 });
 
@@ -113,16 +114,16 @@ test("buildCrmDocumentFolderName lived name without middle", () => {
 
 test("buildCrmDocumentFolderName splits compound firstName into first and middle when middleName is absent", () => {
   assert.equal(
-    buildCrmDocumentFolderName({ firstName: "Helen Hengya", lastName: "Zhou", livedName: "Person 801" }),
-    "Person 803 H. EID",
+    buildCrmDocumentFolderName({ firstName: "Helen Hengya", lastName: "Zhou", livedName: privateValue("name:b9e866afe29e6c4c") }),
+    privateValue("name:1f209b85a0aaf419") + " H. EID",
   );
   assert.equal(
-    buildCrmDocumentFolderName({ firstName: "Victoria Ziling", lastName: "Yin", livedName: "Person 1322" }),
-    "Person 2055 (Linda) Z. EID",
+    buildCrmDocumentFolderName({ firstName: "Victoria Ziling", lastName: "Yin", livedName: privateValue("name:68d9acf368143e55") }),
+    privateValue("name:40dd44ffef62fd97") + " (Linda) Z. EID",
   );
   assert.equal(
-    buildCrmDocumentFolderName({ firstName: "Proudman Yuheng", lastName: "Chen", livedName: "Person 1690" }),
-    "Person 1689 Y. EID",
+    buildCrmDocumentFolderName({ firstName: "Proudman Yuheng", lastName: "Chen", livedName: privateValue("name:92b650859a1ceddd") }),
+    privateValue("name:746f7952c3de1281") + " Y. EID",
   );
 });
 
@@ -191,15 +192,15 @@ test("isCrmPdfResponse rejects HTTP 200 html bodies", () => {
 
 test("buildCrmDocumentFolderName title-cases ALL-CAPS CRM records and formats middle initial", () => {
   // CRM stores some records fully capitalised. The folder/zip name must look
-  // the same either way — `Person 89 A. EID`, never `Person 89 ...`.
+  // the same either way — `name:4def3e680f7b6f79 A. EID`, never `name:67d36a8c0c6ed881 ...`.
   assert.equal(
     buildCrmDocumentFolderName({ firstName: "ALI", lastName: "ALNASSER", middleName: "ANWAR" }),
-    "Person 89 A. EID",
+    privateValue("name:4def3e680f7b6f79") + " A. EID",
   );
   // ...and an already well-cased record is unchanged (idempotent).
   assert.equal(
     buildCrmDocumentFolderName({ firstName: "Jaden", lastName: "Campos", middleName: "Everhett" }),
-    "Person 892 E. EID",
+    privateValue("name:9f9db2a858657b98") + " E. EID",
   );
 });
 

@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -36,7 +37,7 @@ function fakePool(reply: string): TextPoolKey[] {
 }
 
 test("checkEmail flags malformed addresses, passes valid ones and blanks", () => {
-  assert.equal(checkEmail("workEmail", "person@example.edu"), null);
+  assert.equal(checkEmail("workEmail", privateValue("ucsd:d584e8c08670091b")), null);
   assert.equal(checkEmail("workEmail", ""), null);
   assert.equal(checkEmail("workEmail", null), null);
   const bad = checkEmail("workEmail", "jane@ucsd");
@@ -54,13 +55,13 @@ test("checkDob flags unparseable and out-of-range years", () => {
 });
 
 test("checkEid flags non-5+-digit ids", () => {
-  assert.equal(checkEid("employeeId", "10000910"), null);
+  assert.equal(checkEid("employeeId", privateValue("id:dfa73f9264a72c07")), null);
   assert.equal(checkEid("employeeId", "123")?.severity, "warning");
   assert.equal(checkEid("employeeId", ""), null);
 });
 
 test("checkRequired flags blank required fields", () => {
-  assert.equal(checkRequired("name", "Person 905"), null);
+  assert.equal(checkRequired("name", privateValue("name:17a6fb0c3906628f")), null);
   assert.equal(checkRequired("name", "")?.severity, "error");
   assert.equal(checkRequired("name", null)?.severity, "error");
 });
@@ -70,8 +71,8 @@ test("inferRuleSpec detects common HR field names", () => {
     workEmail: "a@b.com",
     personalEmail: "c@d.com",
     dateOfBirth: "1990-01-01",
-    employeeId: "10000910",
-    name: "Person 905",
+    employeeId: privateValue("id:dfa73f9264a72c07"),
+    name: privateValue("name:17a6fb0c3906628f"),
   });
   assert.deepEqual(spec.email?.sort(), ["personalEmail", "workEmail"]);
   assert.deepEqual(spec.dob, ["dateOfBirth"]);
@@ -91,7 +92,7 @@ test("runRuleChecks aggregates issues across categories", () => {
 test("sanityCheckRecord with useLlm:false runs rules only (no pool needed)", async () => {
   __resetUsageTrackerForTests();
   const issues = await sanityCheckRecord(
-    { workEmail: "jane@ucsd", employeeId: "10000910" },
+    { workEmail: "jane@ucsd", employeeId: privateValue("id:dfa73f9264a72c07") },
     { rules: { email: ["workEmail"], eid: ["employeeId"] }, useLlm: false },
   );
   assert.equal(issues.length, 1);

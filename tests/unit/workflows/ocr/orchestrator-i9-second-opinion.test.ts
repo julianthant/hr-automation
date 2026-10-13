@@ -14,6 +14,7 @@
  * searchability strictly improves, guarded by the orchestrator's name-token
  * identity gate whenever the first read had a non-empty name.
  */
+import { privateValue } from "../../../../src/private-data.js";
 import { test, vi } from "vitest";
 import assert from "node:assert";
 import { mkdirSync, rmSync } from "node:fs";
@@ -67,7 +68,7 @@ const i9Record = (over: Record<string, unknown> = {}): Record<string, unknown> =
   firstName: "Jane",
   middleInitial: "A",
   dateOfBirth: "04/01/1998",
-  ssn: "000-00-0000",
+  ssn: privateValue("ssn:01a54629efb95228"),
   documentType: "expected",
   originallyMissing: [],
   notes: [],
@@ -122,7 +123,7 @@ test("i9 second opinion: an unsearchable Section-1 read triggers a roster-LESS t
   assert.deepEqual(reReads[0].excludeModels, ["gemini-2.5-flash-lite"], "the first-read model is excluded");
 
   const records = lastRecords(writtenEntries);
-  assert.equal(records[0].ssn, "000-00-0000", "the corrected (searchable) SSN was adopted");
+  assert.equal(records[0].ssn, privateValue("ssn:01a54629efb95228"), "the corrected (searchable) SSN was adopted");
   assert.equal(records[0].dateOfBirth, "04/01/1998");
   assert.ok(
     (records[0].warnings as string[] | undefined)?.some((w) => w.includes("Second-opinion re-read adopted")),

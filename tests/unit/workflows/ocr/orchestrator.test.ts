@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert";
 import { mkdirSync, rmSync, readFileSync, existsSync, writeFileSync, readdirSync } from "node:fs";
@@ -115,7 +116,7 @@ test("standalone oath orchestrator emits pending → loading-roster → ocr → 
         cached: false,
       }),
       _loadRosterOverride: async () => [
-        { eid: "10000910", name: "Liam Kustenbauder" },
+        { eid: privateValue("id:dfa73f9264a72c07"), name: "Liam Kustenbauder" },
       ],
       _enqueueEidLookupOverride: async () => { /* no-op */ },
       _watchChildRunsOverride: async () => [
@@ -124,7 +125,7 @@ test("standalone oath orchestrator emits pending → loading-roster → ocr → 
           itemId: "ocr-oath-run-1-r0",
           runId: "verify-1",
           status: "done" as const,
-          data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000910" },
+          data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: privateValue("id:dfa73f9264a72c07") },
         },
       ],
     },
@@ -226,7 +227,7 @@ test("rosterMode 'none' runs a roster-REQUIRED form rosterless: no roster load, 
           itemId: "ocr-oath-run-none-r0",
           runId: "lookup-1",
           status: "done" as const,
-          data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000910" },
+          data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: privateValue("id:dfa73f9264a72c07") },
         },
       ],
     },
@@ -246,7 +247,7 @@ test("rosterMode 'none' runs a roster-REQUIRED form rosterless: no roster load, 
     .find((e) => e.status === "done" && e.step === "person-lookup");
   const records = JSON.parse(terminalRow!.data!.records) as Array<Record<string, unknown>>;
   assert.equal(records.length, 1);
-  assert.equal(records[0].employeeId, "10000910", "EID comes from person-lookup, not a roster");
+  assert.equal(records[0].employeeId, privateValue("id:dfa73f9264a72c07"), "EID comes from person-lookup, not a roster");
 
   rmSync(dir, { recursive: true, force: true });
 });
@@ -282,7 +283,7 @@ test("EC run seeds EC-shaped placeholders; no emission carries top-level oath id
         data: [{
           formKind: "emergency-contact",
           sourcePage: 1,
-          employee: { name: "Person 1717", employeeId: "10001516" },
+          employee: { name: privateValue("name:952c7413af9733c9"), employeeId: privateValue("id:699c7799ff18032d") },
           emergencyContact: { name: "Coleman, Rod", relationship: "Parent", primary: true },
           notes: [], documentType: "expected", originallyMissing: [],
         }],
@@ -291,7 +292,7 @@ test("EC run seeds EC-shaped placeholders; no emission carries top-level oath id
         cached: false,
       }),
       _loadRosterOverride: async () => [
-        { eid: "10001516", name: "Person 1717" },
+        { eid: privateValue("id:699c7799ff18032d"), name: privateValue("name:952c7413af9733c9") },
       ],
       _enqueueEidLookupOverride: async () => { /* no-op */ },
       _watchChildRunsOverride: async () => [
@@ -300,7 +301,7 @@ test("EC run seeds EC-shaped placeholders; no emission carries top-level oath id
           itemId: "ocr-ec-run-ec-1-r0",
           runId: "verify-ec-1",
           status: "done" as const,
-          data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10001516" },
+          data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: privateValue("id:699c7799ff18032d") },
         },
       ],
     },
@@ -332,8 +333,8 @@ test("EC run seeds EC-shaped placeholders; no emission carries top-level oath id
   const terminalRow = writtenEntries.find((e) => e.status === "done" && e.step === "person-lookup");
   assert.ok(terminalRow, "standalone EC run completes done/person-lookup");
   const terminalRecord = (JSON.parse(terminalRow!.data!.records) as Array<{ employee?: { name?: string; employeeId?: string } }>)[0];
-  assert.equal(terminalRecord.employee?.name, "Person 1717");
-  assert.equal(terminalRecord.employee?.employeeId, "10001516");
+  assert.equal(terminalRecord.employee?.name, privateValue("name:952c7413af9733c9"));
+  assert.equal(terminalRecord.employee?.employeeId, privateValue("id:699c7799ff18032d"));
 
   rmSync(dir, { recursive: true, force: true });
 });
@@ -375,14 +376,14 @@ test("delegated orchestrator re-stamps parentRunId on EVERY self-emitted row", a
         }],
         provider: "stub", attempts: 1, cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Liam Kustenbauder" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Liam Kustenbauder" }],
       _enqueueEidLookupOverride: async () => { /* no-op */ },
       _watchChildRunsOverride: async () => [{
         workflow: "person-lookup",
         itemId: "ocr-oath-run-parent-r0",
         runId: "verify-1",
         status: "done" as const,
-        data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000910" },
+        data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: privateValue("id:dfa73f9264a72c07") },
       }],
     },
   );
@@ -437,14 +438,14 @@ test("orchestrator stamps data.parallelWorkers on EVERY OCR row when run options
         }],
         provider: "stub", attempts: 1, cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Liam Kustenbauder" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Liam Kustenbauder" }],
       _enqueueEidLookupOverride: async () => { /* no-op */ },
       _watchChildRunsOverride: async () => [{
         workflow: "person-lookup",
         itemId: "ocr-oath-run-workers-r0",
         runId: "verify-1",
         status: "done" as const,
-        data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000910" },
+        data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: privateValue("id:dfa73f9264a72c07") },
       }],
     },
   );
@@ -488,14 +489,14 @@ test("orchestrator omits data.parallelWorkers when run options are absent (Auto)
         }],
         provider: "stub", attempts: 1, cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Liam Kustenbauder" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Liam Kustenbauder" }],
       _enqueueEidLookupOverride: async () => { /* no-op */ },
       _watchChildRunsOverride: async () => [{
         workflow: "person-lookup",
         itemId: "ocr-oath-run-auto-r0",
         runId: "verify-1",
         status: "done" as const,
-        data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000910" },
+        data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: privateValue("id:dfa73f9264a72c07") },
       }],
     },
   );
@@ -537,7 +538,7 @@ test("orchestrator's terminal failed row keeps the rich preview payload (mode/pr
         // Throw after the placeholder "ocr" snapshot has already emitted, so a
         // rich review payload is captured before the orchestrator unwinds.
         _ocrPipelineOverride: async () => { throw new Error("boom ocr"); },
-        _loadRosterOverride: async () => [{ eid: "10000910", name: "Liam Kustenbauder" }],
+        _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Liam Kustenbauder" }],
         _enqueueEidLookupOverride: async () => { /* no-op */ },
         _watchChildRunsOverride: async () => [],
       },
@@ -595,7 +596,7 @@ test("orchestrator drives the session timeline via onPhase for each running phas
         cached: false,
       }),
       _loadRosterOverride: async () => [
-        { eid: "10000910", name: "Liam Kustenbauder" },
+        { eid: privateValue("id:dfa73f9264a72c07"), name: "Liam Kustenbauder" },
       ],
       _enqueueEidLookupOverride: async () => { /* no-op */ },
       _watchChildRunsOverride: async () => [
@@ -604,7 +605,7 @@ test("orchestrator drives the session timeline via onPhase for each running phas
           itemId: "ocr-oath-run-phase-r0",
           runId: "verify-1",
           status: "done" as const,
-          data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000910" },
+          data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: privateValue("id:dfa73f9264a72c07") },
         },
       ],
     },
@@ -642,7 +643,7 @@ test("orchestrator with previousRunId carries forward v1 EIDs", async () => {
         printedName: "Liam Kustenbauder",
         employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
         notes: [], documentType: "expected", originallyMissing: [],
-        employeeId: "10000910",
+        employeeId: privateValue("id:dfa73f9264a72c07"),
         matchState: "resolved", matchSource: "eid-lookup",
         selected: true, warnings: [],
         verification: { state: "verified", hrStatus: "Active", department: "HDH", screenshotFilename: "x.png", checkedAt: "2026-05-01T00:00:00Z" },
@@ -676,7 +677,7 @@ test("orchestrator with previousRunId carries forward v1 EIDs", async () => {
         }],
         provider: "stub", attempts: 1, cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Liam Kustenbauder" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Liam Kustenbauder" }],
       _watchChildRunsOverride: async () => {
         watchCalled = true;
         return [];
@@ -728,7 +729,7 @@ test("orchestrator with previousRunId FAILS LOUD when the prior run's data.recor
           }],
           provider: "stub", attempts: 1, cached: false,
         }),
-        _loadRosterOverride: async () => [{ eid: "10000910", name: "Liam Kustenbauder" }],
+        _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Liam Kustenbauder" }],
         _watchChildRunsOverride: async () => [],
       },
     ),
@@ -772,7 +773,7 @@ test("orchestrator uses SQLite dependencies for initial eid-lookup fan-out", asy
         attempts: 1,
         cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Different Person" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Different Person" }],
       _enqueueEidLookupOverride: async () => {},
       _watchChildRunsOverride: async () => {
         watcherCalled = true;
@@ -833,7 +834,7 @@ test("orchestrator waits for eid-lookup results before completing (standalone oa
         attempts: 1,
         cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Different Person" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Different Person" }],
       _enqueueEidLookupOverride: async () => {},
       _watchChildRunsOverride: async () => {
         watcherCalled = true;
@@ -910,7 +911,7 @@ test("orchestrator patches child outcomes once when progress and final outcomes 
         attempts: 1,
         cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Different Person" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Different Person" }],
       _enqueueEidLookupOverride: async () => {},
       _disableSqliteDependencies: true,
       _watchChildRunsOverride: async (opts: any) => {
@@ -965,7 +966,7 @@ test("orchestrator pre-emits delegated eid-lookup pending rows before daemon aut
         attempts: 1,
         cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Different Person" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Different Person" }],
       _enqueueEidLookupOverride: async () => {},
       _disableSqliteDependencies: true,
       _watchChildRunsOverride: async () => [{
@@ -1029,7 +1030,7 @@ test("orchestrator dispatches eid-lookup by EID when form EID is not on roster",
         attempts: 1,
         cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Liam Kustenbauder" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Liam Kustenbauder" }],
       _enqueueEidLookupOverride: async (items: Array<{ name?: string; emplId?: string; itemId: string }>) => {
         eidLookupItems = items;
       },
@@ -1101,7 +1102,7 @@ test("orchestrator treats non-UCPath employee ids as missing and falls back to n
         attempts: 1,
         cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Unrelated Person" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Unrelated Person" }],
       _enqueueEidLookupOverride: async (items: Array<{ name?: string; emplId?: string; itemId: string }>) => {
         eidLookupItems = items;
       },
@@ -1119,7 +1120,7 @@ test("orchestrator treats non-UCPath employee ids as missing and falls back to n
 
 test("orchestrator records SQLite dependencies for eid-lookup fan-out (form EID off-roster)", async () => {
   const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
-  const runId = "10000000-0000-4000-8000-0000000000ab";
+  const runId = privateValue("id:7e071fd9b023ed8f") + "-0000-4000-8000-0000000000ab";
   let watcherCalled = false;
   let dependencyBatchCreated = false;
 
@@ -1153,7 +1154,7 @@ test("orchestrator records SQLite dependencies for eid-lookup fan-out (form EID 
         attempts: 1,
         cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Liam Kustenbauder" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Liam Kustenbauder" }],
       _enqueueEidLookupOverride: async () => {},
       _createDependencyBatchOverride: async ({ parent, children }) => {
         dependencyBatchCreated = true;
@@ -1213,7 +1214,7 @@ test("orchestrator uses LLM suggestion EIDs but enqueues only OCR name when fuzz
         attempts: 1,
         cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Unrelated Person" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Unrelated Person" }],
       _lookupSuggestionOverride: async () => [
         { name: "Johnnie Battistessa", confidence: 0.72 },
         { emplId: "10873698", confidence: 0.81 },
@@ -1265,7 +1266,7 @@ test("orchestrator collapses lookup name variants to the candidate with the most
         attempts: 1,
         cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Unrelated Person" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Unrelated Person" }],
       _lookupSuggestionOverride: async () => [
         { name: "Barahona Martell, Carlos D", confidence: 0.85 },
         { name: "Barahona Martell, Carlos", confidence: 0.74 },
@@ -1317,7 +1318,7 @@ test("orchestrator falls back to watchChildRuns when dependency creation fails",
         attempts: 1,
         cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Different Person" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Different Person" }],
       _enqueueEidLookupOverride: async () => {},
       _createDependencyBatchOverride: async () => {
         throw new Error("db unavailable");
@@ -1371,7 +1372,7 @@ test("orchestrator uses watcher fallback when OCR_SQLITE_DEPENDENCIES is disable
           attempts: 1,
           cached: false,
         }),
-        _loadRosterOverride: async () => [{ eid: "10000910", name: "Different Person" }],
+        _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Different Person" }],
         _enqueueEidLookupOverride: async () => {},
         _createDependencyBatchOverride: async () => {
           dependencyBatchCreated = true;
@@ -1523,7 +1524,7 @@ test("orchestrator surfaces failedPages and pageStatusSummary on terminal done/p
         ],
       }),
       _loadRosterOverride: async () => [
-        { eid: "10000910", name: "Liam Kustenbauder" },
+        { eid: privateValue("id:dfa73f9264a72c07"), name: "Liam Kustenbauder" },
       ],
       _enqueueEidLookupOverride: async () => { /* no-op */ },
       _watchChildRunsOverride: async () => [
@@ -1532,7 +1533,7 @@ test("orchestrator surfaces failedPages and pageStatusSummary on terminal done/p
           itemId: "ocr-oath-run-fp-1-r0",
           runId: "verify-1",
           status: "done" as const,
-          data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000910" },
+          data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: privateValue("id:dfa73f9264a72c07") },
         },
       ],
     },
@@ -1598,7 +1599,7 @@ test("opts.signal abort mid-phase unwinds the prep — no person-lookup/done row
           await new Promise((r) => setTimeout(r, 700));
           return { data: [], provider: "stub", attempts: 1, cached: false };
         },
-        _loadRosterOverride: async () => [{ eid: "10000910", name: "Liam Kustenbauder" }],
+        _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Liam Kustenbauder" }],
         _enqueueEidLookupOverride: async () => { /* must never be reached */ },
         _watchChildRunsOverride: async () => {
           throw new Error("person-lookup fan-out must not run after a mid-phase cancel");
@@ -1685,7 +1686,7 @@ test("second opinion: a 0-candidate, no-EID name is re-read on tier-1 and ADOPTE
           poolKeyId: "gemini-0:gemini-3.5-flash",
         };
       },
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Barahona Martell, Carlos D" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Barahona Martell, Carlos D" }],
       _lookupSuggestionOverride: async () => [],
       _enqueueEidLookupOverride: async () => { /* no-op */ },
       _disableSqliteDependencies: true,
@@ -1694,7 +1695,7 @@ test("second opinion: a 0-candidate, no-EID name is re-read on tier-1 and ADOPTE
         itemId: "ocr-oath-run-so-adopt-r0",
         runId: "verify-1",
         status: "done" as const,
-        data: { hrStatus: "Active", emplId: "10000910" },
+        data: { hrStatus: "Active", emplId: privateValue("id:dfa73f9264a72c07") },
       }],
     } as never,
   );
@@ -1759,7 +1760,7 @@ test("second opinion: a re-read that ranks no better KEEPS the original reading 
           poolKeyId: "gemini-0:gemini-3.5-flash",
         };
       },
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Unrelated Person" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Unrelated Person" }],
       _lookupSuggestionOverride: async () => [],
       _enqueueEidLookupOverride: async () => { /* no-op */ },
       _disableSqliteDependencies: true,
@@ -1805,7 +1806,7 @@ test("second opinion: EC form EID not on roster is re-read and adopted when corr
           formKind: "emergency-contact",
           sourcePage: 1,
           employee: { name: "Shaaf Hababi", employeeId: "10843962" },
-          emergencyContact: { name: "Person 1079", relationship: "Friend", primary: true },
+          emergencyContact: { name: privateValue("name:aa7f85d8efcd7a15"), relationship: "Friend", primary: true },
           notes: [], documentType: "expected", originallyMissing: [],
         }],
         provider: "stub", attempts: 1, cached: false,
@@ -1818,12 +1819,12 @@ test("second opinion: EC form EID not on roster is re-read and adopted when corr
             formKind: "emergency-contact",
             sourcePage: 1,
             employee: {
-              name: "Person 1860",
-              employeeId: "10002230",
+              name: privateValue("name:431306ac26465833"),
+              employeeId: privateValue("id:bcd23a9c2a43b1d6"),
               homeAddress: { street: "5370 Toscana Way H309", city: "San Diego", state: "CA", zip: "92122" },
             },
             emergencyContact: {
-              name: "Person 1079",
+              name: privateValue("name:aa7f85d8efcd7a15"),
               relationship: "Friend",
               primary: true,
               address: { street: "8800 Lombard Pl", city: "San Diego", state: "CA", zip: "92122" },
@@ -1834,7 +1835,7 @@ test("second opinion: EC form EID not on roster is re-read and adopted when corr
           poolKeyId: "gemini-0:gemini-3.5-flash",
         };
       },
-      _loadRosterOverride: async () => [{ eid: "10002230", name: "Person 1861" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:bcd23a9c2a43b1d6"), name: privateValue("name:20efd7860416263e") }],
       _lookupSuggestionOverride: async () => [],
       _enqueueEidLookupOverride: async () => { /* no-op */ },
       _disableSqliteDependencies: true,
@@ -1851,7 +1852,7 @@ test("second opinion: EC form EID not on roster is re-read and adopted when corr
     matchState?: string;
     emergencyContact?: { cellPhone?: string; address?: { street?: string } };
   }>;
-  assert.equal(parsed[0]?.employee?.employeeId, "10002230", "adopted corrected EID from tier-1 re-read");
+  assert.equal(parsed[0]?.employee?.employeeId, privateValue("id:bcd23a9c2a43b1d6"), "adopted corrected EID from tier-1 re-read");
   assert.equal(parsed[0]?.matchState, "matched");
   assert.equal(parsed[0]?.emergencyContact?.cellPhone, "(202) 500-8356");
   assert.ok(String(parsed[0]?.emergencyContact?.address?.street ?? "").includes("Lombard"));
@@ -1890,14 +1891,14 @@ test("orchestrator stamps data.dryRun on EVERY OCR row when the input is a dry r
         }],
         provider: "stub", attempts: 1, cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Liam Kustenbauder" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Liam Kustenbauder" }],
       _enqueueEidLookupOverride: async () => { /* no-op */ },
       _watchChildRunsOverride: async () => [{
         workflow: "person-lookup",
         itemId: "ocr-oath-run-dry-r0",
         runId: "verify-dry-1",
         status: "done" as const,
-        data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000910" },
+        data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: privateValue("id:dfa73f9264a72c07") },
       }],
     },
   );
@@ -1948,14 +1949,14 @@ test("delegated orchestrator composes the coordinator's trace prefix and stamps 
         }],
         provider: "stub", attempts: 1, cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Liam Kustenbauder" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Liam Kustenbauder" }],
       _enqueueEidLookupOverride: async () => { /* no-op */ },
       _watchChildRunsOverride: async () => [{
         workflow: "person-lookup",
         itemId: "ocr-oath-run-prefix-1a57-r0",
         runId: "verify-prefix-1",
         status: "done" as const,
-        data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000910" },
+        data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: privateValue("id:dfa73f9264a72c07") },
       }],
     },
   );
@@ -2119,7 +2120,7 @@ test("roster load: a TRANSIENT failure is retried (same operation, no substitute
       _loadRosterOverride: async () => {
         attempts += 1;
         if (attempts === 1) throw new Error("EBUSY: roster still flushing (stub)");
-        return [{ eid: "10000910", name: "Liam Kustenbauder" }];
+        return [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Liam Kustenbauder" }];
       },
       _enqueueEidLookupOverride: async () => {},
       _disableSqliteDependencies: true,
@@ -2128,7 +2129,7 @@ test("roster load: a TRANSIENT failure is retried (same operation, no substitute
         itemId: "ocr-oath-run-roster-retry-r0",
         runId: "verify-1",
         status: "done" as const,
-        data: { hrStatus: "Active", emplId: "10000910" },
+        data: { hrStatus: "Active", emplId: privateValue("id:dfa73f9264a72c07") },
       }],
     },
   );
@@ -2205,7 +2206,7 @@ test("STANDALONE run with ZERO extracted records FAILS LOUD instead of completin
         trackerDir: dir,
         _emitOverride: (entry: any) => writtenEntries.push(entry),
         _ocrPipelineOverride: async () => ({ data: [], provider: "stub", attempts: 1, cached: false }),
-        _loadRosterOverride: async () => [{ eid: "10000910", name: "Someone" }],
+        _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Someone" }],
         _enqueueEidLookupOverride: async () => {},
         _watchChildRunsOverride: async () => [],
       },
@@ -2243,7 +2244,7 @@ test("DELEGATED run with ZERO extracted records still parks at awaiting-approval
       trackerDir: dir,
       _emitOverride: (entry: any) => writtenEntries.push(entry),
       _ocrPipelineOverride: async () => ({ data: [], provider: "stub", attempts: 1, cached: false }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Someone" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Someone" }],
       _enqueueEidLookupOverride: async () => {},
       _watchChildRunsOverride: async () => [],
     },
@@ -2284,7 +2285,7 @@ test("second opinion: a rank-2 original is NOT swapped for a re-read that shares
           formKind: "emergency-contact",
           sourcePage: 1,
           employee: { name: "Shaaf Hababi", employeeId: "10843962" },
-          emergencyContact: { name: "Person 1079", relationship: "Friend", primary: true },
+          emergencyContact: { name: privateValue("name:aa7f85d8efcd7a15"), relationship: "Friend", primary: true },
           notes: [], documentType: "expected", originallyMissing: [],
         }],
         provider: "stub", attempts: 1, cached: false,
@@ -2296,13 +2297,13 @@ test("second opinion: a rank-2 original is NOT swapped for a re-read that shares
         records: [{
           formKind: "emergency-contact",
           sourcePage: 1,
-          employee: { name: "Quentin Zorro", employeeId: "10002230" },
-          emergencyContact: { name: "Person 1079", relationship: "Friend", primary: true },
+          employee: { name: "Quentin Zorro", employeeId: privateValue("id:bcd23a9c2a43b1d6") },
+          emergencyContact: { name: privateValue("name:aa7f85d8efcd7a15"), relationship: "Friend", primary: true },
           notes: [], documentType: "expected", originallyMissing: [],
         }],
         poolKeyId: "gemini-0:gemini-3.5-flash",
       }),
-      _loadRosterOverride: async () => [{ eid: "10002230", name: "Zorro, Quentin" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:bcd23a9c2a43b1d6"), name: "Zorro, Quentin" }],
       _lookupSuggestionOverride: async () => [],
       _enqueueEidLookupOverride: async () => {},
       _disableSqliteDependencies: true,
@@ -2329,8 +2330,8 @@ test("namesShareIdentityToken: shares a substantive token → true; disjoint or 
   const { namesShareIdentityToken } = await import("../../../../src/workflows/ocr/orchestrator.js");
   // The live-repro pair: misread "Merrell, Carlos D" vs "Barahona Martell, Carlos D" share "carlos".
   assert.equal(namesShareIdentityToken("Merrell, Carlos D", "Barahona Martell, Carlos D"), true);
-  // The EC digit-misread pair: "Shaaf Hababi" vs "Person 1860" share "hababi".
-  assert.equal(namesShareIdentityToken("Shaaf Hababi", "Person 1860"), true);
+  // The EC digit-misread pair: "Shaaf Hababi" vs "name:431306ac26465833" share "hababi".
+  assert.equal(namesShareIdentityToken("Shaaf Hababi", privateValue("name:431306ac26465833")), true);
   // Different people share nothing.
   assert.equal(namesShareIdentityToken("Shaaf Hababi", "Quentin Zorro"), false);
   // A single-letter initial is too weak to anchor identity.
@@ -2361,7 +2362,7 @@ test("suggestion-LLM failure is surfaced ON THE RECORD as a warning — a failed
         data: [{ ...OATH_STUB_RECORD, printedName: "Zzyzx Qwerty" }],
         provider: "stub", attempts: 1, cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Unrelated Person" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Unrelated Person" }],
       _secondOpinionOverride: async () => null,
       _lookupSuggestionOverride: async () => {
         throw new Error("LLM pool exhausted (stub)");
@@ -2418,7 +2419,7 @@ test("debounced progress snapshot does NOT throw off-stack when a discard lands 
         data: [{ ...OATH_STUB_RECORD, printedName: "Carlos D. Barahona Martell" }],
         provider: "stub", attempts: 1, cached: false,
       }),
-      _loadRosterOverride: async () => [{ eid: "10000910", name: "Different Person" }],
+      _loadRosterOverride: async () => [{ eid: privateValue("id:dfa73f9264a72c07"), name: "Different Person" }],
       _secondOpinionOverride: async () => null,
       _lookupSuggestionOverride: async () => [],
       _enqueueEidLookupOverride: async () => {},

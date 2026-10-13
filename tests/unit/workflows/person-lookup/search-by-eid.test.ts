@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert";
 import {
@@ -20,13 +21,13 @@ test("EidLookupEidInputSchema: rejects non-numeric Empl ID", () => {
 });
 
 test("EidLookupEidInputSchema: accepts UCPath Empl IDs", () => {
-  assert.doesNotThrow(() => EidLookupEidInputSchema.parse({ emplId: "10001516" }));
+  assert.doesNotThrow(() => EidLookupEidInputSchema.parse({ emplId: privateValue("id:699c7799ff18032d") }));
   assert.deepEqual(EidLookupEidInputSchema.parse({ emplId: "10-706431" }), {
-    emplId: "10001516",
+    emplId: privateValue("id:699c7799ff18032d"),
     mode: "search",
   });
   assert.doesNotThrow(() =>
-    EidLookupEidInputSchema.parse({ emplId: "10001516", keepNonHdh: true }),
+    EidLookupEidInputSchema.parse({ emplId: privateValue("id:699c7799ff18032d"), keepNonHdh: true }),
   );
 });
 
@@ -40,15 +41,15 @@ test("EidLookupNameInputSchema: requires non-empty name", () => {
 });
 
 test("EidLookupItemSchema: discriminated union accepts both shapes", () => {
-  const eidInput = EidLookupItemSchema.parse({ emplId: "10001516" });
+  const eidInput = EidLookupItemSchema.parse({ emplId: privateValue("id:699c7799ff18032d") });
   assert.ok("emplId" in eidInput);
   const nameInput = EidLookupItemSchema.parse({ name: "Smith, John" });
   assert.ok("name" in nameInput);
 });
 
 test("isEidInput: returns true only for EID-shape inputs", () => {
-  assert.equal(isEidInput({ emplId: "10001516" }), true);
-  assert.equal(isEidInput({ emplId: "10001516", keepNonHdh: true }), true);
+  assert.equal(isEidInput({ emplId: privateValue("id:699c7799ff18032d") }), true);
+  assert.equal(isEidInput({ emplId: privateValue("id:699c7799ff18032d"), keepNonHdh: true }), true);
   assert.equal(isEidInput({ name: "Smith, John" }), false);
   assert.equal(isEidInput({ name: "Smith, John", keepNonHdh: true }), false);
 });

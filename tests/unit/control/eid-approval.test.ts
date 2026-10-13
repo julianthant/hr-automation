@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -77,7 +78,7 @@ describe("NOT_THIS_PERSON_WORKFLOWS + buildNotThisPersonHandler — validation (
     assert.ok(!NOT_THIS_PERSON_WORKFLOWS.has("separations"));
   });
   it("rejects an unsupported workflow before any IO", async () => {
-    const r = await notThis({ workflow: "separations", id: "4313", eid: "10002180" });
+    const r = await notThis({ workflow: "separations", id: "4313", eid: privateValue("id:c97959f89cba8b0e") });
     assert.equal(r.ok, false);
     assert.match(r.error ?? "", /unsupported workflow "separations"/);
   });
@@ -87,7 +88,7 @@ describe("NOT_THIS_PERSON_WORKFLOWS + buildNotThisPersonHandler — validation (
     assert.match(r.error ?? "", /not a valid 8-digit UCPath EID/);
   });
   it("rejects a missing id", async () => {
-    const r = await notThis({ workflow: "onboarding", id: "", eid: "10002180" });
+    const r = await notThis({ workflow: "onboarding", id: "", eid: privateValue("id:c97959f89cba8b0e") });
     assert.equal(r.ok, false);
     assert.match(r.error ?? "", /id is required/);
   });
@@ -95,14 +96,14 @@ describe("NOT_THIS_PERSON_WORKFLOWS + buildNotThisPersonHandler — validation (
 
 describe("mergeNotMatchEids", () => {
   it("starts a list from nothing", () => {
-    assert.equal(mergeNotMatchEids(undefined, "10002180"), "10002180");
-    assert.equal(mergeNotMatchEids("", "10002180"), "10002180");
+    assert.equal(mergeNotMatchEids(undefined, privateValue("id:c97959f89cba8b0e")), privateValue("id:c97959f89cba8b0e"));
+    assert.equal(mergeNotMatchEids("", privateValue("id:c97959f89cba8b0e")), privateValue("id:c97959f89cba8b0e"));
   });
   it("accumulates across reviews and de-duplicates", () => {
-    assert.equal(mergeNotMatchEids("10001072, 10001585", "10839930"), "10001072,10001585,10839930");
-    assert.equal(mergeNotMatchEids("10001072,10001585", "10001585"), "10001072,10001585");
+    assert.equal(mergeNotMatchEids(privateValue("id:d60c9d756022b15d") + ", " + privateValue("id:56b7368fdb060fa5"), "10839930"), privateValue("id:d60c9d756022b15d") + "," + privateValue("id:56b7368fdb060fa5") + ",10839930");
+    assert.equal(mergeNotMatchEids(privateValue("id:d60c9d756022b15d") + "," + privateValue("id:56b7368fdb060fa5"), privateValue("id:56b7368fdb060fa5")), privateValue("id:d60c9d756022b15d") + "," + privateValue("id:56b7368fdb060fa5"));
   });
   it("ignores a non-string prior", () => {
-    assert.equal(mergeNotMatchEids(["10001072"], "10002180"), "10002180");
+    assert.equal(mergeNotMatchEids([privateValue("id:d60c9d756022b15d")], privateValue("id:c97959f89cba8b0e")), privateValue("id:c97959f89cba8b0e"));
   });
 });

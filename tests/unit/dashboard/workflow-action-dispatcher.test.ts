@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
@@ -176,7 +177,7 @@ describe("buildBulkWorkflowActionRequest", () => {
         source: "operation-view",
         scope: "visible-view",
         items: [
-          { workflowId: "oath-signature", id: "10000910", runId: "signature-run" },
+          { workflowId: "oath-signature", id: privateValue("id:dfa73f9264a72c07"), runId: "signature-run" },
         ],
       }),
       {
@@ -187,7 +188,7 @@ describe("buildBulkWorkflowActionRequest", () => {
           source: "operation-view",
           scope: "visible-view",
           items: [
-            { workflowId: "oath-signature", id: "10000910", runId: "signature-run" },
+            { workflowId: "oath-signature", id: privateValue("id:dfa73f9264a72c07"), runId: "signature-run" },
           ],
         },
       },

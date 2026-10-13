@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 
@@ -14,18 +15,18 @@ test("groupMergedTrackerEntries: two item ids, same emplId → one group", () =>
     {
       workflow: "active-check",
       timestamp: "2026-05-09T18:00:00.000Z",
-      id: "Person 905",
-      runId: "Person 905#1",
+      id: privateValue("name:17a6fb0c3906628f"),
+      runId: privateValue("name:17a6fb0c3906628f") + "#1",
       status: "done",
-      data: { emplId: "10000910", name: "Person 905" },
+      data: { emplId: privateValue("id:dfa73f9264a72c07"), name: privateValue("name:17a6fb0c3906628f") },
     },
     {
       workflow: "active-check",
       timestamp: "2026-05-09T18:05:00.000Z",
-      id: "10000910",
-      runId: "10000910#1",
+      id: privateValue("id:dfa73f9264a72c07"),
+      runId: privateValue("id:dfa73f9264a72c07") + "#1",
       status: "done",
-      data: { emplId: "10000910" },
+      data: { emplId: privateValue("id:dfa73f9264a72c07") },
     },
   ];
   const groups = groupMergedTrackerEntries(rows);
@@ -171,7 +172,7 @@ test("countSidebarRowsFromTrackerHistory: legacy approved OCR parent plus child 
       runId: "child-run-1",
       parentRunId: "parent-run-1",
       status: "done",
-      data: { emplId: "10000910" },
+      data: { emplId: privateValue("id:dfa73f9264a72c07") },
     },
   ];
   assert.equal(countSidebarRowsFromTrackerHistory(raw, isResolvedPrepEntry), 1);

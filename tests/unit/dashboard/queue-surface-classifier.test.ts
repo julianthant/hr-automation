@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
@@ -112,7 +113,7 @@ describe("buildQueueSurfaces", () => {
       runId: "eid-run-1",
       parentRunId: "ocr-run-1",
       status: "done",
-      data: { archetype: "single", searchName: "Person 905", emplId: "10000910" },
+      data: { archetype: "single", searchName: privateValue("name:17a6fb0c3906628f"), emplId: privateValue("id:dfa73f9264a72c07") },
     });
     const eidB = row({
       workflow: "person-lookup",
@@ -152,11 +153,11 @@ describe("buildQueueSurfaces", () => {
     });
     const child = row({
       workflow: "oath-signature",
-      id: "10000910",
+      id: privateValue("id:dfa73f9264a72c07"),
       runId: "oath-child-run-single",
       parentRunId: "ocr-run-single",
       status: "running",
-      data: { emplId: "10000910" },
+      data: { emplId: privateValue("id:dfa73f9264a72c07") },
     });
 
     const surfaces = buildQueueSurfaces({
@@ -169,7 +170,7 @@ describe("buildQueueSurfaces", () => {
     // A single-signer prep row stays a batch card after approval.
     assert.equal(surfaces.groupRows.length, 1);
     assert.equal(surfaces.groupRows[0]?.kind, "preview");
-    assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), ["10000910"]);
+    assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), [privateValue("id:dfa73f9264a72c07")]);
     assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
 

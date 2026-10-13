@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -128,7 +129,7 @@ test("rebuildProjectionForDate is idempotent and skips malformed lines", () => {
     appendFileSync(rowFilePath("work-study", date, dir), JSON.stringify({
       workflow: "work-study",
       timestamp: "2026-05-04T20:00:00.000Z",
-      id: "10000910",
+      id: privateValue("id:dfa73f9264a72c07"),
       runId: "run-1",
       status: "done",
     }) + "\n");

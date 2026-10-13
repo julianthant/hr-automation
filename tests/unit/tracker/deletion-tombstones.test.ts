@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   chmodSync,
@@ -46,7 +47,7 @@ function emit(runId: string, timestamp: string): void {
     runId,
     status: "failed",
     step: "failed",
-    data: { archetype: "single", emplId: runId === "run-1" ? "10000910" : "10000002" },
+    data: { archetype: "single", emplId: runId === "run-1" ? privateValue("id:dfa73f9264a72c07") : "10000002" },
   }, DATE, dir);
 }
 
@@ -77,7 +78,7 @@ describe("append-only deletion tombstones", () => {
       .toHaveLength(1);
     expect((db.prepare("SELECT latest_run_id, latest_empl_id FROM items").get() as {
       latest_run_id: string; latest_empl_id: string;
-    })).toEqual({ latest_run_id: "run-1", latest_empl_id: "10000910" });
+    })).toEqual({ latest_run_id: "run-1", latest_empl_id: privateValue("id:dfa73f9264a72c07") });
     expect((db.prepare("SELECT COUNT(*) AS n FROM run_events").get() as { n: number }).n).toBe(2);
     expect((db.prepare("SELECT COUNT(*) AS n FROM runs").get() as { n: number }).n).toBe(2);
     expect(readFileSync(deletionFilePath(todayDeletionPartition(), dir), "utf8").trim().split("\n")).toHaveLength(1);

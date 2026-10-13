@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { OathRosterOcrRecordSchema, oathOcrFormSpec } from "../../../../../src/services/ocr/forms/oath.js";
@@ -142,8 +143,8 @@ function makeApprovedOathRecord(overrides: Record<string, unknown> = {}) {
     formKind: "oath" as "oath" | "emergency-contact" | "unknown",
     sourcePage: 1,
     rowIndex: 0,
-    printedName: "Person 905",
-    employeeId: "10000910",
+    printedName: privateValue("name:17a6fb0c3906628f"),
+    employeeId: privateValue("id:dfa73f9264a72c07"),
     employeeSigned: true,
     officerSigned: true,
     dateSigned: "04/23/2026",

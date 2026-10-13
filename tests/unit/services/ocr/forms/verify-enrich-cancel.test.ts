@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../../src/private-data.js";
 import { describe, it, vi } from "vitest";
 import assert from "node:assert/strict";
 
@@ -62,14 +63,14 @@ describe("verifyOcrFormSpec.enrichRecords cancel cascade", () => {
       {
         formKind: "oath",
         sourcePage: 1,
-        printedName: "Person 905",
+        printedName: privateValue("name:17a6fb0c3906628f"),
         employeeId: "",
         employeeSigned: true,
         officerSigned: false,
         documentType: "expected",
         originallyMissing: [],
         notes: [],
-        name: "Person 905",
+        name: privateValue("name:17a6fb0c3906628f"),
         matchState: "extracted",
         selected: true,
         warnings: [],

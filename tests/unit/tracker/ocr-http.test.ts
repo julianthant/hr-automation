@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test, vi } from "vitest";
 import assert from "node:assert";
 import { mkdirSync, rmSync, readFileSync, existsSync, appendFileSync, writeFileSync } from "node:fs";
@@ -951,7 +952,7 @@ test("buildOcrApproveHandler fans out oath approvals to oath-signature + oath-up
       runId: "run-oath-fanout",
       records: [
         {
-          employeeId: "10000910",
+          employeeId: privateValue("id:dfa73f9264a72c07"),
           printedName: "Alice One",
           selected: true,
           matchState: "matched",
@@ -1023,7 +1024,7 @@ test("buildOcrApproveHandler forwards parentRunId to ensureDaemonsAndEnqueueOver
     });
 
     const records = [
-      emergencyContactPreviewRecord("10000910", "Alice One", 1),
+      emergencyContactPreviewRecord(privateValue("id:dfa73f9264a72c07"), "Alice One", 1),
       emergencyContactPreviewRecord("10000002", "Bob Two", 2),
     ];
 
@@ -1151,7 +1152,7 @@ test("buildOcrApproveHandler propagates dryRun from OCR row to downstream inputs
     const resp = await handler({
       sessionId: "session-approve-dry",
       runId: "run-approve-dry",
-      records: [emergencyContactPreviewRecord("10000910", "Alice One")],
+      records: [emergencyContactPreviewRecord(privateValue("id:dfa73f9264a72c07"), "Alice One")],
     });
 
     assert.equal(resp.status, 200);
@@ -1207,7 +1208,7 @@ test("buildOcrApproveHandler creates SQLite dependency rows from approval fan-ou
     const resp = await handler({
       sessionId: "session-approve-deps",
       runId: "run-approve-deps",
-      records: [emergencyContactPreviewRecord("10000910", "Alice One")],
+      records: [emergencyContactPreviewRecord(privateValue("id:dfa73f9264a72c07"), "Alice One")],
     });
 
     assert.equal(resp.status, 200);
@@ -1315,7 +1316,7 @@ test("buildOcrApproveHandler approves without preview readiness props", async ()
     const resp = await handler({
       sessionId: "session-preview-props-removed",
       runId: "run-preview-props-removed",
-      records: [emergencyContactPreviewRecord("10000910", "Alice One")],
+      records: [emergencyContactPreviewRecord(privateValue("id:dfa73f9264a72c07"), "Alice One")],
     });
 
     assert.equal(resp.status, 200);
@@ -1336,7 +1337,7 @@ test("discard cascade-cancels still-queued delegated child tasks AND the depende
   const taskStore = createTaskStore(control);
   const children = taskStore.enqueueTasks({
     workflow: "person-lookup",
-    inputs: [{ name: "Person 905" }, { name: "Roe, Sam" }],
+    inputs: [{ name: privateValue("name:17a6fb0c3906628f") }, { name: "Roe, Sam" }],
     deriveItemId: (_inp, idx) => `ocr-oath-r-cascade-r${idx}`,
     parentRunId: "r-cascade",
   });

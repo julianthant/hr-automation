@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, test } from "vitest";
 import assert from "node:assert/strict";
 import type { FrameLocator, Locator, Page } from "playwright";
@@ -305,9 +306,9 @@ describe("rowMatchesTerminationEid", () => {
   test("exact EID in a termination row → true", () => {
     assert.equal(
       rowMatchesTerminationEid(
-        ["John Smith", "10001497", "TER Termination"],
-        "10001497 John Smith TER Termination Pending",
-        "10001497",
+        ["John Smith", privateValue("id:5f40ed01d583a15c"), "TER Termination"],
+        privateValue("id:5f40ed01d583a15c") + " John Smith TER Termination Pending",
+        privateValue("id:5f40ed01d583a15c"),
       ),
       true,
     );
@@ -316,9 +317,9 @@ describe("rowMatchesTerminationEid", () => {
   test("EID present but row not a termination → false", () => {
     assert.equal(
       rowMatchesTerminationEid(
-        ["10001497", "HIR Hire"],
-        "10001497 John Smith HIR Hire Approved",
-        "10001497",
+        [privateValue("id:5f40ed01d583a15c"), "HIR Hire"],
+        privateValue("id:5f40ed01d583a15c") + " John Smith HIR Hire Approved",
+        privateValue("id:5f40ed01d583a15c"),
       ),
       false,
     );
@@ -339,9 +340,9 @@ describe("rowMatchesTerminationEid", () => {
   test("no cell matches the EID → false", () => {
     assert.equal(
       rowMatchesTerminationEid(
-        ["Person 905", "DEPT001", "TER Termination"],
-        "Person 905 DEPT001 TER Termination Pending",
-        "10001497",
+        [privateValue("name:01332c876518a793"), "DEPT001", "TER Termination"],
+        privateValue("name:01332c876518a793") + " DEPT001 TER Termination Pending",
+        privateValue("id:5f40ed01d583a15c"),
       ),
       false,
     );
@@ -543,23 +544,23 @@ describe("interpretPostSubmitTxnReadback", () => {
 // ─── Submit-time "Person Match Found" page (2026-08-20) ──────────────────────
 //
 // Candidate tables below are the LIVE ones from the two blind timeouts that
-// motivated this guard (runs ebd5d59e Person 631 / 99d5012c Person 780).
+// motivated this guard (runs ebd5d59e name:861193e55b0576b2 / 99d5012c name:11e6f33fffe74fc2).
 
 const ROBLES_HIRE = { ssnLast4: "4267", dob: "08/26/2007" };
 const ROBLES_CANDIDATES: PersonMatchCandidate[] = [
-  { personId: "10001666", firstName: "Emily", lastName: "Robles", nationalIdLast4: "9035", dobMonthDay: "10/8" },
+  { personId: privateValue("id:221ff7e7678bffbc"), firstName: "Emily", lastName: "Robles", nationalIdLast4: "9035", dobMonthDay: "10/8" },
 ];
 
-const SUN_HIRE = { ssnLast4: "", dob: "08/24/2003" }; // no SSN (CRM 000-00-0000 placeholder)
+const SUN_HIRE = { ssnLast4: "", dob: "08/24/2003" }; // no SSN (CRM ssn:1438887c12c566c8 placeholder)
 const SUN_CANDIDATES: PersonMatchCandidate[] = [
   { personId: "10197468", firstName: "Haoyuan", lastName: "Sun", nationalIdLast4: "2188", dobMonthDay: "9/30" },
   { personId: "10291151", firstName: "Haojun", lastName: "Sun", nationalIdLast4: "9960", dobMonthDay: "1/2" },
-  { personId: "10001072", firstName: "Haotian", lastName: "Sun", nationalIdLast4: "3380", dobMonthDay: "" },
+  { personId: privateValue("id:d60c9d756022b15d"), firstName: "Haotian", lastName: "Sun", nationalIdLast4: "3380", dobMonthDay: "" },
   { personId: "10489194", firstName: "Haochen", lastName: "Sun", nationalIdLast4: "1919", dobMonthDay: "8/22" },
   { personId: "10568124", firstName: "Haoran", lastName: "Sun", nationalIdLast4: "6160", dobMonthDay: "7/10" },
   { personId: "10682951", firstName: "Hao Yu", lastName: "Sun", nationalIdLast4: "4488", dobMonthDay: "1/29" },
   { personId: "10690473", firstName: "Haoran", lastName: "Sun", nationalIdLast4: "9778", dobMonthDay: "1/15" },
-  { personId: "10001585", firstName: "Haowen", lastName: "Sun", nationalIdLast4: "", dobMonthDay: "" },
+  { personId: privateValue("id:56b7368fdb060fa5"), firstName: "Haowen", lastName: "Sun", nationalIdLast4: "", dobMonthDay: "" },
   { personId: "10823228", firstName: "Haotian", lastName: "Sun", nationalIdLast4: "5916", dobMonthDay: "4/10" },
   { personId: "10839930", firstName: "Hao", lastName: "Sun", nationalIdLast4: "", dobMonthDay: "11/24" },
 ];
@@ -582,7 +583,7 @@ describe("Person Match Found — normalizers", () => {
   });
 
   test("ssnLast4 reads the last 4 digits in any punctuation, '' when absent", () => {
-    assert.equal(ssnLast4("000-00-0000"), "6789");
+    assert.equal(ssnLast4(privateValue("ssn:01a54629efb95228")), "6789");
     assert.equal(ssnLast4("4267"), "4267");
     assert.equal(ssnLast4(""), "");
     assert.equal(ssnLast4(undefined), "");
@@ -595,14 +596,14 @@ describe("candidateExcludedByHardIdentifier", () => {
   });
 
   test("SSN last-4 known on both sides and different → excluded even when DOB is unknown", () => {
-    const c: PersonMatchCandidate = { personId: "10000910", firstName: "A", lastName: "B", nationalIdLast4: "1111", dobMonthDay: "" };
+    const c: PersonMatchCandidate = { personId: privateValue("id:dfa73f9264a72c07"), firstName: "A", lastName: "B", nationalIdLast4: "1111", dobMonthDay: "" };
     assert.equal(candidateExcludedByHardIdentifier(c, { ssnLast4: "2222", dob: "" }), true);
   });
 
   test("identifier unknown on either side → NOT excluded (cannot tell them apart)", () => {
     // Haowen Sun: no DOB, no SSN shown; hire has no SSN → nothing comparable.
     assert.equal(candidateExcludedByHardIdentifier(SUN_CANDIDATES[7], SUN_HIRE), false);
-    // Haotian 10001072: has SSN but the hire has none; DOB blank on the candidate.
+    // Haotian id:d60c9d756022b15d: has SSN but the hire has none; DOB blank on the candidate.
     assert.equal(candidateExcludedByHardIdentifier(SUN_CANDIDATES[2], SUN_HIRE), false);
   });
 
@@ -618,31 +619,31 @@ describe("candidateExcludedByHardIdentifier", () => {
 });
 
 describe("decidePersonMatchContinue", () => {
-  test("Person 631 live case: the lone namesake differs on DOB and SSN → proceed automatically", () => {
+  test(privateValue("name:861193e55b0576b2") + " live case: the lone namesake differs on DOB and SSN → proceed automatically", () => {
     const d = decidePersonMatchContinue(ROBLES_CANDIDATES, ROBLES_HIRE, []);
     assert.equal(d.proceed, true);
     assert.deepEqual(d.unresolved, []);
-    assert.deepEqual(d.reasons, [{ personId: "10001666", reason: "hard-identifier-mismatch" }]);
+    assert.deepEqual(d.reasons, [{ personId: privateValue("id:221ff7e7678bffbc"), reason: "hard-identifier-mismatch" }]);
   });
 
-  test("Person 780 live case, no operator review: two candidates lack any comparable identifier → refuse", () => {
+  test(privateValue("name:11e6f33fffe74fc2") + " live case, no operator review: two candidates lack any comparable identifier → refuse", () => {
     const d = decidePersonMatchContinue(SUN_CANDIDATES, SUN_HIRE, []);
     assert.equal(d.proceed, false);
-    assert.deepEqual(d.unresolved.map((c) => c.personId), ["10001072", "10001585"]);
-    // The exact-name one (Person 780 10839930) is excluded by DOB 11/24 ≠ 8/24, not by name.
+    assert.deepEqual(d.unresolved.map((c) => c.personId), [privateValue("id:d60c9d756022b15d"), privateValue("id:56b7368fdb060fa5")]);
+    // The exact-name one (name:11c37e60e9124b0c id:5c8118b534b5ce0e) is excluded by DOB 11/24 ≠ 8/24, not by name.
     assert.deepEqual(d.reasons.find((r) => r.personId === "10839930"), { personId: "10839930", reason: "hard-identifier-mismatch" });
   });
 
-  test("Person 780 live case with the two unresolved EIDs operator-reviewed → proceed", () => {
-    const d = decidePersonMatchContinue(SUN_CANDIDATES, SUN_HIRE, ["10001072", "10001585"]);
+  test(privateValue("name:11e6f33fffe74fc2") + " live case with the two unresolved EIDs operator-reviewed → proceed", () => {
+    const d = decidePersonMatchContinue(SUN_CANDIDATES, SUN_HIRE, [privateValue("id:d60c9d756022b15d"), privateValue("id:56b7368fdb060fa5")]);
     assert.equal(d.proceed, true);
-    assert.deepEqual(d.reasons.filter((r) => r.reason === "operator-reviewed").map((r) => r.personId), ["10001072", "10001585"]);
+    assert.deepEqual(d.reasons.filter((r) => r.reason === "operator-reviewed").map((r) => r.personId), [privateValue("id:d60c9d756022b15d"), privateValue("id:56b7368fdb060fa5")]);
   });
 
   test("operator review of OTHER EIDs does not cover an unreviewed, unexcluded candidate", () => {
-    const d = decidePersonMatchContinue(SUN_CANDIDATES, SUN_HIRE, ["10001072"]);
+    const d = decidePersonMatchContinue(SUN_CANDIDATES, SUN_HIRE, [privateValue("id:d60c9d756022b15d")]);
     assert.equal(d.proceed, false);
-    assert.deepEqual(d.unresolved.map((c) => c.personId), ["10001585"]);
+    assert.deepEqual(d.unresolved.map((c) => c.personId), [privateValue("id:56b7368fdb060fa5")]);
   });
 
   test("an operator-reviewed EID that ALSO matches on hard identifiers is still honoured (operator decision wins)", () => {
@@ -656,8 +657,8 @@ describe("decidePersonMatchContinue", () => {
   });
 
   test("formatPersonMatchCandidate renders id, name, masked NID and DOB", () => {
-    assert.equal(formatPersonMatchCandidate(ROBLES_CANDIDATES[0]), "10001666 Person 631 (NID ***9035, DOB 10/8)");
-    assert.equal(formatPersonMatchCandidate(SUN_CANDIDATES[7]), "10001585 Haowen Sun (NID ***????, DOB ?)");
+    assert.equal(formatPersonMatchCandidate(ROBLES_CANDIDATES[0]), privateValue("id:221ff7e7678bffbc") + " " + privateValue("name:861193e55b0576b2") + " (NID ***9035, DOB 10/8)");
+    assert.equal(formatPersonMatchCandidate(SUN_CANDIDATES[7]), privateValue("id:56b7368fdb060fa5") + " Haowen Sun (NID ***????, DOB ?)");
   });
 });
 
@@ -682,8 +683,8 @@ describe("classifySubmitSignals", () => {
 describe("buildConcurrentHireCommentsText (UC_CONC_HIRE rehire mode, 2026-08-21)", () => {
   test("mirrors the operator's manual comment verbatim: hire wording, PCN, job number", () => {
     assert.equal(
-      buildConcurrentHireCommentsText("09/11/2026", "10005380", "1169086"),
-      "Concurrent Hire as Dining Student Effective 09/11/2026. PCN 10005380. Job number #1169086.",
+      buildConcurrentHireCommentsText("09/11/2026", privateValue("id:976a53d9563a961f"), "1169086"),
+      "Concurrent Hire as Dining Student Effective 09/11/2026. PCN " + privateValue("id:976a53d9563a961f") + ". Job number #1169086.",
     );
   });
 });

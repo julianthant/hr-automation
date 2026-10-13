@@ -1,3 +1,4 @@
+import { privateValue } from "../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync } from "node:fs";
@@ -127,8 +128,8 @@ const STUB_RECORDS: StubOcrRecord[] = [
   {
     sourcePage: 1,
     rowIndex: 0,
-    printedName: "Person 905",
-    employeeId: "10000910",
+    printedName: privateValue("name:01332c876518a793"),
+    employeeId: privateValue("id:dfa73f9264a72c07"),
     employeeSigned: true,
     dateSigned: "05/01/2026",
   },
@@ -271,9 +272,9 @@ test(
     const signerRow = dash.row("oath-signature", signer.runId);
     assert.equal(signerRow.parentRunId, PARENT_RUN, "signer parentRunId === the delegating run");
     assert.equal(signerRow.archetype, "operation-member", "signer row is a batch-member");
-    assert.equal(signerRow.data.emplId, "10000910", "signer carries the synthetic EID");
-    assert.equal(signerRow.title, "Person 905", "signer title is the resolved name");
-    assert.equal(signerRow.subtitle, "10000910", "signer subtitle is the EID");
+    assert.equal(signerRow.data.emplId, privateValue("id:dfa73f9264a72c07"), "signer carries the synthetic EID");
+    assert.equal(signerRow.title, privateValue("name:01332c876518a793"), "signer title is the resolved name");
+    assert.equal(signerRow.subtitle, privateValue("id:dfa73f9264a72c07"), "signer subtitle is the EID");
     assert.equal(signerRow.data.__traceId, "<traceId>", "signer carries a (scrubbed) trace id");
 
     // ── oath-upload TICKET row (1) — THE CORE P2.12 ASSERTION: file-kind

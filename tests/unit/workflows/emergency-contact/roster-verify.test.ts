@@ -14,6 +14,7 @@
  * `normalizeName`). No mocking of fs — small real files are simpler and exercise
  * the real `readFileSync` path.
  */
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -46,7 +47,7 @@ function makeRecord(overrides: Partial<EmergencyContactRecord["employee"]> = {},
   return {
     sourcePage,
     employee: {
-      name: "Person 905",
+      name: privateValue("name:01332c876518a793"),
       employeeId: "10871222",
       pid: null,
       jobTitle: null,
@@ -81,23 +82,23 @@ function makeBatch(records: EmergencyContactRecord[]): EmergencyContactBatch {
 
 describe("namesMatch", () => {
   it("matches identical names", () => {
-    assert.equal(namesMatch("Person 905", "Person 905"), true);
+    assert.equal(namesMatch(privateValue("name:01332c876518a793"), privateValue("name:01332c876518a793")), true);
   });
 
-  it("matches regardless of word order (\"Person 905\" vs \"Person 905\")", () => {
-    assert.equal(namesMatch("Person 905", "Person 905"), true);
+  it("matches regardless of word order (\"" + privateValue("name:17a6fb0c3906628f") + "\" vs \"" + privateValue("name:01332c876518a793") + "\")", () => {
+    assert.equal(namesMatch(privateValue("name:17a6fb0c3906628f"), privateValue("name:01332c876518a793")), true);
   });
 
   it("is case-insensitive", () => {
-    assert.equal(namesMatch("Person 905", "Person 905"), true);
+    assert.equal(namesMatch(privateValue("name:c5974e2b4ded850d"), privateValue("name:ed37d99b1445238a")), true);
   });
 
   it("matches when a middle name is present on only one side", () => {
-    assert.equal(namesMatch("Jane Marie Doe", "Person 905"), true);
+    assert.equal(namesMatch("Jane Marie Doe", privateValue("name:01332c876518a793")), true);
   });
 
   it("does not match unrelated names", () => {
-    assert.equal(namesMatch("Person 905", "Bob Smith"), false);
+    assert.equal(namesMatch(privateValue("name:01332c876518a793"), "Bob Smith"), false);
   });
 
   it("ignores words shorter than 3 letters — two short-word-only names never match", () => {
@@ -116,7 +117,7 @@ describe("namesMatch", () => {
   });
 
   it("treats empty strings as never matching", () => {
-    assert.equal(namesMatch("", "Person 905"), false);
+    assert.equal(namesMatch("", privateValue("name:01332c876518a793")), false);
     assert.equal(namesMatch("", ""), false);
   });
 });
@@ -135,7 +136,7 @@ describe("normalizeName", () => {
 
 describe("verifyBatchAgainstRoster — CSV parsing", () => {
   it("parses a simple CSV and matches an exact EID + name", async () => {
-    const csv = ["Employee ID,Name", "10871222,Person 905"].join("\n");
+    const csv = ["Employee ID,Name", "10871222," + privateValue("name:01332c876518a793")].join("\n");
     const rosterPath = writeCsv("simple.csv", csv);
     const result = await verifyBatchAgainstRoster(makeBatch([makeRecord()]), rosterPath);
     assert.equal(result.matched, 1);
@@ -147,7 +148,7 @@ describe("verifyBatchAgainstRoster — CSV parsing", () => {
   it("handles quoted fields with embedded commas", async () => {
     const csv = [
       "Employee ID,Name",
-      '10871222,"Person 905"', // quoted field containing a comma
+      '10871222,"' + privateValue("name:17a6fb0c3906628f") + '"', // quoted field containing a comma
     ].join("\n");
     const rosterPath = writeCsv("quoted-comma.csv", csv);
     const result = await verifyBatchAgainstRoster(makeBatch([makeRecord()]), rosterPath);
@@ -165,7 +166,7 @@ describe("verifyBatchAgainstRoster — CSV parsing", () => {
   });
 
   it("tolerates an unterminated quote at EOF without throwing (malformed row)", async () => {
-    const csv = ["Employee ID,Name", '10871222,"Person 905'].join("\n"); // no closing quote
+    const csv = ["Employee ID,Name", '10871222,"' + privateValue("name:01332c876518a793")].join("\n"); // no closing quote
     const rosterPath = writeCsv("unterminated.csv", csv);
     const index = await loadRosterIndex(rosterPath);
     assert.equal(index.length, 1);
@@ -173,21 +174,21 @@ describe("verifyBatchAgainstRoster — CSV parsing", () => {
   });
 
   it("strips a leading UTF-8 BOM", async () => {
-    const csv = String.fromCharCode(0xfeff) + ["Employee ID,Name", "10871222,Person 905"].join("\n");
+    const csv = String.fromCharCode(0xfeff) + ["Employee ID,Name", "10871222," + privateValue("name:01332c876518a793")].join("\n");
     const rosterPath = writeCsv("bom.csv", csv);
     const result = await verifyBatchAgainstRoster(makeBatch([makeRecord()]), rosterPath);
     assert.equal(result.matched, 1);
   });
 
   it("handles CRLF line endings", async () => {
-    const csv = ["Employee ID,Name", "10871222,Person 905"].join("\r\n");
+    const csv = ["Employee ID,Name", "10871222," + privateValue("name:01332c876518a793")].join("\r\n");
     const rosterPath = writeCsv("crlf.csv", csv);
     const result = await verifyBatchAgainstRoster(makeBatch([makeRecord()]), rosterPath);
     assert.equal(result.matched, 1);
   });
 
   it("skips blank rows", async () => {
-    const csv = ["Employee ID,Name", "", "10871222,Person 905", ",,,"].join("\n");
+    const csv = ["Employee ID,Name", "", "10871222," + privateValue("name:01332c876518a793"), ",,,"].join("\n");
     const rosterPath = writeCsv("blank-rows.csv", csv);
     const result = await verifyBatchAgainstRoster(makeBatch([makeRecord()]), rosterPath);
     assert.equal(result.rosterRows, 1, "fully-blank rows must not count as roster rows");
@@ -199,7 +200,7 @@ describe("verifyBatchAgainstRoster — CSV parsing", () => {
       "Exported 2026-07-01",
       "",
       "Employee ID,Name",
-      "10871222,Person 905",
+      "10871222," + privateValue("name:01332c876518a793"),
     ].join("\n");
     const rosterPath = writeCsv("decorative.csv", csv);
     const result = await verifyBatchAgainstRoster(makeBatch([makeRecord()]), rosterPath);
@@ -221,7 +222,7 @@ describe("verifyBatchAgainstRoster — header column resolution (variant spellin
   const headerVariants = ["UCPath ID", "Employee ID", "EmplID", "Empl ID", "eid"];
   for (const header of headerVariants) {
     it(`recognizes "${header}" as the EID column`, async () => {
-      const csv = [`${header},Name`, "10871222,Person 905"].join("\n");
+      const csv = [`${header},Name`, "10871222," + privateValue("name:01332c876518a793")].join("\n");
       const rosterPath = writeCsv(`hdr-${header.replace(/\s+/g, "_")}.csv`, csv);
       const result = await verifyBatchAgainstRoster(makeBatch([makeRecord()]), rosterPath);
       assert.equal(result.matched, 1, `header "${header}" should resolve to the EID column`);
@@ -231,10 +232,10 @@ describe("verifyBatchAgainstRoster — header column resolution (variant spellin
   const nameVariants = ["Legal Name", "Name", "Lived Name", "Employee Name"];
   for (const header of nameVariants) {
     it(`recognizes "${header}" as the Name column`, async () => {
-      const csv = [`Employee ID,${header}`, "10871222,Person 905"].join("\n");
+      const csv = [`Employee ID,${header}`, "10871222," + privateValue("name:01332c876518a793")].join("\n");
       const rosterPath = writeCsv(`name-${header.replace(/\s+/g, "_")}.csv`, csv);
       const index = await loadRosterIndex(rosterPath);
-      assert.equal(index[0]?.name, "Person 905");
+      assert.equal(index[0]?.name, privateValue("name:01332c876518a793"));
     });
   }
 
@@ -242,14 +243,14 @@ describe("verifyBatchAgainstRoster — header column resolution (variant spellin
     const csv = ["Employee ID,First Name,Last Name", "10871222,Jane,Doe"].join("\n");
     const rosterPath = writeCsv("split-name.csv", csv);
     const index = await loadRosterIndex(rosterPath);
-    assert.equal(index[0]?.name, "Person 905");
+    assert.equal(index[0]?.name, privateValue("name:01332c876518a793"));
   });
 
   it("recognizes First/Last Name headers without an internal space (FirstName/LastName)", async () => {
     const csv = ["Employee ID,FirstName,LastName", "10871222,Jane,Doe"].join("\n");
     const rosterPath = writeCsv("nospace-split-name.csv", csv);
     const index = await loadRosterIndex(rosterPath);
-    assert.equal(index[0]?.name, "Person 905");
+    assert.equal(index[0]?.name, privateValue("name:01332c876518a793"));
   });
 
   it("logs a step (no throw) and matches on EID only when there is no Name column at all", async () => {
@@ -272,14 +273,14 @@ describe("verifyBatchAgainstRoster — header column resolution (variant spellin
     // "Name (Legal)" is not one of the exact literals the resolver checks for,
     // so it must NOT resolve as the Name column — pins the strict-equality
     // (not substring) matching for the Name column specifically.
-    const csv = ["Employee ID,Name (Legal)", "10871222,Person 905"].join("\n");
+    const csv = ["Employee ID,Name (Legal)", "10871222," + privateValue("name:01332c876518a793")].join("\n");
     const rosterPath = writeCsv("partial-name-header.csv", csv);
     const index = await loadRosterIndex(rosterPath);
     assert.equal(index[0]?.name, "", "an unrecognized Name header must not be read as the name");
   });
 
   it("prefers the leftmost matching EID header when multiple EID-like columns exist", async () => {
-    const csv = ["UCPath ID,Employee ID,Name", "10871222,99999999,Person 905"].join("\n");
+    const csv = ["UCPath ID,Employee ID,Name", "10871222,99999999," + privateValue("name:01332c876518a793")].join("\n");
     const rosterPath = writeCsv("dupe-eid-cols.csv", csv);
     const index = await loadRosterIndex(rosterPath);
     assert.equal(index[0]?.emplId, "10871222", "the first (leftmost) EID-like column wins");
@@ -294,7 +295,7 @@ describe("verifyBatchAgainstRoster — EID matching", () => {
     assert.equal(result.matched, 0);
     assert.equal(result.missing.length, 1);
     assert.equal(result.missing[0]?.emplId, "10871222");
-    assert.equal(result.missing[0]?.batchName, "Person 905");
+    assert.equal(result.missing[0]?.batchName, privateValue("name:01332c876518a793"));
     assert.equal(result.missing[0]?.sourcePage, 1);
   });
 
@@ -307,14 +308,14 @@ describe("verifyBatchAgainstRoster — EID matching", () => {
     assert.deepEqual(result.mismatched[0], {
       emplId: "10871222",
       sourcePage: 1,
-      batchName: "Person 905",
+      batchName: privateValue("name:01332c876518a793"),
       rosterName: "Robert Smith",
     });
   });
 
   it("normalizes EIDs by stripping non-digit characters before comparing", async () => {
     // Roster export sometimes carries a leading apostrophe or dashes.
-    const csv = ["Employee ID,Name", "'108-71222,Person 905"].join("\n");
+    const csv = ["Employee ID,Name", "'108-71222," + privateValue("name:01332c876518a793")].join("\n");
     const rosterPath = writeCsv("dirty-eid.csv", csv);
     const result = await verifyBatchAgainstRoster(makeBatch([makeRecord()]), rosterPath);
     assert.equal(result.matched, 1);
@@ -323,7 +324,7 @@ describe("verifyBatchAgainstRoster — EID matching", () => {
   it("processes multiple records independently (matched + mismatched + missing together)", async () => {
     const csv = [
       "Employee ID,Name",
-      "10871222,Person 905", // matches record 1
+      "10871222," + privateValue("name:01332c876518a793"), // matches record 1
       "10800001,Someone Wrong", // mismatches record 2
     ].join("\n");
     const rosterPath = writeCsv("multi.csv", csv);
@@ -343,7 +344,7 @@ describe("verifyBatchAgainstRoster — EID matching", () => {
 
 describe("loadRosterIndex — CSV", () => {
   it("builds a flat EID → name index, skipping rows with no usable EID", async () => {
-    const csv = ["Employee ID,Name", "10871222,Person 905", ",No EID Here", "10800001,Bob Smith"].join("\n");
+    const csv = ["Employee ID,Name", "10871222," + privateValue("name:01332c876518a793"), ",No EID Here", "10800001,Bob Smith"].join("\n");
     const rosterPath = writeCsv("index.csv", csv);
     const index = await loadRosterIndex(rosterPath);
     assert.equal(index.length, 2);

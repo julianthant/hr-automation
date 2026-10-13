@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -317,7 +318,7 @@ test("a typed box discriminates PER TOKEN across every kind it accepts", () => {
   assert.equal(pl[2].problem?.code, "not-a-recognized-value");
   assert.match(pl[2].problem?.message ?? "", /8 digits/);
 
-  const cd = parseEntries("10084412, person@example.edu", ["eid", "email"], "comma");
+  const cd = parseEntries("10084412, " + privateValue("ucsd:264d6100e98c4256"), ["eid", "email"], "comma");
   assert.deepEqual(cd.map((e) => e.kind), ["eid", "email"]);
 });
 

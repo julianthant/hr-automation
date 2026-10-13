@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 
@@ -230,9 +231,9 @@ test("delegated person rows prefer employee name over root queue title", () => {
   parent.workflow = "ocr";
   parent.runId = "parent-run-1";
 
-  const child = entry("10000910", {
-    name: "Person 905",
-    __queueTitle: "Person 905",
+  const child = entry(privateValue("id:dfa73f9264a72c07"), {
+    name: privateValue("name:17a6fb0c3906628f"),
+    __queueTitle: privateValue("name:17a6fb0c3906628f"),
     __queueTitleKind: "delegation",
     __queueRootTitle: "Emergency Contact · #3456",
   });
@@ -242,7 +243,7 @@ test("delegated person rows prefer employee name over root queue title", () => {
   const displayNames = buildDisplayNameMap([child, parent], "OCR");
 
   assert.equal(resolveEntryName(parent, displayNames), "Emergency Contact · #3456");
-  assert.equal(resolveEntryName(child, displayNames), "Person 905");
+  assert.equal(resolveEntryName(child, displayNames), privateValue("name:17a6fb0c3906628f"));
 });
 
 test("delegated utility person rows keep their own person display name", () => {
@@ -275,9 +276,9 @@ test("delegated final oath-signature rows keep their own person display name", (
   parent.workflow = "ocr";
   parent.runId = "ocr-run-single";
   const child = entry(
-    "10000910",
+    privateValue("id:dfa73f9264a72c07"),
     {
-      emplId: "10000910",
+      emplId: privateValue("id:dfa73f9264a72c07"),
       name: "Barahona Martell, Carlos D",
       __name: "Barahona Martell, Carlos D",
     },
@@ -343,9 +344,9 @@ test("buildDisplayNameEntries includes delegated parents for visible single chil
   parent.workflow = "ocr";
   parent.runId = "ocr-run-single";
   const child = entry(
-    "10000910",
+    privateValue("id:dfa73f9264a72c07"),
     {
-      emplId: "10000910",
+      emplId: privateValue("id:dfa73f9264a72c07"),
       name: "Barahona Martell, Carlos D",
       __name: "Barahona Martell, Carlos D",
     },
@@ -355,7 +356,7 @@ test("buildDisplayNameEntries includes delegated parents for visible single chil
   child.parentRunId = "ocr-run-single";
   const unrelatedSibling = entry(
     "alternate-search",
-    { emplId: "10000910", searchName: "Alternate, Search" },
+    { emplId: privateValue("id:dfa73f9264a72c07"), searchName: "Alternate, Search" },
     "2026-05-05T12:03:00.000Z",
   );
   unrelatedSibling.workflow = "oath-signature";
@@ -368,16 +369,16 @@ test("buildDisplayNameEntries includes delegated parents for visible single chil
 
   assert.deepEqual(
     new Set(entriesForNames.map((row) => row.runId)),
-    new Set(["ocr-run-single", "10000910#1"]),
+    new Set(["ocr-run-single", privateValue("id:dfa73f9264a72c07") + "#1"]),
   );
   assert.equal(resolveEntryName(child, displayNames), "Barahona Martell, Carlos D");
 });
 
 test("collectEntriesForMergedScope includes hidden merged siblings for bulk controls", () => {
-  const primary = entry("name-search", { emplId: "10001516", searchName: "Zaw, Hein" });
+  const primary = entry("name-search", { emplId: privateValue("id:699c7799ff18032d"), searchName: "Zaw, Hein" });
   primary.status = "running";
   primary.runId = "run-primary";
-  const sibling = entry("10001516", { emplId: "10001516" });
+  const sibling = entry(privateValue("id:699c7799ff18032d"), { emplId: privateValue("id:699c7799ff18032d") });
   sibling.status = "pending";
   sibling.runId = "run-sibling";
   const unrelated = entry("other", { searchName: "Other Person" });

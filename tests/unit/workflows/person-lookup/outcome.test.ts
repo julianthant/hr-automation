@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import type { PersonLookupResult } from "../../../../src/workflows/person-lookup/outcome.js";
@@ -8,7 +9,7 @@ import {
 
 function eidResult(patch: Partial<PersonLookupResult> = {}): PersonLookupResult {
   return {
-    emplId: "10001516",
+    emplId: privateValue("id:699c7799ff18032d"),
     hrStatus: "Active",
     lastName: "Zaw",
     name: "Hein Thant Zaw",
@@ -21,16 +22,16 @@ function eidResult(patch: Partial<PersonLookupResult> = {}): PersonLookupResult 
 
 describe("deriveActiveCheckOutcome", () => {
   it("marks an active HDH employee active when no termination date is present", () => {
-    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: "10001516" }, [eidResult()]);
+    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: privateValue("id:699c7799ff18032d") }, [eidResult()]);
 
     assert.equal(outcome.activeStatus, "active");
     assert.equal(outcome.isActive, true);
     assert.equal(outcome.isHdhAccepted, true);
-    assert.equal(outcome.emplId, "10001516");
+    assert.equal(outcome.emplId, privateValue("id:699c7799ff18032d"));
   });
 
   it("marks a person inactive when UCPath has a termination date", () => {
-    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: "10001516" }, [
+    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: privateValue("id:699c7799ff18032d") }, [
       eidResult({ terminationDate: "04/30/2026", hrStatus: "Inactive" }),
     ]);
 
@@ -40,7 +41,7 @@ describe("deriveActiveCheckOutcome", () => {
   });
 
   it("surfaces the termination reason alongside a termination date", () => {
-    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: "10001516" }, [
+    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: privateValue("id:699c7799ff18032d") }, [
       eidResult({
         terminationDate: "06/13/2023",
         terminationReason: "Resign - Personal Reasons",
@@ -53,7 +54,7 @@ describe("deriveActiveCheckOutcome", () => {
   });
 
   it("blanks the termination reason for an active employee even if one leaks through", () => {
-    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: "10001516" }, [
+    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: privateValue("id:699c7799ff18032d") }, [
       eidResult({ terminationDate: "", terminationReason: "Resign - Personal Reasons" }),
     ]);
 
@@ -62,7 +63,7 @@ describe("deriveActiveCheckOutcome", () => {
   });
 
   it("keeps expected job end date as context without making an employee inactive", () => {
-    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: "10001516" }, [
+    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: privateValue("id:699c7799ff18032d") }, [
       eidResult({ expectedJobEndDate: "06/30/2026", terminationDate: "" }),
     ]);
 
@@ -72,7 +73,7 @@ describe("deriveActiveCheckOutcome", () => {
   });
 
   it("carries first day of service as startDate without replacing EFFDT", () => {
-    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: "10001516" }, [
+    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: privateValue("id:699c7799ff18032d") }, [
       eidResult({
         effectiveDate: "04/01/2026",
         startDate: "03/15/2026",
@@ -84,7 +85,7 @@ describe("deriveActiveCheckOutcome", () => {
   });
 
   it("falls back to EFFDT for startDate when first day of service is unavailable", () => {
-    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: "10001516" }, [
+    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: privateValue("id:699c7799ff18032d") }, [
       eidResult({ effectiveDate: "04/01/2026", startDate: "" }),
     ]);
 
@@ -92,7 +93,7 @@ describe("deriveActiveCheckOutcome", () => {
   });
 
   it("flags active non-HDH employees without hiding their active state", () => {
-    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: "10001516" }, [
+    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: privateValue("id:699c7799ff18032d") }, [
       eidResult({ department: "QUALCOMM INSTITUTE" }),
     ]);
 
@@ -102,20 +103,20 @@ describe("deriveActiveCheckOutcome", () => {
   });
 
   it("marks a missing result not-found", () => {
-    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: "10001516" }, []);
+    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: privateValue("id:699c7799ff18032d") }, []);
 
     assert.equal(outcome.activeStatus, "not-found");
     assert.equal(outcome.isActive, false);
-    assert.equal(outcome.emplId, "10001516");
+    assert.equal(outcome.emplId, privateValue("id:699c7799ff18032d"));
   });
 
   it("marks CRM-only hits as n/a with CRM identity filled", () => {
     const outcome = deriveCrmOnlyCheckOutcome(
-      { kind: "by-eid", emplId: "10001701" },
+      { kind: "by-eid", emplId: privateValue("id:c575d6853c4675f4") },
       {
         name: "Magana, Alondra",
         department: "HOUSING/DINING/HOSPITALITY (000412)",
-        emplId: "10001701",
+        emplId: privateValue("id:c575d6853c4675f4"),
       },
     );
 
@@ -124,18 +125,18 @@ describe("deriveActiveCheckOutcome", () => {
     assert.equal(outcome.isActive, false);
     assert.equal(outcome.name, "Magana, Alondra");
     assert.equal(outcome.department, "HOUSING/DINING/HOSPITALITY (000412)");
-    assert.equal(outcome.emplId, "10001701");
+    assert.equal(outcome.emplId, privateValue("id:c575d6853c4675f4"));
   });
 
   it("marks name searches with multiple candidates ambiguous", () => {
     const outcome = deriveActiveCheckOutcome({ kind: "by-name", name: "Zaw, Hein" }, [
-      eidResult({ emplId: "10001516" }),
+      eidResult({ emplId: privateValue("id:699c7799ff18032d") }),
       eidResult({ emplId: "10706432", name: "Hein Zaw" }),
     ]);
 
     assert.equal(outcome.activeStatus, "ambiguous");
     assert.equal(outcome.isActive, false);
-    assert.deepEqual(outcome.candidateEids, ["10001516", "10706432"]);
+    assert.deepEqual(outcome.candidateEids, [privateValue("id:699c7799ff18032d"), "10706432"]);
   });
 
   it("uses the active instance when a name search returns active and inactive rows for the same EID", () => {

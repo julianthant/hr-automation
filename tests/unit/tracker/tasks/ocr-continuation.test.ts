@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -62,7 +63,7 @@ test("applyOcrEidLookupContinuation emits patched awaiting-approval OCR tracker 
         id: "ocr-oath-ocr-run-1-r0",
         runId: "child-run-0",
         status: "done",
-        data: { emplId: "10000910", hrStatus: "Active", department: "Housing Dining Hospitality" },
+        data: { emplId: privateValue("id:dfa73f9264a72c07"), hrStatus: "Active", department: "Housing Dining Hospitality" },
         timestamp: "2026-05-04T12:00:30.000Z",
       },
       emitTracker: (entry) => emitted.push(entry),
@@ -74,7 +75,7 @@ test("applyOcrEidLookupContinuation emits patched awaiting-approval OCR tracker 
     assert.equal(emitted[0].status, "running");
     assert.equal(emitted[0].data?.verifiedCount, "1");
     const records = JSON.parse(emitted[0].data?.records ?? "[]") as Array<{ employeeId?: string; verification?: { state?: string } }>;
-    assert.equal(records[0].employeeId, "10000910");
+    assert.equal(records[0].employeeId, privateValue("id:dfa73f9264a72c07"));
     assert.equal(records[0].verification?.state, "verified");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -128,14 +129,14 @@ test("applyOcrEidLookupContinuation patches EC-shaped records under employee.* a
       records: JSON.stringify([
         {
           formKind: "emergency-contact",
-          employee: { name: "Person 1717", employeeId: "" },
+          employee: { name: privateValue("name:952c7413af9733c9"), employeeId: "" },
           emergencyContact: { name: "Coleman, Rod", relationship: "Parent" },
           matchState: "lookup-pending",
           selected: true,
         },
         {
           formKind: "emergency-contact",
-          employee: { name: "Person 1379", employeeId: "10002187" },
+          employee: { name: privateValue("name:dcdfaff8c201fd1d"), employeeId: privateValue("id:a970cb8c2efb55e5") },
           emergencyContact: { name: "Wu, Lee", relationship: "Spouse" },
           matchState: "resolved",
           selected: true,
@@ -160,7 +161,7 @@ test("applyOcrEidLookupContinuation patches EC-shaped records under employee.* a
       childRun: {
         workflow: "person-lookup", id: "ocr-ec-ocr-run-ec-r0", runId: "child-run-ec-0",
         status: "done",
-        data: { emplId: "10001516", hrStatus: "Active", department: "Housing Dining Hospitality" },
+        data: { emplId: privateValue("id:699c7799ff18032d"), hrStatus: "Active", department: "Housing Dining Hospitality" },
         timestamp: "2026-06-12T12:00:30.000Z",
       },
       emitTracker: (entry) => emitted.push(entry),
@@ -181,7 +182,7 @@ test("applyOcrEidLookupContinuation patches EC-shaped records under employee.* a
       childRun: {
         workflow: "person-lookup", id: "ocr-ec-ocr-run-ec-r1", runId: "child-run-ec-1",
         status: "done",
-        data: { emplId: "10000910", hrStatus: "Active", department: "Housing Dining Hospitality" },
+        data: { emplId: privateValue("id:dfa73f9264a72c07"), hrStatus: "Active", department: "Housing Dining Hospitality" },
         timestamp: "2026-06-12T12:01:30.000Z",
       },
       emitTracker: (entry) => emitted.push(entry),
@@ -190,9 +191,9 @@ test("applyOcrEidLookupContinuation patches EC-shaped records under employee.* a
     const records = JSON.parse(emitted.at(-1)?.data?.records ?? "[]") as Array<Record<string, unknown>>;
     assert.equal(records.length, 2);
     const employees = records.map((r) => r.employee as { name?: string; employeeId?: string });
-    assert.equal(employees[0].employeeId, "10001516", "blank nested EID is filled from the lookup");
-    assert.equal(employees[0].name, "Person 1717");
-    assert.equal(employees[1].employeeId, "10002187", "present nested EID survives a divergent lookup echo");
+    assert.equal(employees[0].employeeId, privateValue("id:699c7799ff18032d"), "blank nested EID is filled from the lookup");
+    assert.equal(employees[0].name, privateValue("name:952c7413af9733c9"));
+    assert.equal(employees[1].employeeId, privateValue("id:a970cb8c2efb55e5"), "present nested EID survives a divergent lookup echo");
     for (const rec of records) {
       assert.ok(!("printedName" in rec), "no top-level printedName stamped on EC records");
       assert.ok(!("employeeId" in rec), "no top-level employeeId stamped on EC records");
@@ -243,7 +244,7 @@ test("applyOcrEidLookupContinuation does not emit duplicate row for already reso
         data: {
           records: JSON.stringify([{
             printedName: "Liam",
-            employeeId: "10000910",
+            employeeId: privateValue("id:dfa73f9264a72c07"),
             matchState: "resolved",
             matchSource: "eid-lookup",
             selected: true,
@@ -263,7 +264,7 @@ test("applyOcrEidLookupContinuation does not emit duplicate row for already reso
         id: "ocr-oath-ocr-run-1-r0",
         runId: "child-run-0",
         status: "done",
-        data: { emplId: "10000910", hrStatus: "Active", department: "Housing Dining Hospitality" },
+        data: { emplId: privateValue("id:dfa73f9264a72c07"), hrStatus: "Active", department: "Housing Dining Hospitality" },
         timestamp: "2026-05-04T12:00:30.000Z",
       },
       emitTracker: (entry) => emitted.push(entry),
@@ -382,7 +383,7 @@ test("applyOcrActiveCheckContinuation emits verified OCR tracker row", async () 
         status: "running",
         step: "awaiting-approval",
         data: {
-          records: JSON.stringify([{ printedName: "Liam", employeeId: "10000910", matchState: "matched", selected: true }]),
+          records: JSON.stringify([{ printedName: "Liam", employeeId: privateValue("id:dfa73f9264a72c07"), matchState: "matched", selected: true }]),
         },
         timestamp: "2026-05-05T12:00:00.000Z",
       },
@@ -392,7 +393,7 @@ test("applyOcrActiveCheckContinuation emits verified OCR tracker row", async () 
         runId: "active-child-0",
         status: "done",
         data: {
-          emplId: "10000910",
+          emplId: privateValue("id:dfa73f9264a72c07"),
           activeStatus: "active",
           isActive: "true",
           isHdhAccepted: "true",
@@ -458,7 +459,7 @@ test("applyOcrActiveCheckContinuation marks inactive records without deselecting
         status: "running",
         step: "awaiting-approval",
         data: {
-          records: JSON.stringify([{ printedName: "Liam", employeeId: "10000910", matchState: "matched", selected: true }]),
+          records: JSON.stringify([{ printedName: "Liam", employeeId: privateValue("id:dfa73f9264a72c07"), matchState: "matched", selected: true }]),
         },
         timestamp: "2026-05-05T12:00:00.000Z",
       },
@@ -468,7 +469,7 @@ test("applyOcrActiveCheckContinuation marks inactive records without deselecting
         runId: "active-child-0",
         status: "done",
         data: {
-          emplId: "10000910",
+          emplId: privateValue("id:dfa73f9264a72c07"),
           activeStatus: "inactive",
           isActive: "false",
           hrStatus: "Inactive",

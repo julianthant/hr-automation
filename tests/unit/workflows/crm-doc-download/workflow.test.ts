@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test, describe } from "vitest";
 import assert from "node:assert/strict";
 import { join, dirname, basename } from "node:path";
@@ -127,7 +128,7 @@ describe("resolveArchivePath", () => {
 
   test("all members of one batch resolve the SAME archive path", () => {
     const parentRunId = "ffffffff-0000-1111-2222-333344445555";
-    const a = resolveArchivePath(join(PATHS.onboardingDocsDir, "Person 905 EID"), parentRunId);
+    const a = resolveArchivePath(join(PATHS.onboardingDocsDir, privateValue("name:17a6fb0c3906628f") + " EID"), parentRunId);
     const b = resolveArchivePath(join(PATHS.onboardingDocsDir, "Roe, Rick EID"), parentRunId);
     assert.equal(a, b);
   });

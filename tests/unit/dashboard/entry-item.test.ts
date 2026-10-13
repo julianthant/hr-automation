@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import React from "react";
@@ -65,7 +66,7 @@ test("dry-run rows render the cross-workflow DRY RUN chip", () => {
     timestamp: "2026-05-19T12:54:08.000Z",
     firstLogTs: "2026-05-19T12:53:20.000Z",
     lastLogTs: "2026-05-19T12:54:08.000Z",
-    data: { email: "person@example.edu", dryRun: "true" },
+    data: { email: privateValue("ucsd:d584e8c08670091b"), dryRun: "true" },
     _hash: "dryrun-1",
   } as TrackerEntry);
 
@@ -82,7 +83,7 @@ test("live (non-dry-run) rows do NOT render the DRY RUN chip", () => {
     timestamp: "2026-05-19T12:54:08.000Z",
     firstLogTs: "2026-05-19T12:53:20.000Z",
     lastLogTs: "2026-05-19T12:54:08.000Z",
-    data: { email: "person@example.edu" },
+    data: { email: privateValue("ucsd:d584e8c08670091b") },
     _hash: "live-1",
   } as TrackerEntry);
 

@@ -7,6 +7,7 @@
  * person displayed before I Save/Import?" check to.
  */
 
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
@@ -72,9 +73,9 @@ describe("checkDisplayedIdentity (exact)", () => {
   });
 
   it("fails a value that merely CONTAINS the expected (exact ≠ substring)", () => {
-    const r = checkDisplayedIdentity("10877384", "10877384 Person 905", { mode: "exact" });
+    const r = checkDisplayedIdentity("10877384", "10877384 " + privateValue("name:01332c876518a793"), { mode: "exact" });
     assert.equal(r.ok, false);
-    assert.equal(r.shown, "10877384 Person 905");
+    assert.equal(r.shown, "10877384 " + privateValue("name:01332c876518a793"));
   });
 
   it("reports null shown for an empty field value", () => {

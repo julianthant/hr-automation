@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -121,7 +122,7 @@ describe("describeOcrRecords", () => {
       firstName: "Kimi",
       middleInitial: null,
       dateOfBirth: "04/01/1998",
-      ssn: "000-00-0000",
+      ssn: privateValue("ssn:01a54629efb95228"),
       illegible: [],
       originallyMissing: [],
       section2Name: null,
@@ -130,7 +131,7 @@ describe("describeOcrRecords", () => {
     };
 
     it("labels a Section 1 page `i9 §1` and composes its split name", () => {
-      assert.deepEqual(describeOcrRecords([section1]), ["i9 §1 · Person 1218 · ssn ✓ · dob ✓"]);
+      assert.deepEqual(describeOcrRecords([section1]), ["i9 §1 · " + privateValue("name:d0882bf04afb3147") + " · ssn ✓ · dob ✓"]);
     });
 
     it("does not mark a Section 1 record on the section2 fields it never owned", () => {
@@ -144,14 +145,14 @@ describe("describeOcrRecords", () => {
       // admission it could not read, and must not look like a blank field.
       assert.deepEqual(
         describeOcrRecords([{ ...section1, ssn: null, illegible: ["ssn"] }]),
-        ["i9 §1 · Person 1218 · ssn ✗ illegible · dob ✓"],
+        ["i9 §1 · " + privateValue("name:d0882bf04afb3147") + " · ssn ✗ illegible · dob ✓"],
       );
     });
 
     it("distinguishes a blank field (∅) from an illegible one (✗)", () => {
       assert.deepEqual(
         describeOcrRecords([{ ...section1, ssn: null, originallyMissing: ["ssn"] }]),
-        ["i9 §1 · Person 1218 · ssn ∅ blank · dob ✓"],
+        ["i9 §1 · " + privateValue("name:d0882bf04afb3147") + " · ssn ∅ blank · dob ✓"],
       );
     });
 
@@ -170,13 +171,13 @@ describe("describeOcrRecords", () => {
             formKind: "i9 section 2",
             lastName: "Walters",
             firstName: "Kimi",
-            ssn: "000-00-0000",
+            ssn: privateValue("ssn:01a54629efb95228"),
             hireDate: "04/17/2018",
             illegible: [],
             originallyMissing: [],
           },
         ]),
-        ["i9 §2 · Person 1218 · name ✓ · ssn ✓ · hired ✓"],
+        ["i9 §2 · " + privateValue("name:d0882bf04afb3147") + " · name ✓ · ssn ✓ · hired ✓"],
       );
     });
 
@@ -189,10 +190,10 @@ describe("describeOcrRecords", () => {
             ssn: null,
             illegible: [],
             originallyMissing: [],
-            section2Name: "Person 1218",
+            section2Name: privateValue("name:d0882bf04afb3147"),
           },
         ]),
-        ["i9 §2 · Person 1218 · name — · ssn —"],
+        ["i9 §2 · " + privateValue("name:d0882bf04afb3147") + " · name — · ssn —"],
       );
     });
 

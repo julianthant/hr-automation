@@ -9,6 +9,7 @@
  * orchestrator imports it dynamically with no test seam); the main
  * orchestrator.test.ts must keep the real module.
  */
+import { privateValue } from "../../../../src/private-data.js";
 import { test, vi } from "vitest";
 import assert from "node:assert";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -78,8 +79,8 @@ test("disambiguation-LLM failure is surfaced ON THE RECORD as a warning — not 
       _loadRosterOverride: async () => [
         // Both score 0.9 for "Maria Garcia" (probed against the real matcher)
         // → the ambiguous multi-candidate branch, not a single-accept.
-        { eid: "10000910", name: "Garcia Lopez, Maria" },
-        { eid: "10000002", name: "Garcia Person 1402" },
+        { eid: privateValue("id:dfa73f9264a72c07"), name: "Garcia Lopez, Maria" },
+        { eid: "10000002", name: "Garcia " + privateValue("name:e572c9c455e78a01") },
       ],
       _secondOpinionOverride: async () => null,
       _lookupSuggestionOverride: async () => [],
@@ -90,7 +91,7 @@ test("disambiguation-LLM failure is surfaced ON THE RECORD as a warning — not 
         itemId: "ocr-oath-run-disambig-fail-r0",
         runId: "verify-1",
         status: "done" as const,
-        data: { hrStatus: "Active", emplId: "10000910" },
+        data: { hrStatus: "Active", emplId: privateValue("id:dfa73f9264a72c07") },
       }],
     },
   );

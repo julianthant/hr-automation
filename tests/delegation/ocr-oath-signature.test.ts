@@ -1,3 +1,4 @@
+import { privateValue } from "../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync } from "node:fs";
@@ -74,7 +75,7 @@ const oathSignatureStub: GatedWorkflowSpec = {
 
 /** PII-FREE synthetic records: fake names + UCPath-shaped (10######) EIDs. */
 const STUB_RECORDS: StubOcrRecord[] = [
-  { sourcePage: 1, rowIndex: 0, printedName: "Person 905", employeeId: "10000910", employeeSigned: true, dateSigned: "05/01/2026" },
+  { sourcePage: 1, rowIndex: 0, printedName: privateValue("name:01332c876518a793"), employeeId: privateValue("id:dfa73f9264a72c07"), employeeSigned: true, dateSigned: "05/01/2026" },
   { sourcePage: 2, rowIndex: 0, printedName: "Richard Roe", employeeId: "10000002", employeeSigned: true, dateSigned: "05/01/2026" },
   { sourcePage: 3, rowIndex: 0, printedName: "Sam Stone", employeeId: "10000003", employeeSigned: true, dateSigned: "05/02/2026" },
 ];
@@ -188,7 +189,7 @@ test("OCR → oath-signature approveTo fan-out: projection correct under hold/ca
   // Every signer child: batch-member archetype, parentRunId === the delegating run,
   // person title (resolved name), EID subtitle (eid→person, flat-row footer).
   const byEid: Record<string, { name: string }> = {
-    "10000910": { name: "Person 905" },
+    [privateValue("id:dfa73f9264a72c07")]: { name: privateValue("name:01332c876518a793") },
     "10000002": { name: "Richard Roe" },
     "10000003": { name: "Sam Stone" },
   };

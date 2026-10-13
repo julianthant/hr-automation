@@ -8,6 +8,7 @@
  * These tests render the real components to static markup and assert the
  * warning text + confidence badge are present in the output.
  */
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import React from "react";
@@ -29,8 +30,8 @@ function lowConfidenceOathRecord(): OathPreviewRecord {
     formKind: "oath",
     sourcePage: 1,
     rowIndex: 0,
-    printedName: "Person 905",
-    employeeId: "10000910",
+    printedName: privateValue("name:17a6fb0c3906628f"),
+    employeeId: privateValue("id:dfa73f9264a72c07"),
     employeeSigned: true,
     officerSigned: true,
     dateSigned: "04/23/2026",
@@ -39,7 +40,7 @@ function lowConfidenceOathRecord(): OathPreviewRecord {
     matchSource: "llm",
     matchConfidence: 0.4,
     selected: true,
-    warnings: ["LLM picked EID 10000910 but low confidence (0.40) — review"],
+    warnings: ["LLM picked EID " + privateValue("id:dfa73f9264a72c07") + " but low confidence (0.40) — review"],
   };
 }
 
@@ -101,12 +102,12 @@ describe("VerifyRecordView confidence (approved/read-only audit path)", () => {
     const record: VerifyPreviewRecord = {
       formKind: "oath",
       sourcePage: 1,
-      printedName: "Person 905",
-      employeeId: "10000910",
-      name: "Person 905",
+      printedName: privateValue("name:17a6fb0c3906628f"),
+      employeeId: privateValue("id:dfa73f9264a72c07"),
+      name: privateValue("name:17a6fb0c3906628f"),
       matchState: "lookup-pending",
       selected: true,
-      warnings: ["LLM picked EID 10000910 but low confidence (0.40) — review"],
+      warnings: ["LLM picked EID " + privateValue("id:dfa73f9264a72c07") + " but low confidence (0.40) — review"],
       matchConfidence: 0.4,
       checks: [],
     };
@@ -119,9 +120,9 @@ describe("VerifyRecordView confidence (approved/read-only audit path)", () => {
     const record: VerifyPreviewRecord = {
       formKind: "oath",
       sourcePage: 1,
-      printedName: "Person 905",
-      employeeId: "10000910",
-      name: "Person 905",
+      printedName: privateValue("name:17a6fb0c3906628f"),
+      employeeId: privateValue("id:dfa73f9264a72c07"),
+      name: privateValue("name:17a6fb0c3906628f"),
       matchState: "resolved",
       selected: true,
       warnings: [],

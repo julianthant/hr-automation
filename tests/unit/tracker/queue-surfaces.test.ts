@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
@@ -132,7 +133,7 @@ describe("buildTrackerQueueSurfaces", () => {
     });
     const child = entry({
       workflow: "oath-signature",
-      id: "10000910",
+      id: privateValue("id:dfa73f9264a72c07"),
       runId: "oath-run-single",
       parentRunId: "ocr-run-single",
       status: "running",
@@ -148,7 +149,7 @@ describe("buildTrackerQueueSurfaces", () => {
     assert.equal(result.groupRows.length, 1);
     assert.equal(result.groupRows[0]?.kind, "preview");
     assert.equal(result.groupRows[0]?.approvalState, "approved");
-    assert.deepEqual(result.groupRows[0]?.members.map((e) => e.id), ["10000910"]);
+    assert.deepEqual(result.groupRows[0]?.members.map((e) => e.id), [privateValue("id:dfa73f9264a72c07")]);
     assert.deepEqual(result.flatEntries.map((e) => e.id), []);
   });
 
@@ -445,7 +446,7 @@ describe("buildTrackerQueueSurfaces", () => {
     });
     const signer1 = entry({
       workflow: "oath-signature",
-      id: "10000910",
+      id: privateValue("id:dfa73f9264a72c07"),
       runId: "signer-run-1",
       parentRunId: "op-run-2",
       status: "running",
@@ -471,7 +472,7 @@ describe("buildTrackerQueueSurfaces", () => {
     assert.equal(result.groupRows.length, 1);
     const surface = result.groupRows[0];
     assert.equal(surface?.kind, "operation");
-    assert.deepEqual(surface?.members.map((e) => e.id), ["10000910", "10000002"]);
+    assert.deepEqual(surface?.members.map((e) => e.id), [privateValue("id:dfa73f9264a72c07"), "10000002"]);
     assert.equal(
       surface?.members.some((m) => m.workflow === "ocr"),
       false,

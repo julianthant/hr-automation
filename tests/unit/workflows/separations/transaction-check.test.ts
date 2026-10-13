@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, test, beforeAll, beforeEach, vi } from "vitest";
 import assert from "node:assert/strict";
 
@@ -183,7 +184,7 @@ describe("runTransactionCheck — dry-run guards the mutation", () => {
 describe("job-scoped separation check", () => {
   test("never deletes other concurrent jobs when no matching transaction exists", async () => {
     mocks.findTerminationTransactionStatus.mockResolvedValue(ter({ found: false }));
-    const job = { emplRecord: "0", positionNumber: "10005858", jobCode: "004920" };
+    const job = { emplRecord: "0", positionNumber: privateValue("id:4dce293f69e3e795"), jobCode: "004920" };
     assert.deepEqual(await runTransactionCheck(makeCtx(), EID, { dryRun: false, job, effectiveDate: "09/02/2026", expectedComments: "canonical" }), { status: "none" });
     assert.equal(mocks.deletePendingTransaction.mock.calls.length, 0);
     const options = mocks.findTerminationTransactionStatus.mock.calls[0][2] as { job: typeof job; expectedComments: string };
@@ -192,7 +193,7 @@ describe("job-scoped separation check", () => {
   });
   test("reuses the matching pending job without deleting it", async () => {
     mocks.findTerminationTransactionStatus.mockResolvedValue(ter({ found: true, transactionId: "T002230487", approvalStatus: "Pending" }));
-    const job = { emplRecord: "0", positionNumber: "10005858", jobCode: "004920" };
+    const job = { emplRecord: "0", positionNumber: privateValue("id:4dce293f69e3e795"), jobCode: "004920" };
     assert.deepEqual(await runTransactionCheck(makeCtx(), EID, { dryRun: false, job, effectiveDate: "09/02/2026", expectedComments: "canonical" }), { status: "pending-reused", transactionNumber: "T002230487" });
     assert.equal(mocks.deletePendingTransaction.mock.calls.length, 0);
   });

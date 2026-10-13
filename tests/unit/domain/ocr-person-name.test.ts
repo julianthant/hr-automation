@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import {
@@ -20,9 +21,9 @@ describe("splitOcrPersonName", () => {
 
 describe("applyPersonLookupNameToOcrRecord", () => {
   it("patches EC employee first/last/name from resolvedName", () => {
-    const rec: Record<string, unknown> = { employee: { name: "Person 715", employeeId: "10002219" } };
+    const rec: Record<string, unknown> = { employee: { name: privateValue("name:eaa5934db04019d9"), employeeId: privateValue("id:2ce5c9e4b1a0b7bc") } };
     applyPersonLookupNameToOcrRecord(rec, {
-      searchName: "Person 715",
+      searchName: privateValue("name:eaa5934db04019d9"),
       resolvedName: "Garcia Solis, Gema",
     });
     const employee = rec.employee as Record<string, string>;
@@ -32,7 +33,7 @@ describe("applyPersonLookupNameToOcrRecord", () => {
   });
 
   it("does NOT overwrite a present paper printedName but still fills first/last", () => {
-    const rec: Record<string, unknown> = { printedName: "Person 715", employeeId: "10002219" };
+    const rec: Record<string, unknown> = { printedName: privateValue("name:eaa5934db04019d9"), employeeId: privateValue("id:2ce5c9e4b1a0b7bc") };
     applyPersonLookupNameToOcrRecord(rec, {
       resolvedName: "Garcia Solis, Gema",
     });
@@ -40,11 +41,11 @@ describe("applyPersonLookupNameToOcrRecord", () => {
     assert.equal(rec.lastName, "Garcia Solis");
     // printedName is the PAPER side of the verify name check — enrichment
     // must never clobber it, or the check compares the lookup to itself.
-    assert.equal(rec.printedName, "Person 715");
+    assert.equal(rec.printedName, privateValue("name:eaa5934db04019d9"));
   });
 
   it("still stamps printedName when it is blank", () => {
-    const rec: Record<string, unknown> = { printedName: "   ", employeeId: "10002219" };
+    const rec: Record<string, unknown> = { printedName: "   ", employeeId: privateValue("id:2ce5c9e4b1a0b7bc") };
     applyPersonLookupNameToOcrRecord(rec, {
       resolvedName: "Garcia Solis, Gema",
     });
@@ -54,7 +55,7 @@ describe("applyPersonLookupNameToOcrRecord", () => {
   });
 
   it("still stamps printedName when it is missing", () => {
-    const rec: Record<string, unknown> = { printedName: null, employeeId: "10002219" };
+    const rec: Record<string, unknown> = { printedName: null, employeeId: privateValue("id:2ce5c9e4b1a0b7bc") };
     applyPersonLookupNameToOcrRecord(rec, {
       resolvedName: "Garcia Solis, Gema",
     });
@@ -68,18 +69,18 @@ describe("applyPersonLookupNameToOcrRecord", () => {
       "Garcia Solis, Gema",
     );
     assert.equal(
-      applyPersonLookupNameToOcrRecord(rec, { searchName: "Person 715" }),
-      "Person 715",
+      applyPersonLookupNameToOcrRecord(rec, { searchName: privateValue("name:eaa5934db04019d9") }),
+      privateValue("name:eaa5934db04019d9"),
     );
     assert.equal(applyPersonLookupNameToOcrRecord(rec, undefined), undefined);
   });
 
   it("does not stamp an EID searchName into first/last/name when resolvedName is missing", () => {
     const rec: Record<string, unknown> = {
-      employee: { firstName: "Alondra", lastName: "Magana", name: "Magana, Alondra", employeeId: "10001701" },
+      employee: { firstName: "Alondra", lastName: "Magana", name: "Magana, Alondra", employeeId: privateValue("id:c575d6853c4675f4") },
     };
     assert.equal(
-      applyPersonLookupNameToOcrRecord(rec, { searchName: "10001701" }),
+      applyPersonLookupNameToOcrRecord(rec, { searchName: privateValue("id:c575d6853c4675f4") }),
       undefined,
     );
     const employee = rec.employee as Record<string, string>;
@@ -119,7 +120,7 @@ describe("mergeOcrPersonNameParts", () => {
   // (select-all + Delete snaps the EID right back into the input).
   it("clearing firstName when fullName is the EID does not snap the EID back", () => {
     const merged = mergeOcrPersonNameParts(
-      { firstName: "10001701", lastName: "", fullName: "10001701" },
+      { firstName: privateValue("id:c575d6853c4675f4"), lastName: "", fullName: privateValue("id:c575d6853c4675f4") },
       { firstName: "" },
     );
     assert.deepEqual(merged, {
@@ -131,7 +132,7 @@ describe("mergeOcrPersonNameParts", () => {
 
   it("typing a first name alone does not keep a stale EID fullName as the display name", () => {
     const merged = mergeOcrPersonNameParts(
-      { firstName: "10001701", lastName: "", fullName: "10001701" },
+      { firstName: privateValue("id:c575d6853c4675f4"), lastName: "", fullName: privateValue("id:c575d6853c4675f4") },
       { firstName: "Alondra" },
     );
     assert.deepEqual(merged, {

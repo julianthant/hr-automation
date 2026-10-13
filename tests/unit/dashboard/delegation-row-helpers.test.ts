@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
@@ -165,29 +166,29 @@ describe("pickPreviewChildren", () => {
     const out = pickPreviewChildren(
       [
         child({
-          id: "10002241",
+          id: privateValue("id:17f5934d6070e132"),
           data: {
-            emplId: "10002241",
+            emplId: privateValue("id:17f5934d6070e132"),
             employeeName: "Maria Garcia",
-            __subject: "10002241",
+            __subject: privateValue("id:17f5934d6070e132"),
           },
         }),
       ],
       1,
     );
     assert.equal(out[0]?.name, "Maria Garcia");
-    assert.equal(out[0]?.emplId, "10002241");
+    assert.equal(out[0]?.emplId, privateValue("id:17f5934d6070e132"));
   });
 
   it("prefers person names and EIDs over technical subject labels for preview labels", () => {
     const out = pickPreviewChildren(
       [
         child({
-          id: "10001780",
+          id: privateValue("id:dc6ad4b4ae480116"),
           data: {
-            __subject: "Oath · 10001780",
+            __subject: "Oath · " + privateValue("id:dc6ad4b4ae480116"),
             name: "Akitsugu Uchida",
-            emplId: "10001780",
+            emplId: privateValue("id:dc6ad4b4ae480116"),
           },
         }),
         child({ id: "bad-eid", data: { name: "Carlos Barahona", emplId: "12345" } }),
@@ -221,12 +222,12 @@ describe("pickPreviewChildren", () => {
   it("resolves emplId from data.emplId or data.eid", () => {
     const out = pickPreviewChildren(
       [
-        child({ id: "a", data: { emplId: "10000910" } }),
+        child({ id: "a", data: { emplId: privateValue("id:dfa73f9264a72c07") } }),
         child({ id: "b", data: { eid: "10000002" } }),
       ],
       2,
     );
-    assert.equal(out[0]?.emplId, "10000910");
+    assert.equal(out[0]?.emplId, privateValue("id:dfa73f9264a72c07"));
     assert.equal(out[1]?.emplId, "10000002");
   });
 });

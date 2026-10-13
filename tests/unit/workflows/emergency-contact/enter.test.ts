@@ -17,6 +17,7 @@
  * so these fakes model `page.locator(id)` instead.
  */
 
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import type { Page } from "playwright";
@@ -66,10 +67,10 @@ function fakePage(opts: FakeOpts): Page {
 
 describe("readEmergencyContactPersonIdRow", () => {
   it("composes the header row from the EID and name VALUE elements", async () => {
-    const page = fakePage({ emplId: "10877384", name: "Person 905" });
+    const page = fakePage({ emplId: "10877384", name: privateValue("name:01332c876518a793") });
     assert.equal(
       await readEmergencyContactPersonIdRow(page),
-      "Person ID 10877384 Person 905 Emergency Contact",
+      "Person ID 10877384 " + privateValue("name:01332c876518a793") + " Emergency Contact",
     );
   });
 
@@ -115,10 +116,10 @@ describe("readEmergencyContactPersonIdRow", () => {
 
 describe("emergency-contact identity gate wiring", () => {
   it("passes when the loaded editor shows the intended employee id", async () => {
-    const page = fakePage({ emplId: "10877384", name: "Person 905" });
+    const page = fakePage({ emplId: "10877384", name: privateValue("name:01332c876518a793") });
     await assertDisplayedIdentity({
       expected: "10877384",
-      context: "Emergency Contact (Person 905)",
+      context: "Emergency Contact (" + privateValue("name:01332c876518a793") + ")",
       extract: () => readEmergencyContactPersonIdRow(page),
     });
   });
@@ -128,7 +129,7 @@ describe("emergency-contact identity gate wiring", () => {
     await assert.rejects(
       assertDisplayedIdentity({
         expected: "10877384",
-        context: "Emergency Contact (Person 905)",
+        context: "Emergency Contact (" + privateValue("name:01332c876518a793") + ")",
         extract: () => readEmergencyContactPersonIdRow(page),
       }),
       (err: Error) => /10877384/.test(err.message) && /10999999/.test(err.message),
@@ -140,7 +141,7 @@ describe("emergency-contact identity gate wiring", () => {
     await assert.rejects(
       assertDisplayedIdentity({
         expected: "10877384",
-        context: "Emergency Contact (Person 905)",
+        context: "Emergency Contact (" + privateValue("name:01332c876518a793") + ")",
         extract: () => readEmergencyContactPersonIdRow(page),
       }),
       /was not found on the page/,

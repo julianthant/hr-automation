@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { isAcceptedHdhDepartment } from "../../../../src/domain/hdh/departments.js";
@@ -130,13 +131,13 @@ describe("selectPreferredAssignmentDetails", () => {
 
 describe("selectPersonName", () => {
   it("picks a real two-word name", () => {
-    assert.equal(selectPersonName(["Person 1290"]), "Person 1290");
+    assert.equal(selectPersonName([privateValue("name:aeb6ceeb566a2e65")]), privateValue("name:aeb6ceeb566a2e65"));
   });
 
   it("picks the name and skips two-word UI labels in front of it", () => {
     assert.equal(
-      selectPersonName(["Person ID", "HR Status", "Person 1290"]),
-      "Person 1290",
+      selectPersonName(["Person ID", "HR Status", privateValue("name:aeb6ceeb566a2e65")]),
+      privateValue("name:aeb6ceeb566a2e65"),
     );
   });
 
@@ -145,35 +146,35 @@ describe("selectPersonName", () => {
     // text.includes('Person ID') returned false (regular space mismatch) and
     // 'Person ID' leaked through as the picked name.
     assert.equal(
-      selectPersonName(["Person ID", "Person 1290"]),
-      "Person 1290",
+      selectPersonName(["Person ID", privateValue("name:aeb6ceeb566a2e65")]),
+      privateValue("name:aeb6ceeb566a2e65"),
     );
   });
 
   it("matches labels case-insensitively", () => {
     assert.equal(
-      selectPersonName(["person id", "PERSON ID", "Person 1290"]),
-      "Person 1290",
+      selectPersonName(["person id", "PERSON ID", privateValue("name:aeb6ceeb566a2e65")]),
+      privateValue("name:aeb6ceeb566a2e65"),
     );
   });
 
   it("returns the normalized form (collapses internal NBSP/whitespace)", () => {
     assert.equal(
       selectPersonName(["Leo Langley"]),
-      "Person 1290",
+      privateValue("name:aeb6ceeb566a2e65"),
     );
   });
 
   it("rejects candidates containing digits", () => {
     assert.equal(
-      selectPersonName(["12345 Foo", "Person 1290"]),
-      "Person 1290",
+      selectPersonName(["12345 Foo", privateValue("name:aeb6ceeb566a2e65")]),
+      privateValue("name:aeb6ceeb566a2e65"),
     );
   });
 
   it("rejects candidates of length ≥ 60", () => {
     const long = "A" + " B".repeat(40); // exceeds 60 chars
-    assert.equal(selectPersonName([long, "Person 1290"]), "Person 1290");
+    assert.equal(selectPersonName([long, privateValue("name:aeb6ceeb566a2e65")]), privateValue("name:aeb6ceeb566a2e65"));
   });
 
   it("returns null when no candidate qualifies", () => {
@@ -181,7 +182,7 @@ describe("selectPersonName", () => {
   });
 
   it("rejects single-word candidates", () => {
-    assert.equal(selectPersonName(["Active", "Person 1290"]), "Person 1290");
+    assert.equal(selectPersonName(["Active", privateValue("name:aeb6ceeb566a2e65")]), privateValue("name:aeb6ceeb566a2e65"));
   });
 
   it("rejects 'Loading Complete' UI status text leaking from UCPath", () => {
@@ -190,8 +191,8 @@ describe("selectPersonName", () => {
     // shape filter and was picked as the name when the page hadn't fully
     // settled. Skip-list now rejects it.
     assert.equal(
-      selectPersonName(["Loading Complete", "Person 1290"]),
-      "Person 1290",
+      selectPersonName(["Loading Complete", privateValue("name:aeb6ceeb566a2e65")]),
+      privateValue("name:aeb6ceeb566a2e65"),
     );
   });
 
@@ -204,20 +205,20 @@ describe("selectPersonName", () => {
 
 
 describe("resolveSeparationHireDate", () => {
-  const job = { emplRecord: "0", positionNumber: "10005710" };
-  const cells = ["0", "09/13/2026", "Active", "SDCMP", "10005710", "000412", "HOUSING/DINING/HOSPITALITY", "004921", "STDT 2", "06/30/2027", "0.44", "Student"];
+  const job = { emplRecord: "0", positionNumber: privateValue("id:86c05cda34760347") };
+  const cells = ["0", "09/13/2026", "Active", "SDCMP", privateValue("id:86c05cda34760347"), "000412", "HOUSING/DINING/HOSPITALITY", "004921", "STDT 2", "06/30/2027", "0.44", "Student"];
   const instance = { hireDate: "10/24/2025", assignments: [cells], complete: true };
   it("uses Last Hire rather than later assignment EFFDT", () => {
-    assert.equal(resolveSeparationHireDate("10001979", "10001979", job, [instance]), "10/24/2025");
+    assert.equal(resolveSeparationHireDate(privateValue("id:3c6648fa80011ea0"), privateValue("id:3c6648fa80011ea0"), job, [instance]), "10/24/2025");
   });
   it("selects the matched employment instance", () => {
-    assert.equal(resolveSeparationHireDate("10001979", "10001979", job, [{ ...instance, hireDate: "01/01/2026", assignments: [["1", ...cells.slice(1)]] }, instance]), "10/24/2025");
+    assert.equal(resolveSeparationHireDate(privateValue("id:3c6648fa80011ea0"), privateValue("id:3c6648fa80011ea0"), job, [{ ...instance, hireDate: "01/01/2026", assignments: [["1", ...cells.slice(1)]] }, instance]), "10/24/2025");
   });
-  it("rejects a stale employee", () => assert.throws(() => resolveSeparationHireDate("10002179", "10001979", job, [instance]), /identity mismatch/));
-  it("rejects incomplete pagination", () => assert.throws(() => resolveSeparationHireDate("10001979", "10001979", job, [{ ...instance, complete: false }]), /incomplete/));
+  it("rejects a stale employee", () => assert.throws(() => resolveSeparationHireDate(privateValue("id:53d4bcaeeae1dcbc"), privateValue("id:3c6648fa80011ea0"), job, [instance]), /identity mismatch/));
+  it("rejects incomplete pagination", () => assert.throws(() => resolveSeparationHireDate(privateValue("id:3c6648fa80011ea0"), privateValue("id:3c6648fa80011ea0"), job, [{ ...instance, complete: false }]), /incomplete/));
   it("rejects absent or ambiguous jobs", () => {
-    assert.throws(() => resolveSeparationHireDate("10001979", "10001979", { ...job, positionNumber: "other" }, [instance]), /found 0/);
-    assert.throws(() => resolveSeparationHireDate("10001979", "10001979", job, [instance, instance]), /found 2/);
+    assert.throws(() => resolveSeparationHireDate(privateValue("id:3c6648fa80011ea0"), privateValue("id:3c6648fa80011ea0"), { ...job, positionNumber: "other" }, [instance]), /found 0/);
+    assert.throws(() => resolveSeparationHireDate(privateValue("id:3c6648fa80011ea0"), privateValue("id:3c6648fa80011ea0"), job, [instance, instance]), /found 2/);
   });
-  it("rejects blank Last Hire without EFFDT substitution", () => assert.throws(() => resolveSeparationHireDate("10001979", "10001979", job, [{ ...instance, hireDate: "" }]), /Last Hire is blank/));
+  it("rejects blank Last Hire without EFFDT substitution", () => assert.throws(() => resolveSeparationHireDate(privateValue("id:3c6648fa80011ea0"), privateValue("id:3c6648fa80011ea0"), job, [{ ...instance, hireDate: "" }]), /Last Hire is blank/));
 });

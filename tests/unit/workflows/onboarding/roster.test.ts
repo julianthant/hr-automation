@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
@@ -11,7 +12,7 @@ import {
 describe("onboarding roster resolution", () => {
   describe("parseLegalNameComponents", () => {
     it("parses two-token full names into first and last", () => {
-      const parsed = parseLegalNameComponents("Person 1151");
+      const parsed = parseLegalNameComponents(privateValue("name:a602944e526f2e98"));
       assert.deepEqual(parsed, {
         firstName: "Kathliyah",
         lastName: "Clement",
@@ -19,7 +20,7 @@ describe("onboarding roster resolution", () => {
     });
 
     it("parses three-token full names with middle name", () => {
-      const parsed = parseLegalNameComponents("Person 1248");
+      const parsed = parseLegalNameComponents(privateValue("name:00a2cf7da8d52620"));
       assert.deepEqual(parsed, {
         firstName: "Kyla",
         middleName: "Erine",
@@ -28,7 +29,7 @@ describe("onboarding roster resolution", () => {
     });
 
     it("anchors compound last names when fallbackLastName is provided", () => {
-      const parsed = parseLegalNameComponents("Person 1299", "Camargo Ramirez");
+      const parsed = parseLegalNameComponents(privateValue("name:82cd87b912843097"), "Camargo Ramirez");
       assert.deepEqual(parsed, {
         firstName: "Leslie",
         middleName: undefined,
@@ -37,7 +38,7 @@ describe("onboarding roster resolution", () => {
     });
 
     it("parses comma-separated Last, First Middle names", () => {
-      const parsed = parseLegalNameComponents("Person 1151 Jane");
+      const parsed = parseLegalNameComponents(privateValue("name:b2ca7ea1f6ec0335") + " Jane");
       assert.deepEqual(parsed, {
         firstName: "Kathliyah",
         middleName: "Jane",
@@ -61,7 +62,7 @@ describe("onboarding roster resolution", () => {
     it("does not flag normal preferred names", () => {
       assert.equal(isCorruptedLivedNameArtifact("Kat Clement", "Clement"), false);
       assert.equal(isCorruptedLivedNameArtifact("Alex Bonilla", "Bonilla"), false);
-      assert.equal(isCorruptedLivedNameArtifact("Person 797", "Lopez De Los Santos"), false);
+      assert.equal(isCorruptedLivedNameArtifact(privateValue("name:313c0700ee56affa"), "Lopez De Los Santos"), false);
     });
 
     it("does not flag short all-caps tokens or non-matching tokens", () => {
@@ -77,9 +78,9 @@ describe("onboarding roster resolution", () => {
       const entries = await loadOnboardingRosterEntries(rosterPath);
       assert.ok(entries.length > 50, `Expected many entries, got ${entries.length}`);
 
-      const kat = entries.find((e) => e.email.toLowerCase() === "person665@example.com");
+      const kat = entries.find((e) => e.email.toLowerCase() === privateValue("email:605c0289942ac641"));
       assert.ok(kat, "Kathliyah should be found in roster");
-      assert.equal(kat.legalName, "Person 1151");
+      assert.equal(kat.legalName, privateValue("name:a602944e526f2e98"));
       assert.equal(kat.livedName, "Kat Clement");
     });
   });
@@ -89,7 +90,7 @@ describe("onboarding roster resolution", () => {
 
     it("resolves legal and lived names for employee present on roster", async () => {
       const resolved = await resolveOnboardingRosterPerson({
-        email: "person665@example.com",
+        email: privateValue("email:605c0289942ac641"),
         explicitRosterPath: rosterPath,
       });
 
@@ -101,7 +102,7 @@ describe("onboarding roster resolution", () => {
         firstName: "Kat",
         lastName: "Clement",
       });
-      assert.equal(resolved.rawLegalName, "Person 1151");
+      assert.equal(resolved.rawLegalName, privateValue("name:a602944e526f2e98"));
       assert.equal(resolved.rawLivedName, "Kat Clement");
     });
 

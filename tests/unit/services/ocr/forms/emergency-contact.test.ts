@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { emergencyContactOcrFormSpec, PermissiveRecordSchema } from "../../../../../src/services/ocr/forms/emergency-contact.js";
@@ -152,7 +153,7 @@ describe("PermissiveRecordSchema — OCR-pass permissive EC schema", () => {
     // approvable EC records than the PDF held). It must survive instead.
     const parsed = PermissiveRecordSchema.safeParse({
       sourcePage: 6,
-      employee: { name: "Person 1379", employeeId: "10678901" },
+      employee: { name: privateValue("name:3f232cea919470c6"), employeeId: "10678901" },
       emergencyContact: {
         name: "Kelly Wu",
         relationship: "Sibling",
@@ -174,7 +175,7 @@ describe("PermissiveRecordSchema — OCR-pass permissive EC schema", () => {
   it("coerces a STRING employee homeAddress into { street } (VL-003)", () => {
     const parsed = PermissiveRecordSchema.safeParse({
       sourcePage: 7,
-      employee: { name: "Person 632", employeeId: "10789012", homeAddress: "456 Elm Ave, La Jolla, CA 92037" },
+      employee: { name: privateValue("name:849928ddd9413640"), employeeId: "10789012", homeAddress: "456 Elm Ave, La Jolla, CA 92037" },
       emergencyContact: { name: "Pat Sanchez", relationship: "Parent" },
       documentType: "expected",
       originallyMissing: [],
@@ -190,8 +191,8 @@ describe("PermissiveRecordSchema — OCR-pass permissive EC schema", () => {
     const parsed = PermissiveRecordSchema.safeParse({
       sourcePage: 8,
       employee: {
-        name: "Person 2163",
-        employeeId: "10002241",
+        name: privateValue("name:aa1c106321e78164"),
+        employeeId: privateValue("id:17f5934d6070e132"),
         homeAddress: { street: "3869 Miramar St", city: "La Jolla", state: "CA", zip: "92092" },
       },
       emergencyContact: {
@@ -470,10 +471,10 @@ describe("emergencyContactOcrFormSpec.matchRecord auto-accept floor", () => {
   it("auto-accepts exact single candidate (score 1.0 ≥ ROSTER_AUTO_ACCEPT)", async () => {
     const result = await emergencyContactOcrFormSpec.matchRecord({
       record: makeRecord("John Doe"),
-      roster: [rosterRow("John Doe", "10000910")],
+      roster: [rosterRow("John Doe", privateValue("id:dfa73f9264a72c07"))],
     });
     assert.equal(result.matchState, "matched");
-    assert.equal(result.employee.employeeId, "10000910");
+    assert.equal(result.employee.employeeId, privateValue("id:dfa73f9264a72c07"));
   });
 
   it("auto-accepts token-set single candidate (score 0.9 ≥ ROSTER_AUTO_ACCEPT)", async () => {
@@ -501,8 +502,8 @@ describe("EC OCR prompt — vision extraction guidance", () => {
   it("requires digit-accurate UCPath EIDs and full EC section extraction", () => {
     const prompt = emergencyContactOcrFormSpec.prompt;
     assert.match(prompt, /digit-by-digit/i);
-    assert.match(prompt, /10843962.*10002230|10002230.*10843962/);
-    assert.match(prompt, /10983978.*10002232|10002232.*10983978/);
+    assert.match(prompt, new RegExp("10843962.*" + privateValue("id:bcd23a9c2a43b1d6") + "|" + privateValue("id:bcd23a9c2a43b1d6") + ".*10843962"));
+    assert.match(prompt, new RegExp("10983978.*" + privateValue("id:4de5904cd57366c7") + "|" + privateValue("id:4de5904cd57366c7") + ".*10983978"));
     assert.match(prompt, /Emergency section/i);
     assert.match(prompt, /Contact address field contains email/i);
     assert.match(prompt, /0918|mailstop|Apt/i);

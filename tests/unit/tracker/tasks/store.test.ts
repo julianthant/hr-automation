@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -215,7 +216,7 @@ test("markDependencyTerminal records result JSON and updates summary", () => {
     markDependencyTerminal(store, {
       dependencyId: batch.dependencies[0].id,
       status: "satisfied",
-      result: { workflow: "eid-lookup", itemId: "ocr-oath-ocr-run-1-r0", data: { emplId: "10000910" } },
+      result: { workflow: "eid-lookup", itemId: "ocr-oath-ocr-run-1-r0", data: { emplId: privateValue("id:dfa73f9264a72c07") } },
       now: "2026-05-04T12:01:00.000Z",
     });
 

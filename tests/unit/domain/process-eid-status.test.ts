@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, test } from "vitest";
 import assert from "node:assert/strict";
 
@@ -9,7 +10,7 @@ describe("processEidStatusExtensions", () => {
       processEidStatusExtensions.derivedStatus?.({
         workflow: "process-eid",
         status: "done",
-        data: { eidResult: "Found", emplId: "10002345" },
+        data: { eidResult: "Found", emplId: privateValue("id:bf5c81799e6f558c") },
       }),
       "eidFound",
     );

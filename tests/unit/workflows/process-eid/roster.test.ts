@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import {
   mkdirSync,
   mkdtempSync,
@@ -35,9 +36,9 @@ test("loads only rows with a transaction number and no assigned EID", async (t) 
   await writeRoster(rosterPath, [
     ["Onboarding roster"],
     ["Lived Name", "UCPath Transaction Number", "UCPath ID"],
-    ["Person 831", "T002235451", ""],
-    ["Person 780", "T002235452", "Requested"],
-    ["Already Complete", "T002235453", "10002345"],
+    [privateValue("name:6168ff06af447daa"), "T002235451", ""],
+    [privateValue("name:11e6f33fffe74fc2"), "T002235452", "Requested"],
+    ["Already Complete", "T002235453", privateValue("id:bf5c81799e6f558c")],
     ["No Transaction", "", ""],
   ]);
 
@@ -50,14 +51,14 @@ test("loads only rows with a transaction number and no assigned EID", async (t) 
   assert.deepEqual(candidates, [
     {
       source: "person",
-      livedName: "Person 831",
+      livedName: privateValue("name:6168ff06af447daa"),
       transactionId: "T002235451",
       sheet: "September 14",
       rosterRow: 3,
     },
     {
       source: "person",
-      livedName: "Person 780",
+      livedName: privateValue("name:11e6f33fffe74fc2"),
       transactionId: "T002235452",
       sheet: "September 14",
       rosterRow: 4,
@@ -71,9 +72,9 @@ test("carries the legal name only when it differs from the lived name", async (t
   const rosterPath = join(dir, "Onboarding Roster.xlsx");
   await writeRoster(rosterPath, [
     ["Legal Name", "Lived Name", "Transaction #", "UCPath ID"],
-    ["Person 1885", "Person 2087", "T002235715", "Requested"],
-    ["Person 1780", "Person 1780", "T002236496", "Requested"],
-    ["Person 666", "", "T002237975", ""],
+    [privateValue("name:005effca2a06c79b"), privateValue("name:2577cfc192c1035d"), "T002235715", "Requested"],
+    [privateValue("name:83bb613aa947d64e"), privateValue("name:83bb613aa947d64e"), "T002236496", "Requested"],
+    [privateValue("name:75e0d631a086c129"), "", "T002237975", ""],
   ]);
 
   const candidates = await loadProcessEidCandidates({
@@ -85,15 +86,15 @@ test("carries the legal name only when it differs from the lived name", async (t
   assert.deepEqual(candidates, [
     {
       source: "person",
-      livedName: "Person 2087",
-      legalName: "Person 1885",
+      livedName: privateValue("name:2577cfc192c1035d"),
+      legalName: privateValue("name:005effca2a06c79b"),
       transactionId: "T002235715",
       sheet: "September 14",
       rosterRow: 2,
     },
     {
       source: "person",
-      livedName: "Person 1780",
+      livedName: privateValue("name:83bb613aa947d64e"),
       transactionId: "T002236496",
       sheet: "September 14",
       rosterRow: 3,
@@ -101,7 +102,7 @@ test("carries the legal name only when it differs from the lived name", async (t
     // Lived Name blank → the legal name is the only name, and becomes the row's.
     {
       source: "person",
-      livedName: "Person 666",
+      livedName: privateValue("name:75e0d631a086c129"),
       transactionId: "T002237975",
       sheet: "September 14",
       rosterRow: 4,
@@ -119,8 +120,8 @@ test("reads a .csv roster, labeled by its filename", async (t) => {
       ",,Dining Services Student Applicants,,",
       ",,,,",
       "Email,Legal Name,Lived Name,Transaction #,UCPath ID",
-      "a@example.com,Person 756,Person 1734,T002235943,Requested",
-      'b@example.com,"Person 404",Person 404,T002236424,10002345',
+      "a@example.com," + privateValue("name:48ad2576a56f8612") + "," + privateValue("name:d8041f5d6adea3e2") + ",T002235943,Requested",
+      'b@example.com,"' + privateValue("name:8bdd424eee0a3844") + '",' + privateValue("name:4d2d12ec1a49ea8a") + ',T002236424,' + privateValue("id:bf5c81799e6f558c"),
     ].join("\n"),
     "utf8",
   );
@@ -133,8 +134,8 @@ test("reads a .csv roster, labeled by its filename", async (t) => {
   assert.deepEqual(candidates, [
     {
       source: "person",
-      livedName: "Person 1734",
-      legalName: "Person 756",
+      livedName: privateValue("name:d8041f5d6adea3e2"),
+      legalName: privateValue("name:48ad2576a56f8612"),
       transactionId: "T002235943",
       sheet: "26-27 Student Applicants(Sept 28).csv",
       rosterRow: 4,
@@ -164,7 +165,7 @@ test("fails when the requested worksheet label does not resolve exactly", async 
   const rosterPath = join(dir, "Onboarding Roster.xlsx");
   await writeRoster(rosterPath, [
     ["Lived Name", "Transaction Number", "EID"],
-    ["Person 831", "T002235451", ""],
+    [privateValue("name:6168ff06af447daa"), "T002235451", ""],
   ]);
 
   await assert.rejects(
@@ -202,8 +203,8 @@ test("a repeated transaction fails only its own rows, naming both", async (t) =>
   const rosterPath = join(dir, "Onboarding Roster.xlsx");
   await writeRoster(rosterPath, [
     ["Lived Name", "Transaction Number", "EID"],
-    ["Person 460", "T002236430", "Requested"],
-    ["Person 1357", "T002236430", "Requested"],
+    [privateValue("name:0569fa2f1d01296a"), "T002236430", "Requested"],
+    [privateValue("name:5ec6749c7c3b7d6d"), "T002236430", "Requested"],
     ["Unambiguous Person", "T002235451", "Requested"],
   ]);
 
@@ -216,8 +217,8 @@ test("a repeated transaction fails only its own rows, naming both", async (t) =>
   assert.deepEqual(
     candidates.map((c) => [c.livedName, c.rosterRow, Boolean(c.rosterConflict)]),
     [
-      ["Person 460", 2, true],
-      ["Person 1357", 3, true],
+      [privateValue("name:0569fa2f1d01296a"), 2, true],
+      [privateValue("name:5ec6749c7c3b7d6d"), 3, true],
       ["Unambiguous Person", 4, false],
     ],
   );
@@ -234,7 +235,7 @@ test("a repeat is caught even when the other occurrence is already assigned", as
   const rosterPath = join(dir, "Onboarding Roster.xlsx");
   await writeRoster(rosterPath, [
     ["Lived Name", "Transaction Number", "EID"],
-    ["Assigned Person", "T002235451", "10002345"],
+    ["Assigned Person", "T002235451", privateValue("id:bf5c81799e6f558c")],
     ["Other Person", "T002235451", "Requested"],
   ]);
 

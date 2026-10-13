@@ -9,7 +9,7 @@
 import { test, describe } from "vitest";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { privateFile } from "../../../../src/private-data.js";
 
 import {
   deriveWorkflowDryRunDiff,
@@ -205,8 +205,7 @@ describe("deriveWorkflowDryRunDiff — empties", () => {
 //    classification verdict (has/has-not dry run), NOT exact phrasing, so a mining
 //    re-run that rewords a note only breaks this if it breaks classification. ─────
 describe("deriveWorkflowDryRunDiff — real assembled bank", () => {
-  const indexUrl = new URL("../../../../config/workflow-design/data-bank/index.json", import.meta.url);
-  const realBank = JSON.parse(readFileSync(fileURLToPath(indexUrl), "utf8")) as { workflows: WorkflowDataBank[] };
+  const realBank = JSON.parse(readFileSync(privateFile("config/workflow-design/data-bank/index.json"), "utf8")) as { workflows: WorkflowDataBank[] };
   const find = (w: string): WorkflowDataBank | undefined => realBank.workflows.find((x) => x.workflow === w);
 
   for (const w of ["separations", "onboarding", "oath-signature", "oath-upload", "emergency-contact", "onbase"]) {

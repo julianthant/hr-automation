@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../../src/private-data.js";
 import { test, vi } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -35,7 +36,7 @@ test("logsTopic uses SQLite projection when ready", async () => {
     const db = openStateDb(dir);
     appendLogEntry({
       workflow: "work-study",
-      itemId: "10000910",
+      itemId: privateValue("id:dfa73f9264a72c07"),
       runId: "run-a",
       level: "step",
       message: "Filled comp rate",
@@ -43,7 +44,7 @@ test("logsTopic uses SQLite projection when ready", async () => {
     }, dir);
     appendLogEntry({
       workflow: "work-study",
-      itemId: "10000910",
+      itemId: privateValue("id:dfa73f9264a72c07"),
       runId: "run-b",
       level: "error",
       message: "Different run",
@@ -54,7 +55,7 @@ test("logsTopic uses SQLite projection when ready", async () => {
 
     const firstPayload = Promise.withResolvers<LogEntry[]>();
     const stop = logsTopic(
-      { workflow: "work-study", id: "10000910", runId: "run-a", date: "2026-05-04" },
+      { workflow: "work-study", id: privateValue("id:dfa73f9264a72c07"), runId: "run-a", date: "2026-05-04" },
       (data) => firstPayload.resolve(data as LogEntry[]),
       { dir, stateDb: db, projectionReady: true },
     );
@@ -83,7 +84,7 @@ test("runEventsTopic uses SQLite tracker rows for workflowInstance attribution",
     trackEvent({
       workflow: "work-study",
       timestamp: runStart,
-      id: "10000910",
+      id: privateValue("id:dfa73f9264a72c07"),
       runId: "run-a",
       status: "running",
       step: "transaction",

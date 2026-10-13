@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, appendFileSync } from "node:fs";
@@ -26,10 +27,10 @@ function trackerEntry(date: string, status: TrackerEntry["status"] = "running"):
   return {
     workflow: "onboarding",
     timestamp: `${date}T20:00:00.000Z`,
-    id: "person@example.edu",
+    id: privateValue("ucsd:d584e8c08670091b"),
     runId: "run-1",
     status,
-    data: { employeeName: "Person 905" },
+    data: { employeeName: privateValue("name:01332c876518a793") },
   };
 }
 
@@ -81,7 +82,7 @@ test("applyTrackerEntryLive triggers a deferred rebuild after consecutive failur
 
     // Sanity: the projection has no row for this item yet.
     const before = openStateDb(dir)
-      .prepare("SELECT COUNT(*) AS n FROM runs WHERE item_id = 'person@example.edu'")
+      .prepare("SELECT COUNT(*) AS n FROM runs WHERE item_id = '" + privateValue("ucsd:d584e8c08670091b") + "'")
       .get() as { n: number };
     assert.equal(before.n, 0, "projection should not have the row before rebuild");
 
@@ -100,7 +101,7 @@ test("applyTrackerEntryLive triggers a deferred rebuild after consecutive failur
     const verifyDb = openDatabase(stateDbPath(dir));
     try {
       const row = verifyDb
-        .prepare("SELECT latest_status FROM runs WHERE item_id = 'person@example.edu'")
+        .prepare("SELECT latest_status FROM runs WHERE item_id = '" + privateValue("ucsd:d584e8c08670091b") + "'")
         .get() as { latest_status: string } | undefined;
       assert.ok(row, "rebuild should have applied the JSONL row to the projection");
       assert.equal(row.latest_status, "running");
@@ -156,7 +157,7 @@ test("applyTrackerEntryLive resets the failure counter on a successful apply", a
     // A clean live apply succeeds — counter stays at 0.
     assert.doesNotThrow(() => applyTrackerEntryLive(trackerEntry(date), trackerSource(dir, date), dir));
     const row = openDatabase(stateDbPath(dir))
-      .prepare("SELECT latest_status FROM runs WHERE item_id = 'person@example.edu'")
+      .prepare("SELECT latest_status FROM runs WHERE item_id = '" + privateValue("ucsd:d584e8c08670091b") + "'")
       .get() as { latest_status: string } | undefined;
     assert.equal(row?.latest_status, "running");
   } finally {
@@ -180,16 +181,16 @@ test("applySigintTerminalToProjection writes failed status to the projection", (
     const trackEntry: TrackerEntry = {
       workflow: "onboarding",
       timestamp: `${date}T20:05:00.000Z`,
-      id: "person@example.edu",
+      id: privateValue("ucsd:d584e8c08670091b"),
       runId: "run-1",
       status: "failed",
-      data: { employeeName: "Person 905" },
+      data: { employeeName: privateValue("name:01332c876518a793") },
       error: "Process terminated (SIGINT)",
       step: "extraction",
     };
     const logEntry: LogEntry = {
       workflow: "onboarding",
-      itemId: "person@example.edu",
+      itemId: privateValue("ucsd:d584e8c08670091b"),
       runId: "run-1",
       level: "error",
       message: "Process terminated (SIGINT)",
@@ -216,7 +217,7 @@ test("applySigintTerminalToProjection writes failed status to the projection", (
     const verifyDb = openDatabase(stateDbPath(dir));
     try {
       const run = verifyDb
-        .prepare("SELECT latest_status, latest_step, latest_error FROM runs WHERE item_id = 'person@example.edu'")
+        .prepare("SELECT latest_status, latest_step, latest_error FROM runs WHERE item_id = '" + privateValue("ucsd:d584e8c08670091b") + "'")
         .get() as { latest_status: string; latest_step: string; latest_error: string };
       assert.deepEqual({ ...run }, {
         latest_status: "failed",
@@ -224,7 +225,7 @@ test("applySigintTerminalToProjection writes failed status to the projection", (
         latest_error: "Process terminated (SIGINT)",
       });
       const logRow = verifyDb
-        .prepare("SELECT level, message FROM logs WHERE item_id = 'person@example.edu'")
+        .prepare("SELECT level, message FROM logs WHERE item_id = '" + privateValue("ucsd:d584e8c08670091b") + "'")
         .get() as { level: string; message: string };
       assert.deepEqual({ ...logRow }, {
         level: "error",
@@ -253,7 +254,7 @@ test("applySigintTerminalToProjection is a silent no-op when the projection is n
     const trackEntry: TrackerEntry = {
       workflow: "onboarding",
       timestamp: `${date}T20:05:00.000Z`,
-      id: "person@example.edu",
+      id: privateValue("ucsd:d584e8c08670091b"),
       runId: "run-1",
       status: "failed",
       data: {},
@@ -261,7 +262,7 @@ test("applySigintTerminalToProjection is a silent no-op when the projection is n
     };
     const logEntry: LogEntry = {
       workflow: "onboarding",
-      itemId: "person@example.edu",
+      itemId: privateValue("ucsd:d584e8c08670091b"),
       runId: "run-1",
       level: "error",
       message: "Process terminated (SIGINT)",

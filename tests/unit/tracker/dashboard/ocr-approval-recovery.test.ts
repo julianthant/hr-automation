@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,7 +35,7 @@ test("startup recovery dispatches the persisted manifest without OCR JSONL and a
     formType: "oath",
     parentRunId: "display-operation-parent",
     operationWorkflow: "oath-signature",
-    records: [{ selected: true, employeeId: "10000910" }],
+    records: [{ selected: true, employeeId: privateValue("id:dfa73f9264a72c07") }],
     reviewData: { pdfOriginalName: "recovery.pdf" },
     children: [
       {
@@ -42,14 +43,14 @@ test("startup recovery dispatches the persisted manifest without OCR JSONL and a
         workflow: "oath-signature",
         itemId: "stable-signer-id-a",
         runId: "stable-signer-run-a",
-        input: { emplId: "10000910", dryRun: true },
+        input: { emplId: privateValue("id:dfa73f9264a72c07"), dryRun: true },
       },
       {
         kind: "record",
         workflow: "oath-signature",
         itemId: "stable-signer-id-b",
         runId: "stable-signer-run-b",
-        input: { emplId: "10000910", dryRun: true },
+        input: { emplId: privateValue("id:dfa73f9264a72c07"), dryRun: true },
       },
     ],
   };
@@ -100,13 +101,13 @@ test("startup recovery dispatches the persisted manifest without OCR JSONL and a
       workflow: "oath-signature",
       itemId: "stable-signer-id-a",
       runId: "stable-signer-run-a",
-      input: { emplId: "10000910", dryRun: true },
+      input: { emplId: privateValue("id:dfa73f9264a72c07"), dryRun: true },
     },
     {
       workflow: "oath-signature",
       itemId: "stable-signer-id-b",
       runId: "stable-signer-run-b",
-      input: { emplId: "10000910", dryRun: true },
+      input: { emplId: privateValue("id:dfa73f9264a72c07"), dryRun: true },
     },
   ]);
   const durable = store.db.prepare(`
@@ -156,14 +157,14 @@ test("a post-commit dispatch error releases approval for idempotent recovery ins
         workflow: "oath-signature",
         itemId: "signer-stable",
         runId: "signer-run-stable",
-        input: { emplId: "10000910", dryRun: true },
+        input: { emplId: privateValue("id:dfa73f9264a72c07"), dryRun: true },
       },
       {
         kind: "record",
         workflow: "person-lookup",
         itemId: "lookup-stable",
         runId: "lookup-run-stable",
-        input: { emplId: "10000910", keepNonHdh: true },
+        input: { emplId: privateValue("id:dfa73f9264a72c07"), keepNonHdh: true },
       },
     ],
   };
@@ -247,7 +248,7 @@ test("recovery preserves persisted record parallelism", async () => {
       workflow: "oath-signature",
       itemId: "parallel-child",
       runId: "parallel-child-run",
-      input: { emplId: "10000910", dryRun: true },
+      input: { emplId: privateValue("id:dfa73f9264a72c07"), dryRun: true },
     }],
   };
   const requestHash = hashOcrApprovalRequest({ records: manifest.records });
@@ -293,7 +294,7 @@ for (const invalidWorkers of ["9", "1e3"]) {
         workflow: "oath-signature",
         itemId: "invalid-workers-child",
         runId: "invalid-workers-child-run",
-        input: { emplId: "10000910", dryRun: true },
+        input: { emplId: privateValue("id:dfa73f9264a72c07"), dryRun: true },
       }],
     };
     const requestHash = hashOcrApprovalRequest({ records: manifest.records });

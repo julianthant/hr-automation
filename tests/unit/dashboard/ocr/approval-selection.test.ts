@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, expect, it } from "vitest";
 import {
   MANUAL_EID_WARNING,
@@ -41,7 +42,7 @@ function ecRecord(overrides: {
     sourcePage: 1,
     employee: {
       name: "Test, Person",
-      employeeId: overrides.employeeId ?? "10002128",
+      employeeId: overrides.employeeId ?? privateValue("id:fe9771721a90312b"),
     },
     emergencyContact: {
       name: "Contact",
@@ -123,7 +124,7 @@ describe("promoteManualEidMatch", () => {
   // could not be approved no matter what the operator entered.
   it("promotes an unresolved row to resolved/manual when the operator types an EID", () => {
     const base = ecRecord({ matchState: "unresolved", employeeId: "", selected: true });
-    const typed = ecRecord({ matchState: "unresolved", employeeId: "10001347", selected: true });
+    const typed = ecRecord({ matchState: "unresolved", employeeId: privateValue("id:8998bec701a40c77"), selected: true });
 
     const promoted = promoteManualEidMatch(base, typed);
 
@@ -134,8 +135,8 @@ describe("promoteManualEidMatch", () => {
   });
 
   it("leaves the record untouched when the EID is unchanged from the server value", () => {
-    const base = ecRecord({ matchState: "unresolved", employeeId: "10001347" });
-    const next = { ...ecRecord({ matchState: "unresolved", employeeId: "10001347" }), selected: true };
+    const base = ecRecord({ matchState: "unresolved", employeeId: privateValue("id:8998bec701a40c77") });
+    const next = { ...ecRecord({ matchState: "unresolved", employeeId: privateValue("id:8998bec701a40c77") }), selected: true };
 
     expect(promoteManualEidMatch(base, next)).toBe(next);
   });
@@ -150,9 +151,9 @@ describe("promoteManualEidMatch", () => {
   it("drops stale confidence and verification when overriding a resolved EID", () => {
     // The lookup's verification/confidence describe the OLD identity — they
     // must not follow a different, hand-typed one onto the card.
-    const base = { ...ecRecord({ matchState: "resolved", employeeId: "10002221" }), matchConfidence: 0.97 };
+    const base = { ...ecRecord({ matchState: "resolved", employeeId: privateValue("id:012d16a0ac796d9f") }), matchConfidence: 0.97 };
     const typed = {
-      ...ecRecord({ matchState: "resolved", employeeId: "10001347", verification: VERIFIED }),
+      ...ecRecord({ matchState: "resolved", employeeId: privateValue("id:8998bec701a40c77"), verification: VERIFIED }),
       matchConfidence: 0.97,
     };
 
@@ -165,14 +166,14 @@ describe("promoteManualEidMatch", () => {
 
   it("does not stack the provenance warning across repeated edits", () => {
     const base = ecRecord({ matchState: "unresolved", employeeId: "" });
-    const once = promoteManualEidMatch(base, ecRecord({ matchState: "unresolved", employeeId: "10001347" }));
+    const once = promoteManualEidMatch(base, ecRecord({ matchState: "unresolved", employeeId: privateValue("id:8998bec701a40c77") }));
     const twice = promoteManualEidMatch(base, once);
 
     expect(twice.warnings.filter((w) => w === MANUAL_EID_WARNING)).toHaveLength(1);
   });
 
   it("promotes a manually added row, which has no base record at all", () => {
-    const typed = ecRecord({ matchState: "unresolved", employeeId: "10001347", selected: true });
+    const typed = ecRecord({ matchState: "unresolved", employeeId: privateValue("id:8998bec701a40c77"), selected: true });
 
     expect(promoteManualEidMatch(undefined, typed).matchState).toBe("resolved");
   });
@@ -180,12 +181,12 @@ describe("promoteManualEidMatch", () => {
 
 describe("readRecordEid", () => {
   it("reads the EC shape (nested under employee)", () => {
-    expect(readRecordEid(ecRecord({ employeeId: "10001347" }))).toBe("10001347");
+    expect(readRecordEid(ecRecord({ employeeId: privateValue("id:8998bec701a40c77") }))).toBe(privateValue("id:8998bec701a40c77"));
   });
 
   it("reads the oath shape (top-level employeeId)", () => {
-    const oathShaped = { ...ecRecord(), employeeId: "10002221" } as unknown as PreviewRecord;
-    expect(readRecordEid(oathShaped)).toBe("10002221");
+    const oathShaped = { ...ecRecord(), employeeId: privateValue("id:012d16a0ac796d9f") } as unknown as PreviewRecord;
+    expect(readRecordEid(oathShaped)).toBe(privateValue("id:012d16a0ac796d9f"));
   });
 
   it("is empty for a missing record", () => {

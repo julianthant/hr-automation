@@ -1,3 +1,4 @@
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it, expect } from "vitest";
 import {
   resolveMemberPresentation,
@@ -7,7 +8,7 @@ import {
 describe("resolveMemberPresentation — delegation naming", () => {
   it("custom member title template wins", () => {
     const r = resolveMemberPresentation(
-      { id: "m1", data: { queueRowKind: "person", name: "Person 905", __traceId: "os-1-aa11" } },
+      { id: "m1", data: { queueRowKind: "person", name: privateValue("name:01332c876518a793"), __traceId: "os-1-aa11" } },
       {
         delegation: {
           memberTitle: { scheme: "custom-template", template: "Signer: {name}" },
@@ -15,13 +16,13 @@ describe("resolveMemberPresentation — delegation naming", () => {
         },
       },
     );
-    expect(r?.title).toBe("Signer: Person 905");
+    expect(r?.title).toBe("Signer: " + privateValue("name:01332c876518a793"));
     expect(r?.subtitle).toBe("os-1-aa11");
   });
 
   it("returns undefined with no presentation config (no-op)", () => {
     const r = resolveMemberPresentation(
-      { id: "m1", data: { queueRowKind: "person", name: "Person 905", __traceId: "os-1-aa11" } },
+      { id: "m1", data: { queueRowKind: "person", name: privateValue("name:01332c876518a793"), __traceId: "os-1-aa11" } },
       undefined,
     );
     expect(r).toBeUndefined();
@@ -29,7 +30,7 @@ describe("resolveMemberPresentation — delegation naming", () => {
 
   it("returns undefined when delegation block is empty (no-op)", () => {
     const r = resolveMemberPresentation(
-      { id: "m1", data: { queueRowKind: "person", name: "Person 905", __traceId: "os-1-aa11" } },
+      { id: "m1", data: { queueRowKind: "person", name: privateValue("name:01332c876518a793"), __traceId: "os-1-aa11" } },
       { delegation: {} },
     );
     expect(r).toBeUndefined();
@@ -37,7 +38,7 @@ describe("resolveMemberPresentation — delegation naming", () => {
 
   it("returns undefined when only memberTitle is set (both required)", () => {
     const r = resolveMemberPresentation(
-      { id: "m1", data: { queueRowKind: "person", name: "Person 905", __traceId: "os-1-aa11" } },
+      { id: "m1", data: { queueRowKind: "person", name: privateValue("name:01332c876518a793"), __traceId: "os-1-aa11" } },
       { delegation: { memberTitle: { scheme: "custom-template", template: "Signer: {name}" } } },
     );
     expect(r).toBeUndefined();
@@ -45,7 +46,7 @@ describe("resolveMemberPresentation — delegation naming", () => {
 
   it("returns undefined when only memberSubtitle is set (both required)", () => {
     const r = resolveMemberPresentation(
-      { id: "m1", data: { queueRowKind: "person", name: "Person 905", __traceId: "os-1-aa11" } },
+      { id: "m1", data: { queueRowKind: "person", name: privateValue("name:01332c876518a793"), __traceId: "os-1-aa11" } },
       { delegation: { memberSubtitle: { scheme: "trace-only" } } },
     );
     expect(r).toBeUndefined();

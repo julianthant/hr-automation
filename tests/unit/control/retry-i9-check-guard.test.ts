@@ -6,6 +6,7 @@
  * gone (pruned) or never existed (legacy display-only rows), the retry must
  * REFUSE, loudly. See src/workflows/separations/CLAUDE.md → "I-9 mode".
  */
+import { privateValue } from "../../../src/private-data.js";
 import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
@@ -46,8 +47,8 @@ describe("retry i9-check reconstruction guard", () => {
         data: {
           archetype: "operation-member",
           i9Check: "true",
-          name: "Person 706",
-          __name: "Person 706",
+          name: privateValue("name:9c12f2d590ae3a2c"),
+          __name: privateValue("name:9c12f2d590ae3a2c"),
           __id: itemId,
         },
         error: "search timed out",

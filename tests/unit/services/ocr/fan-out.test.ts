@@ -1,3 +1,4 @@
+import { privateValue } from "../../../../src/private-data.js";
 import { describe, it, vi } from "vitest";
 import assert from "node:assert/strict";
 import type {
@@ -53,7 +54,7 @@ describe("fanOutAndWatch", () => {
       trackerDir: undefined,
       date: "2026-06-11",
       child: fakeChild,
-      children: [child("item-a", "Person 905"), child("item-b", "Roe, Sam")],
+      children: [child("item-a", privateValue("name:17a6fb0c3906628f")), child("item-b", "Roe, Sam")],
       timeoutMs: 1000,
       dispatch: async (children) => {
         dispatched = children;
@@ -87,7 +88,7 @@ describe("fanOutAndWatch", () => {
       date: "2026-06-11",
       child: fakeChild,
       watchWorkflow: "i9-lookup",
-      children: [child("item-a", "Person 905")],
+      children: [child("item-a", privateValue("name:17a6fb0c3906628f"))],
       timeoutMs: 1000,
       dispatch: async () => {},
       watch: async (opts: WatchChildRunsOpts): Promise<ChildOutcome[]> => {
@@ -112,7 +113,7 @@ describe("fanOutAndWatch", () => {
         trackerDir: "unused",
         date: "2026-06-11",
         child: fakeChild,
-        children: [child("item-a", "Person 905")],
+        children: [child("item-a", privateValue("name:17a6fb0c3906628f"))],
         timeoutMs: 1000,
         dispatch: async () => {},
         watch: async (): Promise<ChildOutcome[]> => {
@@ -145,7 +146,7 @@ describe("fanOutAndWatch", () => {
         trackerDir: "unused",
         date: "2026-06-11",
         child: fakeChild,
-        children: [child("item-a", "Person 905")],
+        children: [child("item-a", privateValue("name:17a6fb0c3906628f"))],
         timeoutMs: 1000,
         dispatch: async () => {},
         watch: async (): Promise<ChildOutcome[]> => {
@@ -191,7 +192,7 @@ describe("fanOutAndWatch", () => {
       trackerDir: undefined,
       date: "2026-06-11",
       child: fakeChild,
-      children: [child("item-a", "Person 905"), child("item-b", "Roe, Sam")],
+      children: [child("item-a", privateValue("name:17a6fb0c3906628f")), child("item-b", "Roe, Sam")],
       timeoutMs: 1000,
       onDispatched: (results) => dispatchedItemIds.push(...results.map((r) => r.itemId)),
       watch: async (): Promise<ChildOutcome[]> => [],
