@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { readPrivateIfListed } from "../../private-data.js";
 import { log } from "../../utils/log.js";
 import { dataBankIndexFile } from "../paths.js";
 import type { DataBank } from "../../domain/workflow-design/data-bank.js";
@@ -11,8 +12,9 @@ import { DataBankSchema } from "./schema.js";
  * or unreadable file (the editor degrades to no palette rather than erroring).
  */
 export function readDataBank(repoRoot: string): DataBank | null {
-  const file = dataBankIndexFile(repoRoot);
-  if (!existsSync(file)) return null;
+  const tracked = dataBankIndexFile(repoRoot);
+  if (!existsSync(tracked)) return null;
+  const file = readPrivateIfListed(tracked);
   try {
     const parsed = DataBankSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
     if (!parsed.success) {
