@@ -21,6 +21,6 @@ SQLite stores tasks, attempts, worker claims, and dependencies. JSONL records pr
 
 TypeScript, Node.js, Playwright, React, Hono, SQLite, Zod, Vite, Tailwind CSS, ExcelJS, and Vitest. The repository includes unit and architecture tests, plus a separate live-test lane. Live operation requires institutional access and local configuration.
 
-The public history contains 2,507 commits reachable from `HEAD`, with commit dates spanning March 13 through October 12, 2026. Publication preparation may change that history.
+2,508 commits from March 13 to October 12, 2026.
 
 Real HR data, credentials, and operational evidence belong in operator-only local storage outside the tracked repository. The code expects separately supplied documents, rosters, authentication state, and configuration. This README describes the software and does not include personnel records.
