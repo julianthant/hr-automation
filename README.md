@@ -1,108 +1,26 @@
 # HR Automation
 
-UCPath HR automation for UCSD. Playwright-driven workflows for onboarding, separations, person lookups, work-study updates, oath signatures, oath uploads, emergency contacts, and UKG report downloads.
+A local HR operations app that coordinates browser workflows across UCPath, Kuali, Kronos, CRM, and document systems.
 
-## Setup
+Built for a UCSD HR operator, the app combines work that otherwise crosses several portals into a dashboard with queues, step logs, document review, and browser-session controls. Workflows cover onboarding, separations, person lookup, work-study updates, Kronos pay rules, oath signatures and uploads, emergency contacts, OnBase imports, I-9 checks, and CRM document downloads. OCR prepares scanned forms for review and downstream workflows. SharePoint downloads support roster lookup. Old Kronos report automation also exists, but is outside the generic dashboard workflow loader.
 
-```bash
-npm install
-npx playwright install chromium
-cp .env.example .env   # fill in credentials
-npm run setup          # validates environment
-```
+## How it works
 
-### Environment Variables
+A React dashboard sends requests to a local Node.js backend built with Hono. Server-sent events stream progress back to the operator. A shared TypeScript workflow kernel manages steps, browser sessions, cancellation, and delegated work. Workflow modules compose system-specific Playwright drivers rather than carrying their own selectors and login code.
 
-| Variable | Description |
-|----------|-------------|
-| `UCPATH_USER_ID` | UCSD SSO username |
-| `UCPATH_PASSWORD` | UCSD SSO password |
-| `TIMEKEEPER_NAME` | Operator timekeeper name for Kuali separation timekeeper fills (`src/config.ts` requires this at startup) |
+SQLite stores tasks, attempts, worker claims, and dependencies. JSONL records preserve workflow events, logs, and session history for the dashboard. OCR-backed operations can wait for review before creating downstream work, while daemon workers process queued items through reusable authenticated browser sessions.
 
-Duo MFA is manual — the automation pauses and polls until you approve on your phone.
+## Engineering problems addressed
 
-## Commands
+- Cross-system authentication and navigation. Shared SSO helpers and Duo approval handling coordinate multiple browser sessions. UCPath drivers account for PeopleSoft content frames and overlays that can block form controls.
+- Identity ambiguity. A separation that resolves to a different employee pauses for operator review instead of silently substituting the match and continuing to termination.
+- Committing a transaction safely. Separation dry runs stop before UCPath submission and Kuali finalization. They may still fill fields in an unsubmitted Kuali draft. Verified transaction receipts support reuse of existing work, and a submission without an extracted transaction number stops before Kuali finalization.
+- Worker races and uncertain persistence. Queue claims carry expiring leases and generations. Terminal-state writes retry and reconcile against stored state. If persistence remains uncertain, the worker blocks the claim rather than returning it to the executable queue.
 
-Workflow starts are dashboard-only: typed runs use the top input bar and file/PDF runs use the upload modal. Daemon workers still back most workflows; use `:stop` scripts to drain and shut down a workflow's daemon pool.
+## Stack and scope
 
-### Daemon Stops
-```bash
-npm run onboarding:stop                      # Soft-stop all onboarding daemons
-npm run separation:stop                      # Soft-stop all separation daemons
-npm run work-study:stop
-npm run person-lookup:stop                   # Person Lookup replaces legacy eid-lookup + active-check starts
-npm run oath-signature:stop
-npm run oath-upload:stop
-npm run emergency-contact:stop
-npm run crm-doc-download:stop
-```
+TypeScript, Node.js, Playwright, React, Hono, SQLite, Zod, Vite, Tailwind CSS, ExcelJS, and Vitest. The repository includes unit and architecture tests, plus a separate live-test lane. Live operation requires institutional access and local configuration.
 
-### Dashboard
-```bash
-npm run dashboard                            # SSE backend (:3838) + Vite dev (:5173) + ngrok for phone Capture QR links
-npm run dashboard:watch                      # Same, but tsx watch restarts SSE backend on src/ changes
-npm run dashboard:prod                       # Serve pre-built dashboard from SSE only
-```
+The public history contains 2,507 commits reachable from `HEAD`, with commit dates spanning March 13 through October 12, 2026. Publication preparation may change that history.
 
-Open **http://localhost:5173** to monitor live workflow progress. Capture
-QR links require a public URL (set `CAPTURE_PUBLIC_URL` when running ngrok
-separately, or pass `--capture-ngrok`). Capture does not use LAN QR fallbacks;
-a dashboard started without `CAPTURE_PUBLIC_URL` or `--capture-ngrok` still
-boots — Capture is disabled and `/api/capture/start` returns 503 until a public
-URL is provided.
-
-### Export / Utilities
-```bash
-tsx --env-file=.env src/cli.ts export <workflow>   # Dump JSONL tracker to xlsx
-npm run clean:tracker                              # Default 7d: prune stale .tracker JSONL and .tracker/screenshots PNGs (`--days`, `--dir`, `--no-screenshots`, `--screenshots-only` — see `src/scripts/ops/clean-tracker.ts`)
-npm run test-login                                 # Smoke test UCPath + CRM auth
-npm run setup                                      # First-use environment validation wizard
-npm run schemas:export                             # Write each workflow's Zod input schema as JSON Schema
-npm run selectors:catalog                          # Regenerate per-system SELECTORS.md
-npm run selector:search "<intent>"                 # Fuzzy search across SELECTORS.md + LESSONS.md
-npm run typecheck                                  # Type-check src/
-npm run typecheck:all                              # Type-check src/ + tests
-npm run lint                                       # ESLint
-npm run test                                       # Unit tests
-npm run test:architecture                          # Static architecture/convention guards
-npm run build:dashboard                            # Single-file dashboard build
-```
-
-> If `npm run` is blocked, invoke tsx directly: `./node_modules/.bin/tsx --env-file=.env src/cli.ts <command>`
-
-## Architecture
-
-See `CLAUDE.md` for the full architecture reference, kernel API, daemon mode design, and workflow authoring guide.
-
-```
-src/
-  core/          # Workflow kernel (kernel/, daemon/, task-store/)
-  systems/       # Playwright drivers: crm, ucpath, i9, kuali, old-kronos, new-kronos, servicenow, sharepoint
-  workflows/     # Composed workflows: onboarding, separations, person-lookup, work-study,
-                 #   oath-signature, oath-upload, emergency-contact, ocr, old-kronos-reports,
-                 #   sharepoint-download, crm-doc-download
-  infra/         # Auth flows + browser launch
-  services/      # OCR, roster matching, mobile photo capture,
-                 #   timecard/ — shared UKG/timecard helpers (`src/services/timecard/`)
-  tracker/       # JSONL append + SSE + Excel export
-  dashboard/     # React SPA (Vite + shadcn/ui)
-  domain/        # Pure HR business logic (identity, names, EIDs, etc.)
-  utils/         # log, errors, env
-  cli.ts         # Commander entry point
-  config.ts      # URLs, PATHS, TIMEOUTS, SCREEN, ANNUAL_DATES
-```
-
-## How It Works
-
-All workflows run headed Chromium browsers so you can approve Duo MFA prompts. In **daemon mode**, browsers stay open between items — Duo fires once per daemon spawn, not per item. Subsequent enqueues claim work from a shared SQLite queue without re-authentication.
-
-### Selector Discovery
-
-```bash
-npm install -g @playwright/cli@latest
-playwright-cli -s=mysession open --headed "<url>"
-playwright-cli -s=mysession snapshot    # accessibility tree with ref IDs
-playwright-cli -s=mysession click e40   # interact by ref
-```
-
-After mapping, add to `src/systems/<system>/selectors.ts` with `// verified YYYY-MM-DD`. Run `npm run selectors:catalog` to sync.
+Real HR data, credentials, and operational evidence belong in operator-only local storage outside the tracked repository. The code expects separately supplied documents, rosters, authentication state, and configuration. This README describes the software and does not include personnel records.
