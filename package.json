@@ -55,7 +55,8 @@
     "test:watch": "vitest",
     "test:architecture": "vitest run tests/unit/architecture --reporter=dot",
     "test:rebuild": "tsx scripts/rebuild/run-rebuild-tests.ts",
-    "test:coverage": "tsx scripts/rebuild/run-rebuild-tests.ts --coverage && tsx scripts/rebuild/suite-size.ts"
+    "test:coverage": "tsx scripts/rebuild/run-rebuild-tests.ts --coverage && tsx scripts/rebuild/suite-size.ts",
+    "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
     "@google/genai": "^2.15.0",
