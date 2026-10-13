@@ -1,3 +1,7 @@
+# Real operator data, restored only on the operator's machine. Git ignores it;
+# the pre-commit scanner does not special-case it.
+/private/
+
 # Environment variables / secrets
 .env
 .env.*
