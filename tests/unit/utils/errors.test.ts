@@ -1,6 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { classifyError, isBrowserClosedError } from '../../../src/utils/errors.js'
+import { classifyError, describeLocatorFailure, isBrowserClosedError } from '../../../src/utils/errors.js'
 
 test('isBrowserClosedError: matches all three browser-closed Playwright shapes', () => {
   assert.equal(
@@ -20,6 +20,35 @@ test('isBrowserClosedError: matches all three browser-closed Playwright shapes',
   )
   assert.equal(isBrowserClosedError(new Error('Element not found')), false)
   assert.equal(isBrowserClosedError(new Error('Timeout waiting for locator')), false)
+})
+
+test('describeLocatorFailure: names the control instead of a locator timeout', () => {
+  assert.equal(
+    describeLocatorFailure(
+      "locator.waitFor: Timeout 15000ms exceeded.\nCall log:\n  - waiting for getByRole('button', { name: 'Search' }) to be visible",
+    ),
+    "Can't find Search button",
+  )
+  assert.equal(
+    describeLocatorFailure(
+      "locator.fill: Timeout 10000ms exceeded.\nCall log:\n  - waiting for getByRole('textbox', { name: 'Empl ID' })",
+    ),
+    "Can't fill Empl ID field",
+  )
+  assert.equal(
+    describeLocatorFailure(
+      "locator.waitFor: Timeout 15000ms exceeded.\nCall log:\n  - waiting for locator('#PERSON_NPC_VW_EMPLID') to be visible",
+    ),
+    "Can't find #PERSON_NPC_VW_EMPLID",
+  )
+  assert.equal(describeLocatorFailure("Last Day Worked cannot be in the future"), null)
+})
+
+test('classifyError: a locator timeout becomes the missing control', () => {
+  assert.equal(
+    classifyError(new Error("locator.click: Timeout 10000ms exceeded.\nCall log:\n  - waiting for getByRole('button', { name: 'Save' })")),
+    "Can't find Save button",
+  )
 })
 
 test('classifyError: appends systemId to each browser-closed variant', () => {

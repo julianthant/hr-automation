@@ -26,7 +26,7 @@ Example log lines you'll see in practice:
 ```
 ·  ucpath.jobData.compRateCodeInput: clicked in 87ms
 !  selector fallback triggered: ucpath.jobData.compRateCodeInput (click took 3421ms — likely fallback-hit or page stall)
-✗  selector fallback triggered: ucpath.jobData.compRateCodeInput (click failed after 10000ms — TimeoutError: locator.click timed out)
+✗  selector fallback triggered: ucpath.jobData.compRateCodeInput (click failed after 10000ms — Can't find ucpath.jobData.compRateCodeInput)
 ```
 
 The second and third are the re-mapping signals: primary anchor is either

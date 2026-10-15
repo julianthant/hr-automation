@@ -6,15 +6,49 @@ export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * Turn a Playwright locator failure into the missing control.
+ * `locator.waitFor: Timeout 15000ms exceeded` becomes "Can't find Search button"
+ * or "Can't fill Empl ID field" when the call log names the control.
+ */
+export function describeLocatorFailure(raw: string): string | null {
+  if (/waitForSelector/i.test(raw) && /timeout/i.test(raw)) return "Can't find the control";
+  const action = raw.match(/locator\.(waitFor|click|dblclick|fill|check|uncheck|selectOption|press|hover)\b/i)?.[1]?.toLowerCase();
+  if (!action || !/timeout/i.test(raw)) return null;
+
+  const role = raw.match(/getByRole\(\s*['"]([^'"]+)['"][^)]*name:\s*['"]([^'"]+)['"]/i);
+  const rolePattern = raw.match(/getByRole\(\s*['"]([^'"]+)['"][^)]*name:\s*\/([^/]+)\/[a-z]*/i);
+  let target = "";
+  const roleHit = role ?? rolePattern;
+  if (roleHit) {
+    const kind = roleHit[1].toLowerCase();
+    const name = roleHit[2].replace(/\\/g, "").trim();
+    const noun = kind === "button" ? "button"
+      : kind === "link" ? "link"
+      : kind === "checkbox" ? "checkbox"
+      : kind === "textbox" || kind === "combobox" || kind === "searchbox" ? "field"
+      : kind;
+    target = `${name} ${noun}`.replace(/\s+/g, " ").trim();
+  } else {
+    const named = raw.match(/getBy(?:Label|Placeholder|Text|Title)\(\s*['"]([^'"]+)['"]/i)?.[1];
+    const locators = [...raw.matchAll(/locator\(\s*['"]([^'"]+)['"]\s*\)/g)].map((match) => match[1]);
+    target = (named ?? locators.at(-1) ?? "").trim();
+  }
+  if (!target) target = action === "fill" ? "the field" : "the control";
+
+  if (action === "fill") return `Can't fill ${target}`;
+  if (action === "selectoption") return `Can't choose ${target}`;
+  if (action === "check" || action === "uncheck") return `Can't check ${target}`;
+  if (action === "click" || action === "dblclick" || action === "press" || action === "hover") return `Can't find ${target}`;
+  return `Can't find ${target}`;
+}
+
 /** Common Playwright/workflow error patterns → concise dashboard-friendly messages. */
 const ERROR_PATTERNS: [RegExp, string][] = [
   [/Target page, context or browser has been closed/i, "Browser closed unexpectedly"],
   [/browser has been disconnected/i, "Browser disconnected"],
   [/Page crashed/i, "Page crashed"],
-  [/page\.goto.*Timeout (\d+)ms/i, "Page navigation timed out"],
-  [/waiting for locator\('([^']+)'\).*Timeout/i, "Element not found: $1"],
-  [/locator\.(click|fill|check|select).*Timeout (\d+)ms/i, "Timed out waiting for element"],
-  [/waitForSelector.*Timeout/i, "Element did not appear in time"],
+  [/page\.goto.*Timeout (\d+)ms/i, "Page did not load"],
   [/waitForLoadState.*Timeout/i, "Page did not finish loading"],
   [/net::ERR_CONNECTION_REFUSED/i, "Connection refused — server unreachable"],
   [/net::ERR_NAME_NOT_RESOLVED/i, "DNS error — hostname not found"],
@@ -64,6 +98,8 @@ function appendSystemId(message: string, systemId: string | undefined): string {
  */
 export function classifyError(err: unknown, opts?: ClassifyErrorOpts): string {
   const raw = errorMessage(err);
+  const locatorCause = describeLocatorFailure(raw);
+  if (locatorCause) return locatorCause;
   for (const [pattern, replacement] of ERROR_PATTERNS) {
     const match = raw.match(pattern);
     if (match) {

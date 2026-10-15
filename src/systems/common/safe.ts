@@ -73,10 +73,13 @@ async function instrumentedAction(opts: ActionOpts): Promise<void> {
       log.debug(`${label}: ${actionName}ed in ${elapsed}ms`);
     }
   } catch (err) {
+    if (isCancellation(err)) throw err;
+    const verb = actionName === "fill" ? "fill" : "find";
+    const cause = `Can't ${verb} ${label}`;
     log.error(
-      `selector fallback triggered: ${label} (${actionName} failed after ${Date.now() - start}ms — ${errorMessage(err)})`,
+      `selector fallback triggered: ${label} (${actionName} failed after ${Date.now() - start}ms — ${cause})`,
     );
-    throw err;
+    throw new Error(cause, { cause: err });
   }
 }
 

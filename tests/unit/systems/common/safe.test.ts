@@ -137,10 +137,11 @@ describe("safeClick", () => {
     const { stdio, entries, error } = await runWithLogCapture("t3", () =>
       safeClick(loc, { label: "comp-rate-code" }),
     );
-    assert.equal(error, clickErr, "original click error should be re-thrown");
+    assert.equal(error instanceof Error && error.message, "Can't find comp-rate-code");
+    assert.equal(error instanceof Error ? error.cause : undefined, clickErr);
     assert.ok(
       stdio.some((l) =>
-        /selector fallback triggered: comp-rate-code \(click failed after \d+ms — TimeoutError: locator\.click timed out\)/.test(
+        /selector fallback triggered: comp-rate-code \(click failed after \d+ms — Can't find comp-rate-code\)/.test(
           l,
         ),
       ),
@@ -208,10 +209,11 @@ describe("safeFill", () => {
     const { stdio, entries, error } = await runWithLogCapture("t6", () =>
       safeFill(loc, "x", { label: "national-id" }),
     );
-    assert.equal(error, fillErr);
+    assert.equal(error instanceof Error && error.message, "Can't fill national-id");
+    assert.equal(error instanceof Error ? error.cause : undefined, fillErr);
     assert.ok(
       stdio.some((l) =>
-        /selector fallback triggered: national-id \(fill failed after \d+ms — TimeoutError: locator\.fill timed out\)/.test(
+        /selector fallback triggered: national-id \(fill failed after \d+ms — Can't fill national-id\)/.test(
           l,
         ),
       ),
