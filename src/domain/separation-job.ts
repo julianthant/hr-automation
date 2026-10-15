@@ -5,6 +5,84 @@ export interface SeparationJob {
   jobCode: string;
 }
 
+/** One Workforce employment row that can be matched to a Kuali student title. */
+export interface WorkforceJobChoice {
+  emplRecord: string;
+  jobCode: string;
+  jobDescription?: string;
+  hrStatus?: string;
+  positionNumber?: string;
+}
+
+/** `4920` and `004920` are the same title code. Anything else is not a job code. */
+export function normalizeSeparationJobCode(code: string | undefined): string {
+  const digits = code?.trim().match(/^(\d{4,6})$/)?.[1];
+  return digits ? digits.padStart(6, "0") : "";
+}
+
+function describeWorkforceJob(job: WorkforceJobChoice): string {
+  return [
+    `record ${job.emplRecord || "?"}`,
+    job.hrStatus,
+    normalizeSeparationJobCode(job.jobCode) || job.jobCode || "no job code",
+    job.jobDescription,
+    job.positionNumber ? `position ${job.positionNumber}` : "",
+  ].filter(Boolean).join(" ");
+}
+
+/**
+ * Pick the Workforce job the Kuali form named.
+ * The requested title wins over "the one active row", including when that title
+ * is already inactive, so an existing termination can be reused instead of
+ * filing against a different concurrent job. Two positions with the same title
+ * fail: the form does not say which position.
+ */
+export function selectWorkforceJobForKuali<T extends WorkforceJobChoice>(
+  eid: string,
+  requestedJobCode: string | undefined,
+  candidates: readonly T[],
+): T {
+  const described = candidates.map(describeWorkforceJob).join("; ") || "no jobs";
+  if (candidates.length === 0) {
+    throw new Error(`EID ${eid}: Workforce listed no jobs to compare with the Kuali form.`);
+  }
+  const requested = normalizeSeparationJobCode(requestedJobCode);
+  if (!requested) {
+    if (candidates.length === 1) return candidates[0];
+    const active = candidates.filter((job) => !/terminat|inactive/i.test(job.hrStatus ?? ""));
+    if (active.length === 1) return active[0];
+    throw new Error(
+      `EID ${eid}: the Kuali form has no Student Title Code, and Workforce has more than one job (${described}). Refusing to terminate or reuse an arbitrary job.`,
+    );
+  }
+  const matches = candidates.filter((job) => normalizeSeparationJobCode(job.jobCode) === requested);
+  const unique: T[] = [];
+  for (const job of matches) {
+    const key = `${job.emplRecord}|${job.positionNumber ?? ""}`;
+    const existing = unique.findIndex((kept) => `${kept.emplRecord}|${kept.positionNumber ?? ""}` === key);
+    if (existing === -1) unique.push(job);
+    else if (!unique[existing].positionNumber && job.positionNumber) unique[existing] = job;
+  }
+  if (unique.length === 1) return unique[0];
+  const jobs = new Map<string, T>();
+  for (const job of candidates) {
+    const key = job.positionNumber
+      ? `${job.emplRecord}|${job.positionNumber}`
+      : `${job.emplRecord}|${normalizeSeparationJobCode(job.jobCode)}`;
+    const kept = jobs.get(key);
+    if (!kept || (!kept.positionNumber && job.positionNumber)) jobs.set(key, job);
+  }
+  if (jobs.size === 1) return [...jobs.values()][0];
+  if (unique.length === 0) {
+    throw new Error(
+      `EID ${eid}: Kuali form asks for job ${requested}, but Workforce has ${described}. This run will not terminate or mark as duplicate a different job.`,
+    );
+  }
+  throw new Error(
+    `EID ${eid}: Kuali form asks for job ${requested}, and Workforce has more than one matching job (${unique.map(describeWorkforceJob).join("; ")}). The form does not say which position.`,
+  );
+}
+
 /** Kuali comments and the selected student title must agree when both identify a job. */
 export function parseSeparationJobCode(comment: string, studentTitle: string): string | undefined {
   const codes = new Set(Array.from(comment.matchAll(/\bSTDT\s*([234])\b/gi), (m) =>

@@ -1,4 +1,4 @@
-import { matchesSeparationJob, type SeparationJob } from "../../domain/separation-job.js";
+import { matchesSeparationJob, normalizeSeparationJobCode, type SeparationJob } from "../../domain/separation-job.js";
 import { z } from "zod/v4";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
@@ -51,7 +51,7 @@ import {
 import type { SeparationTimecardData } from "../../systems/new-kronos/index.js";
 
 // UCPath (Job Summary fetch for the identity gate + identity-check re-fetch)
-import { getJobSummaryIdentity, readSeparationHireDate } from "../../systems/ucpath/index.js";
+import { getJobSummaryIdentity, readJobMatchingKualiTitle } from "../../systems/ucpath/index.js";
 import type { JobSummaryData } from "../../systems/ucpath/index.js";
 
 import {
@@ -668,6 +668,27 @@ export const separationsWorkflow = defineWorkflow({
         if (!js.found || !js.data) throw new Error(`Cannot resolve the separation job for ${kualiData.eid}`);
         jobSummaryData = js.data;
       }
+      const requestedJobCode = normalizeSeparationJobCode(kualiData.jobCodeHint);
+      if (requestedJobCode && normalizeSeparationJobCode(jobSummaryData.jobCode) !== requestedJobCode) {
+        log.warn(
+          `[Job match] Workforce Job Summary opened ${jobSummaryData.jobCode || "no job code"} ` +
+          `(${jobSummaryData.jobDescription || "no title"}) for EID ${kualiData.eid}, ` +
+          `but the Kuali form asks for ${requestedJobCode}. Opening that employment record.`,
+        );
+        const matched = await readJobMatchingKualiTitle(await ctx.page("ucpath"), kualiData.eid, requestedJobCode);
+        jobSummaryData = {
+          ...jobSummaryData,
+          emplRecord: matched.emplRecord,
+          positionNumber: matched.positionNumber,
+          jobCode: matched.jobCode,
+          jobDescription: matched.jobDescription,
+          deptId: matched.deptId,
+          departmentDescription: matched.departmentDescription,
+        };
+        log.step(
+          `[Job match] Kuali ${requestedJobCode} is record ${matched.emplRecord} position ${matched.positionNumber} ${matched.jobDescription}`,
+        );
+      }
       const { emplRecord, positionNumber, jobCode } = jobSummaryData;
       if (emplRecord === undefined || !positionNumber) throw new Error(`Missing employment record or position for ${kualiData.eid}`);
       separationJob = { emplRecord, positionNumber, jobCode };
@@ -788,10 +809,12 @@ export const separationsWorkflow = defineWorkflow({
       let kronosStart = "";
       let kronosEnd = "";
       const phase1 = await ctx.step("kronos-search", async () => {
-        const hireDate = await readSeparationHireDate(await ctx.page("ucpath"), kualiData.eid, separationJob);
-        ({ startDate: kronosStart, endDate: kronosEnd } = computeKronosDateRange(hireDate, todayMmDdYyyy()));
-        ctx.updateData({ hireDate, kronosStartDate: kronosStart, kronosEndDate: kronosEnd });
-        log.step(`[New Kronos] Verified Last Hire through today: ${kronosStart} – ${kronosEnd}`);
+        ({ startDate: kronosStart, endDate: kronosEnd } = computeKronosDateRange(kualiData.separationDate, todayMmDdYyyy()));
+        ctx.updateData({ kronosStartDate: kronosStart, kronosEndDate: kronosEnd });
+        log.step(
+          `[New Kronos] Timecard window ${kronosStart} – ${kronosEnd} ` +
+          `(1st of the month before Kuali separation ${kualiData.separationDate}, through today)`,
+        );
         return runKronosSearch(ctx, kualiData, kronosStart, kronosEnd, timekeeperName);
       });
       if (phase1.newK.status === "fulfilled") {

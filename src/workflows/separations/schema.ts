@@ -257,23 +257,32 @@ function parseDate(dateStr: string): Date {
   return new Date(y, m - 1, d);
 }
 
-/** Search the verified hire date through the current local date, inclusive. */
+/**
+ * Kronos timecard window: the 1st of the month before the Kuali separation
+ * date, through today. A 09/09/2026 separation searches 08/01/2026–today.
+ * Day is always the 1st, so a 31st-day separation cannot overflow the month.
+ */
 export function computeKronosDateRange(
-  hireDate: string,
+  separationDate: string,
   currentDate: string,
 ): { startDate: string; endDate: string } {
-  const strictDate = (value: string): Date => {
-    if (!/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(value)) throw new Error(`Invalid hire-date search boundary: "${value}"`);
+  const strictDate = (value: string, label: string): Date => {
+    if (!/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(value)) throw new Error(`Invalid ${label}: "${value}"`);
     const date = parseDate(value);
     const [month, day, year] = value.split("/").map(Number);
     if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
-      throw new Error(`Invalid hire-date search boundary: "${value}"`);
+      throw new Error(`Invalid ${label}: "${value}"`);
     }
     return date;
   };
-  const start = strictDate(hireDate);
-  const end = strictDate(currentDate);
-  if (start > end) throw new Error(`Last Hire ${hireDate} is after current date ${currentDate}`);
+  const separation = strictDate(separationDate, "Kuali separation date");
+  const end = strictDate(currentDate, "current date");
+  const start = new Date(separation.getFullYear(), separation.getMonth() - 1, 1);
+  if (start > end) {
+    throw new Error(
+      `Kronos search start ${formatMmDdYyyy(start)} (the month before Kuali separation ${formatMmDdYyyy(separation)}) is after current date ${formatMmDdYyyy(end)}`,
+    );
+  }
   return { startDate: formatMmDdYyyy(start), endDate: formatMmDdYyyy(end) };
 }
 

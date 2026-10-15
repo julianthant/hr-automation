@@ -48,6 +48,7 @@ const mocks = vi.hoisted(() => {
     // correction (real fn navigates UCPath — stub it).
     getJobSummaryIdentity: vi.fn(),
     readSeparationHireDate: vi.fn(),
+    readJobMatchingKualiTitle: vi.fn(),
     // Kuali name write the identity-check "similar" branch makes (real fn drives
     // a live Kuali form — stub it).
     updateEmployeeName: vi.fn(),
@@ -105,6 +106,7 @@ vi.mock("../../../../src/systems/ucpath/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../../src/systems/ucpath/index.js")>()),
   getJobSummaryIdentity: mocks.getJobSummaryIdentity,
   readSeparationHireDate: mocks.readSeparationHireDate,
+  readJobMatchingKualiTitle: mocks.readJobMatchingKualiTitle,
 }));
 // Stub only the Kuali name write the identity-check "similar" branch makes on a
 // live run; keep every other kuali export real (isVoluntaryTermination, the
@@ -269,6 +271,7 @@ beforeEach(() => {
   mocks.updateLastDayWorked.mockResolvedValue(undefined);
   mocks.updateSeparationDate.mockResolvedValue(undefined);
   mocks.fillTimekeeperTasks.mockResolvedValue(undefined);
+  mocks.readJobMatchingKualiTitle.mockRejectedValue(new Error("readJobMatchingKualiTitle was not expected"));
 });
 
 describe("SeparationInputSchema (separationsWorkflow.config.schema)", () => {
@@ -447,7 +450,7 @@ describe("separations handler — found timecard without a verified last punch",
     { docId: "4753", eid: privateValue("id:3c6648fa80011ea0"), name: privateValue("name:a526af6f78c2d193"), positionNumber: privateValue("id:86c05cda34760347") },
     { docId: "4755", eid: privateValue("id:53d4bcaeeae1dcbc"), name: "Hu, Lawrence", positionNumber: privateValue("id:4563e2ea5867053f") },
   ]) {
-    it(`rejects #${item.docId}'s empty hire-to-current window before receipt reuse or submission`, async () => {
+    it(`rejects #${item.docId}'s empty timecard window before receipt reuse or submission`, async () => {
       mocks.runKualiExtract.mockResolvedValue({
         ...KUALI_FIXTURE, employeeName: item.name, eid: item.eid,
         lastDayWorked: "09/12/2026", separationDate: "09/12/2026",
@@ -463,7 +466,7 @@ describe("separations handler — found timecard without a verified last punch",
       });
       const { ctx } = makeFakeCtx({ docId: item.docId });
       await assert.rejects(runHandler(ctx, { docId: item.docId }),
-        new RegExp(`${item.eid}.*01/01/2025.*no physical punch`));
+        new RegExp(`${item.eid}.*08/01/2026.*no physical punch`));
       assert.equal(mocks.runTransactionCheck.mock.calls.length, 0);
       assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
       assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
@@ -1099,6 +1102,26 @@ describe("job identity and Task 1 safety", () => {
     await assert.rejects(runHandler(ctx, { docId: "4605" }), /Missing employment record/);
     assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
   });
+  it("terminates the only Workforce job when the Kuali title is not that job", async () => {
+    mocks.runKualiExtract.mockResolvedValue({ ...KUALI_FIXTURE, jobCodeHint: "004920" });
+    mocks.getJobSummaryIdentity.mockResolvedValue({
+      found: true,
+      name: "Test Employee",
+      data: {
+        emplRecord: "0", positionNumber: "29000001", deptId: "000412",
+        departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004921", jobDescription: "STDT 2",
+      },
+    });
+    mocks.readJobMatchingKualiTitle.mockResolvedValue({
+      emplRecord: "0", positionNumber: "29000001", jobCode: "004921", jobDescription: "STDT 2",
+      deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY",
+    });
+    const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
+    await runHandler(ctx, { docId: "4131", dryRun: true });
+    assert.equal(probe.data.jobCode, "004921");
+    assert.equal(probe.data.emplRecord, "0");
+    assert.equal(probe.data.positionNumber, "29000001");
+  });
 });
 
 
@@ -1131,26 +1154,59 @@ describe("receipt verification regressions", () => {
 });
 
 
-describe("separations hire-date search window", () => {
-  it("passes the verified Last Hire through today to Kronos", async () => {
-    mocks.readSeparationHireDate.mockResolvedValue("10/24/2025");
+describe("Kuali student title selects the Workforce job", () => {
+  it("switches to the Person Org record for the Kuali title when Job Summary opened a different job", async () => {
+    mocks.runKualiExtract.mockResolvedValue({ ...KUALI_FIXTURE, jobCodeHint: "004920" });
+    mocks.getJobSummaryIdentity.mockResolvedValue({
+      found: true,
+      name: "Test Employee",
+      data: {
+        emplRecord: "0", positionNumber: "29000001", deptId: "000412",
+        departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004921", jobDescription: "STDT 2",
+      },
+    });
+    mocks.readJobMatchingKualiTitle.mockResolvedValue({
+      emplRecord: "2", positionNumber: "29000002", jobCode: "004920", jobDescription: "STDT 3",
+      deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY",
+    });
     const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
     await runHandler(ctx, { docId: "4131", dryRun: true });
-    assert.equal(mocks.readSeparationHireDate.mock.calls[0][1], KUALI_FIXTURE.eid);
-    assert.deepEqual(mocks.readSeparationHireDate.mock.calls[0][2], { emplRecord: "0", positionNumber: privateValue("id:4dce293f69e3e795"), jobCode: "004920" });
-    assert.equal(mocks.runKronosSearch.mock.calls[0][2], "10/24/2025");
+    assert.equal(probe.data.jobCode, "004920");
+    assert.equal(probe.data.emplRecord, "2");
+    assert.equal(probe.data.positionNumber, "29000002");
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
+  });
+  it("fails before Kronos or submission when no Workforce job matches the Kuali title", async () => {
+    mocks.runKualiExtract.mockResolvedValue({ ...KUALI_FIXTURE, jobCodeHint: "004920" });
+    mocks.getJobSummaryIdentity.mockResolvedValue({
+      found: true,
+      name: "Test Employee",
+      data: {
+        emplRecord: "0", positionNumber: "29000001", deptId: "000412",
+        departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004921", jobDescription: "STDT 2",
+      },
+    });
+    mocks.readJobMatchingKualiTitle.mockRejectedValue(new Error(
+      "EID 19000003: Kuali form asks for job 004920, but Workforce has record 0 Active 004921 STDT 2. This run will not terminate or mark as duplicate a different job.",
+    ));
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await assert.rejects(runHandler(ctx, { docId: "4131" }), /will not terminate or mark as duplicate/);
+    assert.equal(mocks.runKronosSearch.mock.calls.length, 0);
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
+    assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
+  });
+});
+
+describe("separations Kronos search window", () => {
+  it("searches from the 1st of the month before the Kuali separation date through today", async () => {
+    const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
+    await runHandler(ctx, { docId: "4131", dryRun: true });
+    assert.equal(mocks.readSeparationHireDate.mock.calls.length, 0);
+    assert.equal(mocks.runKronosSearch.mock.calls[0][2], "12/01/2025");
     const now = new Date();
     const today = `${String(now.getMonth() + 1).padStart(2, "0")}/${String(now.getDate()).padStart(2, "0")}/${now.getFullYear()}`;
     assert.equal(mocks.runKronosSearch.mock.calls[0][3], today);
-    assert.equal(probe.data.hireDate, "10/24/2025");
-  });
-  it("stops before Kronos, receipt reuse or submission when hire-date lookup fails", async () => {
-    mocks.readSeparationHireDate.mockRejectedValue(new Error("Last Hire is blank"));
-    const { ctx } = makeFakeCtx({ docId: "4131" });
-    await assert.rejects(runHandler(ctx, { docId: "4131" }), /Last Hire is blank/);
-    assert.equal(mocks.runKronosSearch.mock.calls.length, 0);
-    assert.equal(mocks.runTransactionCheck.mock.calls.length, 0);
-    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
-    assert.equal(mocks.runKualiFinalize.mock.calls.length, 0);
+    assert.equal(probe.data.kronosStartDate, "12/01/2025");
+    assert.equal(probe.data.kronosEndDate, today);
   });
 });

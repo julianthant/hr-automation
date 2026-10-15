@@ -18,7 +18,9 @@
  */
 
 import type { Page, FrameLocator } from "playwright";
+import { setTimeout as delay } from "node:timers/promises";
 import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
+import { normalizeSeparationJobCode, selectWorkforceJobForKuali } from "../../domain/separation-job.js";
 import { displayPersonName, parseLastFirstName } from "../../domain/identity/person-name.js";
 import { log } from "../../utils/log.js";
 import { collapseSidebar, getContentFrame, waitForPeopleSoftProcessing } from "./navigate.js";
@@ -995,18 +997,142 @@ export function resolveSeparationHireDate(
   return hireDate;
 }
 
+interface PersonOrgSearchRow {
+  emplRecord: string;
+  jobCode: string;
+  jobDescription: string;
+  hrStatus: string;
+  rowIndex: number;
+}
+
+async function searchPersonOrgByEid(page: Page, eid: string): Promise<FrameLocator> {
+  const frame = await navigateToPersonOrgSummary(page);
+  await safeFill(personOrgSummary.lastNameInput(frame), "", { label: "clear last name" });
+  await safeFill(personOrgSummary.nameInput(frame), "", { label: "clear name" });
+  await safeFill(personOrgSummary.emplIdInput(frame), eid, { label: "person org employee ID" });
+  await safeClick(personOrgSummary.searchButton(frame), { label: "person org search" });
+  return frame;
+}
+
+async function personOrgDetailVisible(frame: FrameLocator): Promise<boolean> {
+  return personOrgSummary.personIdValue(frame).isVisible().catch(() => false);
+}
+
+async function readPersonOrgSearchRows(frame: FrameLocator): Promise<PersonOrgSearchRow[]> {
+  const table = personOrgSummary.resultsTable(frame);
+  if (await table.count().catch(() => 0) === 0) return [];
+  return table.evaluate((tableEl: HTMLTableElement) => {
+    const data: Array<{ emplRecord: string; jobCode: string; jobDescription: string; hrStatus: string; rowIndex: number }> = [];
+    let rowIndex = 0;
+    for (const row of Array.from(tableEl.rows)) {
+      const cells = Array.from(row.cells);
+      const emplId = cells[0]?.textContent?.trim() ?? "";
+      if (cells.length >= 8 && /^\d{5,}$/.test(emplId)) {
+        data.push({
+          emplRecord: cells[1]?.textContent?.trim() ?? "",
+          hrStatus: cells[2]?.textContent?.trim() ?? "",
+          jobCode: cells[4]?.textContent?.trim() ?? "",
+          jobDescription: cells[5]?.textContent?.trim() ?? "",
+          rowIndex,
+        });
+        rowIndex++;
+      }
+    }
+    return data;
+  });
+}
+
+/** Detail page, or a results grid. A bare 15s locator timeout hides which jobs were on screen. */
+async function waitForPersonOrgOutcome(frame: FrameLocator, eid: string): Promise<"detail" | "grid"> {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (await personOrgDetailVisible(frame)) return "detail";
+    if ((await readPersonOrgSearchRows(frame)).length > 0) return "grid";
+    await delay(250);
+  }
+  throw new Error(
+    `Person Organizational Summary for EID ${eid} did not open a job detail page or a results table within 15s. ` +
+    `The search is still on the criteria form, so no employment record was chosen.`,
+  );
+}
+
+async function openPersonOrgSearchRow(frame: FrameLocator, eid: string, row: PersonOrgSearchRow): Promise<void> {
+  await safeClick(personOrgSummary.drillInButton(frame, row.rowIndex), { label: "person org job drill-in" });
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (await personOrgDetailVisible(frame)) return;
+    await delay(250);
+  }
+  throw new Error(
+    `Person Organizational Summary for EID ${eid}: chose record ${row.emplRecord} ${row.hrStatus} ${row.jobCode} ${row.jobDescription}, ` +
+    `but the detail page did not open within 15s.`,
+  );
+}
+
+/**
+ * Open the Person Org employment record whose job code is the Kuali student title.
+ * Job Summary often auto-opens one concurrent job; this is how the other title is selected.
+ */
+export async function readJobMatchingKualiTitle(
+  page: Page,
+  eid: string,
+  jobCode: string,
+): Promise<{
+  emplRecord: string;
+  positionNumber: string;
+  jobCode: string;
+  jobDescription: string;
+  deptId: string;
+  departmentDescription: string;
+}> {
+  const frame = await searchPersonOrgByEid(page, eid);
+  const outcome = await waitForPersonOrgOutcome(frame, eid);
+  if (outcome === "grid") {
+    const chosen = selectWorkforceJobForKuali(eid, jobCode, await readPersonOrgSearchRows(frame));
+    await openPersonOrgSearchRow(frame, eid, chosen);
+  }
+  await clickEmploymentInstancesViewAllIfPresent(page, frame);
+  const assignments = (await extractAssignmentRowsFromBody(frame))
+    .map((cells) => deriveAssignmentDetailsFromCells(cells))
+    .filter((row): row is NonNullable<typeof row> => row !== null)
+    .map((row) => ({ ...row, jobDescription: row.jobCodeDescription }));
+  const matched = selectWorkforceJobForKuali(eid, jobCode, assignments);
+  const code = normalizeSeparationJobCode(matched.jobCode);
+  if (!/^\d+$/.test(matched.emplRecord) || !/^\d{7,8}$/.test(matched.positionNumber) || !code) {
+    throw new Error(
+      `EID ${eid}: Kuali job ${jobCode} matched Person Org record ${matched.emplRecord || "?"} ` +
+      `but the position or job code is missing (position ${matched.positionNumber || "blank"}, job ${matched.jobCode || "blank"}).`,
+    );
+  }
+  if (code !== normalizeSeparationJobCode(jobCode)) {
+    log.warn(
+      `[Job match] Kuali asks for ${jobCode}, but EID ${eid} has only one Workforce job ` +
+      `${code} ${matched.jobCodeDescription || ""} record ${matched.emplRecord} position ${matched.positionNumber}. Terminating that job.`,
+    );
+  }
+  return {
+    emplRecord: matched.emplRecord,
+    positionNumber: matched.positionNumber,
+    jobCode: code,
+    jobDescription: matched.jobCodeDescription,
+    deptId: matched.deptId,
+    departmentDescription: matched.department,
+  };
+}
+
 /** Read Last Hire directly; assignment EFFDT is never a substitute. */
 export async function readSeparationHireDate(
   page: Page,
   eid: string,
-  job: { emplRecord: string; positionNumber: string },
+  job: { emplRecord: string; positionNumber: string; jobCode?: string },
 ): Promise<string> {
-  const frame = await navigateToPersonOrgSummary(page);
-  await safeFill(personOrgSummary.lastNameInput(frame), "", { label: "clear last name" });
-  await safeFill(personOrgSummary.nameInput(frame), "", { label: "clear name" });
-  await safeFill(personOrgSummary.emplIdInput(frame), eid, { label: "hire-date employee ID" });
-  await safeClick(personOrgSummary.searchButton(frame), { label: "hire-date search" });
-  await personOrgSummary.personIdValue(frame).waitFor({ state: "visible", timeout: 15_000 });
+  const frame = await searchPersonOrgByEid(page, eid);
+  const outcome = await waitForPersonOrgOutcome(frame, eid);
+  if (outcome === "grid") {
+    const rows = await readPersonOrgSearchRows(frame);
+    const chosen = selectWorkforceJobForKuali(eid, job.jobCode, rows);
+    await openPersonOrgSearchRow(frame, eid, chosen);
+  }
   await waitForPeopleSoftProcessing(frame);
   const observedEid = await personOrgSummary.personIdValue(frame).innerText();
   // verified 2026-10-06: each ORG Instance contains its own Last Hire and assignment grid.

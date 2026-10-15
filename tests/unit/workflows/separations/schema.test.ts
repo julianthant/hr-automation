@@ -449,19 +449,18 @@ describe("getInitials", () => {
 });
 
 describe("computeKronosDateRange", () => {
-  it("covers hire through today without using claimed separation dates", () => {
-    assert.deepEqual(computeKronosDateRange("10/24/2025", "10/06/2026"), { startDate: "10/24/2025", endDate: "10/06/2026" });
+  it("starts on the 1st of the month before the Kuali separation date and ends today", () => {
+    assert.deepEqual(computeKronosDateRange("09/09/2026", "10/15/2026"), { startDate: "08/01/2026", endDate: "10/15/2026" });
   });
-  it("includes same-day hires", () => {
-    assert.deepEqual(computeKronosDateRange("06/08/2026", "06/08/2026"), { startDate: "06/08/2026", endDate: "06/08/2026" });
+  it("crosses New Year when the separation is in January", () => {
+    assert.deepEqual(computeKronosDateRange("01/16/2026", "10/15/2026"), { startDate: "12/01/2025", endDate: "10/15/2026" });
   });
-  it("pads date boundaries", () => {
-    assert.equal(computeKronosDateRange("4/3/2026", "6/8/2026").startDate, "04/03/2026");
+  it("uses the 1st even when the separation day is the 31st", () => {
+    assert.equal(computeKronosDateRange("03/31/2026", "04/15/2026").startDate, "02/01/2026");
   });
-  it("retains leap-day hires", () => {
-    assert.equal(computeKronosDateRange("02/29/2024", "10/06/2026").startDate, "02/29/2024");
+  it("rejects a window that would start after today", () => {
+    assert.throws(() => computeKronosDateRange("12/09/2026", "10/15/2026"), /after current date/);
   });
-  it("rejects future hires", () => assert.throws(() => computeKronosDateRange("10/07/2026", "10/06/2026"), /after current date/));
   it("rejects impossible boundaries", () => {
     assert.throws(() => computeKronosDateRange("02/29/2025", "10/06/2026"), /Invalid/);
     assert.throws(() => computeKronosDateRange("01/01/2025", "04/31/2026"), /Invalid/);

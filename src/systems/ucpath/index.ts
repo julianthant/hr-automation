@@ -86,4 +86,4 @@ export {
 } from "./job-summary.js";
 export type { JobSummaryData, JobSummaryIdentity } from "./job-summary.js";
 
-export { readSeparationHireDate } from "./person-org-summary.js";
+export { readJobMatchingKualiTitle, readSeparationHireDate } from "./person-org-summary.js";

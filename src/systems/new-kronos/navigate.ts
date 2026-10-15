@@ -908,34 +908,33 @@ export async function getSeparationTimecardData(
 ): Promise<SeparationTimecardData> {
   log.step("[New Kronos] Parsing timecard for separation data (last punch, sick, holiday)...");
 
+  // No named functions in this callback. tsx keepNames wraps them in `__name`,
+  // which exists only in Node, so the page throws ReferenceError on every read.
   const raw = await page.evaluate(async (bounds: { start: number[]; end: number[] }) => {
     const start = new Date(bounds.start[0], bounds.start[1], bounds.start[2]);
     const endDate = new Date(bounds.end[0], bounds.end[1], bounds.end[2]);
     const weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const dateKey = (date: Date): string => `${date.getMonth() + 1}/${date.getDate()}`;
     const requested = new Map<string, { weekday: string; time: number }>();
-    for (const day = new Date(start); day <= endDate; day.setDate(day.getDate() + 1)) requested.set(dateKey(day), { weekday: weekdayNames[day.getDay()], time: day.getTime() });
+    for (const day = new Date(start); day <= endDate; day.setDate(day.getDate() + 1)) {
+      requested.set(`${day.getMonth() + 1}/${day.getDate()}`, { weekday: weekdayNames[day.getDay()], time: day.getTime() });
+    }
     const previous = new Date(start); previous.setDate(previous.getDate() - 1);
     const following = new Date(endDate); following.setDate(following.getDate() + 1);
-    const padding = [previous, following].map(day => `${weekdayNames[day.getDay()]} ${dateKey(day)}`);
+    const padding = [previous, following].map((day) => `${weekdayNames[day.getDay()]} ${day.getMonth() + 1}/${day.getDate()}`);
     const snapshots = new Map<string, { date: { mon: number; day: number }; cells: string[] }>();
-    const viewports = (): HTMLElement[] => {
-      const vps = [...document.querySelectorAll<HTMLElement>(".ui-grid-viewport")];
-      if (vps.length !== 2) throw new Error(`[New Kronos] Expected two timecard viewports; found ${vps.length}`);
-      return vps;
-    };
-    const scroll = (top: number): void => {
-      const vps = viewports();
-      for (const vp of vps) {
-        vp.scrollTop = top;
-        vp.dispatchEvent(new Event("scroll", { bubbles: true }));
-      }
-    };
-    scroll(0);
+    const initial = [...document.querySelectorAll<HTMLElement>(".ui-grid-viewport")];
+    if (initial.length !== 2) throw new Error(`[New Kronos] Expected two timecard viewports; found ${initial.length}`);
+    for (const vp of initial) {
+      vp.scrollTop = 0;
+      vp.dispatchEvent(new Event("scroll", { bubbles: true }));
+    }
     let reachedEnd = false;
     for (let pass = 0; pass < 2_000; pass++) {
-      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-      const [dateVp, dataVp] = viewports();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const vps = [...document.querySelectorAll<HTMLElement>(".ui-grid-viewport")];
+      if (vps.length !== 2) throw new Error(`[New Kronos] Expected two timecard viewports; found ${vps.length}`);
+      const dateVp = vps[0];
+      const dataVp = vps[1];
       const dRows = [...dateVp.querySelectorAll<HTMLElement>("[role=row]")];
       const xRows = [...dataVp.querySelectorAll<HTMLElement>("[role=row]")];
       if (!dRows.length || dRows.length !== xRows.length || dataVp.clientHeight <= 0) {
@@ -966,7 +965,10 @@ export async function getSeparationTimecardData(
       const end = dataVp.scrollHeight - dataVp.clientHeight;
       if (dataVp.scrollTop >= end - 1) { reachedEnd = true; break; }
       const next = Math.min(end, dataVp.scrollTop + Math.max(1, dataVp.clientHeight - 40));
-      scroll(next);
+      for (const vp of vps) {
+        vp.scrollTop = next;
+        vp.dispatchEvent(new Event("scroll", { bubbles: true }));
+      }
     }
     if (!reachedEnd) throw new Error("[New Kronos] Full timecard scan did not reach the end");
     const rows = [...snapshots.values()];

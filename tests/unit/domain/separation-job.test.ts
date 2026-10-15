@@ -1,7 +1,7 @@
 import { privateValue } from "../../../src/private-data.js";
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import { commentsMatchTermination, matchesSeparationJob, parseKualiSeparationTask, parseSeparationJobCode, parseTerminationJobHeader } from "../../../src/domain/separation-job.js";
+import { commentsMatchTermination, matchesSeparationJob, parseKualiSeparationTask, parseSeparationJobCode, parseTerminationJobHeader, selectWorkforceJobForKuali } from "../../../src/domain/separation-job.js";
 
 describe("separation job identity", () => {
   it("distinguishes summer and academic-year forms from their comments", () => {
@@ -28,6 +28,35 @@ describe("separation job identity", () => {
     assert.equal(parseKualiSeparationTask("PLEASE REVIEW AND COMPLETE CHECKLIST - Task 2\nTimekeeper Tasks - Step 1"), 2);
     assert.equal(parseKualiSeparationTask("PLEASE REVIEW AND COMPLETE CHECKLIST - Task 1"), 1);
     assert.throws(() => parseKualiSeparationTask("Timekeeper Tasks - Step 1"), /instruction/);
+  });
+});
+
+describe("selectWorkforceJobForKuali", () => {
+  const stdt2 = { emplRecord: "0", jobCode: "004921", jobDescription: "STDT 2", hrStatus: "Active", positionNumber: "29000001" };
+  const stdt3 = { emplRecord: "1", jobCode: "004920", jobDescription: "STDT 3", hrStatus: "Active", positionNumber: "29000002" };
+  const inactiveStdt3 = { ...stdt3, emplRecord: "2", hrStatus: "Inactive" };
+
+  it("picks the Kuali title even when another job is also active", () => {
+    assert.equal(selectWorkforceJobForKuali("19000001", "004920", [stdt2, stdt3]), stdt3);
+    assert.equal(selectWorkforceJobForKuali("19000001", "4921", [stdt2, stdt3]).jobCode, "004921");
+  });
+  it("picks an inactive matching title so the existing termination can be reused", () => {
+    assert.equal(selectWorkforceJobForKuali("19000002", "004920", [stdt2, inactiveStdt3]), inactiveStdt3);
+  });
+  it("uses the only Workforce job when the Kuali title is not among the rows", () => {
+    assert.equal(selectWorkforceJobForKuali("19000001", "004920", [stdt2]), stdt2);
+  });
+  it("refuses a different job when the person has more than one Workforce job", () => {
+    assert.throws(() => selectWorkforceJobForKuali("19000001", "004919", [stdt2, stdt3]), /will not terminate or mark as duplicate/);
+  });
+  it("refuses two positions with the same title", () => {
+    assert.throws(
+      () => selectWorkforceJobForKuali("19000001", "004921", [stdt2, { ...stdt2, positionNumber: "29000003" }]),
+      /does not say which position/,
+    );
+  });
+  it("refuses several jobs when the form has no student title", () => {
+    assert.throws(() => selectWorkforceJobForKuali("19000001", undefined, [stdt2, stdt3]), /no Student Title Code/);
   });
 });
 

@@ -1,5 +1,6 @@
 import type { Page, Locator } from "playwright";
 import { setTimeout as sleep } from "node:timers/promises";
+import { selectWorkforceJobForKuali } from "../../domain/separation-job.js";
 import { log } from "../../utils/log.js";
 import { errorMessage, classifyPlaywrightError } from "../../utils/errors.js";
 import { jobSummary } from "./selectors.js";
@@ -326,48 +327,44 @@ async function ensureJobSummaryDetailPage(
       }
       nonTerminated.push(i);
     }
-    if (nonTerminated.length === 0) {
+    let rowIndex: number;
+    if (opts.jobCodeHint) {
+      // The Kuali title selects the row, including an inactive one. Taking the
+      // only active row here filed the other concurrent job.
+      const chosen = selectWorkforceJobForKuali(emplId, opts.jobCodeHint, Array.from({ length: scopedTotal }, (_, index) => ({
+        index,
+        emplRecord: rowRecords[index] ?? "",
+        jobCode: rowJobCodes[index] ?? "",
+        hrStatus: statuses[index] ?? "",
+      })));
+      rowIndex = chosen.index;
+      log.step(
+        `[Job Summary] Kuali job ${opts.jobCodeHint} matches row ${rowIndex + 1}/${scopedTotal} ` +
+        `(record ${chosen.emplRecord}, ${chosen.hrStatus || "no status"}, job ${chosen.jobCode})`,
+      );
+    } else if (nonTerminated.length === 0) {
       throw new Error(
         `[Job Summary] Multi-row grid for EID ${emplId}: all ${scopedTotal} rows were Terminated — no actionable row to drill into. Verify the EID in Kuali Build, or the employee may already be fully separated.`,
       );
-    }
-
-    let rowIndex: number;
-    if (nonTerminated.length === 1) {
+    } else if (nonTerminated.length === 1) {
       rowIndex = nonTerminated[0];
-    } else {
-      // Disambiguation among multiple non-terminated rows
-      if (opts.preferredEmplRecord !== undefined) {
-        const matches = nonTerminated.filter((idx) => rowRecords[idx] === opts.preferredEmplRecord);
-        if (matches.length === 1) {
-          rowIndex = matches[0];
-          log.step(
-            `[Job Summary] Disambiguated concurrent active jobs for EID ${emplId}: selected row ${rowIndex + 1}/${scopedTotal} with requested Empl Record ${opts.preferredEmplRecord} (job code ${rowJobCodes[rowIndex]})`,
-          );
-        } else {
-          throw new Error(
-            `[Job Summary] Multi-row grid for EID ${emplId}: requested Empl Record '${opts.preferredEmplRecord}' was not found among active rows (active rows: ${nonTerminated.map((idx) => `row ${idx + 1} [Empl Rec ${rowRecords[idx]}, Job ${rowJobCodes[idx]}]`).join(", ")}). Refusing to proceed with wrong job.`,
-          );
-        }
-      } else if (opts.jobCodeHint !== undefined) {
-        const matches = nonTerminated.filter((idx) => rowJobCodes[idx] === opts.jobCodeHint);
-        if (matches.length === 1) {
-          rowIndex = matches[0];
-          log.step(
-            `[Job Summary] Disambiguated concurrent active jobs for EID ${emplId}: selected row ${rowIndex + 1}/${scopedTotal} matching Job Code hint ${opts.jobCodeHint} (Empl Record ${rowRecords[rowIndex]})`,
-          );
-        } else {
-          throw new Error(
-            `[Job Summary] Multi-row grid for EID ${emplId}: ${nonTerminated.length} non-terminated rows found (concurrent jobs) — could not disambiguate with Job Code hint '${opts.jobCodeHint}' (candidates: ${nonTerminated.map((idx) => `row ${idx + 1} [Empl Rec ${rowRecords[idx]}, Job ${rowJobCodes[idx]}]`).join(", ")}). Resolve the correct position/job manually before re-running.`,
-          );
-        }
-      } else {
+    } else if (opts.preferredEmplRecord !== undefined) {
+      const matches = nonTerminated.filter((idx) => rowRecords[idx] === opts.preferredEmplRecord);
+      if (matches.length !== 1) {
         throw new Error(
-          `[Job Summary] Multi-row grid for EID ${emplId}: ${nonTerminated.length} non-terminated rows found `
-          + `(concurrent jobs) — row statuses: ${statuses.join(", ")}. Cannot determine which job is being `
-          + `separated without disambiguation; resolve the correct position/job manually before re-running.`,
+          `[Job Summary] Multi-row grid for EID ${emplId}: requested Empl Record '${opts.preferredEmplRecord}' was not found among active rows (active rows: ${nonTerminated.map((idx) => `row ${idx + 1} [Empl Rec ${rowRecords[idx]}, Job ${rowJobCodes[idx]}]`).join(", ")}). Refusing to proceed with wrong job.`,
         );
       }
+      rowIndex = matches[0];
+      log.step(
+        `[Job Summary] Disambiguated concurrent active jobs for EID ${emplId}: selected row ${rowIndex + 1}/${scopedTotal} with requested Empl Record ${opts.preferredEmplRecord} (job code ${rowJobCodes[rowIndex]})`,
+      );
+    } else {
+      throw new Error(
+        `[Job Summary] Multi-row grid for EID ${emplId}: ${nonTerminated.length} non-terminated rows found `
+        + `(concurrent jobs) — row statuses: ${statuses.join(", ")}. Cannot determine which job is being `
+        + `separated without disambiguation; resolve the correct position/job manually before re-running.`,
+      );
     }
 
     const row = scopedRows.nth(rowIndex);

@@ -62,9 +62,12 @@ function evaluateCallbackSpans(src: string): Array<{ index: number; body: string
   return spans;
 }
 
-/** A named binding declared inside the callback — what esbuild wraps in `__name`. */
+/**
+ * A named binding declared inside the callback — what esbuild wraps in `__name`.
+ * A TypeScript return type (`: string`, `: HTMLElement[]`) may sit between `)` and `=>`.
+ */
 const NAMED_BINDING =
-  /\b(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?(?:\([^)]*\)|\w+)\s*=>|\bfunction\s+\w+\s*\(/;
+  /\b(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?(?:\([^)]*\)|\w+)(?:\s*:\s*[^=]+?)?\s*=>|\bfunction\s+\w+\s*\(/;
 
 /** Comments describing this very hazard are not offenders — match code only. */
 function stripComments(src: string): string {
@@ -80,6 +83,12 @@ const ALLOWLIST = [
 ];
 
 describe("architecture: no named functions inside page-evaluated callbacks", () => {
+  it("flags a named arrow whose return type sits before =>", () => {
+    const sample = "page.evaluate(() => { const dateKey = (date: Date): string => String(date); const viewports = (): HTMLElement[] => []; })";
+    const span = evaluateCallbackSpans(sample)[0];
+    assert.match(stripComments(span.body), NAMED_BINDING);
+  });
+
   it("every evaluate/evaluateAll callback declares only anonymous callbacks", () => {
     const offenders: string[] = [];
     for (const dir of SCAN_DIRS) {
