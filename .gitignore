@@ -77,23 +77,14 @@ docs/*
 # (.tracker/sharepoint, .tracker/rosters, .tracker/screenshots) — covered by
 # the .tracker/ rule above. Runtime writers mkdir their targets on demand.
 
-# Generated artifacts. Directory shells/docs may be tracked; generated outputs
-# are re-created by scripts/tests. See generated/README.md for the layout.
-generated/schemas/*.schema.json
-generated/pathfinder/
-generated/reports/
-# All run-scratch lives in dot-dirs under generated/ (per generated/README.md) —
-# ignore every one of them with a single catch-all. Currently:
-#   .e2e/                  e2e run artifacts (app tracker + harness manifests/reports)
-#   .tests/                unit-test tracker output (tracker/log/log-validator)
-#   .dashboard-preview/    seed-session-fixture.ts dashboard fixture
-#   .duo-soak/             Duo Autopilot soak-run logs
-#   .screenshot-verify/    selector verification screenshots
-#   .screenshot-verify-live/  live-workflow verification shots + tracker
-generated/.*/
-# One-off run-output directories (dated audit/batch artifacts, ad-hoc scripts)
-generated/audit-*/
-generated/separations-*/
+# Generated artifacts. Only the README shells are tracked. Run output, schema
+# exports, and dated batch receipts (CRM checks, Kuali runs, imports) stay local.
+# See generated/README.md.
+generated/*
+!generated/README.md
+!generated/schemas/
+generated/schemas/*
+!generated/schemas/README.md
 
 # OS
 .DS_Store
