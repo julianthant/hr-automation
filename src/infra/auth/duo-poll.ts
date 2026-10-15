@@ -564,7 +564,7 @@ export async function pollDuoApproval(
       // lands) — the loop would otherwise wait out the whole window. Send a Duo
       // Push ourselves so the operator can approve on their phone, once, and open
       // the wait back up to the full timeout now that a push is actually pending.
-      if (!pushTriggered) {
+      if (!pushTriggered && process.env.HR_AUTOMATION_DUO_EXTENSION !== "1") {
         const sent = await triggerDuoPushFromFactorScreen(page, options.abortSignal);
         if (sent) {
           pushTriggered = true;

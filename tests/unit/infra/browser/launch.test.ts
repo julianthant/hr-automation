@@ -3,6 +3,8 @@ import type { Page } from "playwright";
 import {
   gotoWithRetry,
   DEFAULT_NAVIGATION_RETRIES,
+  duoExtensionSignCount,
+  stampCredentialSignCounts,
 } from "../../../../src/infra/browser/launch.js";
 
 /**
@@ -32,6 +34,19 @@ function makeFakePage(opts: {
   } as unknown as Page;
   return { page, gotoCalls: () => gotoCount, delayCalls: () => delayCount };
 }
+
+describe("duoExtensionSignCount", () => {
+  it("keeps parallel browsers off the same counter", () => {
+    expect(duoExtensionSignCount(1_700_000_000, 1)).toBe(1_700_001_000);
+    expect(duoExtensionSignCount(1_700_000_000, 2)).toBe(1_700_002_000);
+  });
+
+  it("stamps every packaged credential", () => {
+    const parsed = { credentials: [{ signCount: 1 }, { signCount: 4 }] };
+    stampCredentialSignCounts(parsed, 50);
+    expect(parsed.credentials.map((c) => c.signCount)).toEqual([50, 50]);
+  });
+});
 
 describe("gotoWithRetry", () => {
   it("defaults to 10 navigation attempts (operator policy: refresh up to 10×)", () => {

@@ -50,6 +50,13 @@ describe("isDuoWebAuthnEnabled", () => {
     assert.equal(isDuoWebAuthnEnabled({ HR_AUTOMATION_DUO_WEBAUTHN: "1" }), true);
   });
 
+  it("stays off when the Duo Autopilot extension is loaded", () => {
+    assert.equal(
+      isDuoWebAuthnEnabled({ HR_AUTOMATION_DUO_WEBAUTHN: "1", HR_AUTOMATION_DUO_EXTENSION: "1" }),
+      false,
+    );
+  });
+
   it("is false for unset, empty, or any other value", () => {
     assert.equal(isDuoWebAuthnEnabled({}), false);
     assert.equal(isDuoWebAuthnEnabled({ HR_AUTOMATION_DUO_WEBAUTHN: "" }), false);
@@ -129,6 +136,12 @@ describe("nextSignCount", () => {
 
   it("never returns below zero", () => {
     assert.equal(nextSignCount(-4, undefined), 0);
+  });
+
+  it("ignores a unix-time jump from the virtual authenticator", () => {
+    assert.equal(nextSignCount(12, 1_791_915_322), 12);
+    assert.equal(nextSignCount(0, 1_791_915_322), 0);
+    assert.equal(nextSignCount(12, 40), 40);
   });
 });
 

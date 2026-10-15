@@ -1,3 +1,7 @@
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import {
   chromium,
   type Browser,
@@ -109,6 +113,90 @@ export async function gotoWithRetry(
   }
 }
 
+/** Gap between per-browser Duo Autopilot counters so parallel workers don't sign the same count. */
+export const DUO_EXTENSION_SIGNCOUNT_STRIDE = 1_000;
+
+/**
+ * Starting WebAuthn counter for one browser. Unix time is ahead of Duo; the
+ * stride keeps two workers that launch in the same second from replaying it.
+ */
+export function duoExtensionSignCount(nowSec: number, seq: number): number {
+  return nowSec + seq * DUO_EXTENSION_SIGNCOUNT_STRIDE;
+}
+
+/** Write `signCount` onto every credential in the packaged extension file. Pure aside from mutating `parsed`. */
+export function stampCredentialSignCounts(parsed: unknown, signCount: number): void {
+  if (!parsed || typeof parsed !== "object") return;
+  const creds = (parsed as { credentials?: unknown }).credentials;
+  const list = Array.isArray(creds) ? creds : [parsed];
+  for (const entry of list) {
+    if (entry && typeof entry === "object") (entry as { signCount?: number }).signCount = signCount;
+  }
+}
+
+function duoAutopilotSourceDir(): string | undefined {
+  if (process.env.HR_AUTOMATION_DUO_EXTENSION === "0") return undefined;
+  const dir = process.env.HR_AUTOMATION_DUO_EXTENSION_DIR?.trim() || join(process.cwd(), "duo-autopilot");
+  if (!existsSync(join(dir, "manifest.json"))) return undefined;
+  if (!existsSync(join(dir, "credentials", "duo-webauthn.json"))) return undefined;
+  return dir;
+}
+
+async function reserveExtensionSeq(root: string): Promise<number> {
+  const seqPath = join(root, "duo-extension-seq");
+  const lockDir = join(root, "duo-extension-seq.lock");
+  mkdirSync(root, { recursive: true });
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {
+      mkdirSync(lockDir);
+    } catch (err) {
+      const code = err && typeof err === "object" && "code" in err ? err.code : undefined;
+      if (code !== "EEXIST") throw err;
+      await sleep(30);
+      continue;
+    }
+    try {
+      let seq = 0;
+      try {
+        seq = Number(readFileSync(seqPath, "utf8")) || 0;
+      } catch {
+        /* first reservation */
+      }
+      seq += 1;
+      writeFileSync(seqPath, String(seq));
+      return seq;
+    } finally {
+      rmSync(lockDir, { recursive: true, force: true });
+    }
+  }
+  throw new Error("Could not reserve a Duo Autopilot signCount");
+}
+
+/**
+ * Copy Duo Autopilot and stamp a unique signCount. Extensions only load from a
+ * persistent profile, and a reused profile keeps a counter Duo has already seen.
+ */
+async function prepareDuoAutopilot(): Promise<{ extDir: string; profileDir: string } | undefined> {
+  const source = duoAutopilotSourceDir();
+  if (!source) return undefined;
+  const root = join(process.cwd(), ".auth");
+  const seq = await reserveExtensionSeq(root);
+  const scratch = join(tmpdir(), `hrauto-duo-${process.pid}-${seq}`);
+  const extDir = join(scratch, "ext");
+  const profileDir = join(scratch, "profile");
+  cpSync(source, extDir, { recursive: true });
+  const credPath = join(extDir, "credentials", "duo-webauthn.json");
+  const parsed = JSON.parse(readFileSync(credPath, "utf8")) as unknown;
+  stampCredentialSignCounts(parsed, duoExtensionSignCount(Math.floor(Date.now() / 1000), seq));
+  writeFileSync(credPath, `${JSON.stringify(parsed, null, 2)}\n`);
+  mkdirSync(profileDir, { recursive: true });
+  return { extDir, profileDir };
+}
+
+function forgetScratch(dir: string): void {
+  rmSync(dir, { recursive: true, force: true });
+}
+
 export interface LaunchOptions {
   /** Persistent session directory. When set, uses launchPersistentContext() to reuse login state. */
   sessionDir?: string;
@@ -145,21 +233,36 @@ export async function launchBrowser(options: LaunchOptions = {}): Promise<{
 }> {
   const viewport = options.viewport === undefined ? null : options.viewport;
   const headless = options.headless ?? false;
+  const autopilot = await prepareDuoAutopilot();
+  const args = [...(options.args ?? [])];
+  if (autopilot) {
+    args.push(`--disable-extensions-except=${autopilot.extDir}`, `--load-extension=${autopilot.extDir}`);
+    process.env.HR_AUTOMATION_DUO_EXTENSION = "1";
+    log.step("Duo Autopilot extension loaded");
+  }
 
-  if (options.sessionDir) {
-    log.step(`Launching browser (persistent session: ${options.sessionDir})...`);
+  if (options.sessionDir || autopilot) {
+    const sessionDir = options.sessionDir ?? autopilot?.profileDir;
+    if (!sessionDir) throw new Error("Duo Autopilot launch is missing a profile directory");
+    log.step(`Launching browser (persistent session: ${sessionDir})...`);
     let context: BrowserContext | undefined;
     try {
-      context = await chromium.launchPersistentContext(options.sessionDir, {
+      context = await chromium.launchPersistentContext(sessionDir, {
+        ...(autopilot ? { channel: "chromium" as const } : {}),
         headless,
         viewport,
         acceptDownloads: options.acceptDownloads ?? false,
-        args: options.args,
+        args,
       });
+      if (autopilot) {
+        const scratch = join(autopilot.profileDir, "..");
+        context.on("close", () => forgetScratch(scratch));
+      }
       const existingPages = context.pages();
       const page = existingPages[0] ?? await context.newPage();
       return { browser: null, context, page };
     } catch (err) {
+      if (autopilot) forgetScratch(join(autopilot.profileDir, ".."));
       if (context) {
         await withTimeout(
           context.close(),
@@ -176,7 +279,7 @@ export async function launchBrowser(options: LaunchOptions = {}): Promise<{
   log.step("Launching browser...");
   const browser = await chromium.launch({
     headless,
-    args: options.args,
+    args,
   });
   let context: BrowserContext | undefined;
   try {

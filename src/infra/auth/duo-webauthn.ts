@@ -77,6 +77,9 @@ export interface DuoWebAuthnCredential {
  * env gate is unit-testable without touching `process.env` globally.
  */
 export function isDuoWebAuthnEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  // The Duo Autopilot extension answers the ceremony. Arming the CDP virtual
+  // authenticator as well signs the dead saved key and Duo refuses it.
+  if (env.HR_AUTOMATION_DUO_EXTENSION === "1") return false;
   return env[DUO_WEBAUTHN_ENV_FLAG] === "1";
 }
 
@@ -155,12 +158,26 @@ export function mergeDuoWebAuthnCredential(
 }
 
 /**
+ * CDP `getCredentials` sometimes reports a unix-time signCount. Persisting that
+ * jump makes the next assertion billions ahead of Duo's server counter, and Duo
+ * then refuses it ("signed but did not complete"). A real authenticator step is
+ * +1; the reserve/resync windows are 10 and 100. Anything bigger is not a counter.
+ */
+export const DUO_WEBAUTHN_SIGNCOUNT_JUMP_LIMIT = 1_000;
+
+/**
  * Monotonic signature counter merge. WebAuthn servers may treat a counter that
  * does not advance as a cloned-authenticator signal, so we persist the larger
- * of the saved and freshly-observed counts. Pure.
+ * of the saved and freshly-observed counts — unless the observed value jumped
+ * past {@link DUO_WEBAUTHN_SIGNCOUNT_JUMP_LIMIT}, in which case we keep saved.
+ * Pure.
  */
 export function nextSignCount(saved: number, observed: number | undefined): number {
-  return Math.max(saved, observed ?? 0, 0);
+  const base = Math.max(saved, 0);
+  if (observed === undefined || !Number.isFinite(observed)) return base;
+  const obs = Math.trunc(observed);
+  if (obs > base + DUO_WEBAUTHN_SIGNCOUNT_JUMP_LIMIT) return base;
+  return Math.max(base, obs);
 }
 
 export interface DuoWebAuthnLock {
