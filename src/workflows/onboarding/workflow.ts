@@ -344,7 +344,11 @@ export const onboardingWorkflow = defineWorkflow({
           { attempts: 2 },
         );
         try {
-          data = validateEmployeeData(rawData);
+          data = validateEmployeeData(rawData, input.postalCodeOverride);
+          if (input.postalCodeOverride !== undefined) {
+            ctx.updateData({ postalCodeOverride: input.postalCodeOverride });
+            log.step(`Using operator-confirmed postal code ${input.postalCodeOverride} for this run; CRM unchanged`);
+          }
         } catch (e) {
           throw new ExtractionError(`Schema validation failed: ${errorMessage(e)}`);
         }

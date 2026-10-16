@@ -22,6 +22,8 @@ This workflow touches three systems: **crm**, **ucpath**, **i9**.
 
 ## Retry safety
 
+Dashboard API inputs may carry `postalCodeOverride`, an operator-confirmed US ZIP or ZIP+4 used only for that run. Extraction validates this override before replacing the CRM postal code in the in-memory employee data; the original CRM record is never edited. The tracker records `postalCodeOverride` for audit, and retries preserve it in the original input.
+
 **Duplicate-hire probe (2026-07-01 — the idempotency gap is now CLOSED).** Contract 2 makes retry a uniform kernel behavior: a retry re-runs the handler from step 0 with the pristine original input, so the `transaction` step's UCPath Smart HR submit could fire twice if the first run succeeded server-side but failed before writing the terminal tracker row (network blip after submit). The retry re-reaches the transaction step because person-search still returns "new hire" — an *unprocessed* Smart HR hire creates no searchable person record yet.
 
 The fix lives in this workflow (not the kernel): the `transaction` step now probes the UCPath Smart HR list for an existing in-flight HIRE before re-submitting, via `findExistingHireTransaction` (`src/systems/ucpath/ss-smart-hr.ts`). It runs **after the dry-run guard, before `buildTransactionPlan(...).execute()`**. If (and only if) a HIGH-CONFIDENCE duplicate is found it logs, stamps `status: "Already Submitted"` + `existingHireTxn`, screenshots `onboarding-existing-hire-transaction`, and RETURNS without submitting. Mirrors separations' effdt-gated `findExistingTerminationTransaction`.

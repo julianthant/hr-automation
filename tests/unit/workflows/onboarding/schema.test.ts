@@ -22,6 +22,21 @@ const VALID_DATA: Record<string, string> = {
 };
 
 describe("EmployeeDataSchema", () => {
+  it("uses the run postal-code override without changing the extracted CRM data", () => {
+    const raw = { ...VALID_DATA, postalCode: "2001" };
+    const input = OnboardingInputSchema.parse({ email: "hire@example.com", postalCodeOverride: "92092" });
+    assert.equal(validateEmployeeData(raw, input.postalCodeOverride).postalCode, "92092");
+    assert.equal(raw.postalCode, "2001");
+    assert.throws(() => validateEmployeeData(raw));
+  });
+
+  it("rejects malformed postal-code overrides instead of substituting CRM data", () => {
+    for (const postalCodeOverride of ["", "2001", "92092 extra"]) {
+      assert.equal(OnboardingInputSchema.safeParse({ email: "hire@example.com", postalCodeOverride }).success, false);
+      assert.throws(() => validateEmployeeData(VALID_DATA, postalCodeOverride));
+    }
+  });
+
   it("accepts valid employee data with all 10 fields", () => {
     const result = validateEmployeeData(VALID_DATA);
 

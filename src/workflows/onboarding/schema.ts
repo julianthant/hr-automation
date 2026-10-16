@@ -62,11 +62,15 @@ export type EmployeeData = z.infer<typeof EmployeeDataSchema>;
  */
 export function validateEmployeeData(
   raw: Record<string, string | null>,
+  postalCodeOverride?: string,
 ): EmployeeData {
   // Convert null values to undefined so Zod sees them as missing
   const cleaned: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(raw)) {
     cleaned[key] = value ?? undefined;
+  }
+  if (postalCodeOverride !== undefined) {
+    cleaned.postalCode = EmployeeDataSchema.shape.postalCode.parse(postalCodeOverride);
   }
 
   // Normalize 5-digit zip codes with incomplete 1-3 digit suffixes (e.g. "92092-100" -> "92092")
@@ -122,5 +126,7 @@ export const OnboardingInputSchema = z.object({
   mode: z.enum(ONBOARDING_HIRE_MODES).optional(),
   /** Explicit roster path override; when omitted, resolves the newest downloaded roster. */
   rosterPath: z.string().optional(),
+  /** Operator-confirmed postal code for this run; CRM remains unchanged. */
+  postalCodeOverride: EmployeeDataSchema.shape.postalCode.optional(),
 });
 export type OnboardingInput = z.infer<typeof OnboardingInputSchema>;
