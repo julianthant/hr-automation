@@ -248,6 +248,7 @@ export function buildTransactionPlan(
     dob: data.dob ?? "",
     ssn: ssnDigits,
     address: data.address,
+    addressLine2: data.addressLine2,
     city: data.city,
     state: data.state,
     postalCode: data.postalCode,
@@ -435,7 +436,7 @@ export function buildTransactionPlan(
       // hireIdentity feeds the Person-Match-Found exclusion rule ONLY: the
       // hire's real SSN last-4 (none for a 900-999 placeholder) and DOB.
       const result = await clickSaveAndSubmit(page, getContentFrame(page), undefined, {
-        personName: `${data.firstName} ${data.lastName}`.trim(),
+        personName: `${data.preferredFirstName || data.firstName} ${data.preferredLastName || data.lastName}`.trim(),
         hireIdentity: {
           ssnLast4: ssnLast4(ssnForUcpathEntry(data.ssn)),
           dob: data.dob,

@@ -62,6 +62,9 @@ A `T…` transaction NUMBER is issued regardless of outcome — live `T002204014
 
 ## Gotchas
 
+- Address Line 2 is optional CRM data, preserved through validation and passed to UCPath. Nonblank apartment/unit details use the same blur and final readback checks as Address Line 1; a lost value fails before submission.
+- The tracker SSN field shows `No SSN` for an absent or UCPath-rejected 900-series placeholder, so roster exports expose the JOL follow-up. Never copy a placeholder into UCPath or I-9.
+- UCPath transaction-list searches/readback use the roster's lived/preferred name, which the list displays. Legal names still populate the legal-name fields.
 - SSN/DOB are optional (international students) but wage requires `$` prefix
 - Appointment field: extracts just the number from "Casual/Restricted 5" → `"5"`
 - Department number parsed from parenthesized text: `"Computer Science (000412)"` → `"000412"`

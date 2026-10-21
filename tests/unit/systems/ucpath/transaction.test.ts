@@ -691,11 +691,12 @@ describe("buildConcurrentHireCommentsText (UC_CONC_HIRE rehire mode, 2026-08-21)
 
 
 describe("fillPersonalData refresh safety", () => {
-  function fixture(mode: "lost-address" | "corrupted-name" | "unreadable") {
+  function fixture(mode: "lost-address" | "corrupted-name" | "unreadable" | "lost-unit") {
     const values = new Map<string, string>();
     let addressWrites = 0;
     const field = (name: string) => ({
       fill: async (value: string) => {
+        if (name === "Address Line 2" && mode === "lost-unit") return;
         if (name === "Address Line 1" && addressWrites++ === 0) {
           if (mode === "corrupted-name") values.set("Legal Last Name", "Lopez9450");
           return;
@@ -716,6 +717,15 @@ describe("fillPersonalData refresh safety", () => {
     return { frame, page, values, writes: () => addressWrites };
   }
   const input = { firstName: "Isabella", lastName: "Lopez", dob: "01/02/2007", address: "9450 Example Rd" };
+  test("fills and verifies apartment details in Address Line 2", async () => {
+    const f = fixture("lost-address");
+    await fillPersonalData(f.page, f.frame, { ...input, addressLine2: "Apt 30037" });
+    assert.equal(f.values.get("Address Line 2"), "Apt 30037");
+  });
+  test("fails before submission when apartment details do not persist", async () => {
+    const f = fixture("lost-unit");
+    await assert.rejects(fillPersonalData(f.page, f.frame, { ...input, addressLine2: "Apt 30037" }), /address line 2.*readback/i);
+  });
   test("retries a fill lost during a fragment refresh", async () => {
     const f = fixture("lost-address");
     await fillPersonalData(f.page, f.frame, input);

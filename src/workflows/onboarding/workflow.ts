@@ -322,8 +322,9 @@ export const onboardingWorkflow = defineWorkflow({
       email: d.email ?? email,
       phone: d.phone ?? "",
       dob: d.dob ?? "",
-      ssn: maskSsn(d.ssn),
+      ssn: ssnForUcpathEntry(d.ssn) ? maskSsn(d.ssn) : "No SSN",
       address: d.address,
+      ...(d.addressLine2 !== undefined ? { addressLine2: d.addressLine2 } : {}),
       city: d.city,
       state: d.state,
       postalCode: d.postalCode,
@@ -865,8 +866,8 @@ export const onboardingWorkflow = defineWorkflow({
         // `found:false` → we SUBMIT. A false skip would silently never hire the
         // real person, which is worse than the probe-guarded double-submit risk.
         const existingHire = await findExistingHireTransaction(ucpathPage, {
-          firstName: data.firstName,
-          lastName: data.lastName,
+          firstName: person.preferred.firstName,
+          lastName: person.preferred.lastName,
           effectiveDate: data.effectiveDate,
           templateId,
         });
@@ -988,8 +989,8 @@ export const onboardingWorkflow = defineWorkflow({
             for (let attempt = 1; attempt <= 3 && !receipt.transactionId; attempt++) {
               if (attempt > 1) await ucpathPage.waitForTimeout(5_000);
               receipt = await readSubmittedHireReceipt(ucpathPage, {
-                firstName: data.firstName,
-                lastName: data.lastName,
+                firstName: person.preferred.firstName,
+                lastName: person.preferred.lastName,
                 effectiveDate: data.effectiveDate,
                 templateId,
               });

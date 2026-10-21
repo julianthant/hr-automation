@@ -22,6 +22,11 @@ const VALID_DATA: Record<string, string> = {
 };
 
 describe("EmployeeDataSchema", () => {
+  it("preserves apartment and unit details in optional Address Line 2", () => {
+    assert.equal(validateEmployeeData({ ...VALID_DATA, addressLine2: "Apt 30037" }).addressLine2, "Apt 30037");
+    assert.equal(validateEmployeeData({ ...VALID_DATA, addressLine2: "" }).addressLine2, "");
+    assert.equal(validateEmployeeData(VALID_DATA).addressLine2, undefined);
+  });
   it("uses the run postal-code override without changing the extracted CRM data", () => {
     const raw = { ...VALID_DATA, postalCode: "2001" };
     const input = OnboardingInputSchema.parse({ email: "hire@example.com", postalCodeOverride: "92092" });
