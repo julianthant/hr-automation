@@ -1,11 +1,15 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { chromium } from "playwright";
 
 import { launchBrowser } from "../../../../src/infra/browser/launch.js";
 
 describe("launchBrowser staged cleanup", () => {
+  beforeEach(() => {
+    vi.stubEnv("HR_AUTOMATION_DUO_EXTENSION", "0");
+  });
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("closes the ephemeral browser when context creation fails", async () => {
