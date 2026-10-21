@@ -56,7 +56,7 @@ test("fillHrInquiryForm: fills subject, description, attaches file, drives Speci
     setInputFiles: (p) => { calls.push(`setInputFiles[${label}]=${p}`); return Promise.resolve(); },
     type: (v) => { calls.push(`type[${label}]=${v}`); return Promise.resolve(); },
     selectOption: (v) => {
-      calls.push(`selectOption[${label}]=${typeof v === "object" ? JSON.stringify(v) : String(v)}`);
+      calls.push(`selectOption[${label}]=${typeof v === "string" ? v : JSON.stringify(v)}`);
       return Promise.resolve();
     },
     isVisible: () => Promise.resolve(true),
@@ -236,7 +236,13 @@ test("fillHrInquiryForm: ServiceNow fields emit selector-health warnings through
           category: "Payroll",
           attachmentPath: "/tmp/oaths.pdf",
         }), dir),
-      /Subject fill failed/,
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.equal(err.message, "Can't fill servicenow hr inquiry subject");
+        assert.ok(err.cause instanceof Error);
+        assert.equal(err.cause.message, "Subject fill failed");
+        return true;
+      },
     );
 
     const logLines = readdirSync(logsDir(dir))

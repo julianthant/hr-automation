@@ -1,7 +1,10 @@
 import { privateValue } from "../../../../src/private-data.js";
-import { describe, it } from "vitest";
+import { beforeAll, afterAll, describe, it } from "vitest";
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
+import { join } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import ExcelJS from "exceljs";
 import {
   parseLegalNameComponents,
   loadOnboardingRosterEntries,
@@ -10,6 +13,27 @@ import {
 } from "../../../../src/workflows/onboarding/roster.js";
 
 describe("onboarding roster resolution", () => {
+  const dir = mkdtempSync(join(tmpdir(), "onboarding-roster-test-"));
+  const rosterPath = join(dir, "synthetic-roster.xlsx");
+  beforeAll(async () => {
+    const workbook = new ExcelJS.Workbook();
+    for (let page = 0; page < 2; page++) {
+      const sheet = workbook.addWorksheet(`Cohort ${page + 1}`);
+      sheet.addRow(["Synthetic onboarding roster"]);
+      sheet.addRow(["Email", "Legal Name", "Lived Name"]);
+      for (let row = 0; row < 30; row++) {
+        const id = page * 30 + row;
+        sheet.addRow([`student${id}@example.com`, `Student${id} Example`, `Preferred${id} Example`]);
+      }
+      if (page === 1) sheet.addRow([
+        privateValue("email:605c0289942ac641"),
+        privateValue("name:a602944e526f2e98"),
+        "Kat Clement",
+      ]);
+    }
+    await workbook.xlsx.writeFile(rosterPath);
+  });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
   describe("parseLegalNameComponents", () => {
     it("parses two-token full names into first and last", () => {
       const parsed = parseLegalNameComponents(privateValue("name:a602944e526f2e98"));
@@ -72,11 +96,12 @@ describe("onboarding roster resolution", () => {
   });
 
   describe("loadOnboardingRosterEntries on sample roster", () => {
-    const rosterPath = resolve(process.cwd(), "data/rosters/OnboardingRoster-2026-09-09T21-05-59.xlsx");
 
     it("extracts entries with legal and lived names from all sheets", async () => {
       const entries = await loadOnboardingRosterEntries(rosterPath);
-      assert.ok(entries.length > 50, `Expected many entries, got ${entries.length}`);
+      assert.equal(entries.length, 61);
+      assert.ok(entries.some((entry) => entry.email === "student0@example.com"));
+      assert.ok(entries.some((entry) => entry.email === "student59@example.com"));
 
       const kat = entries.find((e) => e.email.toLowerCase() === privateValue("email:605c0289942ac641"));
       assert.ok(kat, "Kathliyah should be found in roster");
@@ -86,7 +111,6 @@ describe("onboarding roster resolution", () => {
   });
 
   describe("resolveOnboardingRosterPerson", () => {
-    const rosterPath = resolve(process.cwd(), "data/rosters/OnboardingRoster-2026-09-09T21-05-59.xlsx");
 
     it("resolves legal and lived names for employee present on roster", async () => {
       const resolved = await resolveOnboardingRosterPerson({

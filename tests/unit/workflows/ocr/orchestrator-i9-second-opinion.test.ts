@@ -36,6 +36,20 @@ vi.mock("../../../../src/core/delegate.js", () => ({
   }),
 }));
 
+vi.mock("../../../../src/services/matching/employee-action-history.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../src/services/matching/employee-action-history.js")>();
+  return {
+    ...actual,
+    loadEmployeeActionHistory: vi.fn(async () => ({
+      byEmplId: new Map(),
+      byNormalizedName: new Map(),
+      byLastFirst: new Map(),
+      byPpsId: new Map(),
+      sourcePath: "synthetic-action-history.xlsx",
+    })),
+  };
+});
+
 async function setup(): Promise<{ dir: string; pdfPath: string; pdfFileId: string }> {
   const dir = join(tmpdir(), `ocr-i9-so-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
@@ -58,7 +72,7 @@ async function setup(): Promise<{ dir: string; pdfPath: string; pdfFileId: strin
 function lastRecords(entries: Array<{ data?: Record<string, unknown> }>): Array<Record<string, unknown>> {
   const last = [...entries].reverse().find((e) => typeof (e.data as { records?: unknown })?.records === "string");
   assert.ok(last, "a snapshot with records was emitted");
-  return JSON.parse((last!.data as { records: string }).records) as Array<Record<string, unknown>>;
+  return JSON.parse((last.data as { records: string }).records) as Array<Record<string, unknown>>;
 }
 
 const i9Record = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -115,7 +129,7 @@ test("i9 second opinion: an unsearchable Section-1 read triggers a roster-LESS t
           poolKeyId: "gemini-1:gemini-2.5-flash",
         };
       },
-    } as never,
+    },
   );
 
   assert.equal(reReads.length, 1, "the unsearchable i9 page is re-read despite NO roster being loaded");
@@ -169,7 +183,7 @@ test("i9 second opinion: a re-read naming a DIFFERENT person is NOT adopted (ide
         records: [i9Record({ lastName: "Smith", firstName: "John", middleInitial: null })],
         poolKeyId: "gemini-1:gemini-2.5-flash",
       }),
-    } as never,
+    },
   );
 
   const records = lastRecords(writtenEntries);
@@ -211,7 +225,7 @@ test("i9 second opinion: a searchable Section-1 read is NOT a suspect — no re-
         reReads.push(args);
         return null;
       },
-    } as never,
+    },
   );
 
   assert.equal(reReads.length, 0, "a clean read never triggers the re-read");

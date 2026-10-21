@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, beforeEach, afterEach, vi, type MockInstance } from "vitest";
 import assert from "node:assert/strict";
 import type { Locator } from "playwright";
 import { log } from "../../../../src/utils/log.js";
@@ -33,9 +33,9 @@ function assertFallbackInvariant(msg: string, label: string): void {
 }
 
 describe("safeClick fallback attempt logging", () => {
-  let debugSpy: ReturnType<typeof vi.spyOn>;
-  let warnSpy: ReturnType<typeof vi.spyOn>;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let debugSpy: MockInstance<typeof log.debug>;
+  let warnSpy: MockInstance<typeof log.warn>;
+  let errorSpy: MockInstance<typeof log.error>;
 
   beforeEach(() => {
     debugSpy = vi.spyOn(log, "debug").mockImplementation(() => {});
@@ -54,7 +54,7 @@ describe("safeClick fallback attempt logging", () => {
     await safeClick(locator, { label: "myLabel" });
 
     assert.equal(debugSpy.mock.calls.length, 1);
-    const msg = debugSpy.mock.calls[0]![0] as string;
+    const msg = debugSpy.mock.calls[0][0];
     assert.match(msg, /myLabel: clicked in/);
     assert.match(msg, /ms$/);
 
@@ -69,7 +69,7 @@ describe("safeClick fallback attempt logging", () => {
     await safeClick(locator, { label: "myLabel", _slowThresholdMs: -1 });
 
     assert.equal(warnSpy.mock.calls.length, 1);
-    const msg = warnSpy.mock.calls[0]![0] as string;
+    const msg = warnSpy.mock.calls[0][0] as string;
 
     // Invariant 1 + 2: literal prefix + "(" delimiter
     assertFallbackInvariant(msg, "myLabel");
@@ -86,16 +86,21 @@ describe("safeClick fallback attempt logging", () => {
 
     await assert.rejects(
       () => safeClick(locator, { label: "myLabel" }),
-      (err: unknown) => err === cause,
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.equal(err.cause, cause);
+        assert.equal(err.message, "Can't find myLabel");
+        return true;
+      },
     );
 
     assert.equal(errorSpy.mock.calls.length, 1);
-    const msg = errorSpy.mock.calls[0]![0] as string;
+    const msg = errorSpy.mock.calls[0][0] as string;
 
     // Invariant 1 + 2
     assertFallbackInvariant(msg, "myLabel");
     // Invariant 3: level is error (caller verifies via spy name)
-    assert.match(msg, /click failed after \d+ms — Timeout 30000ms exceeded\)$/);
+    assert.match(msg, /click failed after \d+ms — Can't find myLabel\)$/);
 
     assert.equal(debugSpy.mock.calls.length, 0);
     assert.equal(warnSpy.mock.calls.length, 0);
@@ -103,9 +108,9 @@ describe("safeClick fallback attempt logging", () => {
 });
 
 describe("safeFill fallback attempt logging", () => {
-  let debugSpy: ReturnType<typeof vi.spyOn>;
-  let warnSpy: ReturnType<typeof vi.spyOn>;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let debugSpy: MockInstance<typeof log.debug>;
+  let warnSpy: MockInstance<typeof log.warn>;
+  let errorSpy: MockInstance<typeof log.error>;
 
   beforeEach(() => {
     debugSpy = vi.spyOn(log, "debug").mockImplementation(() => {});
@@ -124,7 +129,7 @@ describe("safeFill fallback attempt logging", () => {
     await safeFill(locator, "hello", { label: "myLabel" });
 
     assert.equal(debugSpy.mock.calls.length, 1);
-    const msg = debugSpy.mock.calls[0]![0] as string;
+    const msg = debugSpy.mock.calls[0][0];
     assert.match(msg, /myLabel: filled in/);
     assert.match(msg, /ms$/);
 
@@ -139,7 +144,7 @@ describe("safeFill fallback attempt logging", () => {
     await safeFill(locator, "hello", { label: "myLabel", _slowThresholdMs: -1 });
 
     assert.equal(warnSpy.mock.calls.length, 1);
-    const msg = warnSpy.mock.calls[0]![0] as string;
+    const msg = warnSpy.mock.calls[0][0] as string;
 
     assertFallbackInvariant(msg, "myLabel");
     assert.match(msg, /fill took \d+ms — likely fallback-hit or page stall\)$/);
@@ -154,14 +159,19 @@ describe("safeFill fallback attempt logging", () => {
 
     await assert.rejects(
       () => safeFill(locator, "hello", { label: "myLabel" }),
-      (err: unknown) => err === cause,
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.equal(err.cause, cause);
+        assert.equal(err.message, "Can't fill myLabel");
+        return true;
+      },
     );
 
     assert.equal(errorSpy.mock.calls.length, 1);
-    const msg = errorSpy.mock.calls[0]![0] as string;
+    const msg = errorSpy.mock.calls[0][0] as string;
 
     assertFallbackInvariant(msg, "myLabel");
-    assert.match(msg, /fill failed after \d+ms — Timeout 30000ms exceeded\)$/);
+    assert.match(msg, /fill failed after \d+ms — Can't fill myLabel\)$/);
 
     assert.equal(debugSpy.mock.calls.length, 0);
     assert.equal(warnSpy.mock.calls.length, 0);
