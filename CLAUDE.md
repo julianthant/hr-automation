@@ -206,22 +206,6 @@ this branch is frozen at the pre-split state and is kept only as a rollback asse
 Nothing here was deleted and nothing here is deprecated. This repo remains live-runnable,
 maintainable, and the sole production authority until a single all-at-once cutover.
 
-**Standing duty — every legacy maintenance change must be recorded in the rebuild repo.** When you
-change anything under `src/` or `tests/` here, **commit the legacy change first**, then add one
-schema-v2 record per changed path under that exact commit in the rebuild repo's
-`config/legacy-change-accounting.json`: first-parent/commit blob hashes, the **affected** capability
-ids (not merely the owning path — a `src/core/daemon` fix affects every workflow that runs through
-the daemon), a non-empty impact rationale, and closed rebuild recheck evidence. Dirty legacy
-`src/`/`tests/` state—including staged and untracked changes—intentionally makes the rebuild guards
-red until the named legacy commit exists and is accounted.
-
-Why it matters: D93 retired the same-tree scan that used to notice a legacy edit incidentally, so
-this accounting is now the program's *only* drift detector — load-bearing, not corroborating. The
-rebuild repo's `legacy-change-accounting.test.ts` reads this working tree directly (via
-`../hr-automation`, override `HRAUTO_LEGACY_REPO`) and goes red when the manifest and this repo
-disagree. A legacy change committed here without its record turns the rebuild repo's guard suite
-red, which is the intended alarm.
-
 Also unchanged by the split: the two runtimes share one machine, so distinct ports, state/artifact
 roots, process locks, browser profiles, and launch-command names remain required and remain gated
 (`config/runtime-isolation.json` in the rebuild repo).
