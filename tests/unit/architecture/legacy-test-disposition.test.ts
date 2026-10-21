@@ -1,15 +1,15 @@
 import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
+import preservation from "../../../config/rebuild/legacy-preservation.json" with { type: "json" };
 import inventory from "../../../config/rebuild/legacy-test-disposition.json" with { type: "json" };
 import { REPO_ROOT } from "./helpers/guard-files.js";
 
 function baselineDirectories(): string[] {
-  return requiredLegacyDirectories(execFileSync(
-    "git",
-    ["ls-tree", "-r", "--name-only", inventory.baselineCommit, "--", "tests"],
-    { cwd: REPO_ROOT, encoding: "utf8" },
-  ).trim().split("\n").filter(Boolean), currentTestFiles());
+  assert.equal(inventory.baselineCommit, preservation.baselineCommit);
+  const tests = preservation.roots.find(({ root }) => root === "tests");
+  assert.ok(tests, "frozen baseline must inventory tests");
+  return requiredLegacyDirectories(tests.files, currentTestFiles());
 }
 
 function currentTestFiles(): string[] {

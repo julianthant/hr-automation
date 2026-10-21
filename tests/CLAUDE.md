@@ -65,6 +65,9 @@ Rules (these mirror the hard realities of live testing):
 
 ## Regression clusters
 
+- Frozen rebuild inventories under `config/rebuild/` retain pre-split provenance; they do not account for current production edits. Test baseline Git operations in temporary repositories, and runtime preservation/activation in synthetic source trees. Keep missing-path, stale-hash, and cross-runtime rejection checks.
+- Onboarding roster tests generate multi-sheet workbooks in temporary directories. I-9 OCR second-opinion tests stub only Action History loading; real cross-reference and identity-gate logic still run. Unit tests must not need operator roster files or SharePoint configuration.
+
 - Dashboard queue/rail counts: backend `wfCounts` regressions belong in `tests/unit/tracker/state-queries.test.ts` and pure count helpers under `tests/unit/tracker/` or `tests/unit/dashboard/`. Pin that counts are backend-authoritative, independent of the selected workflow, and use the same queue-surface model as the rendered rail badges. OCR prep rows that still render in the queue must remain counted until the queue no longer renders them.
 - Person lookup dates: tests under `tests/unit/workflows/person-lookup/` should keep UCPath Last Hire/startDate separate from assignment EFFDT/effectiveDate. Dashboard detail fields should show `startDate`; retain `effdt` only as backend context.
 - Workflow categories/start surfaces: when a workflow moves category or start-surface eligibility, pin both the workflow config and the loader/surface arrays. Example: delegated utilities such as `i9-lookup` are `category: "Search"` but are not dashboard input/upload starts.

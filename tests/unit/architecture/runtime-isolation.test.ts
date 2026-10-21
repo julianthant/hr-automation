@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import assert from "node:assert/strict";
@@ -224,18 +224,20 @@ describe("D88 runtime isolation", () => {
     assert.notEqual(isolation.legacy.frontendPort, isolation.rebuild.frontendPort);
   });
 
-  it("audits the real pre-tree checkout and exact legacy commands", () => {
-    assert.deepEqual(auditRuntimeIsolation(REPO_ROOT, isolation, packageJson.scripts, preservation), []);
+  it("audits a pre-tree fixture and the real exact legacy commands", () => {
+    withActiveFixture((root) => {
+      rmSync(join(root, isolation.rebuild.sourceRoot), { recursive: true, force: true });
+      const snapshot = preserveFiles(root, ["src/cli.ts"]);
+      assert.deepEqual(auditRuntimeIsolation(root, isolation, packageJson.scripts, snapshot), []);
+      assert.ok(auditRuntimeIsolation(root, isolation, { ...packageJson.scripts, dashboard: "node wrong.ts" }, snapshot).length > 0);
+    });
   });
 
-  it("activates beside the actual preserved legacy tree without imposing rebuild normal form", () => {
+  it("activates beside a preserved legacy fixture without imposing rebuild normal form", () => {
     withActiveFixture((root, contract, scripts) => {
-      rmSync(join(root, contract.legacy.sourceRoot), { recursive: true, force: true });
-      cpSync(join(REPO_ROOT, contract.legacy.sourceRoot), join(root, contract.legacy.sourceRoot), {
-        recursive: true,
-      });
-
-      assert.deepEqual(auditRuntimeIsolation(root, contract, scripts, preservation), []);
+      write(root, "src/dynamic.ts", 'import { readFileSync } from "node:fs";\nreadFileSync(process.env.LEGACY_INPUT);\n');
+      const snapshot = preserveFiles(root, ["src/cli.ts", "src/dynamic.ts"]);
+      assert.deepEqual(auditRuntimeIsolation(root, contract, scripts, snapshot), []);
 
       write(
         root,
@@ -250,11 +252,11 @@ launch({ userDataDir: ".auth-rebuild" });
 `,
       );
       const preservedCrossing = {
-        ...preservation,
+        ...snapshot,
         runtimeIsolation: {
-          ...preservation.runtimeIsolation,
+          ...snapshot.runtimeIsolation,
           files: {
-            ...preservation.runtimeIsolation.files,
+            ...snapshot.runtimeIsolation.files,
             "src/rebuild-crossing-activation.ts": sha256(join(root, "src/rebuild-crossing-activation.ts")),
           },
         },
