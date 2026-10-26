@@ -1,6 +1,6 @@
 # CRM Doc Download Workflow
 
-Downloads **ACT CRM iDocs PDFs** for an onboarding record, then **packages each run into a zip** under `~/Documents/onboarding/`: search the CRM onboarding list, open the latest row, download configured documents, resolve the person's name, then archive. Invoked from the dashboard input-run surface (EIDs **or emails**). Onboarding does **not** reach this workflow — it downloads iDocs in-process (`folderSubjectFromLegalLived` + `buildCrmDocumentDownloadPath` + `downloadCrmIdocsDocuments`) using the same roster Legal vs Lived folder names; the lineage fields stay in the schema for any future delegating parent.
+Downloads **ACT CRM iDocs PDFs** for an onboarding record, then **packages each run into a zip** under `data/onboarding/`: search the CRM onboarding list, open the latest row, download documents selected by the shared `resolveDefaultCrmDocIndices` layout rules (see CRM module instructions), resolve the person's name, then archive. Invoked from the dashboard input-run surface (EIDs **or emails**). Onboarding does **not** reach this workflow — it downloads iDocs in-process (`folderSubjectFromLegalLived` + `buildCrmDocumentDownloadPath` + `downloadCrmIdocsDocuments`) using the same roster Legal vs Lived folder names; the lineage fields stay in the schema for any future delegating parent.
 
 **Kernel-based** — `crmDocDownloadWorkflow` in `workflow.ts`; CRM-only auth; pool batch mode.
 
@@ -22,7 +22,7 @@ This workflow touches **crm** only.
 
 ## Step pipeline
 
-1. **`search-record`** — `searchCrmOnboardingRecords` with the resolved query (email or emplId), then `selectLatestResult` (retries wired via `ctx.retry`).
+1. **`search-record`** — `searchCrmOnboardingRecords` with the resolved query (email or emplId), then `selectLatestResult` (one `ctx.retry` wraps search + selection, so a navigation timeout always restarts from search results).
 2. **`download`** — `downloadCrmIdocsDocuments` into a temp folder (or straight into the known final folder when the caller supplied a name/`folderPath`). The temp split exists because step 3 navigates away from the record page, which the PDF.js iframe download depends on.
 3. **`archive`** — resolve the person's name (input override → onboarding-roster Legal vs Lived; EID-only matches the record's UCSD/personal email to the roster), rename the temp folder to `Last, First (LivedName) Middle EID` when it was not known up front, zip it into the run's combined archive under a lock, then delete the raw folder. Updates `firstName`/`lastName`/`middleName`/`livedName` + `pdfDownload` / `pdfFolder` (now the zip path) on the tracker row.
 

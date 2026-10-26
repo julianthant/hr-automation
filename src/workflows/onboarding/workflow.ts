@@ -409,9 +409,9 @@ export const onboardingWorkflow = defineWorkflow({
           folderSubjectFromLegalLived(person.rawLegalName, person.rawLivedName),
         );
         const docIndices = resolveDefaultCrmDocIndices(idocsViewerInfo.totalDocs);
-        if (idocsViewerInfo.totalDocs !== 9) {
+        if (!docIndices.includes(2)) {
           log.step(
-            `CRM iDocs has ${idocsViewerInfo.totalDocs} doc(s) (not 9) — skipping EE Data Gathering Form, downloading Doc 1 only`,
+            `CRM iDocs has ${idocsViewerInfo.totalDocs} doc(s) — verified offer-only layout, downloading Doc 1 only`,
           );
         }
         const saved = await downloadCrmIdocsDocuments(crmPage, folderPath, {

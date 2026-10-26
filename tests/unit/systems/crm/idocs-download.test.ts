@@ -29,18 +29,19 @@ test("resolveDefaultCrmDocIndices omits EE Data Gathering Form (returns [0]) whe
   assert.deepEqual(resolveDefaultCrmDocIndices(5), [0]);
 });
 
-test("resolveDefaultCrmDocIndices only downloads EE Data Gathering Form when totalDocs is 9", () => {
+test("resolveDefaultCrmDocIndices includes the EE form for both verified complete layouts", () => {
   assert.deepEqual(resolveDefaultCrmDocIndices(1), [0]);
-  assert.deepEqual(resolveDefaultCrmDocIndices(3), [0]);
+  assert.deepEqual(resolveDefaultCrmDocIndices(2), [0]);
   assert.deepEqual(resolveDefaultCrmDocIndices(5), [0]);
-  assert.deepEqual(resolveDefaultCrmDocIndices(8), [0]);
   assert.deepEqual(resolveDefaultCrmDocIndices(9), [0, 2]);
-  assert.deepEqual(resolveDefaultCrmDocIndices(10), [0]);
+  assert.deepEqual(resolveDefaultCrmDocIndices(11), [0, 2]);
 });
 
-test("resolveDefaultCrmDocIndices falls back to DEFAULT_CRM_DOC_INDICES when totalDocs is undefined", () => {
-  assert.deepEqual(resolveDefaultCrmDocIndices(undefined), [0, 2]);
-  assert.deepEqual(resolveDefaultCrmDocIndices(), [0, 2]);
+test("unverified or unreadable layouts fail instead of silently omitting a form", () => {
+  for (const count of [0, 3, 8, 10, 12, -1, 2.5, Number.NaN]) {
+    assert.throws(() => resolveDefaultCrmDocIndices(count), /unverified.*document count/i);
+  }
+  assert.throws(() => Reflect.apply(resolveDefaultCrmDocIndices, null, []), /document count/i);
 });
 
 test("defaultCrmDocumentName names doc 1 and doc 3 by their known identity", () => {

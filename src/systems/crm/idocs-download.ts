@@ -16,25 +16,18 @@ const IDOCS_DOC_PATH = "/iDocsForSalesforce/iDocsForSalesforceDocumentServer";
 export const DEFAULT_CRM_DOC_INDICES = [0, 2] as const;
 
 /**
- * Resolves the default CRM document indices to download based on the total number
- * of documents on the record (`totalDocs`).
- *
- * Doc 1 (index 0) is the Signed Offer Letter.
- * Doc 3 (index 2) is the EE Data Gathering Form.
- *
- * When totalDocs is 9 ("Doc: X of 9"), both the Signed Offer Letter and
- * the EE Data Gathering Form are downloaded ([0, 2]).
- * When totalDocs is 5 ("Doc: X of 5", or any count other than 9), the EE Data
- * Gathering Form is skipped and only the Signed Offer Letter ([0]) is downloaded.
+ * Known iDocs layouts: offer-only (1/2/5), or offer + EE form (9/11).
+ * The 11-document layout's Doc 3 was live-verified as the EE form 2026-10-26.
+ * Unknown counts must be mapped before naming PDFs by position.
  */
-export function resolveDefaultCrmDocIndices(totalDocs?: number): readonly number[] {
-  if (totalDocs === 9) {
+export function resolveDefaultCrmDocIndices(totalDocs: number): readonly number[] {
+  if (totalDocs === 9 || totalDocs === 11) {
     return DEFAULT_CRM_DOC_INDICES;
   }
-  if (totalDocs !== undefined && totalDocs > 0) {
+  if (totalDocs === 1 || totalDocs === 2 || totalDocs === 5) {
     return [0];
   }
-  return DEFAULT_CRM_DOC_INDICES;
+  throw new Error(`Unverified CRM iDocs document count: ${totalDocs}. Map this layout before downloading.`);
 }
 
 /**

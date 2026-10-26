@@ -20,3 +20,13 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Fix:** Five strategies in `record`: `thLabelFollowingTd` (preferred — `<th>` anchor), `tdLabelFollowingTd` (plain `<td>` anchor), `cellLabelFollowingTd` (`.or()` of both for tag-variant rows — UNVERIFIED), `rowLabelLastCell` (row-scoped last-cell for non-adjacent value cells — UNVERIFIED), and `lightningFieldValue` (Salesforce Lightning `slds-form-element` layout — UNVERIFIED). `extractField(page, label)` in `extract.ts` tries each in order with a 500 ms timeout per attempt (reduced from 2 000 ms on 2026-06-07 — missing fields were costing up to 20 s; present elements resolve near-instantly). Strategies 3–5 are UNVERIFIED against the live CRM record page and need a live re-verify before bumping their `// verified` dates in `selectors.ts`.
 **Selector:** `record.thLabelFollowingTd`, `record.tdLabelFollowingTd`, `record.cellLabelFollowingTd`, `record.rowLabelLastCell`, `record.lightningFieldValue` in `selectors.ts`
 **Tags:** visualforce, label, extract, xpath, th, td, fallback, lightning, timeout, perf
+
+## 2026-10-26 — iDocs total counts change when forms are added
+
+**Tried:** Download the EE form only when the viewer had exactly nine documents and treat every other count as offer-only.
+
+**Failed because:** Completed November 2 records now have eleven documents. Their document 3 is still the Employee Data Gathering Form, so the old rule silently omitted it. The two-document layout contains the signed offer and its completion certificate.
+
+**Fix:** Use the shared layout resolver for both onboarding and CRM Doc Download: 9/11 select indices 0 and 2; 1/2/5 select index 0. Reject unverified counts. Live-verified document 3 on the eleven-document layout and document 2 on the two-document layout; regression tests pin selection and unknown-count rejection.
+
+**Tags:** crm, idocs, document-count, download, ee-form, fail-loud

@@ -1,5 +1,5 @@
 import { privateValue } from "../../../../src/private-data.js";
-import { test, describe } from "vitest";
+import { test, describe, vi } from "vitest";
 import assert from "node:assert/strict";
 import { join, dirname, basename } from "node:path";
 import {
@@ -12,6 +12,7 @@ import {
   emailMatchesIdentity,
 } from "../../../../src/workflows/crm-doc-download/workflow.js";
 import { PATHS } from "../../../../src/config.js";
+import * as crm from "../../../../src/systems/crm/index.js";
 
 test("crm-doc-download schema accepts email-only utility runs", () => {
   const parsed = CrmDocDownloadInputSchema.parse({ email: "jane@example.edu" });
@@ -66,6 +67,44 @@ test("crm-doc-download workflow is a utility workflow with CRM auth", () => {
     crmDocDownloadWorkflow.config.deriveItemId?.({ emplId: "10873698" }),
     "10873698",
   );
+});
+
+test("a search retry returns to the results page after a record navigation timeout", async (t) => {
+  t.onTestFinished(() => { vi.restoreAllMocks(); });
+  let onResults = false;
+  let attempts = 0;
+  vi.spyOn(crm, "searchCrmOnboardingRecords").mockImplementation(async () => {
+    onResults = true;
+  });
+  vi.spyOn(crm, "selectLatestResult").mockImplementation(async () => {
+    assert.equal(onResults, true, "selection must start on search results");
+    onResults = false;
+    if (++attempts === 1) throw new Error("navigation timed out after opening record");
+  });
+  vi.spyOn(crm, "extractField").mockResolvedValue("jane@example.edu");
+  const reachedDownload = new Error("search and identity verified");
+  const ctx = {
+    page: async () => ({}),
+    updateData: () => {},
+    step: async (name: string, fn: () => Promise<unknown>) => {
+      if (name === "download") throw reachedDownload;
+      return fn();
+    },
+    retry: async (fn: () => Promise<unknown>) => {
+      try {
+        return await fn();
+      } catch {
+        return fn();
+      }
+    },
+  };
+  await assert.rejects(
+    crmDocDownloadWorkflow.config.handler(ctx as never, {
+      email: "jane@example.edu", firstName: "Jane", lastName: "Doe",
+    }),
+    (error) => error === reachedDownload,
+  );
+  assert.equal(attempts, 2);
 });
 
 describe("emplIdMatchesIdentity", () => {

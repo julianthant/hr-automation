@@ -136,8 +136,10 @@ export const crmDocDownloadWorkflow = defineWorkflow({
     let savedCount = 0;
 
     await ctx.step("search-record", async () => {
-      await ctx.retry(() => searchCrmOnboardingRecords(page, resolveCrmDocDownloadSearchQuery(input)), { attempts: 3 });
-      await ctx.retry(() => selectLatestResult(page), { attempts: 3 });
+      await ctx.retry(async () => {
+        await searchCrmOnboardingRecords(page, resolveCrmDocDownloadSearchQuery(input));
+        await selectLatestResult(page);
+      }, { attempts: 3 });
       // The CRM `?q=` search is fuzzy — a query that matches nobody exactly can
       // still land on a plausible-but-wrong person's record (see
       // src/systems/crm/CLAUDE.md fuzzy-search gotcha). Confirm the selected
