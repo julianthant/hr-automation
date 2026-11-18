@@ -331,12 +331,11 @@ Empl ID fill (`Timed out waiting for element`), and `nameInput` /
 accessible name is `"Approval Status ="` — the `=` operator folds in on
 comboboxes too); all arms live-probed on the real search form, and the
 downstream results grid (`trPTS_CFG_CL_STD_RSL` rows) confirmed unchanged on
-the same probe. `payPathActions` still carries the fragile `exact: true`
-textbox shape on a `$op`-bearing search grid and would break the same way, but
-no current workflow drives it (operator confirmed 2026-08-04: "don't use
-paypath actions, use workforce job summary"), so it is left as-is rather than
-edited unverified. `smartHRTransactionStatus` (`HR_TBH_STATUS.GBL`) keeps its
-`exact: true` filter arms — it is a filter dashboard, NOT a
+the same probe. Work Study hit the same failure on PayPath Actions on
+2026-11-18. Switching `payPathActions.emplIdInput` to `/^Empl ID\b/`
+let the dry run open the intended employment record and fill all three tabs.
+`smartHRTransactionStatus` (`HR_TBH_STATUS.GBL`) keeps its `exact: true` filter
+arms — it is a filter dashboard, NOT a
 Find-an-Existing-Value form, so its inputs carry no `$op` operator. **The rule
 to carry forward: on a PeopleSoft Find-an-Existing-Value form, never pin a
 search textbox with `exact: true` on the bare label — the operator text is

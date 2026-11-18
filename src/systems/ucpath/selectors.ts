@@ -1228,11 +1228,11 @@ export const personOrgSummary = {
 
 export const payPathActions = {
   /**
-   * Empl ID textbox. Most common search key. verified 2026-04-24
+   * Empl ID textbox. The accessible name includes the search operator. verified 2026-11-18
    * @tags empl, id, employee, textbox, paypath-actions
    */
   emplIdInput: (f: FrameLocator): Locator =>
-    f.getByRole("textbox", { name: "Empl ID", exact: true }),
+    f.getByRole("textbox", { name: /^Empl ID\b/ }),
 
   /**
    * Empl Record textbox. Disambiguates between concurrent jobs for the
