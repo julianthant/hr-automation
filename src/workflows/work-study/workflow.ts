@@ -21,9 +21,7 @@ export const WORK_STUDY_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
 /**
  * Kernel definition for the work-study PayPath workflow.
  *
- * Exports a RegisteredWorkflow. Run it via `runWorkflow(workStudyWorkflow, input)`
- * in tests/internal scripts, or expose it through a dashboard input-run parser
- * before adding an operator start path.
+ * The dashboard supplies the employee ID, effective date, and optional dry-run flag.
  */
 export const workStudyWorkflow = defineWorkflow({
   name: "work-study",
@@ -57,10 +55,19 @@ export const workStudyWorkflow = defineWorkflow({
   operatorSubject: (input) =>
     buildOperatorSubject({ kind: "eid", value: input.emplId }),
   handler: async (ctx, input) => {
-    const wsCtx: WorkStudyContext = { employeeName: "" };
+    const wsCtx: WorkStudyContext = {
+      employeeName: "",
+      captureDryRun: async (label) => {
+        await ctx.screenshot({ kind: "form", label });
+      },
+    };
 
     // Surface input data to the dashboard before the first step fires.
-    ctx.updateData({ emplId: input.emplId, effectiveDate: input.effectiveDate });
+    ctx.updateData({
+      emplId: input.emplId,
+      effectiveDate: input.effectiveDate,
+      ...(input.dryRun ? { dryRun: true } : {}),
+    });
 
     // Step 1: auth — Session already kicked off loginToUCPath; we just
     // announce the phase for the dashboard, then let the first ctx.page()
@@ -75,6 +82,9 @@ export const workStudyWorkflow = defineWorkflow({
       const plan = buildWorkStudyPlan(input, page, wsCtx);
       await plan.execute();
       ctx.updateData({ name: wsCtx.employeeName });
+      if (input.dryRun) {
+        log.success("Dry run complete. The PayPath form was filled and Save and Submit was skipped.");
+      }
     });
   },
 });

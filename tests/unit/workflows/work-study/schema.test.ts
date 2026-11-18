@@ -76,6 +76,11 @@ describe("WorkStudyInputSchema — effectiveDate regex (^\\d{2}/\\d{2}/\\d{4}$)"
     assert.equal(result.success, true);
   });
 
+  it("rejects a date outside the calendar", () => {
+    const result = WorkStudyInputSchema.safeParse({ emplId: "12345", effectiveDate: "09/31/2026" });
+    assert.equal(result.success, false);
+  });
+
   it("rejects YYYY-MM-DD format (ISO 8601)", () => {
     const result = WorkStudyInputSchema.safeParse({ emplId: "12345", effectiveDate: "2026-03-17" });
     assert.equal(result.success, false);

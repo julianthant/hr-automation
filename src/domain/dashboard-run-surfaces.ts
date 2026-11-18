@@ -8,6 +8,7 @@ export const DASHBOARD_INPUT_RUN_WORKFLOWS = [
   "crm-doc-download",
   "onboarding",
   "kronos-pay-rule",
+  "work-study",
 ] as const;
 
 export const DASHBOARD_UPLOAD_RUN_WORKFLOWS = [

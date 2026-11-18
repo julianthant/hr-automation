@@ -139,6 +139,28 @@ test("input-run options fold the selected mode and explicit CRM state onto every
   );
 });
 
+test("work-study input run accepts EID and effective-date pairs", () => {
+  const config = getInputRunConfig("work-study");
+
+  assert.ok(config);
+  assert.equal(config.supportsDryRun, true);
+  assert.deepEqual(config.parseInput("12345 9/13/2026, 67890 10/01/2026"), {
+    ok: true,
+    inputs: [
+      { emplId: "12345", effectiveDate: "09/13/2026" },
+      { emplId: "67890", effectiveDate: "10/01/2026" },
+    ],
+  });
+});
+
+test("work-study input run rejects the entire input if a pair is missing its date or has an impossible date", () => {
+  const config = getInputRunConfig("work-study");
+
+  assert.ok(config);
+  assert.equal(config.parseInput("12345 9/13/2026, 67890").ok, false);
+  assert.equal(config.parseInput("12345 9/31/2026").ok, false);
+});
+
 test("crm-doc-download input run accepts EIDs separated by commas", () => {
   const config = getInputRunConfig("crm-doc-download");
 

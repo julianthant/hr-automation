@@ -4,6 +4,7 @@ import {
   DASHBOARD_UPLOAD_RUN_WORKFLOWS,
 } from "../../domain/dashboard-run-surfaces.js";
 import { parsePersonLookupMatchLine } from "../../workflows/person-lookup/schema.js";
+import { WorkStudyInputSchema } from "../../workflows/work-study/schema.js";
 
 type DashboardInputRunWorkflow = (typeof DASHBOARD_INPUT_RUN_WORKFLOWS)[number];
 type DashboardUploadRunWorkflow = (typeof DASHBOARD_UPLOAD_RUN_WORKFLOWS)[number];
@@ -278,6 +279,34 @@ export function parseCrmDocDownloadInputs(raw: string): InputRunParseResult {
   return { ok: true, inputs };
 }
 
+function parseWorkStudyInputs(raw: string): InputRunParseResult {
+  const records = raw.split(",").map((record) => record.trim()).filter(Boolean);
+  if (records.length === 0) {
+    return { ok: false, error: "Enter at least one EID and effective date" };
+  }
+
+  const inputs: InputRunParseOk["inputs"] = [];
+  for (const record of records) {
+    const match = /^(\S+)\s+(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(record);
+    if (!match) {
+      return { ok: false, error: `Expected EID MM/DD/YYYY, got "${record}"` };
+    }
+
+    const [, emplId, month, day, year] = match;
+    const result = WorkStudyInputSchema.safeParse({
+      emplId,
+      effectiveDate: [month.padStart(2, "0"), day.padStart(2, "0"), year].join("/"),
+    });
+    if (!result.success) {
+      const message = result.error.issues.map((issue) => issue.message).join(", ");
+      return { ok: false, error: `${message} for "${record}"` };
+    }
+    inputs.push(result.data);
+  }
+
+  return { ok: true, inputs };
+}
+
 const ONBOARDING_PLACEHOLDER = "Enter emails, comma-separated (e.g. " + privateValue("ucsd:9e895cc9310c8df0") + ", " + privateValue("ucsd:66246b85383e70e7") + ")";
 // Comma-separated emails → a `pool` batch (onboarding declares
 // `batch: { mode: "pool" }`). The regex catches obviously-malformed input
@@ -367,6 +396,11 @@ export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfi
         note: "Existing UCPath person: skips the I-9 and files a UC_CONC_HIRE concurrent hire on their Empl ID.",
       },
     ],
+  },
+  "work-study": {
+    placeholder: "EID MM/DD/YYYY, …",
+    parseInput: parseWorkStudyInputs,
+    supportsDryRun: true,
   },
   "kronos-pay-rule": {
     placeholder: "Enter EIDs, comma-separated (e.g. 10873611, 10873075)",

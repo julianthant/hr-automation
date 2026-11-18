@@ -1,6 +1,6 @@
 import type { Page, FrameLocator } from "playwright";
 import { ActionPlan } from "../../systems/ucpath/action-plan.js";
-import { clickSaveAndSubmit } from "../../systems/ucpath/index.js";
+import { clickSaveAndSubmit, waitForSaveEnabled } from "../../systems/ucpath/index.js";
 import { getContentFrame } from "../../systems/ucpath/navigate.js";
 import { payPathActions, hrTasks, smartHR } from "../../systems/ucpath/selectors.js";
 import { log } from "../../utils/log.js";
@@ -11,6 +11,7 @@ import type { WorkStudyInput } from "./schema.js";
 /** Mutable context populated during plan execution. */
 export interface WorkStudyContext {
   employeeName: string;
+  captureDryRun?: (label: string) => Promise<void>;
 }
 
 // --- Helpers ---
@@ -193,7 +194,7 @@ async function fillInitiatorComments(
  *  6. Fill Job Data Comments
  *  7. Click Additional Pay Data tab
  *  8. Fill Initiator's Comments
- *  9. Save and Submit
+ *  9. Verify submit readiness for a dry run or save and submit for a live run
  */
 export function buildWorkStudyPlan(
   input: WorkStudyInput,
@@ -202,6 +203,7 @@ export function buildWorkStudyPlan(
 ): ActionPlan {
   const plan = new ActionPlan();
   const comments = buildCommentsText(input.effectiveDate);
+  const capture = input.dryRun ? ctx.captureDryRun : undefined;
 
   plan.add(
     "Navigate to PayPath Actions",
@@ -220,7 +222,10 @@ export function buildWorkStudyPlan(
 
   plan.add(
     `Fill Position Data (eff date: ${input.effectiveDate}, reason: JRL, pool: F)`,
-    () => fillPositionData(page, getContentFrame(page), input.effectiveDate),
+    async () => {
+      await fillPositionData(page, getContentFrame(page), input.effectiveDate);
+      await capture?.("work-study-dry-run-position-data");
+    },
   );
 
   plan.add(
@@ -230,7 +235,10 @@ export function buildWorkStudyPlan(
 
   plan.add(
     `Fill Job Data Comments: ${comments}`,
-    () => fillJobDataComments(getContentFrame(page), comments),
+    async () => {
+      await fillJobDataComments(getContentFrame(page), comments);
+      await capture?.("work-study-dry-run-job-data");
+    },
   );
 
   plan.add(
@@ -240,8 +248,18 @@ export function buildWorkStudyPlan(
 
   plan.add(
     `Fill Initiator's Comments: ${comments}`,
-    () => fillInitiatorComments(getContentFrame(page), comments),
+    async () => {
+      await fillInitiatorComments(getContentFrame(page), comments);
+      await capture?.("work-study-dry-run-additional-pay-data");
+    },
   );
+
+  if (input.dryRun) {
+    plan.add("Verify PayPath is ready to submit", () =>
+      waitForSaveEnabled(smartHR.saveAndSubmitButton(getContentFrame(page))),
+    );
+    return plan;
+  }
 
   plan.add(
     "Save and Submit",
